@@ -44,6 +44,11 @@ generate_hcl "z_ec2_instance.tf" {
       }
 
       filter {
+        name   = "availability-zone"
+        values = [global.availability_zone]
+      }
+
+      filter {
         name   = "default-for-az"
         values = ["true"]
       }
