@@ -21,7 +21,3 @@ globals {
 import {
   source = "/modules/ec2/instance.tm.hcl"
 }
-
-import {
-  source = "/modules/ec2/spot_instance.tm.hcl"
-}
