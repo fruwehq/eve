@@ -6,6 +6,11 @@
 # run `terramate generate` from root directory of the repository.
 
 globals {
+  ### GLOBAL INFO #############################################################
+
+  # My IP address
+  my_ip = "126.249.129.150"
+
   ### TERRAFORM ###############################################################
 
   ### global variables for use when generating providers
@@ -15,7 +20,7 @@ globals {
   # The global terraform version to use
   terraform_version = "~> 1.14.4"
 
-  ### AWS ###############################################################
+  ### AWS #####################################################################
   project_name = "ephemeral-cloud-gaming"
 
   aws = {

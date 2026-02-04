@@ -4,7 +4,7 @@ stack {
   tags = [
     "dev",
     "shared",
-    "dns",
+    "networking",
   ]
 
   after = [
@@ -12,6 +12,14 @@ stack {
   ]
 }
 
+globals {
+  allowed_cidrs = ["${global.my_ip}/32"]
+}
+
 import {
-  source = "/modules/ec2/elastic_ip.tm.hcl"
+  source = "/modules/ec2/subnet.tm.hcl"
+}
+
+import {
+  source = "/modules/ec2/security_group.tm.hcl"
 }
