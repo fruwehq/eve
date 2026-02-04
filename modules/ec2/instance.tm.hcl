@@ -21,6 +21,18 @@ generate_hcl "z_ec2_instance.tf" {
       }
     }
 
+    data "aws_vpc" "default" {
+      filter {
+        name   = "tag:Environment"
+        values = ["dev"]
+      }
+
+      filter {
+        name   = "tag:Project"
+        values = ["ephemeral-cloud-gaming"]
+      }
+    }
+
     data "aws_security_group" "default" {
       name = global.aws.security_group.name
     }
@@ -28,7 +40,7 @@ generate_hcl "z_ec2_instance.tf" {
     data "aws_subnets" "default" {
       filter {
         name   = "vpc-id"
-        values = [aws_default_vpc.default.id]
+        values = [data.aws_vpc.default.id]
       }
 
       filter {
@@ -87,7 +99,7 @@ generate_hcl "z_ec2_instance.tf" {
         }
       }
 
-      tags = merge(var.tags, {
+      tags = tm_merge(global.aws.tags, {
         Name = "ephemeral-cloud-gaming-windows"
       })
     }
