@@ -1,7 +1,10 @@
 generate_hcl "z_ec2_vpc.tf" {
   content {
     resource "aws_default_vpc" "default" {
-      tags = global.aws.tags
+      tags = tm_merge(global.aws.tags, {
+        Environment = globals.environment
+        Name = "Default VPC"
+      })
     }
   }
 }
