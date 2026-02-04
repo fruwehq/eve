@@ -17,6 +17,10 @@ globals {
 }
 
 import {
+  source = "/modules/ec2/common_data.tm.hcl"
+}
+
+import {
   source = "/modules/ec2/subnet.tm.hcl"
 }
 

@@ -1,9 +1,5 @@
 generate_hcl "z_ec2_subnet.tf" {
   content {
-    data "aws_vpc" "default" {
-      default = true
-    }
-
     data "aws_subnets" "default" {
       filter {
         name   = "vpc-id"
