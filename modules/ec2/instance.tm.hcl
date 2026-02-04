@@ -95,7 +95,7 @@ generate_hcl "z_ec2_instance.tf" {
       }
 
       tm_dynamic "instance_market_options" {
-        condition = try(global.use_spot, false)
+        condition = tm_can(global.use_spot)
 
         content {
           market_type = "spot"
