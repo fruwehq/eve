@@ -1,6 +1,8 @@
 # Makefile
 
+export AWS_CONFIG_FILE
 export AWS_PROFILE
+export AWS_SHARED_CREDENTIALS_FILE
 
 default: help
 
