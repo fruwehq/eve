@@ -78,7 +78,7 @@ generate_hcl "z_ec2_instance.tf" {
 
     resource "aws_instance" "windows" {
       ami                         = data.aws_ami.windows.id
-      instance_type               = try(global.instance_type, "g5.2xlarge")
+      instance_type               = global.instance_type
       subnet_id                   = data.aws_subnets.default.ids[0]
       vpc_security_group_ids      = [data.aws_security_group.default.id]
       iam_instance_profile        = aws_iam_instance_profile.windows.name
