@@ -1,7 +1,7 @@
 generate_hcl "z_ec2_security_group.tf" {
   content {
-    resource "aws_security_group" "windows" {
-      name        = "ephemeral-cloud-gaming-windows"
+    resource "aws_security_group" "default" {
+      name        = global.aws.security_group.name
       description = "Security group for ephemeral cloud gaming Windows"
       vpc_id      = aws_default_vpc.default.id
 

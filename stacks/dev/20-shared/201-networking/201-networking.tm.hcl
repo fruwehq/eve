@@ -21,9 +21,5 @@ import {
 }
 
 import {
-  source = "/modules/ec2/subnet.tm.hcl"
-}
-
-import {
   source = "/modules/ec2/security_group.tm.hcl"
 }

@@ -1,11 +1,11 @@
 generate_hcl "z_ec2_instance.tf" {
   content {
-    data "aws_ami" "windows_2022" {
+    data "aws_ami" "windows" {
       most_recent = true
       owners      = ["amazon"]
       filter {
         name   = "name"
-        values = ["Windows_Server-2022-English-Full-Base-*"]
+        values = ["Windows_Server-2025-English-Full-Base-2026*"]
       }
       filter {
         name   = "virtualization-type"
@@ -18,6 +18,22 @@ generate_hcl "z_ec2_instance.tf" {
       filter {
         name   = "root-device-type"
         values = ["ebs"]
+      }
+    }
+
+    data "aws_security_group" "default" {
+      name = global.aws.security_group.name
+    }
+
+    data "aws_subnets" "default" {
+      filter {
+        name   = "vpc-id"
+        values = [aws_default_vpc.default.id]
+      }
+
+      filter {
+        name   = "default-for-az"
+        values = ["true"]
       }
     }
 
@@ -44,10 +60,10 @@ generate_hcl "z_ec2_instance.tf" {
     }
 
     resource "aws_instance" "windows" {
-      ami                         = data.aws_ami.windows_2022.id
+      ami                         = data.aws_ami.windows.id
       instance_type               = try(global.instance_type, "g5.2xlarge")
-      subnet_id                   = local.default_subnet_id
-      vpc_security_group_ids      = [aws_security_group.windows.id]
+      subnet_id                   = data.aws_subnets.default.ids[0]
+      vpc_security_group_ids      = [data.aws_security_group.default.id]
       iam_instance_profile        = aws_iam_instance_profile.windows.name
       instance_initiated_shutdown_behavior = "stop"
 
