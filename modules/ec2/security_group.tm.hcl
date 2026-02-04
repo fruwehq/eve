@@ -147,9 +147,5 @@ generate_hcl "z_ec2_security_group.tf" {
         description = "Allow all egress"
       }
     }
-
-    output "security_group_id" {
-      value = aws_security_group.windows.id
-    }
   }
 }
