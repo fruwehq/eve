@@ -11,3 +11,7 @@ stack {
     "/stacks/dev/10-cloud-base",
   ]
 }
+
+import {
+  source = "/modules/ec2/elastic_ip.tm.hcl"
+}
