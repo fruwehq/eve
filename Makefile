@@ -1,5 +1,7 @@
 # Makefile
 
+export AWS_PROFILE
+
 default: help
 
 help: ## Show this help message.
