@@ -94,12 +94,13 @@ generate_hcl "z_ec2_instance.tf" {
         http_tokens = "required"
       }
 
-      dynamic "instance_market_options" {
-        for_each = local.use_spot ? [1] : []
+      tm_dynamic "instance_market_options" {
+        condition = try(global.use_spot, false)
+
         content {
           market_type = "spot"
           spot_options {
-            instance_interruption_behavior = local.spot_interruption_behavior
+            instance_interruption_behavior = "stop"
           }
         }
       }
