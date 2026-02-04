@@ -13,9 +13,10 @@ stack {
 }
 
 globals {
-  availability_zone = "ap-northeast-1b"
-  instance_type  = "g5.2xlarge"
-  use_spot       = false
+  availability_zone = "ap-northeast-1c"
+  # instance_type  = "g5.2xlarge"
+  instance_type  = "g5.xlarge"
+  use_spot       = true
 }
 
 import {
