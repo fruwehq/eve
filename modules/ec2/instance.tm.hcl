@@ -24,7 +24,7 @@ generate_hcl "z_ec2_instance.tf" {
     data "aws_vpc" "default" {
       filter {
         name   = "tag:Environment"
-        values = [globals.environment]
+        values = [global.environment]
       }
 
       filter {

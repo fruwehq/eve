@@ -13,6 +13,7 @@ stack {
 }
 
 globals {
+  availability_zone = "ap-northeast-1c"
   instance_type  = "g5.2xlarge"
   use_spot       = true
 }
