@@ -17,7 +17,7 @@ globals {
 }
 
 import {
-  source = "/modules/ec2/common_data.tm.hcl"
+  source = "/modules/ec2/vpc.tm.hcl"
 }
 
 import {

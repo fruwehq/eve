@@ -3,7 +3,7 @@ generate_hcl "z_ec2_subnet.tf" {
     data "aws_subnets" "default" {
       filter {
         name   = "vpc-id"
-        values = [data.aws_vpc.default.id]
+        values = [aws_default_vpc.default.id]
       }
 
       filter {
@@ -13,7 +13,7 @@ generate_hcl "z_ec2_subnet.tf" {
     }
 
     locals {
-      default_vpc_id   = data.aws_vpc.default.id
+      default_vpc_id   = aws_default_vpc.default.id
       default_subnet_id = data.aws_subnets.default.ids[0]
     }
 

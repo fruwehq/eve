@@ -3,7 +3,7 @@ generate_hcl "z_ec2_security_group.tf" {
     resource "aws_security_group" "windows" {
       name        = "ephemeral-cloud-gaming-windows"
       description = "Security group for ephemeral cloud gaming Windows"
-      vpc_id      = data.aws_vpc.default.id
+      vpc_id      = aws_default_vpc.default.id
 
       ingress {
         from_port   = 80
