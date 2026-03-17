@@ -55,16 +55,6 @@ if (Test-Path $config) {
     if (-not (Select-String -Path $config -Pattern "^PubkeyAuthentication\s+yes" -Quiet)) {
         Add-Content $config "`nPubkeyAuthentication yes"
     }
-
-    # Ensure the administrator Match block exists for key authentication
-    if (-not (Select-String -Path $config -Pattern "Match Group administrators" -Quiet)) {
-        Add-Content $config "`nMatch Group administrators"
-        Add-Content $config "    AuthorizedKeysFile __PROGRAMDATA__/ssh/administrators_authorized_keys"
-    }
-
-    if (-not (Select-String -Path $config -Pattern "Subsystem\s+powershell" -Quiet)) {
-        Add-Content $config "`nSubsystem powershell C:/Program Files/PowerShell/7/pwsh.exe -sshs -NoLogo"
-    }
 }
 
 # Install PowerShell 7 if it is not already present
@@ -73,7 +63,7 @@ if (-not (Test-Path "C:\Program Files\PowerShell\7\pwsh.exe")) {
     winget install --id Microsoft.PowerShell --source winget --accept-package-agreements --accept-source-agreements
 }
 
-# Configure PowerShell profile for nicer SSH behavior
+# Enable CTRL-D
 $profileDir = "C:\Users\Administrator\Documents\PowerShell"
 $profilePath = Join-Path $profileDir "Microsoft.PowerShell_profile.ps1"
 
@@ -90,25 +80,13 @@ if (-not (Select-String -Path $profilePath -Pattern ([regex]::Escape($ctrlDLine)
     Add-Content -Path $profilePath -Value $ctrlDLine
 }
 
+# Enable SCP
 New-ItemProperty `
   -Path "HKLM:\SOFTWARE\OpenSSH" `
   -Name DefaultShell `
   -Value "C:\Program Files\PowerShell\7\pwsh.exe" `
   -PropertyType String `
   -Force
-
-# Enable ANSI colors for PowerShell over SSH (match normal PowerShell colors)
-New-ItemProperty `
-  -Path "HKCU:\Console" `
-  -Name VirtualTerminalLevel `
-  -Value 1 `
-  -PropertyType DWORD `
-  -Force | Out-Null
-
-# Add SFTP subsystem if missing
-if (-not (Select-String -Path $config -Pattern '^\s*Subsystem\s+sftp\s+' -Quiet)) {
-    Add-Content $config "`nSubsystem sftp sftp-server.exe"
-}
 
 # Restart SSH service
 Restart-Service sshd
