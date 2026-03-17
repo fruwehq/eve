@@ -1,8 +1,19 @@
 # Makefile
 
+# Specify default environment if none provided
+ENV ?= vultr
+
+# Load specific dotenv files based on precedence
+-include .env
+-include .env.$(ENV)
+-include .env.$(ENV).local
+
 export AWS_CONFIG_FILE
 export AWS_PROFILE
 export AWS_SHARED_CREDENTIALS_FILE
+export EPHEMERAL_SUNSHINE_PASSWORD
+export EPHEMERAL_WINDOWS_IP
+export EPHEMERAL_WINDOWS_PASSWORD
 
 default: help
 
@@ -40,3 +51,11 @@ nuke: destroy clean ## Destroys all stacks and removes local terraform/terramate
 
 plan: generate ## Plans terraform changes on all stacks
 	terramate run -- terraform plan
+
+provision: provision.clear-state ## Syncs provision scripts and runs bootstrap on remote host
+	ssh vultr 'New-Item -ItemType Directory -Force C:\Users\Administrator\provision | Out-Null; if (Test-Path "C:\Users\Administrator\provision\scripts") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\scripts" }'
+	scp -r windows/provision vultr:/C:/Users/Administrator/
+	ssh vultr '$$winPw = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("$(shell printf %s "$(EPHEMERAL_WINDOWS_PASSWORD)" | base64)")); $$env:EPHEMERAL_WINDOWS_PASSWORD = $$winPw; $$sunPw = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("$(shell printf %s "$(EPHEMERAL_SUNSHINE_PASSWORD)" | base64)")); $$env:EPHEMERAL_SUNSHINE_PASSWORD = $$sunPw; & "C:\Users\Administrator\provision\scripts\bootstrap.ps1"'
+
+provision.clear-state: ## Clears remote provisioning state, logs, and downloads
+	ssh vultr 'if (Test-Path "C:\Users\Administrator\provision\state") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\state" }; if (Test-Path "C:\Users\Administrator\provision\logs") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\logs" }; if (Test-Path "C:\Users\Administrator\provision\downloads") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\downloads" }'

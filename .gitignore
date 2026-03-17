@@ -49,3 +49,7 @@ node_modules
 
 # VSCode? auto-generated useless package json
 modules/spanner/backup/package-lock.json
+
+# dotenv environment variable files
+.env.*.local
+.env.local
