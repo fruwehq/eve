@@ -52,7 +52,7 @@ nuke: destroy clean ## Destroys all stacks and removes local terraform/terramate
 plan: generate ## Plans terraform changes on all stacks
 	terramate run -- terraform plan
 
-provision: provision.clear-state ## Syncs provision scripts and runs bootstrap on remote host
+provision: ## Syncs provision scripts and runs bootstrap on remote host
 	ssh vultr 'New-Item -ItemType Directory -Force C:\Users\Administrator\provision | Out-Null; if (Test-Path "C:\Users\Administrator\provision\scripts") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\scripts" }'
 	scp -r windows/provision vultr:/C:/Users/Administrator/
 	ssh vultr '$$winPw = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("$(shell printf %s "$(EPHEMERAL_WINDOWS_PASSWORD)" | base64)")); $$env:EPHEMERAL_WINDOWS_PASSWORD = $$winPw; $$sunPw = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("$(shell printf %s "$(EPHEMERAL_SUNSHINE_PASSWORD)" | base64)")); $$env:EPHEMERAL_SUNSHINE_PASSWORD = $$sunPw; & "C:\Users\Administrator\provision\scripts\bootstrap.ps1"'
