@@ -34,15 +34,19 @@ Set-Service -Name sshd -StartupType Automatic
 
 # Open firewall port
 Write-Host "Opening firewall port 22..."
+if (Get-NetFirewallRule -Name "OpenSSH-Server-In-TCP" -ErrorAction SilentlyContinue) {
+    Remove-NetFirewallRule -Name "OpenSSH-Server-In-TCP"
+}
+
 New-NetFirewallRule `
   -Name "OpenSSH-Server-In-TCP" `
-  -DisplayName "OpenSSH Server (TCP 22)" `
+  -DisplayName "OpenSSH SSH Server (sshd)" `
   -Enabled True `
   -Direction Inbound `
   -Protocol TCP `
   -Action Allow `
   -LocalPort 22 `
-  -Profile Any
+  -Profile Any | Out-Null
 
 # Ensure sshd_config allows PowerShell
 $config = "C:\ProgramData\ssh\sshd_config"
