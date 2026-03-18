@@ -5,7 +5,21 @@ try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new() } catch {}
 
 . "$PSScriptRoot\..\lib\downloads.ps1"
 
+
 Write-Host "Installing Virtual Display Driver (VDD) (driver-only)..."
+
+# --- Idempotency check: skip if VDD already installed ---
+try {
+  $existing = Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue |
+    Where-Object { $_.InstanceId -like 'ROOT\\MTTVDD*' -or $_.FriendlyName -match 'Virtual Display|VDD|MttVDD' }
+
+  if ($existing) {
+    Write-Host "VDD already installed. Skipping installation."
+    return
+  }
+} catch {
+  Write-Host "Could not verify existing VDD installation. Continuing..."
+}
 
 # 1) Resolve latest release + find VDD.Control ZIP
 try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch {}
