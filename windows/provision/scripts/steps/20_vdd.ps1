@@ -80,6 +80,8 @@ Write-Host "Executing silent install script from repository archive..."
 & $scriptPath
 
 Start-Sleep -Seconds 5
+$rebootFlag = "C:\Users\Administrator\provision\state\reboot.flag"
+$changed = $false
 
 # --- Verify installation ---
 try {
@@ -88,11 +90,19 @@ try {
 
   if ($installed) {
     Write-Host "VDD installation successful."
+    $changed = $true
   } else {
     Write-Host "WARNING: VDD installation could not be verified."
   }
 } catch {
   Write-Host "WARNING: Could not verify VDD installation."
+}
+
+if ($changed) {
+  Write-Host "VDD installation requires reboot. Requesting reboot..."
+  New-Item $rebootFlag -ItemType File -Force | Out-Null
+} else {
+  Write-Host "No reboot required."
 }
 
 Write-Host "VDD setup complete."
