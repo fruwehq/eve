@@ -27,7 +27,7 @@ RESOLVE_WINDOWS_IP = IP=$${EPHEMERAL_WINDOWS_IP:-$$(terramate run --tags=vultr:s
 RESOLVE_WINDOWS_PASSWORD = PW=$${EPHEMERAL_WINDOWS_PASSWORD:-$$(terramate run --tags=vultr:services:windows -- terraform output -raw vultr_instance_default_password)}; \
 	if [ -z "$$PW" ]; then echo "Missing password"; exit 1; fi
 
-all: init apply wait-ssh provision moonlight.pair ## Shows help, init terraform stack, apply infra and provision once reachable
+all: init apply ssh.wait provision sunshine.wait moonlight.pair ## Shows help, init terraform stack, apply infra and provision once reachable
 
 apply: generate ## Applies terraform configuration to all stacks
 	terramate run --tags=$(ENV) -- terraform apply -auto-approve
@@ -130,7 +130,15 @@ sunshine: ## Opens the Sunshine web UI in the local browser
 	@$(RESOLVE_WINDOWS_IP); \
 	open "https://$$IP:47990" || open -a "Google Chrome" "https://$$IP:47990"
 
-wait-ssh: ## Wait until SSH on the Windows host is reachable
+sunshine.wait: ## Wait until the Sunshine web UI port is reachable
+	@$(RESOLVE_WINDOWS_IP); \
+		echo "Waiting for Sunshine on $$IP:47990..."; \
+		until nc -z $$IP 47990 >/dev/null 2>&1; do \
+			sleep 5; \
+		done; \
+		echo "Sunshine is reachable on $$IP:47990"
+
+ssh.wait: ## Wait until SSH on the Windows host is reachable
 	@$(RESOLVE_WINDOWS_IP); \
 	SSH_OPTS='-o StrictHostKeyChecking=no -o ConnectTimeout=5 -o ServerAliveInterval=10 -i $(SSH_PUBLIC_KEY_FILE)'; \
 	echo "Waiting for SSH on $$IP..."; \
@@ -138,3 +146,8 @@ wait-ssh: ## Wait until SSH on the Windows host is reachable
 		sleep 5; \
 	done; \
 	echo "SSH is ready on $$IP"
+
+ssh: ## Open an interactive SSH session to the Windows instance
+	@$(RESOLVE_WINDOWS_IP); \
+	SSH_OPTS='-o StrictHostKeyChecking=no -o ServerAliveInterval=10 -i $(SSH_PUBLIC_KEY_FILE)'; \
+	ssh $$SSH_OPTS Administrator@$$IP
