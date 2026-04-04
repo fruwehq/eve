@@ -8,9 +8,10 @@ generate_hcl "z_vultr_instance.tf" {
     }
 
     resource "vultr_instance" "default" {
-      backup = global.vultr.instance.backup
-      plan   = global.vultr.instance.plan
-      region = global.vultr.region
+      backup         = global.vultr.instance.backup
+      os_id          = global.vultr.instance.os_id
+      plan           = global.vultr.instance.plan
+      region         = global.vultr.region
       reserved_ip_id = vultr_reserved_ip.default.id
     }
   }
