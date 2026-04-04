@@ -88,18 +88,23 @@ secrets.json: ## Writes ./tmp/secrets.json for Windows provisioning
 	  > ./tmp/secrets.json
 
 provision: secrets.json ## Syncs provision scripts and runs bootstrap on remote host
-	ssh vultr 'New-Item -ItemType Directory -Force C:\Users\Administrator\provision | Out-Null; New-Item -ItemType Directory -Force C:\Users\Administrator\provision\state | Out-Null; if (Test-Path "C:\Users\Administrator\provision\scripts") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\scripts" }'
-	scp -r windows/provision vultr:/C:/Users/Administrator/
-	scp ./tmp/secrets.json vultr:/C:/Users/Administrator/provision/state/secrets.json
-	ssh vultr '& "C:\Users\Administrator\provision\scripts\bootstrap.ps1"'
+	@$(RESOLVE_WINDOWS_IP); \
+	SSH_OPTS='-o StrictHostKeyChecking=no -o ServerAliveInterval=10 -i $(SSH_PUBLIC_KEY_FILE)'; \
+	ssh $$SSH_OPTS Administrator@$$IP 'New-Item -ItemType Directory -Force C:\Users\Administrator\provision | Out-Null; New-Item -ItemType Directory -Force C:\Users\Administrator\provision\state | Out-Null; if (Test-Path "C:\Users\Administrator\provision\scripts") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\scripts" }'; \
+	scp $$SSH_OPTS -r windows/provision Administrator@$$IP:/C:/Users/Administrator/; \
+	scp $$SSH_OPTS ./tmp/secrets.json Administrator@$$IP:/C:/Users/Administrator/provision/state/secrets.json; \
+	ssh $$SSH_OPTS Administrator@$$IP '& "C:\Users\Administrator\provision\scripts\bootstrap.ps1"'
 
 provision.clear-state: ## Clears remote provisioning state, logs, and downloads
-	ssh vultr 'if (Test-Path "C:\Users\Administrator\provision\state") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\state" }; if (Test-Path "C:\Users\Administrator\provision\logs") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\logs" }; if (Test-Path "C:\Users\Administrator\provision\downloads") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\downloads" }'
+	@$(RESOLVE_WINDOWS_IP); \
+	SSH_OPTS='-o StrictHostKeyChecking=no -o ServerAliveInterval=10 -i $(SSH_PUBLIC_KEY_FILE)'; \
+	ssh $$SSH_OPTS Administrator@$$IP 'if (Test-Path "C:\Users\Administrator\provision\state") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\state" }; if (Test-Path "C:\Users\Administrator\provision\logs") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\logs" }; if (Test-Path "C:\Users\Administrator\provision\downloads") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\downloads" }'
 
 wait-ssh: ## Wait until SSH on the Windows host is reachable
 	@$(RESOLVE_WINDOWS_IP); \
+	SSH_OPTS='-o StrictHostKeyChecking=no -o ConnectTimeout=5 -o ServerAliveInterval=10 -i $(SSH_PUBLIC_KEY_FILE)'; \
 	echo "Waiting for SSH on $$IP..."; \
-	until ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 vultr@$$IP exit 0 >/dev/null 2>&1; do \
+	until ssh $$SSH_OPTS Administrator@$$IP exit 0 >/dev/null 2>&1; do \
 		sleep 5; \
 	done; \
 	echo "SSH is ready on $$IP"
