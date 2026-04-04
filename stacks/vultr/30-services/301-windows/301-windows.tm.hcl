@@ -22,6 +22,19 @@ globals "vultr" "reserved_ip" {
   label = global.project
 }
 
+generate_hcl "z_ssh_public_key_file.tf" {
+  content {
+    variable "ssh_public_key_file" {
+      type      = string
+      sensitive = false
+    }
+
+    locals {
+      ssh_public_key_file = var.ssh_public_key_file
+    }
+  }
+}
+
 import {
   source = "/modules/vultr/instance.tm.hcl"
 }

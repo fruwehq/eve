@@ -67,6 +67,9 @@ show-password: ## Displays instance default password
 	@$(RESOLVE_WINDOWS_PASSWORD); \
 	echo "$$PW"
 
+show-ip: ## Displays instance public IP address
+	terramate run --tags=vultr:services:windows -- terraform output -raw vultr_instance_main_ip
+
 secrets.json: ## Writes ./tmp/secrets.json for Windows provisioning
 	@$(RESOLVE_WINDOWS_PASSWORD); \
 	jq -n \

@@ -8,9 +8,14 @@ generate_hcl "z_vultr_instance.tf" {
     }
 
     resource "vultr_startup_script" "windows_ssh" {
-      name   = "windows-ssh-bootstrap"
-      type   = "boot"
-      script = base64encode(file("${terramate.root.path.fs.absolute}/windows/ssh.ps1"))
+      name = "windows-ssh-bootstrap"
+      type = "boot"
+      script = base64encode(templatefile(
+        "${terramate.root.path.fs.absolute}/windows/ssh.ps1.tftpl",
+        {
+          public_key = trimspace(file(pathexpand(locals.ssh_public_key_file)))
+        }
+      ))
     }
 
     resource "vultr_instance" "default" {
@@ -26,6 +31,10 @@ generate_hcl "z_vultr_instance.tf" {
       description = "Default password returned by Vultr for the created instance"
       value       = vultr_instance.default.default_password
       sensitive   = true
+    }
+
+    output "vultr_instance_main_ip" {
+      value = vultr_instance.default.main_ip
     }
   }
 }
