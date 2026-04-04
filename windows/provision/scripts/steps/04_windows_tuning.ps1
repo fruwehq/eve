@@ -107,6 +107,12 @@ Set-RegistryValueIfNeeded `
   -Name "1" `
   -Value "00000411"
 
+# Force the Japanese 106/109 keyboard layout DLL so RDP scan codes map like a JP keyboard.
+Set-RegistryValueIfNeeded `
+  -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Keyboard Layouts\00000411" `
+  -Name "Layout File" `
+  -Value "kbd106.dll"
+
 if ($changed) {
   Write-Host "Windows tuning changed system settings. Requesting reboot..."
   New-Item $rebootFlag -ItemType File -Force | Out-Null

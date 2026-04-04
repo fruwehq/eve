@@ -21,10 +21,10 @@ export MY_IP
 export SSH_PUBLIC_KEY_FILE
 export VULTR_API_KEY
 
-	RESOLVE_WINDOWS_IP = IP=$${EPHEMERAL_WINDOWS_IP:-$$(terramate run --tags=vultr:services:windows -- terraform output -raw vultr_instance_main_ip)}; \
+RESOLVE_WINDOWS_IP = IP=$${EPHEMERAL_WINDOWS_IP:-$$(terramate run --tags=vultr:services:windows -- terraform output -raw vultr_instance_main_ip)}; \
 	if [ -z "$$IP" ]; then echo "Missing IP"; exit 1; fi
-	
-	RESOLVE_WINDOWS_PASSWORD = PW=$${EPHEMERAL_WINDOWS_PASSWORD:-$$(terramate run --tags=vultr:services:windows -- terraform output -raw vultr_instance_default_password)}; \
+
+RESOLVE_WINDOWS_PASSWORD = PW=$${EPHEMERAL_WINDOWS_PASSWORD:-$$(terramate run --tags=vultr:services:windows -- terraform output -raw vultr_instance_default_password)}; \
 	if [ -z "$$PW" ]; then echo "Missing password"; exit 1; fi
 
 all: init apply wait-ssh provision  ## Shows help, init terraform stack, apply infra and provision once reachable
@@ -124,6 +124,11 @@ show-password: ## Displays instance default password
 sunshine: ## Opens the Sunshine web UI in the local browser
 	@$(RESOLVE_WINDOWS_IP); \
 	open "https://$$IP:47990" || open -a "Google Chrome" "https://$$IP:47990"
+
+pair: ## Pair Moonlight with Sunshine using a fixed PIN
+	@$(RESOLVE_WINDOWS_IP); \
+	PIN=1234; \
+	/Applications/Moonlight.app/Contents/MacOS/Moonlight pair --pin $$PIN $$IP
 
 wait-ssh: ## Wait until SSH on the Windows host is reachable
 	@$(RESOLVE_WINDOWS_IP); \

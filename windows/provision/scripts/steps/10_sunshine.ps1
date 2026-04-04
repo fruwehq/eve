@@ -63,8 +63,14 @@ if (!(Test-Path $configPath)) {
   New-Item -ItemType File -Path $configPath -Force | Out-Null
 }
 
+
 if (-not (Select-String -Path $configPath -Pattern "^\s*localhost_only\s*=" -Quiet)) {
   Add-Content -Path $configPath -Value "`nlocalhost_only = false`n"
+}
+
+# Set a fixed pairing PIN for Moonlight
+if (-not (Select-String -Path $configPath -Pattern "^\s*pairing_pin\s*=" -Quiet)) {
+  Add-Content -Path $configPath -Value "pairing_pin = 1234`n"
 }
 
 # Set Sunshine Web UI credentials from the environment or secrets file.
