@@ -14,5 +14,11 @@ generate_hcl "z_vultr_instance.tf" {
       region         = global.vultr.region
       reserved_ip_id = data.vultr_reserved_ip.default.id
     }
+
+    output "vultr_instance_default_password" {
+      description = "Default password returned by Vultr for the created instance"
+      value       = vultr_instance.default.default_password
+      sensitive   = true
+    }
   }
 }

@@ -23,7 +23,7 @@ generate_hcl "z_providers.tf" {
     }
 
     provider "vultr" {
-      api_key = "VULTR_API_KEY"
+      # api_key = "VULTR_API_KEY" # Use the VULTR_API_KEY environment variable
     }
   }
 }

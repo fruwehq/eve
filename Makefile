@@ -19,6 +19,9 @@ export EPHEMERAL_WINDOWS_PASSWORD
 export MY_IP
 export VULTR_API_KEY
 
+RESOLVE_WINDOWS_PASSWORD = PW=$${EPHEMERAL_WINDOWS_PASSWORD:-$$(terramate run --tags=vultr:services:windows -- terraform output -raw vultr_instance_default_password)}; \
+	if [ -z "$$PW" ]; then echo "Missing password"; exit 1; fi
+
 default: help
 
 help: ## Show this help message.
@@ -56,13 +59,29 @@ lint:
 
 nuke: destroy clean ## Destroys all stacks and removes local terraform/terramate artifacts
 
+
 plan: generate ## Plans terraform changes on all stacks
 	terramate run --tags=$(ENV) -- terraform plan
 
+show-password: ## Displays instance default password
+	@$(RESOLVE_WINDOWS_PASSWORD); \
+	echo "$$PW"
+
+secrets.json: ## Writes ./tmp/secrets.json for Windows provisioning
+	@$(RESOLVE_WINDOWS_PASSWORD); \
+	jq -n \
+	  --arg wp "$$PW" \
+	  --arg sp "$(EPHEMERAL_SUNSHINE_PASSWORD)" \
+	  '{windows_password: $$wp, sunshine_password: $$sp}' \
+	  > ./tmp/secrets.json
+
 provision: ## Syncs provision scripts and runs bootstrap on remote host
-	ssh vultr 'New-Item -ItemType Directory -Force C:\Users\Administrator\provision | Out-Null; if (Test-Path "C:\Users\Administrator\provision\scripts") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\scripts" }'
-	scp -r windows/provision vultr:/C:/Users/Administrator/
-	ssh vultr '$$winPw = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("$(shell printf %s "$(EPHEMERAL_WINDOWS_PASSWORD)" | base64)")); $$env:EPHEMERAL_WINDOWS_PASSWORD = $$winPw; $$sunPw = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("$(shell printf %s "$(EPHEMERAL_SUNSHINE_PASSWORD)" | base64)")); $$env:EPHEMERAL_SUNSHINE_PASSWORD = $$sunPw; & "C:\Users\Administrator\provision\scripts\bootstrap.ps1"'
+	WIN_PW="$${EPHEMERAL_WINDOWS_PASSWORD:-$$(terramate run --tags=vultr:services:windows -- terraform output -raw vultr_instance_default_password)}"; \
+	if [ -z "$$WIN_PW" ]; then echo "EPHEMERAL_WINDOWS_PASSWORD is not set and Terraform did not return vultr_instance_default_password"; exit 1; fi; \
+	ssh vultr 'New-Item -ItemType Directory -Force C:\Users\Administrator\provision | Out-Null; if (Test-Path "C:\Users\Administrator\provision\scripts") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\scripts" }'; \
+	scp -r windows/provision vultr:/C:/Users/Administrator/; \
+	ssh vultr "New-Item -ItemType Directory -Force C:\Users\Administrator\provision\state | Out-Null; \$\$json = @{ windows_password = '$$WIN_PW'; sunshine_password = '$(EPHEMERAL_SUNSHINE_PASSWORD)' } | ConvertTo-Json -Compress; Set-Content -Path 'C:\Users\Administrator\provision\state\secrets.json' -Value \$\$json"; \
+	ssh vultr '& "C:\Users\Administrator\provision\scripts\bootstrap.ps1"'
 
 provision.clear-state: ## Clears remote provisioning state, logs, and downloads
 	ssh vultr 'if (Test-Path "C:\Users\Administrator\provision\state") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\state" }; if (Test-Path "C:\Users\Administrator\provision\logs") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\logs" }; if (Test-Path "C:\Users\Administrator\provision\downloads") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\downloads" }'
