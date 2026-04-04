@@ -82,7 +82,7 @@ secrets.json: ## Writes ./tmp/secrets.json for Windows provisioning
 provision: secrets.json ## Syncs provision scripts and runs bootstrap on remote host
 	ssh vultr 'New-Item -ItemType Directory -Force C:\Users\Administrator\provision | Out-Null; New-Item -ItemType Directory -Force C:\Users\Administrator\provision\state | Out-Null; if (Test-Path "C:\Users\Administrator\provision\scripts") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\scripts" }'
 	scp -r windows/provision vultr:/C:/Users/Administrator/
-	scp ./tmp/secrets.json vultr:/C:/Users\Administrator/provision/state/secrets.json
+	scp ./tmp/secrets.json vultr:/C:/Users/Administrator/provision/state/secrets.json
 	ssh vultr '& "C:\Users\Administrator\provision\scripts\bootstrap.ps1"'
 
 provision.clear-state: ## Clears remote provisioning state, logs, and downloads
