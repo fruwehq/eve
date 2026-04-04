@@ -10,12 +10,18 @@ generate_hcl "z_vultr_instance.tf" {
     resource "vultr_startup_script" "windows_ssh" {
       name = "windows-ssh-bootstrap"
       type = "boot"
-      script = base64encode(templatefile(
-        "${terramate.root.path.fs.absolute}/windows/ssh.ps1.tftpl",
-        {
-          public_key = trimspace(file(pathexpand(local.ssh_public_key_file)))
-        }
-      ))
+
+      script = base64encode(<<-EOT
+        @echo off
+        mkdir C:\Windows\Temp 2>nul
+        powershell.exe -NoProfile -ExecutionPolicy Bypass -EncodedCommand ${textencodebase64(templatefile(
+          "${terramate.root.path.fs.absolute}/windows/ssh.ps1.tftpl",
+          {
+            public_key = trimspace(file(pathexpand(local.ssh_public_key_file)))
+          }
+        ), "UTF-16LE")} > C:\Windows\Temp\vultr-startup-cmd.log 2>&1
+      EOT
+      )
     }
 
     resource "vultr_instance" "default" {
