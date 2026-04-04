@@ -13,7 +13,7 @@ generate_hcl "z_vultr_instance.tf" {
       script = base64encode(templatefile(
         "${terramate.root.path.fs.absolute}/windows/ssh.ps1.tftpl",
         {
-          public_key = trimspace(file(pathexpand(locals.ssh_public_key_file)))
+          public_key = trimspace(file(pathexpand(local.ssh_public_key_file)))
         }
       ))
     }

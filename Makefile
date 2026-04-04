@@ -17,6 +17,7 @@ export EPHEMERAL_SUNSHINE_PASSWORD
 export EPHEMERAL_WINDOWS_IP
 export EPHEMERAL_WINDOWS_PASSWORD
 export MY_IP
+export SSH_PUBLIC_KEY_FILE
 export VULTR_API_KEY
 
 RESOLVE_WINDOWS_PASSWORD = PW=$${EPHEMERAL_WINDOWS_PASSWORD:-$$(terramate run --tags=vultr:services:windows -- terraform output -raw vultr_instance_default_password)}; \
