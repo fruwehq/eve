@@ -77,11 +77,11 @@ generate_hcl "z_ec2_instance.tf" {
     }
 
     resource "aws_instance" "windows" {
-      ami                         = data.aws_ami.windows.id
-      instance_type               = global.instance_type
-      subnet_id                   = data.aws_subnets.default.ids[0]
-      vpc_security_group_ids      = [data.aws_security_group.default.id]
-      iam_instance_profile        = aws_iam_instance_profile.windows.name
+      ami                                  = data.aws_ami.windows.id
+      instance_type                        = global.instance_type
+      subnet_id                            = data.aws_subnets.default.ids[0]
+      vpc_security_group_ids               = [data.aws_security_group.default.id]
+      iam_instance_profile                 = aws_iam_instance_profile.windows.name
       instance_initiated_shutdown_behavior = "stop"
 
       root_block_device {

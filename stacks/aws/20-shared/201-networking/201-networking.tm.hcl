@@ -15,7 +15,7 @@ stack {
 generate_hcl "allowed-cidrs.tf" {
   content {
     variable "my_ip" {
-      type = "string"
+      type = string
     }
 
     locals {

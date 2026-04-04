@@ -1,7 +1,7 @@
 // TERRAMATE: GENERATED AUTOMATICALLY DO NOT EDIT
 
 variable "my_ip" {
-  type = "string"
+  type = string
 }
 locals {
   allowed_cidrs = [
