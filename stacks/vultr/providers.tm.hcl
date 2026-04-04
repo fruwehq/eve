@@ -13,21 +13,13 @@ generate_hcl "z_providers.tf" {
   content {
     terraform {
       required_providers {
-        aws = {
-          source  = "hashicorp/aws"
-          version = "~> 6.0"
+        vultr = {
+          source = "vultr/vultr"
+          version = "2.30.1"
         }
       }
 
       required_version = global.terraform_version
-    }
-
-    provider "aws" {
-      region = global.aws.region
-
-      default_tags {
-        tags = global.aws.tags
-      }
     }
   }
 }

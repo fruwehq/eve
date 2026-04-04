@@ -6,27 +6,14 @@
 # run `terramate generate` from root directory of the repository.
 
 ##############################################################################
-# Generate 'z_providers.tf' in each stack
+# Generate 'z_backend.tf' in each stack
 # All globals will be replaced with the final value that is known by the stack
 # Any terraform code can be defined within the content block
-generate_hcl "z_providers.tf" {
+generate_hcl "z_backend.tf" {
   content {
     terraform {
-      required_providers {
-        aws = {
-          source  = "hashicorp/aws"
-          version = "~> 6.0"
-        }
-      }
 
-      required_version = global.terraform_version
-    }
-
-    provider "aws" {
-      region = global.aws.region
-
-      default_tags {
-        tags = global.aws.tags
+      backend "local" {
       }
     }
   }
