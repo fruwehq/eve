@@ -21,5 +21,9 @@ generate_hcl "z_providers.tf" {
 
       required_version = global.terraform_version
     }
+
+    provider "vultr" {
+      api_key = "VULTR_API_KEY"
+    }
   }
 }

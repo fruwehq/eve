@@ -5,8 +5,8 @@ ENV ?= vultr
 
 # Load specific dotenv files based on precedence
 -include .env
--include .env.local
 -include .env.$(ENV)
+-include .env.local
 -include .env.$(ENV).local
 
 export AWS_CONFIG_FILE
