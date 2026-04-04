@@ -68,11 +68,6 @@ if (-not (Select-String -Path $configPath -Pattern "^\s*origin_web_ui_allowed\s*
   Add-Content -Path $configPath -Value "`norigin_web_ui_allowed = wan`n"
 }
 
-# Set a fixed pairing PIN for Moonlight
-if (-not (Select-String -Path $configPath -Pattern "^\s*pairing_pin\s*=" -Quiet)) {
-  Add-Content -Path $configPath -Value "pairing_pin = 1234`n"
-}
-
 # Set Sunshine Web UI credentials from the environment or secrets file.
 # Use a fixed username to keep provisioning simple and reproducible.
 if (-not $sunshinePassword -and (Test-Path $secretsFile)) {
@@ -101,3 +96,45 @@ Write-Host "Sunshine credentials exit code: $($credsProc.ExitCode)"
 
 Write-Host "Starting Sunshine process..."
 Start-Process -FilePath $sunshineExe
+
+# Wait for Sunshine Web UI to become available
+Write-Host "Waiting for Sunshine API..."
+$maxAttempts = 30
+$attempt = 0
+$ready = $false
+
+while (-not $ready -and $attempt -lt $maxAttempts) {
+  try {
+    $response = Invoke-WebRequest -Uri "https://localhost:47990" -UseBasicParsing -SkipCertificateCheck -TimeoutSec 2
+    if ($response.StatusCode -ge 200) {
+      $ready = $true
+      break
+    }
+  } catch {}
+  Start-Sleep -Seconds 2
+  $attempt++
+}
+
+if (-not $ready) {
+  Write-Warning "Sunshine API did not become ready in time. Skipping auto pairing."
+} else {
+  Write-Host "Sunshine API ready. Sending pairing PIN..."
+
+  $basicAuthValue = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("sunshine:$sunshinePassword"))
+  $pairHeaders = @{ Authorization = "Basic $basicAuthValue" }
+  $pairBody = @{ pin = "1234"; name = "ephemeral-client" } | ConvertTo-Json
+
+  try {
+    Invoke-RestMethod \
+      -Uri "https://localhost:47990/api/pin" \
+      -Method Post \
+      -Headers $pairHeaders \
+      -Body $pairBody \
+      -ContentType "application/json" \
+      -SkipCertificateCheck
+
+    Write-Host "Pairing PIN submitted successfully."
+  } catch {
+    Write-Warning "Failed to submit pairing PIN: $_"
+  }
+}
