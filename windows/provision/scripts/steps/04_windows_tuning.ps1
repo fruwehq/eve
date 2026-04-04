@@ -92,9 +92,20 @@ Set-RegistryValueIfNeeded -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVers
 Set-RegistryValueIfNeeded -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" -Name DefaultPassword -Value $Pass
 Set-RegistryValueIfNeeded -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" -Name DefaultDomainName -Value "."
 
+# Configure Japanese keyboard layout for the user session and the logon/default session.
 $languageList = New-WinUserLanguageList -Language "ja-JP"
 Set-WinUserLanguageList -LanguageList $languageList -Force
 Set-WinDefaultInputMethodOverride -InputTip "0411:00000411"
+
+Set-RegistryValueIfNeeded `
+  -Path "HKCU:\Keyboard Layout\Preload" `
+  -Name "1" `
+  -Value "00000411"
+
+Set-RegistryValueIfNeeded `
+  -Path "Registry::HKEY_USERS\.DEFAULT\Keyboard Layout\Preload" `
+  -Name "1" `
+  -Value "00000411"
 
 if ($changed) {
   Write-Host "Windows tuning changed system settings. Requesting reboot..."

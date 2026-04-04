@@ -100,6 +100,11 @@ rdp: ## Writes ./tmp/windows.rdp and opens it for debugging
 	sleep 3; \
 	osascript -e 'tell application "System Events" to keystroke "v" using command down' -e 'tell application "System Events" to key code 36'
 
+reboot: ## Reboots the remote Windows instance
+	@$(RESOLVE_WINDOWS_IP); \
+	SSH_OPTS='-o StrictHostKeyChecking=no -o ServerAliveInterval=10 -i $(SSH_PUBLIC_KEY_FILE)'; \
+	ssh $$SSH_OPTS Administrator@$$IP 'shutdown /r /t 0'
+
 secrets.json: ## Writes ./tmp/secrets.json for Windows provisioning
 	@$(RESOLVE_WINDOWS_PASSWORD); \
 	jq -n \
