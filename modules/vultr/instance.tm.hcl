@@ -12,7 +12,7 @@ generate_hcl "z_vultr_instance.tf" {
       os_id          = global.vultr.instance.os_id
       plan           = global.vultr.instance.plan
       region         = global.vultr.region
-      reserved_ip_id = vultr_reserved_ip.default.id
+      reserved_ip_id = data.vultr_reserved_ip.default.id
     }
   }
 }
