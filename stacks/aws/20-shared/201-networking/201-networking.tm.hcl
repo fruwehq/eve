@@ -12,8 +12,16 @@ stack {
   ]
 }
 
-globals {
-  allowed_cidrs = ["${global.my_ip}/32"]
+generate_hcl "allowed-cidrs.tf" {
+  content {
+    variable "my_ip" {
+      type = "string"
+    }
+
+    locals {
+      allowed_cidrs = ["${var.my_ip}/32"]
+    }
+  }
 }
 
 import {

@@ -8,9 +8,6 @@
 globals {
   ### GLOBAL INFO #############################################################
 
-  # My IP address
-  my_ip = "126.249.129.150"
-
   ### TERRAFORM ###############################################################
 
   ### global variables for use when generating providers
@@ -18,21 +15,8 @@ globals {
   # stack level
 
   # The global terraform version to use
-  terraform_version = "~> 1.14.4"
+  terraform_version = "~> 1.14.8"
 
-  ### AWS #####################################################################
+  # THe project name
   project_name = "ephemeral-cloud-gaming"
-
-  aws = {
-    region = "ap-northeast-1"
-
-    tags = {
-      Project   = global.project_name
-      ManagedBy = "terraform"
-    }
-
-    security_group = {
-      name = "ephemeral-cloud-gaming-windows"
-    }
-  }
 }
