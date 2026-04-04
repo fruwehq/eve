@@ -8,7 +8,7 @@ generate_hcl "z_vultr_instance.tf" {
     }
 
     resource "vultr_instance" "default" {
-      backup         = global.vultr.instance.backup
+      backups        = global.vultr.instance.backups
       os_id          = global.vultr.instance.os_id
       plan           = global.vultr.instance.plan
       region         = global.vultr.region
