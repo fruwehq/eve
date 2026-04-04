@@ -1,4 +1,5 @@
 # Makefile
+.DEFAULT_GOAL := default
 
 # Specify default environment if none provided
 ENV ?= vultr
@@ -99,6 +100,26 @@ provision.clear-state: ## Clears remote provisioning state, logs, and downloads
 	@$(RESOLVE_WINDOWS_IP); \
 	SSH_OPTS='-o StrictHostKeyChecking=no -o ServerAliveInterval=10 -i $(SSH_PUBLIC_KEY_FILE)'; \
 	ssh $$SSH_OPTS Administrator@$$IP 'if (Test-Path "C:\Users\Administrator\provision\state") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\state" }; if (Test-Path "C:\Users\Administrator\provision\logs") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\logs" }; if (Test-Path "C:\Users\Administrator\provision\downloads") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\downloads" }'
+
+rdp: ## Writes ./tmp/windows.rdp and opens it for debugging
+	@$(RESOLVE_WINDOWS_IP); \
+	$(RESOLVE_WINDOWS_PASSWORD); \
+	printf '%s\n' \
+	  "full address:s:$$IP" \
+	  "username:s:Administrator" \
+	  "prompt for credentials on client:i:1" \
+	  "administrative session:i:1" \
+	  "screen mode id:i:2" \
+	  "desktopwidth:i:2560" \
+	  "desktopheight:i:1440" \
+	  "session bpp:i:32" \
+	  "redirectclipboard:i:1" \
+	  "audiomode:i:0" \
+	  > ./tmp/windows.rdp; \
+	printf '%s' "$$PW" | pbcopy; \
+	open -a "Microsoft Remote Desktop" ./tmp/windows.rdp || open ./tmp/windows.rdp; \
+	sleep 3; \
+	osascript -e 'tell application "System Events" to keystroke "v" using command down' -e 'tell application "System Events" to key code 36'
 
 wait-ssh: ## Wait until SSH on the Windows host is reachable
 	@$(RESOLVE_WINDOWS_IP); \
