@@ -75,12 +75,10 @@ secrets.json: ## Writes ./tmp/secrets.json for Windows provisioning
 	  '{windows_password: $$wp, sunshine_password: $$sp}' \
 	  > ./tmp/secrets.json
 
-provision: ## Syncs provision scripts and runs bootstrap on remote host
-	WIN_PW="$${EPHEMERAL_WINDOWS_PASSWORD:-$$(terramate run --tags=vultr:services:windows -- terraform output -raw vultr_instance_default_password)}"; \
-	if [ -z "$$WIN_PW" ]; then echo "EPHEMERAL_WINDOWS_PASSWORD is not set and Terraform did not return vultr_instance_default_password"; exit 1; fi; \
-	ssh vultr 'New-Item -ItemType Directory -Force C:\Users\Administrator\provision | Out-Null; if (Test-Path "C:\Users\Administrator\provision\scripts") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\scripts" }'; \
-	scp -r windows/provision vultr:/C:/Users/Administrator/; \
-	ssh vultr "New-Item -ItemType Directory -Force C:\Users\Administrator\provision\state | Out-Null; \$\$json = @{ windows_password = '$$WIN_PW'; sunshine_password = '$(EPHEMERAL_SUNSHINE_PASSWORD)' } | ConvertTo-Json -Compress; Set-Content -Path 'C:\Users\Administrator\provision\state\secrets.json' -Value \$\$json"; \
+provision: secrets.json ## Syncs provision scripts and runs bootstrap on remote host
+	ssh vultr 'New-Item -ItemType Directory -Force C:\Users\Administrator\provision | Out-Null; New-Item -ItemType Directory -Force C:\Users\Administrator\provision\state | Out-Null; if (Test-Path "C:\Users\Administrator\provision\scripts") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\scripts" }'
+	scp -r windows/provision vultr:/C:/Users/Administrator/
+	scp ./tmp/secrets.json vultr:/C:/Users\Administrator/provision/state/secrets.json
 	ssh vultr '& "C:\Users\Administrator\provision\scripts\bootstrap.ps1"'
 
 provision.clear-state: ## Clears remote provisioning state, logs, and downloads
