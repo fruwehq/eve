@@ -80,6 +80,10 @@ show-ip: ## Displays instance public IP address
 	@$(RESOLVE_WINDOWS_IP); \
 	echo "$$IP"
 
+sunshine: ## Opens the Sunshine web UI in the local browser
+	@$(RESOLVE_WINDOWS_IP); \
+	open "https://$$IP:47990" || open -a "Google Chrome" "https://$$IP:47990"
+
 secrets.json: ## Writes ./tmp/secrets.json for Windows provisioning
 	@$(RESOLVE_WINDOWS_PASSWORD); \
 	jq -n \
