@@ -13,5 +13,5 @@ stack {
 }
 
 import {
-  source = "/modules/vultr/*/__init__.tm.hcl"
+  source = "/modules/vultr/__init__.tm.hcl"
 }

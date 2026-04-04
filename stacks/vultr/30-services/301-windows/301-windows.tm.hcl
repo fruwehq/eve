@@ -12,15 +12,16 @@ stack {
   ]
 }
 
-globals {
-  availability_zone = "ap-northeast-1b"
-  instance_type     = "g5.2xlarge"
-  # instance_type  = "g5.xlarge"
-  # instance_type  = "g5.4xlarge"
-  # instance_type  = "g4dn.2xlarge"
-  use_spot = true
+globals "vultr" "instance" {
+  plan = "vcg-a40-4c-20g-8vram"
+}
+
+globals "vultr" "reserved_ip" {
+  backups = "disabled"
+  label   = global.project
+  os_id   = 2516 # Windows Core 2025 Standard x64 - retrieved via `vultr os list`
 }
 
 import {
-  source = "/modules/vultr/ec2/instance.tm.hcl"
+  source = "/modules/vultr/instance.tm.hcl"
 }

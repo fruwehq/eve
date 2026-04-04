@@ -18,5 +18,5 @@ globals {
   terraform_version = "~> 1.14.8"
 
   # THe project name
-  project_name = "ephemeral-cloud-gaming"
+  project = "ephemeral-cloud-gaming"
 }

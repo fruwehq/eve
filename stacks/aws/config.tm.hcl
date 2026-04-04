@@ -2,7 +2,7 @@ globals "aws" {
   region = "ap-northeast-1"
 
   tags = {
-    Project   = global.project_name
+    Project   = global.project
     ManagedBy = "terraform"
   }
 

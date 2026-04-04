@@ -12,7 +12,7 @@ stack {
   ]
 }
 
-generate_hcl "allowed-cidrs.tf" {
+generate_hcl "z_allowed-cidrs.tf" {
   content {
     variable "my_ip" {
       type = string

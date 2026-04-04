@@ -12,22 +12,10 @@ stack {
   ]
 }
 
-generate_hcl "allowed-cidrs.tf" {
-  content {
-    variable "my_ip" {
-      type = string
-    }
-
-    locals {
-      allowed_cidrs = ["${var.my_ip}/32"]
-    }
-  }
+globals "vultr" "reserved_ip" {
+  label = global.project
 }
 
 import {
-  source = "/modules/vultr/ec2/vpc.tm.hcl"
-}
-
-import {
-  source = "/modules/vultr/ec2/security_group.tm.hcl"
+  source = "/modules/vultr/reserved_ip.tm.hcl"
 }

@@ -24,12 +24,12 @@ generate_hcl "z_ec2_instance.tf" {
     data "aws_vpc" "default" {
       filter {
         name   = "tag:Environment"
-        values = [global.project_name]
+        values = [global.project]
       }
 
       filter {
         name   = "tag:Project"
-        values = [global.project_name]
+        values = [global.project]
       }
     }
 
