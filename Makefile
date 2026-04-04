@@ -27,7 +27,7 @@ RESOLVE_WINDOWS_IP = IP=$${EPHEMERAL_WINDOWS_IP:-$$(terramate run --tags=vultr:s
 RESOLVE_WINDOWS_PASSWORD = PW=$${EPHEMERAL_WINDOWS_PASSWORD:-$$(terramate run --tags=vultr:services:windows -- terraform output -raw vultr_instance_default_password)}; \
 	if [ -z "$$PW" ]; then echo "Missing password"; exit 1; fi
 
-all: init apply ssh.wait provision sunshine.wait moonlight.pair ## Shows help, init terraform stack, apply infra and provision once reachable
+all: init apply ssh.wait provision sunshine.wait moonlight.pair ## Does everything you need. Inits terraform stack, apply infra and provision once reachable, and then pairs sunshine with moonlight
 
 apply: generate ## Applies terraform configuration to all stacks
 	terramate run --tags=$(ENV) -- terraform apply -auto-approve
