@@ -89,8 +89,6 @@ rdp: ## Writes ./tmp/windows.rdp and opens it for debugging
 	  "prompt for credentials on client:i:1" \
 	  "administrative session:i:1" \
 	  "screen mode id:i:2" \
-	  "desktopwidth:i:2560" \
-	  "desktopheight:i:1440" \
 	  "session bpp:i:32" \
 	  "redirectclipboard:i:1" \
 	  "audiomode:i:0" \
