@@ -55,7 +55,7 @@ if (-not $alreadyInstalled) {
   if ($proc.ExitCode -ne 0) {
     throw "Sunshine installer failed with exit code $($proc.ExitCode)"
   }
-  Write-Host "Sunshine installer exit code: $($proc.ExitCode)"
+Write-Host "Sunshine installer exit code: $($proc.ExitCode)"
 }
 
 # Ensure the config file exists and allows remote access for this ephemeral instance.
@@ -64,8 +64,8 @@ if (!(Test-Path $configPath)) {
 }
 
 
-if (-not (Select-String -Path $configPath -Pattern "^\s*localhost_only\s*=" -Quiet)) {
-  Add-Content -Path $configPath -Value "`nlocalhost_only = false`n"
+if (-not (Select-String -Path $configPath -Pattern "^\s*origin_web_ui_allowed\s*=" -Quiet)) {
+  Add-Content -Path $configPath -Value "`norigin_web_ui_allowed = wan`n"
 }
 
 # Set a fixed pairing PIN for Moonlight
@@ -99,5 +99,5 @@ if ($credsProc.ExitCode -ne 0) {
 }
 Write-Host "Sunshine credentials exit code: $($credsProc.ExitCode)"
 
-Write-Host "Starting Sunshine..."
-Start-Process -FilePath $sunshineExe -ArgumentList $configPath
+Write-Host "Starting Sunshine process..."
+Start-Process -FilePath $sunshineExe
