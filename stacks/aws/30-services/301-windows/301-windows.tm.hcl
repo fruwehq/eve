@@ -22,5 +22,5 @@ globals {
 }
 
 import {
-  source = "/modules/ec2/instance.tm.hcl"
+  source = "/modules/aws/ec2/instance.tm.hcl"
 }

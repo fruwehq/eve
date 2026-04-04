@@ -8,7 +8,7 @@ stack {
   ]
 
   after = [
-    "/stacks/aws/10-cloud-base",
+    "/stacks/aws/10-base",
   ]
 }
 
@@ -25,9 +25,9 @@ generate_hcl "allowed-cidrs.tf" {
 }
 
 import {
-  source = "/modules/ec2/vpc.tm.hcl"
+  source = "/modules/aws/ec2/vpc.tm.hcl"
 }
 
 import {
-  source = "/modules/ec2/security_group.tm.hcl"
+  source = "/modules/aws/ec2/security_group.tm.hcl"
 }

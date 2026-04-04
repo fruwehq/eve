@@ -3,11 +3,11 @@ stack {
 
   tags = [
     "aws",
-    "bootstrap",
+    "base",
     "empty-project",
   ]
 }
 
 import {
-  source = "/modules/__bootstrap__/empty-project.tm.hcl"
+  source = "/modules/aws/__bootstrap__/empty-project.tm.hcl"
 }
