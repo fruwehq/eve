@@ -2,7 +2,7 @@ stack {
   name = "000 Initial base stack of an empty project"
 
   tags = [
-    "dev",
+    "aws",
     "bootstrap",
     "empty-project",
   ]

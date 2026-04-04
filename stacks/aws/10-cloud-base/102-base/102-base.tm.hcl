@@ -2,13 +2,13 @@ stack {
   name = "102 Base"
 
   tags = [
-    "dev",
+    "aws",
     "cloud-base",
     "base",
   ]
 
   after = [
-    "/stacks/dev/00-bootstrap",
+    "/stacks/aws/00-bootstrap",
   ]
 }
 
