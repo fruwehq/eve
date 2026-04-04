@@ -7,6 +7,8 @@ Write-Host "Ensuring Sunshine is installed and configured..."
 $sunshineDir = "${env:ProgramFiles}\Sunshine"
 $sunshineExe = Join-Path $sunshineDir "sunshine.exe"
 $configPath = Join-Path $sunshineDir "config\sunshine.conf"
+$secretsFile = "C:\Users\Administrator\provision\state\secrets.json"
+$sunshinePassword = $env:EPHEMERAL_SUNSHINE_PASSWORD
 
 $alreadyInstalled = Test-Path $sunshineDir
 if ($alreadyInstalled) {
@@ -65,10 +67,19 @@ if (-not (Select-String -Path $configPath -Pattern "^\s*localhost_only\s*=" -Qui
   Add-Content -Path $configPath -Value "`nlocalhost_only = false`n"
 }
 
-# Set Sunshine Web UI credentials from the environment.
+# Set Sunshine Web UI credentials from the environment or secrets file.
 # Use a fixed username to keep provisioning simple and reproducible.
-if (-not $env:EPHEMERAL_SUNSHINE_PASSWORD) {
-  throw "EPHEMERAL_SUNSHINE_PASSWORD is required"
+if (-not $sunshinePassword -and (Test-Path $secretsFile)) {
+  try {
+    $secrets = Get-Content $secretsFile | ConvertFrom-Json
+    $sunshinePassword = $secrets.sunshine_password
+  } catch {
+    throw "Failed to read Sunshine password from $secretsFile"
+  }
+}
+
+if (-not $sunshinePassword) {
+  throw "Sunshine password not provided. Set EPHEMERAL_SUNSHINE_PASSWORD or create $secretsFile with a sunshine_password field."
 }
 
 if (!(Test-Path $sunshineExe)) {
@@ -76,7 +87,7 @@ if (!(Test-Path $sunshineExe)) {
 }
 
 Write-Host "Setting Sunshine credentials..."
-$credsProc = Start-Process -FilePath $sunshineExe -ArgumentList $configPath, "--creds", "sunshine", $env:EPHEMERAL_SUNSHINE_PASSWORD -Wait -PassThru
+$credsProc = Start-Process -FilePath $sunshineExe -ArgumentList $configPath, "--creds", "sunshine", $sunshinePassword -Wait -PassThru
 if ($credsProc.ExitCode -ne 0) {
   throw "Sunshine credential setup failed with exit code $($credsProc.ExitCode)"
 }
