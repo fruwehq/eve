@@ -7,12 +7,19 @@ generate_hcl "z_vultr_instance.tf" {
       }
     }
 
+    resource "vultr_startup_script" "windows_ssh" {
+      name   = "windows-ssh-bootstrap"
+      type   = "boot"
+      script = file("${terramate.root.path.fs.absolute}/windows/ssh.ps1")
+    }
+
     resource "vultr_instance" "default" {
       backups        = global.vultr.instance.backups
       os_id          = global.vultr.instance.os_id
       plan           = global.vultr.instance.plan
       region         = global.vultr.region
       reserved_ip_id = data.vultr_reserved_ip.default.id
+      script_id      = vultr_startup_script.windows_ssh.id
     }
 
     output "vultr_instance_default_password" {
