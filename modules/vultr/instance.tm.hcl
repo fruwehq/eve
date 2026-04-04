@@ -10,7 +10,7 @@ generate_hcl "z_vultr_instance.tf" {
     resource "vultr_startup_script" "windows_ssh" {
       name   = "windows-ssh-bootstrap"
       type   = "boot"
-      script = file("${terramate.root.path.fs.absolute}/windows/ssh.ps1")
+      script = base64encode(file("${terramate.root.path.fs.absolute}/windows/ssh.ps1"))
     }
 
     resource "vultr_instance" "default" {
