@@ -20,8 +20,15 @@ export MY_IP
 export SSH_PUBLIC_KEY_FILE
 export VULTR_API_KEY
 
-RESOLVE_WINDOWS_PASSWORD = PW=$${EPHEMERAL_WINDOWS_PASSWORD:-$$(terramate run --tags=vultr:services:windows -- terraform output -raw vultr_instance_default_password)}; \
+	RESOLVE_WINDOWS_IP = IP=$${EPHEMERAL_WINDOWS_IP:-$$(terramate run --tags=vultr:services:windows -- terraform output -raw vultr_instance_main_ip)}; \
+	if [ -z "$$IP" ]; then echo "Missing IP"; exit 1; fi
+	
+	RESOLVE_WINDOWS_PASSWORD = PW=$${EPHEMERAL_WINDOWS_PASSWORD:-$$(terramate run --tags=vultr:services:windows -- terraform output -raw vultr_instance_default_password)}; \
 	if [ -z "$$PW" ]; then echo "Missing password"; exit 1; fi
+
+apply.bootstrap: apply wait-ssh provision ## Apply infra and provision once reachable
+
+bootstrap: wait-ssh provision ## Wait for SSH and run provisioning
 
 default: help
 
@@ -69,7 +76,8 @@ show-password: ## Displays instance default password
 	echo "$$PW"
 
 show-ip: ## Displays instance public IP address
-	terramate run --tags=vultr:services:windows -- terraform output -raw vultr_instance_main_ip
+	@$(RESOLVE_WINDOWS_IP); \
+	echo "$$IP"
 
 secrets.json: ## Writes ./tmp/secrets.json for Windows provisioning
 	@$(RESOLVE_WINDOWS_PASSWORD); \
@@ -87,3 +95,11 @@ provision: secrets.json ## Syncs provision scripts and runs bootstrap on remote 
 
 provision.clear-state: ## Clears remote provisioning state, logs, and downloads
 	ssh vultr 'if (Test-Path "C:\Users\Administrator\provision\state") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\state" }; if (Test-Path "C:\Users\Administrator\provision\logs") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\logs" }; if (Test-Path "C:\Users\Administrator\provision\downloads") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\downloads" }'
+
+wait-ssh: ## Wait until SSH on the Windows host is reachable
+	@$(RESOLVE_WINDOWS_IP); \
+	echo "Waiting for SSH on $$IP..."; \
+	until ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 vultr@$$IP exit 0 >/dev/null 2>&1; do \
+		sleep 5; \
+	done; \
+	echo "SSH is ready on $$IP"
