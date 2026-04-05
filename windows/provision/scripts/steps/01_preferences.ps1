@@ -1,5 +1,9 @@
 $ErrorActionPreference = 'Stop'
 
+Write-Host "#########################################################"
+Write-Host "### Start 01"
+Write-Host "#########################################################"
+
 Write-Host "Configuring Windows UI (dark mode + black background)..."
 
 $targetUser = "Administrator"
@@ -68,3 +72,8 @@ finally {
         & reg.exe unload "HKU\$hiveName" | Out-Null
     }
 }
+
+Write-Host "---------------------------------------------------------"
+Write-Host "END 01"
+Write-Host "---------------------------------------------------------"
+Write-Host ""

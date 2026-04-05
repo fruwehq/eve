@@ -1,5 +1,9 @@
 $ErrorActionPreference = 'Stop'
 
+Write-Host "#########################################################"
+Write-Host "### Start 04"
+Write-Host "#########################################################"
+
 Write-Host "Applying Windows tuning..."
 
 $changed = $false
@@ -119,3 +123,8 @@ if ($changed) {
 } else {
   Write-Host "Windows tuning already in desired state. No reboot requested."
 }
+
+Write-Host "---------------------------------------------------------"
+Write-Host "END 04"
+Write-Host "---------------------------------------------------------"
+Write-Host ""

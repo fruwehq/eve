@@ -1,5 +1,9 @@
 $ErrorActionPreference = 'Stop'
 
+Write-Host "#########################################################"
+Write-Host "### Start 10"
+Write-Host "#########################################################"
+
 . "$PSScriptRoot\..\lib\downloads.ps1"
 
 Write-Host "Ensuring Sunshine is installed and configured..."
@@ -138,3 +142,8 @@ if (-not $ready) {
     Write-Warning "Failed to submit pairing PIN: $_"
   }
 }
+
+Write-Host "---------------------------------------------------------"
+Write-Host "END 10"
+Write-Host "---------------------------------------------------------"
+Write-Host ""

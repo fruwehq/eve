@@ -1,5 +1,9 @@
 $ErrorActionPreference = 'Stop'
 
+Write-Host "#########################################################"
+Write-Host "### Start 02"
+Write-Host "#########################################################"
+
 . "$PSScriptRoot\..\lib\downloads.ps1"
 
 Write-Host "Checking GPU driver..."
@@ -24,3 +28,8 @@ if ($nvidia) {
 # Write-Host "NVIDIA installer exit code: $($proc.ExitCode)"
 
 # New-Item $rebootFlag -ItemType File -Force | Out-Null
+
+Write-Host "---------------------------------------------------------"
+Write-Host "END 02"
+Write-Host "---------------------------------------------------------"
+Write-Host ""

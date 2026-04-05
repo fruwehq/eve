@@ -1,5 +1,9 @@
 $ErrorActionPreference = 'Stop'
 
+Write-Host "#########################################################"
+Write-Host "### Start 20"
+Write-Host "#########################################################"
+
 # Avoid mojibake in logs (Runner writes UTF-8 timestamps)
 try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new() } catch {}
 
@@ -329,3 +333,8 @@ Write-Host "VDD setup complete."
 # }
 
 # Write-Host 'VDD setup complete.'
+
+Write-Host "---------------------------------------------------------"
+Write-Host "END 20"
+Write-Host "---------------------------------------------------------"
+Write-Host ""

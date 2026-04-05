@@ -1,5 +1,9 @@
 $ErrorActionPreference = 'Stop'
 
+Write-Host "#########################################################"
+Write-Host "### Start 30"
+Write-Host "#########################################################"
+
 . "$PSScriptRoot\..\lib\downloads.ps1"
 
 Write-Host "Installing Steam..."
@@ -28,3 +32,8 @@ if (Test-Path $steamExe) {
 }
 
 throw "Steam did not install silently. Steam.exe not found at $steamExe. If Steam is already installed manually, set currentStep to 3 and rerun the runner."
+
+Write-Host "---------------------------------------------------------"
+Write-Host "END 30"
+Write-Host "---------------------------------------------------------"
+Write-Host ""

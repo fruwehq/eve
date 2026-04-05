@@ -1,5 +1,9 @@
 $ErrorActionPreference = 'Stop'
 
+Write-Host "#########################################################"
+Write-Host "### Start 03"
+Write-Host "#########################################################"
+
 . "$PSScriptRoot\..\lib\downloads.ps1"
 
 Write-Host "Ensuring Visual C++ runtime is installed..."
@@ -32,3 +36,8 @@ Unblock-File $file -ErrorAction SilentlyContinue
 
 $proc = Start-Process -FilePath $file -ArgumentList "/install /quiet /norestart" -Wait -PassThru
 Write-Host "Installer exit code: $($proc.ExitCode)"
+
+Write-Host "---------------------------------------------------------"
+Write-Host "END 03"
+Write-Host "---------------------------------------------------------"
+Write-Host ""
