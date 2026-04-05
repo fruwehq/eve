@@ -74,10 +74,40 @@ moonlight: ## Start Moonlight
 	@$(RESOLVE_WINDOWS_IP); \
 	/Applications/Moonlight.app/Contents/MacOS/Moonlight stream --game-optimization $$IP "Desktop"
 
-moonlight.pair: ## Pair Moonlight with Sunshine using a fixed PIN
+moonlight.pair: ## Pair Moonlight with Sunshine using a fixed PIN while Moonlight is actively pairing
 	@$(RESOLVE_WINDOWS_IP); \
 	PIN=1234; \
-	/Applications/Moonlight.app/Contents/MacOS/Moonlight pair --pin $$PIN $$IP
+	PAIR_RESPONSE_FILE=./tmp/moonlight-pair-response.json; \
+	mkdir -p ./tmp; \
+	rm -f $$PAIR_RESPONSE_FILE; \
+	printf '%s\n' "Starting Moonlight pairing against $$IP with PIN $$PIN..."; \
+	/Applications/Moonlight.app/Contents/MacOS/Moonlight pair --pin $$PIN $$IP & \
+	MOONLIGHT_PID=$$!; \
+	sleep 2; \
+	printf '%s\n' "Submitting pairing PIN to Sunshine..."; \
+	HTTP_CODE=$$(curl -sS -k \
+	  -u "sunshine:$(EPHEMERAL_SUNSHINE_PASSWORD)" \
+	  -H "Content-Type: application/json" \
+	  --data-binary "{\"pin\":\"$$PIN\",\"name\":\"ephemeral-client\"}" \
+	  -o $$PAIR_RESPONSE_FILE \
+	  -w "%{http_code}" \
+	  "https://$$IP:47990/api/pin"); \
+	CURL_EXIT=$$?; \
+	if [ $$CURL_EXIT -ne 0 ]; then \
+	  kill $$MOONLIGHT_PID >/dev/null 2>&1 || true; \
+	  wait $$MOONLIGHT_PID >/dev/null 2>&1 || true; \
+	  echo "Sunshine pairing API call failed."; \
+	  exit $$CURL_EXIT; \
+	fi; \
+	if ! printf '%s' "$$HTTP_CODE" | grep -q '^2'; then \
+	  kill $$MOONLIGHT_PID >/dev/null 2>&1 || true; \
+	  wait $$MOONLIGHT_PID >/dev/null 2>&1 || true; \
+	  echo "Sunshine pairing API returned HTTP $$HTTP_CODE."; \
+	  if [ -f $$PAIR_RESPONSE_FILE ]; then cat $$PAIR_RESPONSE_FILE; fi; \
+	  exit 1; \
+	fi; \
+	printf '%s\n' "Sunshine pairing API accepted the PIN. Waiting for Moonlight to finish..."; \
+	wait $$MOONLIGHT_PID
 
 nuke: destroy clean ## Destroys all stacks and removes local terraform/terramate artifacts
 
