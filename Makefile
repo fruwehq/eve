@@ -72,7 +72,7 @@ logs: ## Fetch and print all provisioning logs from the Windows instance
 
 moonlight: ## Start Moonlight
 	@$(RESOLVE_WINDOWS_IP); \
-	/Applications/Moonlight.app/Contents/MacOS/Moonlight stream $$IP "Desktop"
+	/Applications/Moonlight.app/Contents/MacOS/Moonlight stream --game-optimization $$IP "Desktop"
 
 moonlight.pair: ## Pair Moonlight with Sunshine using a fixed PIN
 	@$(RESOLVE_WINDOWS_IP); \
