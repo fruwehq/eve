@@ -1,9 +1,13 @@
 generate_hcl "z_vultr_reserved_ip.tf" {
   content {
-    # resource "vultr_reserved_ip" "default" {
-    #   label   = global.vultr.reserved_ip.label
-    #   region  = global.vultr.region
-    #   ip_type = "v4"
-    # }
+    resource "vultr_reserved_ip" "default" {
+      label   = global.vultr.reserved_ip.label
+      region  = global.vultr.region
+      ip_type = "v4"
+
+      lifecycle {
+        prevent_destroy = true
+      }
+    }
   }
 }
