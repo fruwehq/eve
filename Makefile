@@ -1,5 +1,9 @@
 # Makefile
 .DEFAULT_GOAL := default
+.PHONY: all apply aws.login clean default destroy generate help init lint logs \
+				moonlight moonlight.pair nuke plan provision provision.clear-state \
+				provision.restart rdp reboot secrets.json show-ip show-password \
+				sunshine sunshine.wait ssh ssh.wait upload
 
 # Specify default environment if none provided
 ENV ?= vultr
@@ -66,7 +70,7 @@ lint:
 
 logs: ## Fetch and print all provisioning logs from the Windows instance
 	@$(RESOLVE_WINDOWS_IP); \
-	SSH_OPTS='-o StrictHostKeyChecking=no -o ServerAliveInterval=10 -i $(SSH_PUBLIC_KEY_FILE)'; \
+	SSH_OPTS='-o StrictHostKeyChecking=no -o ServerAliveInterval=10 -o WarnWeakCrypto=no-pq-kex -i $(SSH_PUBLIC_KEY_FILE)'; \
 	printf '%s\n' "Fetching logs from $$IP..."; \
 	ssh $$SSH_OPTS Administrator@$$IP "if (Test-Path 'C:\Users\Administrator\provision\scripts\logs.ps1') { & 'C:\Users\Administrator\provision\scripts\logs.ps1' } else { Write-Output 'No logs script found. Run make provision first.' }"
 
@@ -114,9 +118,9 @@ nuke: destroy clean ## Destroys all stacks and removes local terraform/terramate
 plan: generate ## Plans terraform changes on all stacks
 	terramate run --tags=$(ENV) -- terraform plan
 
-provision: secrets.json ## Syncs provision scripts and runs bootstrap on remote host
+provision: secrets.json upload ## Syncs provision scripts and runs bootstrap on remote host
 	@$(RESOLVE_WINDOWS_IP); \
-	SSH_OPTS='-o StrictHostKeyChecking=no -o ServerAliveInterval=10 -i $(SSH_PUBLIC_KEY_FILE)'; \
+	SSH_OPTS='-o StrictHostKeyChecking=no -o ServerAliveInterval=10 -o WarnWeakCrypto=no-pq-kex -i $(SSH_PUBLIC_KEY_FILE)'; \
 	ssh $$SSH_OPTS Administrator@$$IP 'New-Item -ItemType Directory -Force C:\Users\Administrator\provision | Out-Null; New-Item -ItemType Directory -Force C:\Users\Administrator\provision\state | Out-Null; if (Test-Path "C:\Users\Administrator\provision\scripts") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\scripts" }'; \
 	scp $$SSH_OPTS -r windows/provision Administrator@$$IP:/C:/Users/Administrator/; \
 	scp $$SSH_OPTS ./tmp/secrets.json Administrator@$$IP:/C:/Users/Administrator/provision/state/secrets.json; \
@@ -124,7 +128,7 @@ provision: secrets.json ## Syncs provision scripts and runs bootstrap on remote 
 
 provision.clear-state: ## Clears remote provisioning state, logs, and downloads
 	@$(RESOLVE_WINDOWS_IP); \
-	SSH_OPTS='-o StrictHostKeyChecking=no -o ServerAliveInterval=10 -i $(SSH_PUBLIC_KEY_FILE)'; \
+	SSH_OPTS='-o StrictHostKeyChecking=no -o ServerAliveInterval=10 -o WarnWeakCrypto=no-pq-kex -i $(SSH_PUBLIC_KEY_FILE)'; \
 	ssh $$SSH_OPTS Administrator@$$IP 'if (Test-Path "C:\Users\Administrator\provision\state") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\state" }; if (Test-Path "C:\Users\Administrator\provision\logs") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\logs" }; if (Test-Path "C:\Users\Administrator\provision\downloads") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\downloads" }'
 
 provision.restart: provision.clear-state provision ## Clears the provisioning state, uploads the new scripts and executes them
@@ -149,7 +153,7 @@ rdp: ## Writes ./tmp/windows.rdp and opens it for debugging
 
 reboot: ## Reboots the remote Windows instance
 	@$(RESOLVE_WINDOWS_IP); \
-	SSH_OPTS='-o StrictHostKeyChecking=no -o ServerAliveInterval=10 -i $(SSH_PUBLIC_KEY_FILE)'; \
+	SSH_OPTS='-o StrictHostKeyChecking=no -o ServerAliveInterval=10 -o WarnWeakCrypto=no-pq-kex -i $(SSH_PUBLIC_KEY_FILE)'; \
 	ssh $$SSH_OPTS Administrator@$$IP 'shutdown /r /t 0'
 
 secrets.json: ## Writes ./tmp/secrets.json for Windows provisioning
@@ -172,24 +176,70 @@ sunshine: ## Opens the Sunshine web UI in the local browser
 	@$(RESOLVE_WINDOWS_IP); \
 	open "https://$$IP:47990" || open -a "Google Chrome" "https://$$IP:47990"
 
-sunshine.wait: ## Wait until the Sunshine web UI port is reachable
+sunshine.wait: ## Wait until Sunshine accepts authenticated API requests
 	@$(RESOLVE_WINDOWS_IP); \
-		echo "Waiting for Sunshine on $$IP:47990..."; \
-		until nc -z $$IP 47990 >/dev/null 2>&1; do \
-			sleep 5; \
-		done; \
-		echo "Sunshine is reachable on $$IP:47990"
+	ATTEMPT=1; \
+	MAX_ATTEMPTS=20; \
+	printf '%s\n' "Waiting for Sunshine API on $$IP:47990..."; \
+	while [ $$ATTEMPT -le $$MAX_ATTEMPTS ]; do \
+		HTTP_CODE=$$(curl -sS -k \
+		  -u "sunshine:$(EPHEMERAL_SUNSHINE_PASSWORD)" \
+		  -o /dev/null \
+		  -w "%{http_code}" \
+		  "https://$$IP:47990/api/config"); \
+		CURL_EXIT=$$?; \
+		if [ $$CURL_EXIT -eq 0 ] && printf '%s' "$$HTTP_CODE" | grep -q '^2'; then \
+			printf '%s\n' "Sunshine API is ready on $$IP:47990"; \
+			exit 0; \
+		fi; \
+		printf '%s\n' "Sunshine API not ready yet (attempt $$ATTEMPT/$$MAX_ATTEMPTS, curl=$$CURL_EXIT, http=$$HTTP_CODE). Sleeping 2 seconds..."; \
+		sleep 2; \
+		ATTEMPT=$$((ATTEMPT + 1)); \
+	done; \
+	printf '%s\n' "Sunshine API did not become ready in time."; \
+	exit 1
 
 ssh: ## Open an interactive SSH session to the Windows instance
 	@$(RESOLVE_WINDOWS_IP); \
-	SSH_OPTS='-o StrictHostKeyChecking=no -o ServerAliveInterval=10 -i $(SSH_PUBLIC_KEY_FILE)'; \
+	SSH_OPTS='-o StrictHostKeyChecking=no -o ServerAliveInterval=10 -o WarnWeakCrypto=no-pq-kex -i $(SSH_PUBLIC_KEY_FILE)'; \
 	ssh $$SSH_OPTS Administrator@$$IP
 
 ssh.wait: ## Wait until SSH on the Windows host is reachable
 	@$(RESOLVE_WINDOWS_IP); \
-	SSH_OPTS='-o StrictHostKeyChecking=no -o ConnectTimeout=5 -o ServerAliveInterval=10 -i $(SSH_PUBLIC_KEY_FILE)'; \
+	SSH_OPTS='-o StrictHostKeyChecking=no -o ConnectTimeout=5 -o ServerAliveInterval=10 -o WarnWeakCrypto=no-pq-kex -i $(SSH_PUBLIC_KEY_FILE)'; \
 	echo "Waiting for SSH on $$IP..."; \
 	until ssh $$SSH_OPTS Administrator@$$IP exit 0 >/dev/null 2>&1; do \
 		sleep 5; \
 	done; \
 	echo "SSH is ready on $$IP"
+
+upload: ## Upload local non-committed files from ./upload, skipping files that already exist remotely
+	@$(RESOLVE_WINDOWS_IP); \
+	SSH_OPTS='-o StrictHostKeyChecking=no -o ServerAliveInterval=10 -o WarnWeakCrypto=no-pq-kex -i $(SSH_PUBLIC_KEY_FILE)'; \
+	REMOTE_UPLOAD_DIR='C:\Users\Administrator\upload'; \
+	REMOTE_DESKTOP_DIR='C:\Users\Administrator\Desktop\upload'; \
+	printf '%s\n' "Preparing remote upload folder on $$IP..."; \
+	ssh $$SSH_OPTS Administrator@$$IP "New-Item -ItemType Directory -Force '$$REMOTE_UPLOAD_DIR' | Out-Null; if (!(Test-Path '$$REMOTE_DESKTOP_DIR')) { cmd /c mklink /J \"$$REMOTE_DESKTOP_DIR\" \"$$REMOTE_UPLOAD_DIR\" >nul 2>&1 }"; \
+	if [ ! -d ./upload ]; then \
+		printf '%s\n' "No ./upload directory found. Skipping upload."; \
+		exit 0; \
+	fi; \
+	find ./upload -type f ! -name '.gitkeep' -exec sh -c '\
+		FILE="$$1"; \
+		REL_PATH="$${FILE#./upload/}"; \
+		REL_PATH_WIN=$$(printf "%s" "$$REL_PATH" | sed "s#/#\\\\\\\\#g"); \
+		REL_DIR=$$(dirname "$$REL_PATH"); \
+		if [ "$$REL_DIR" = "." ]; then \
+			REMOTE_DIR="C:\\Users\\Administrator\\upload"; \
+		else \
+			REL_DIR_WIN=$$(printf "%s" "$$REL_DIR" | sed "s#/#\\\\\\\\#g"); \
+			REMOTE_DIR="C:\\Users\\Administrator\\upload\\$$REL_DIR_WIN"; \
+		fi; \
+		ssh '"$$SSH_OPTS"' Administrator@'"$$IP"' "New-Item -ItemType Directory -Force '\''$$REMOTE_DIR'\'' | Out-Null"; \
+		if ssh '"$$SSH_OPTS"' Administrator@'"$$IP"' "if (Test-Path '\''C:\\Users\\Administrator\\upload\\$$REL_PATH_WIN'\'') { exit 0 } else { exit 1 }" >/dev/null 2>&1; then \
+			printf "%s\n" "Skipping existing upload file: $$REL_PATH"; \
+		else \
+			printf "%s\n" "Uploading: $$REL_PATH"; \
+			scp '"$$SSH_OPTS"' "$$FILE" Administrator@'"$$IP"':/C:/Users/Administrator/upload/"$$REL_PATH"; \
+		fi \
+	' sh {} \;
