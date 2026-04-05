@@ -101,11 +101,7 @@ Write-Host "Sunshine credentials exit code: $($credsProc.ExitCode)"
 Write-Host "Starting Sunshine process..."
 Start-Process -FilePath $sunshineExe
 
-[System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12
-$previousCertCallback = [System.Net.ServicePointManager]::ServerCertificateValidationCallback
-[System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
-
-# Wait for Sunshine Web UI to become available
+# Wait for Sunshine Web UI port to become available
 Write-Host "Waiting for Sunshine API..."
 $maxAttempts = 10
 $attempt = 0
@@ -114,17 +110,25 @@ $lastWaitError = $null
 
 while (-not $ready -and $attempt -lt $maxAttempts) {
   $attempt++
+  $client = $null
   try {
     Write-Host "Sunshine wait attempt $attempt/$maxAttempts..."
-    $response = Invoke-WebRequest -Uri "https://127.0.0.1:47990" -UseBasicParsing -TimeoutSec 2
-    Write-Host "Sunshine wait response status: $($response.StatusCode)"
-    if ($response.StatusCode -ge 200) {
-      $ready = $true
-      break
+    $client = New-Object System.Net.Sockets.TcpClient
+    $async = $client.BeginConnect("127.0.0.1", 47990, $null, $null)
+    if (-not $async.AsyncWaitHandle.WaitOne(2000, $false)) {
+      throw "TCP connect timed out"
     }
+    $client.EndConnect($async)
+    Write-Host "Sunshine TCP port is reachable."
+    $ready = $true
+    break
   } catch {
     $lastWaitError = $_.Exception.Message
     Write-Host "Sunshine wait attempt $attempt failed: $lastWaitError"
+  } finally {
+    if ($client) {
+      $client.Close()
+    }
   }
   Start-Sleep -Seconds 2
 }
@@ -138,25 +142,34 @@ if (-not $ready) {
 } else {
   Write-Host "Sunshine API ready. Sending pairing PIN..."
 
-  $basicAuthValue = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("sunshine:$sunshinePassword"))
-  $pairHeaders = @{ Authorization = "Basic $basicAuthValue" }
-  $pairBody = @{ pin = "1234"; name = "ephemeral-client" } | ConvertTo-Json
+  $pairBody = @{ pin = "1234"; name = "ephemeral-client" } | ConvertTo-Json -Compress
 
   try {
-    Invoke-RestMethod `
-      -Uri "https://127.0.0.1:47990/api/pin" `
-      -Method Post `
-      -Headers $pairHeaders `
-      -Body $pairBody `
-      -ContentType "application/json"
+    $pairResponseFile = Join-Path $env:TEMP "sunshine-pair-response.json"
+    if (Test-Path $pairResponseFile) {
+      Remove-Item $pairResponseFile -Force -ErrorAction SilentlyContinue
+    }
+
+    $httpCode = & curl.exe -sS -k -u "sunshine:$sunshinePassword" -H "Content-Type: application/json" -d $pairBody -o $pairResponseFile -w "%{http_code}" "https://127.0.0.1:47990/api/pin"
+    $curlExitCode = $LASTEXITCODE
+    $responseBody = if (Test-Path $pairResponseFile) { Get-Content -Path $pairResponseFile -Raw } else { "" }
+
+    if ($curlExitCode -ne 0) {
+      throw "curl exited with code $curlExitCode. Response: $responseBody"
+    }
+
+    if ($httpCode -notmatch "^2") {
+      throw "Sunshine pairing API returned HTTP $httpCode. Response: $responseBody"
+    }
 
     Write-Host "Pairing PIN submitted successfully."
+    if ($responseBody) {
+      Write-Host $responseBody
+    }
   } catch {
-    Write-Warning "Failed to submit pairing PIN: $_"
+    Write-Warning "Failed to submit pairing PIN: $($_.Exception.Message)"
   }
 }
-
-[System.Net.ServicePointManager]::ServerCertificateValidationCallback = $previousCertCallback
 
 Write-Host "---------------------------------------------------------"
 Write-Host "END 10"
