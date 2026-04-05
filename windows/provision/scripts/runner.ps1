@@ -1,11 +1,12 @@
-$ProvisionPath = "C:\Users\Administrator\provision"
-$ScriptsPath   = "$ProvisionPath\scripts"
-$StatePath     = "$ProvisionPath\state"
-$LogsPath      = "$ProvisionPath\logs"
-$StateFile     = "$StatePath\state.json"
-$StepsPath     = "$ScriptsPath\steps"
-$LogFile       = "$LogsPath\provision.log"
-$RebootFlag    = "$StatePath\reboot.flag"
+$ProvisionPath  = "C:\Users\Administrator\provision"
+$ScriptsPath    = "$ProvisionPath\scripts"
+$StatePath      = "$ProvisionPath\state"
+$LogsPath       = "$ProvisionPath\logs"
+$StateFile      = "$StatePath\state.json"
+$StepsPath      = "$ScriptsPath\steps"
+$LogFile        = "$LogsPath\provision.log"
+$RebootFlag     = "$StatePath\reboot.flag"
+$TranscriptFile = "$LogsPath\transcript.log"
 
 function Log($msg) {
   $ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
@@ -15,6 +16,9 @@ function Log($msg) {
 if (!(Test-Path $LogsPath)) {
   throw "Logs directory not found: $LogsPath"
 }
+
+# Start full transcript logging to capture ALL output
+Start-Transcript -Path $TranscriptFile -Append -Force
 
 if (!(Test-Path $StateFile)) {
   throw "State file not found: $StateFile"
@@ -39,6 +43,7 @@ try {
 
     if ($CurrentStep -ge $StepFiles.Count) {
         Log "Provisioning complete."
+        Stop-Transcript
         exit 0
     }
 
@@ -46,7 +51,7 @@ try {
 
     Log "Running step [$CurrentStep/$($StepFiles.Count-1)] $($Step.Name)"
 
-    & $Step.FullName 2>&1 | Tee-Object -FilePath $LogFile -Append
+    & $Step.FullName 2>&1 | ForEach-Object { Log $_ }
 
     $State.currentStep = $CurrentStep + 1
     $State | ConvertTo-Json | Set-Content $StateFile
@@ -68,6 +73,7 @@ catch {
 
   Log "ERROR: $($_.Exception.Message)"
   Log $_.ScriptStackTrace
+  Stop-Transcript
   throw
 
 }

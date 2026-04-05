@@ -64,6 +64,12 @@ init: generate ## Inits environment
 lint:
 	terramate fmt
 
+logs: ## Fetch and print all provisioning logs from the Windows instance
+	@$(RESOLVE_WINDOWS_IP); \
+	SSH_OPTS='-o StrictHostKeyChecking=no -o ServerAliveInterval=10 -i $(SSH_PUBLIC_KEY_FILE)'; \
+	printf '%s\n' "Fetching logs from $$IP..."; \
+	ssh $$SSH_OPTS Administrator@$$IP "if (Test-Path 'C:\Users\Administrator\provision\scripts\logs.ps1') { & 'C:\Users\Administrator\provision\scripts\logs.ps1' } else { Write-Output 'No logs script found. Run make provision first.' }"
+
 moonlight.pair: ## Pair Moonlight with Sunshine using a fixed PIN
 	@$(RESOLVE_WINDOWS_IP); \
 	PIN=1234; \
@@ -86,6 +92,8 @@ provision.clear-state: ## Clears remote provisioning state, logs, and downloads
 	@$(RESOLVE_WINDOWS_IP); \
 	SSH_OPTS='-o StrictHostKeyChecking=no -o ServerAliveInterval=10 -i $(SSH_PUBLIC_KEY_FILE)'; \
 	ssh $$SSH_OPTS Administrator@$$IP 'if (Test-Path "C:\Users\Administrator\provision\state") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\state" }; if (Test-Path "C:\Users\Administrator\provision\logs") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\logs" }; if (Test-Path "C:\Users\Administrator\provision\downloads") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\downloads" }'
+
+provision.restart: provision.clear-state provision ## Clears the provisioning state, uploads the new scripts and executes them
 
 rdp: ## Writes ./tmp/windows.rdp and opens it for debugging
 	@$(RESOLVE_WINDOWS_IP); \
@@ -138,6 +146,11 @@ sunshine.wait: ## Wait until the Sunshine web UI port is reachable
 		done; \
 		echo "Sunshine is reachable on $$IP:47990"
 
+ssh: ## Open an interactive SSH session to the Windows instance
+	@$(RESOLVE_WINDOWS_IP); \
+	SSH_OPTS='-o StrictHostKeyChecking=no -o ServerAliveInterval=10 -i $(SSH_PUBLIC_KEY_FILE)'; \
+	ssh $$SSH_OPTS Administrator@$$IP
+
 ssh.wait: ## Wait until SSH on the Windows host is reachable
 	@$(RESOLVE_WINDOWS_IP); \
 	SSH_OPTS='-o StrictHostKeyChecking=no -o ConnectTimeout=5 -o ServerAliveInterval=10 -i $(SSH_PUBLIC_KEY_FILE)'; \
@@ -146,8 +159,3 @@ ssh.wait: ## Wait until SSH on the Windows host is reachable
 		sleep 5; \
 	done; \
 	echo "SSH is ready on $$IP"
-
-ssh: ## Open an interactive SSH session to the Windows instance
-	@$(RESOLVE_WINDOWS_IP); \
-	SSH_OPTS='-o StrictHostKeyChecking=no -o ServerAliveInterval=10 -i $(SSH_PUBLIC_KEY_FILE)'; \
-	ssh $$SSH_OPTS Administrator@$$IP
