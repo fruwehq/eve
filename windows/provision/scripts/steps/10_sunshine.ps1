@@ -107,7 +107,7 @@ $previousCertCallback = [System.Net.ServicePointManager]::ServerCertificateValid
 
 # Wait for Sunshine Web UI to become available
 Write-Host "Waiting for Sunshine API..."
-$maxAttempts = 30
+$maxAttempts = 10
 $attempt = 0
 $ready = $false
 $lastWaitError = $null
@@ -116,7 +116,7 @@ while (-not $ready -and $attempt -lt $maxAttempts) {
   $attempt++
   try {
     Write-Host "Sunshine wait attempt $attempt/$maxAttempts..."
-    $response = Invoke-WebRequest -Uri "https://localhost:47990" -UseBasicParsing -TimeoutSec 2
+    $response = Invoke-WebRequest -Uri "https://127.0.0.1:47990" -UseBasicParsing -TimeoutSec 2
     Write-Host "Sunshine wait response status: $($response.StatusCode)"
     if ($response.StatusCode -ge 200) {
       $ready = $true
@@ -144,7 +144,7 @@ if (-not $ready) {
 
   try {
     Invoke-RestMethod `
-      -Uri "https://localhost:47990/api/pin" `
+      -Uri "https://127.0.0.1:47990/api/pin" `
       -Method Post `
       -Headers $pairHeaders `
       -Body $pairBody `
