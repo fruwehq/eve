@@ -101,26 +101,40 @@ Write-Host "Sunshine credentials exit code: $($credsProc.ExitCode)"
 Write-Host "Starting Sunshine process..."
 Start-Process -FilePath $sunshineExe
 
+[System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12
+$previousCertCallback = [System.Net.ServicePointManager]::ServerCertificateValidationCallback
+[System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
+
 # Wait for Sunshine Web UI to become available
 Write-Host "Waiting for Sunshine API..."
 $maxAttempts = 30
 $attempt = 0
 $ready = $false
+$lastWaitError = $null
 
 while (-not $ready -and $attempt -lt $maxAttempts) {
+  $attempt++
   try {
-    $response = Invoke-WebRequest -Uri "https://localhost:47990" -UseBasicParsing -SkipCertificateCheck -TimeoutSec 2
+    Write-Host "Sunshine wait attempt $attempt/$maxAttempts..."
+    $response = Invoke-WebRequest -Uri "https://localhost:47990" -UseBasicParsing -TimeoutSec 2
+    Write-Host "Sunshine wait response status: $($response.StatusCode)"
     if ($response.StatusCode -ge 200) {
       $ready = $true
       break
     }
-  } catch {}
+  } catch {
+    $lastWaitError = $_.Exception.Message
+    Write-Host "Sunshine wait attempt $attempt failed: $lastWaitError"
+  }
   Start-Sleep -Seconds 2
-  $attempt++
 }
 
 if (-not $ready) {
-  Write-Warning "Sunshine API did not become ready in time. Skipping auto pairing."
+  if ($lastWaitError) {
+    Write-Warning "Sunshine API did not become ready in time. Last error: $lastWaitError. Skipping auto pairing."
+  } else {
+    Write-Warning "Sunshine API did not become ready in time. Skipping auto pairing."
+  }
 } else {
   Write-Host "Sunshine API ready. Sending pairing PIN..."
 
@@ -129,19 +143,20 @@ if (-not $ready) {
   $pairBody = @{ pin = "1234"; name = "ephemeral-client" } | ConvertTo-Json
 
   try {
-    Invoke-RestMethod \
-      -Uri "https://localhost:47990/api/pin" \
-      -Method Post \
-      -Headers $pairHeaders \
-      -Body $pairBody \
-      -ContentType "application/json" \
-      -SkipCertificateCheck
+    Invoke-RestMethod `
+      -Uri "https://localhost:47990/api/pin" `
+      -Method Post `
+      -Headers $pairHeaders `
+      -Body $pairBody `
+      -ContentType "application/json"
 
     Write-Host "Pairing PIN submitted successfully."
   } catch {
     Write-Warning "Failed to submit pairing PIN: $_"
   }
 }
+
+[System.Net.ServicePointManager]::ServerCertificateValidationCallback = $previousCertCallback
 
 Write-Host "---------------------------------------------------------"
 Write-Host "END 10"
