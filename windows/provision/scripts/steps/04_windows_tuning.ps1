@@ -99,29 +99,51 @@ Set-RegistryValueIfNeeded -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVers
 # Configure Japanese keyboard layout for the user session and the logon/default session.
 $desiredInputTip = "0411:00000411"
 $needsLanguageUpdate = $false
+Write-Host "Desired input tip: $desiredInputTip"
 
 try {
   $currentLanguageList = Get-WinUserLanguageList
-  $hasJapanese = @($currentLanguageList | Where-Object { $_.LanguageTag -eq "ja-JP" }).Count -gt 0
-  if (-not $hasJapanese) {
+  $languageSummary = $currentLanguageList | ForEach-Object {
+    "$($_.LanguageTag) [tips=$($_.InputMethodTips -join ', ')]"
+  }
+  Write-Host "Current user language list: $($languageSummary -join ' | ')"
+
+  $jpEntry = $currentLanguageList | Where-Object { $_.LanguageTag -eq "ja-JP" } | Select-Object -First 1
+  if (-not $jpEntry) {
+    Write-Host "Japanese language entry not found. Language update required."
     $needsLanguageUpdate = $true
+  } elseif (-not ($jpEntry.InputMethodTips -contains $desiredInputTip)) {
+    Write-Host "Japanese language entry found, but desired input tip is missing. Current tips: $($jpEntry.InputMethodTips -join ', ')"
+    $needsLanguageUpdate = $true
+  } else {
+    Write-Host "Japanese language entry already contains desired input tip."
   }
 } catch {
+  Write-Host "Failed to inspect current user language list: $($_.Exception.Message)"
   $needsLanguageUpdate = $true
 }
 
 try {
   $preload1 = (Get-ItemProperty -Path "HKCU:\Keyboard Layout\Preload" -ErrorAction Stop)."1"
+  Write-Host "HKCU keyboard preload slot 1: $preload1"
   if ($preload1 -ne "00000411") {
+    Write-Host "HKCU keyboard preload slot 1 is not Japanese. Language update required."
     $needsLanguageUpdate = $true
+  } else {
+    Write-Host "HKCU keyboard preload slot 1 already set to Japanese."
   }
 } catch {
+  Write-Host "Failed to inspect HKCU keyboard preload slot 1: $($_.Exception.Message)"
   $needsLanguageUpdate = $true
 }
 
+Write-Host "needsLanguageUpdate = $needsLanguageUpdate"
 if ($needsLanguageUpdate) {
+  Write-Host "Applying Japanese language/input method update..."
   $languageList = New-WinUserLanguageList -Language "ja-JP"
-  Set-WinUserLanguageList -LanguageList $languageList -Force
+  $languageList[0].InputMethodTips.Clear()
+  $languageList[0].InputMethodTips.Add($desiredInputTip)
+  Set-WinUserLanguageList -LanguageList $languageList -Force -WarningAction SilentlyContinue
   Set-WinDefaultInputMethodOverride -InputTip $desiredInputTip
   $changed = $true
 }
