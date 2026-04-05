@@ -70,11 +70,11 @@ logs: ## Fetch and print all provisioning logs from the Windows instance
 	printf '%s\n' "Fetching logs from $$IP..."; \
 	ssh $$SSH_OPTS Administrator@$$IP "if (Test-Path 'C:\Users\Administrator\provision\scripts\logs.ps1') { & 'C:\Users\Administrator\provision\scripts\logs.ps1' } else { Write-Output 'No logs script found. Run make provision first.' }"
 
-moonlight: ## Start Moonlight
+moonlight: sunshine.wait ## Start Moonlight
 	@$(RESOLVE_WINDOWS_IP); \
 	/Applications/Moonlight.app/Contents/MacOS/Moonlight stream --game-optimization $$IP "Desktop"
 
-moonlight.pair: ## Pair Moonlight with Sunshine using a fixed PIN while Moonlight is actively pairing
+moonlight.pair: sunshine.wait ## Pair Moonlight with Sunshine using a fixed PIN while Moonlight is actively pairing
 	@$(RESOLVE_WINDOWS_IP); \
 	PIN=1234; \
 	PAIR_RESPONSE_FILE=./tmp/moonlight-pair-response.json; \
