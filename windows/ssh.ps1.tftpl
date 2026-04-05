@@ -24,7 +24,7 @@ icacls $adminAuthKeys /inheritance:r | Out-Null
 icacls $adminAuthKeys /grant "Administrators:F" | Out-Null
 icacls $adminAuthKeys /grant "SYSTEM:F" | Out-Null
 
-# Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
+Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
 
 # Open firewall port
 Write-Host "Opening firewall port 22..."
