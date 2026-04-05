@@ -102,7 +102,8 @@ $needsLanguageUpdate = $false
 
 try {
   $currentLanguageList = Get-WinUserLanguageList
-  if ($currentLanguageList.Count -ne 1 -or $currentLanguageList[0].LanguageTag -ne "ja-JP") {
+  $hasJapanese = @($currentLanguageList | Where-Object { $_.LanguageTag -eq "ja-JP" }).Count -gt 0
+  if (-not $hasJapanese) {
     $needsLanguageUpdate = $true
   }
 } catch {
@@ -110,8 +111,8 @@ try {
 }
 
 try {
-  $currentOverride = Get-WinDefaultInputMethodOverride
-  if ($null -eq $currentOverride -or $currentOverride.InputTip -ne $desiredInputTip) {
+  $preload1 = (Get-ItemProperty -Path "HKCU:\Keyboard Layout\Preload" -ErrorAction Stop)."1"
+  if ($preload1 -ne "00000411") {
     $needsLanguageUpdate = $true
   }
 } catch {
