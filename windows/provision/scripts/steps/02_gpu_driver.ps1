@@ -12,6 +12,12 @@ $nvidia = Get-CimInstance Win32_VideoController | Where-Object { $_.Name -like "
 
 if ($nvidia) {
     Write-Host "NVIDIA driver already present."
+
+    Write-Host "---------------------------------------------------------"
+    Write-Host "END 02 - early exit"
+    Write-Host "---------------------------------------------------------"
+    Write-Host ""
+
     exit
 }
 

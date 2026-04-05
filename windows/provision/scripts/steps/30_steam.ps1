@@ -14,6 +14,12 @@ $file = "C:\Users\Administrator\provision\downloads\steam\SteamSetup.exe"
 $steamExe = "${env:ProgramFiles(x86)}\Steam\Steam.exe"
 if (Test-Path $steamExe) {
   Write-Host "Steam already installed at $steamExe. Skipping."
+
+  Write-Host "---------------------------------------------------------"
+  Write-Host "END 30 - early exit"
+  Write-Host "---------------------------------------------------------"
+  Write-Host ""
+
   exit
 }
 
@@ -28,12 +34,13 @@ Start-Sleep -Seconds 3
 
 if (Test-Path $steamExe) {
   Write-Host "Steam installed at $steamExe"
+
+  Write-Host "---------------------------------------------------------"
+  Write-Host "END 30"
+  Write-Host "---------------------------------------------------------"
+  Write-Host ""
+
   exit 0
 }
 
 throw "Steam did not install silently. Steam.exe not found at $steamExe. If Steam is already installed manually, set currentStep to 3 and rerun the runner."
-
-Write-Host "---------------------------------------------------------"
-Write-Host "END 30"
-Write-Host "---------------------------------------------------------"
-Write-Host ""

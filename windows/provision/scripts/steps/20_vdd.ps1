@@ -18,6 +18,12 @@ try {
 
   if ($existing) {
     Write-Host "VDD already installed. Skipping installation."
+
+    Write-Host "---------------------------------------------------------"
+    Write-Host "END 20 - early exit"
+    Write-Host "---------------------------------------------------------"
+    Write-Host ""
+
     return
   }
 } catch {

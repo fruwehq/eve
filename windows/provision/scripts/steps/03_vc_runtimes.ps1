@@ -26,6 +26,12 @@ if (Test-Path $vcKey) {
 
 if ($installed) {
     Write-Host "Visual C++ runtime already installed. Skipping."
+
+    Write-Host "---------------------------------------------------------"
+    Write-Host "END 03 - early exit"
+    Write-Host "---------------------------------------------------------"
+    Write-Host ""
+
     return
 }
 
