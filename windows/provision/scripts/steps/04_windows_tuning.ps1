@@ -97,9 +97,33 @@ Set-RegistryValueIfNeeded -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVers
 Set-RegistryValueIfNeeded -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" -Name DefaultDomainName -Value "."
 
 # Configure Japanese keyboard layout for the user session and the logon/default session.
-$languageList = New-WinUserLanguageList -Language "ja-JP"
-Set-WinUserLanguageList -LanguageList $languageList -Force
-Set-WinDefaultInputMethodOverride -InputTip "0411:00000411"
+$desiredInputTip = "0411:00000411"
+$needsLanguageUpdate = $false
+
+try {
+  $currentLanguageList = Get-WinUserLanguageList
+  if ($currentLanguageList.Count -ne 1 -or $currentLanguageList[0].LanguageTag -ne "ja-JP") {
+    $needsLanguageUpdate = $true
+  }
+} catch {
+  $needsLanguageUpdate = $true
+}
+
+try {
+  $currentOverride = Get-WinDefaultInputMethodOverride
+  if ($null -eq $currentOverride -or $currentOverride.InputTip -ne $desiredInputTip) {
+    $needsLanguageUpdate = $true
+  }
+} catch {
+  $needsLanguageUpdate = $true
+}
+
+if ($needsLanguageUpdate) {
+  $languageList = New-WinUserLanguageList -Language "ja-JP"
+  Set-WinUserLanguageList -LanguageList $languageList -Force
+  Set-WinDefaultInputMethodOverride -InputTip $desiredInputTip
+  $changed = $true
+}
 
 Set-RegistryValueIfNeeded `
   -Path "HKCU:\Keyboard Layout\Preload" `

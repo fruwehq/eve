@@ -99,7 +99,7 @@ if ($credsProc.ExitCode -ne 0) {
 Write-Host "Sunshine credentials exit code: $($credsProc.ExitCode)"
 
 Write-Host "Starting Sunshine process..."
-Start-Process -FilePath $sunshineExe
+Start-Process -FilePath $sunshineExe -ArgumentList $configPath
 
 # Wait for Sunshine Web UI port to become available
 Write-Host "Waiting for Sunshine API..."
@@ -145,12 +145,21 @@ if (-not $ready) {
   $pairBody = @{ pin = "1234"; name = "ephemeral-client" } | ConvertTo-Json -Compress
 
   try {
+    $pairBodyFile = Join-Path $env:TEMP "sunshine-pair-request.json"
+    Set-Content -Path $pairBodyFile -Value $pairBody -NoNewline
+
     $pairResponseFile = Join-Path $env:TEMP "sunshine-pair-response.json"
     if (Test-Path $pairResponseFile) {
       Remove-Item $pairResponseFile -Force -ErrorAction SilentlyContinue
     }
 
-    $httpCode = & curl.exe -sS -k -u "sunshine:$sunshinePassword" -H "Content-Type: application/json" -d $pairBody -o $pairResponseFile -w "%{http_code}" "https://127.0.0.1:47990/api/pin"
+    $httpCode = & curl.exe -sS -k `
+      -u "sunshine:$sunshinePassword" `
+      -H "Content-Type: application/json" `
+      --data-binary "@$pairBodyFile" `
+      -o $pairResponseFile `
+      -w "%{http_code}" `
+      "https://127.0.0.1:47990/api/pin"
     $curlExitCode = $LASTEXITCODE
     $responseBody = if (Test-Path $pairResponseFile) { Get-Content -Path $pairResponseFile -Raw } else { "" }
 
