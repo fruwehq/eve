@@ -63,7 +63,7 @@ try {
         Log "Reboot requested. Restarting..."
 
         Restart-Computer -Force
-        exit
+        exit 0
     }
 
   }

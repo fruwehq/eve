@@ -18,7 +18,7 @@ if ($nvidia) {
     Write-Host "---------------------------------------------------------"
     Write-Host ""
 
-    exit
+    exit 0
 }
 
 # Write-Host "Installing NVIDIA driver..."

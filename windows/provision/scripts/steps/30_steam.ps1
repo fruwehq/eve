@@ -20,7 +20,7 @@ if (Test-Path $steamExe) {
   Write-Host "---------------------------------------------------------"
   Write-Host ""
 
-  exit
+  exit 0
 }
 
 Download-File -Url $url -OutFile $file -SkipIfExists
@@ -32,15 +32,13 @@ Write-Host "Steam installer exit code: $($proc.ExitCode)"
 
 Start-Sleep -Seconds 3
 
-if (Test-Path $steamExe) {
-  Write-Host "Steam installed at $steamExe"
-
-  Write-Host "---------------------------------------------------------"
-  Write-Host "END 30"
-  Write-Host "---------------------------------------------------------"
-  Write-Host ""
-
-  exit 0
+if (!(Test-Path $steamExe)) {
+  throw "Steam did not install silently. Steam.exe not found at $steamExe. If Steam is already installed manually, set currentStep to 3 and rerun the runner."
 }
 
-throw "Steam did not install silently. Steam.exe not found at $steamExe. If Steam is already installed manually, set currentStep to 3 and rerun the runner."
+Write-Host "Steam installed at $steamExe"
+
+Write-Host "---------------------------------------------------------"
+Write-Host "END 30"
+Write-Host "---------------------------------------------------------"
+Write-Host ""
