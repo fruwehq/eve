@@ -108,15 +108,14 @@ try {
   }
   Write-Host "Current user language list: $($languageSummary -join ' | ')"
 
-  $jpEntry = $currentLanguageList | Where-Object { $_.LanguageTag -eq "ja-JP" } | Select-Object -First 1
+  $jpEntry = $currentLanguageList | Where-Object { $_.LanguageTag -eq "ja" -or $_.LanguageTag -eq "ja-JP" -or $_.LanguageTag -like "ja-*" } | Select-Object -First 1
   if (-not $jpEntry) {
     Write-Host "Japanese language entry not found. Language update required."
     $needsLanguageUpdate = $true
-  } elseif (-not ($jpEntry.InputMethodTips -contains $desiredInputTip)) {
-    Write-Host "Japanese language entry found, but desired input tip is missing. Current tips: $($jpEntry.InputMethodTips -join ', ')"
-    $needsLanguageUpdate = $true
   } else {
-    Write-Host "Japanese language entry already contains desired input tip."
+    Write-Host "Japanese language entry found: $($jpEntry.LanguageTag)"
+    Write-Host "Current Japanese input tips: $($jpEntry.InputMethodTips -join ', ')"
+    Write-Host "Not using InputMethodTips as a hard requirement because Windows may report Japanese IME tips in GUID form."
   }
 } catch {
   Write-Host "Failed to inspect current user language list: $($_.Exception.Message)"
@@ -141,8 +140,6 @@ Write-Host "needsLanguageUpdate = $needsLanguageUpdate"
 if ($needsLanguageUpdate) {
   Write-Host "Applying Japanese language/input method update..."
   $languageList = New-WinUserLanguageList -Language "ja-JP"
-  $languageList[0].InputMethodTips.Clear()
-  $languageList[0].InputMethodTips.Add($desiredInputTip)
   Set-WinUserLanguageList -LanguageList $languageList -Force -WarningAction SilentlyContinue
   Set-WinDefaultInputMethodOverride -InputTip $desiredInputTip
   $changed = $true
