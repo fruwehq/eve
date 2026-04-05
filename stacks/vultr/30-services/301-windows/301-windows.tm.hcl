@@ -14,7 +14,9 @@ stack {
 
 globals "vultr" "instance" {
   backups = "disabled"
-  plan    = "vcg-a40-4c-20g-8vram"
+  plan    = "vcg-a40-2c-10g-4vram"
+  # plan    = "vcg-a40-4c-20g-8vram"
+  # plan    = "vcg-a40-6c-30g-12vram"
   os_id   = 2514 # Windows 2025 Standard x64 - retrieved via `vultr-cli os list`
 }
 
