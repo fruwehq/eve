@@ -85,7 +85,7 @@ moonlight.pair: sunshine.wait ## Pair Moonlight with Sunshine using a fixed PIN 
 	MOONLIGHT_PID=$$!; \
 	sleep 2; \
 	printf '%s\n' "Submitting pairing PIN to Sunshine..."; \
-	HTTP_CODE=$$(curl -sS -k \
+	HTTP_CODE=$$(curl -sS -i -k \
 	  -u "sunshine:$(EPHEMERAL_SUNSHINE_PASSWORD)" \
 	  -H "Content-Type: application/json" \
 	  --data-binary "{\"pin\":\"$$PIN\",\"name\":\"ephemeral-client\"}" \
