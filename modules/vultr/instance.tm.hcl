@@ -1,11 +1,11 @@
 generate_hcl "z_vultr_instance.tf" {
   content {
-    data "vultr_reserved_ip" "default" {
-      filter {
-        name   = "label"
-        values = [global.vultr.reserved_ip.label]
-      }
-    }
+    # data "vultr_reserved_ip" "default" {
+    #   filter {
+    #     name   = "label"
+    #     values = [global.vultr.reserved_ip.label]
+    #   }
+    # }
 
     resource "vultr_startup_script" "windows_ssh" {
       name = "windows-ssh-bootstrap"
@@ -29,7 +29,7 @@ generate_hcl "z_vultr_instance.tf" {
       os_id          = global.vultr.instance.os_id
       plan           = global.vultr.instance.plan
       region         = global.vultr.region
-      reserved_ip_id = data.vultr_reserved_ip.default.id
+      # reserved_ip_id = data.vultr_reserved_ip.default.id
       script_id      = vultr_startup_script.windows_ssh.id
     }
 
