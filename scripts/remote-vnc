@@ -53,11 +53,13 @@ else
         "${SSH_OPTS[@]}" "$SSH_USER@$IP" && TUNNEL_PID=$(lsof -ti :"$LOCAL_PORT" | head -1)
 fi
 
+VNC_PASSWORD="${VNC_PASSWORD:-vagrant}"
+
 echo "[remote-vnc] Tunnel active on localhost:$LOCAL_PORT"
 echo "[remote-vnc] Opening VNC viewer..."
 
 if command -v open >/dev/null 2>&1; then
-    open "vnc://localhost:$LOCAL_PORT"
+    open "vnc://:${VNC_PASSWORD}@localhost:$LOCAL_PORT"
 elif command -v vncviewer >/dev/null 2>&1; then
     vncviewer "localhost::$LOCAL_PORT"
 else

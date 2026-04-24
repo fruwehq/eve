@@ -133,7 +133,7 @@ bundles:
     includes: [ssh]
 
   - id: access-gui-safe
-    includes: [ssh, rustdesk]
+    includes: [ssh, rustdesk, vnc]
 
   - id: access-gui-vnc
     includes: [ssh, vnc]
