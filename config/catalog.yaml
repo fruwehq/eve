@@ -122,6 +122,7 @@ packages:
   - id: ssh
   - id: steam
   - id: sunshine
+  - id: vnc
   - id: xpra
 
 # -----------------------------------------------------------------------------
@@ -133,6 +134,9 @@ bundles:
 
   - id: access-gui-safe
     includes: [ssh, rustdesk]
+
+  - id: access-gui-vnc
+    includes: [ssh, vnc]
 
   - id: access-gui-streaming
     includes: [ssh, sunshine, rustdesk]

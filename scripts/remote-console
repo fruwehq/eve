@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# Open the VM's graphical console for a local profile.
+# Usage: scripts/remote-console <profile>
+#
+# VMware Fusion: opens the VMX in the Fusion GUI
+# VirtualBox: opens the VirtualBox GUI
+
+set -euo pipefail
+
+PROFILE="${1:?Usage: scripts/remote-console <profile>}"
+cd "$(git rev-parse --show-toplevel)"
+
+RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
+ENGINE=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^ENGINE=/{print $2}')
+PROVIDER=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^PROVIDER=/{print $2}')
+
+if [ "$ENGINE" != "vagrant" ]; then
+  echo "remote.console is only supported for local (vagrant) profiles. Provider: $PROVIDER" >&2
+  exit 1
+fi
+
+case "$PROVIDER" in
+  local-vmware)
+    VMX=$(find ".generated/$PROFILE/.vagrant/machines/default" -name '*.vmx' 2>/dev/null | head -1)
+    if [ -z "$VMX" ]; then
+      echo "No VMX found. Is the VM running? Try: make apply PROFILE=$PROFILE" >&2
+      exit 1
+    fi
+    if vmrun list | grep -q "$VMX"; then
+      echo "[remote.console] VM is running, opening VMware Fusion window"
+      open -a "VMware Fusion" "$VMX"
+    else
+      echo "[remote.console] Starting VM with GUI"
+      vmrun -T fusion start "$VMX" gui
+    fi
+    ;;
+  local-virtualbox)
+    UUID=$(cd ".generated/$PROFILE" && vboxmanage list runningvms | awk -F'"' '{print $2}' | head -1)
+    if [ -z "$UUID" ]; then
+      echo "No running VirtualBox VM found. Try: make apply PROFILE=$PROFILE" >&2
+      exit 1
+    fi
+    echo "[remote.console] Opening VirtualBox window"
+    vboxmanage startvm "$UUID" --type separate
+    ;;
+  *)
+    echo "remote.console: unsupported local provider: $PROVIDER" >&2
+    exit 1
+    ;;
+esac

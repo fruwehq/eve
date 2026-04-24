@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# Open a VNC session to a profile's VM.
+# Usage: scripts/remote-vnc <profile>
+#
+# For vagrant profiles: tunnels VNC (5900) through SSH via vagrant
+# For terraform profiles: tunnels VNC (5900) through SSH via profile-ssh
+
+set -euo pipefail
+
+PROFILE="${1:?Usage: scripts/remote-vnc <profile>}"
+cd "$(git rev-parse --show-toplevel)"
+
+VNC_PORT="${VNC_PORT:-5900}"
+LOCAL_PORT="${VNC_LOCAL_PORT:-5901}"
+
+RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
+ENGINE=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^ENGINE=/{print $2}')
+SSH_USER=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^SSH_USER=/{print $2}')
+
+echo "[remote-vnc] Setting up SSH tunnel for VNC ($LOCAL_PORT -> remote:$VNC_PORT)"
+
+cleanup() {
+    if [ -n "${TUNNEL_PID:-}" ]; then
+        kill "$TUNNEL_PID" 2>/dev/null || true
+    fi
+}
+trap cleanup EXIT
+
+if [ "$ENGINE" = "vagrant" ]; then
+    IP=$(./scripts/profile-ip "$PROFILE")
+    SSH_PORT=$(cd ".generated/$PROFILE" && vagrant ssh-config | awk '/Port/ {print $2; exit}')
+    PRIV_KEY=$(cd ".generated/$PROFILE" && vagrant ssh-config | awk '/IdentityFile/ {print $2; exit}')
+
+    ssh -f -N -L "$LOCAL_PORT:127.0.0.1:$VNC_PORT" \
+        -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+        -p "$SSH_PORT" -i "$PRIV_KEY" \
+        "vagrant@$IP" && TUNNEL_PID=$(lsof -ti :"$LOCAL_PORT" | head -1)
+else
+    IP=$(./scripts/profile-ip "$PROFILE")
+    [ -n "$IP" ] || { echo "remote-vnc: could not resolve IP" >&2; exit 1; }
+
+    KEY_FILE="${SSH_PUBLIC_KEY_FILE:-}"
+    if [ -n "$KEY_FILE" ] && [ "${KEY_FILE%.pub}" != "$KEY_FILE" ]; then
+        PRIV_KEY="${KEY_FILE%.pub}"
+    else
+        PRIV_KEY="${SSH_PRIVATE_KEY_FILE:-}"
+    fi
+
+    SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=10)
+    [ -n "$PRIV_KEY" ] && SSH_OPTS+=(-i "$PRIV_KEY")
+
+    ssh -f -N -L "$LOCAL_PORT:127.0.0.1:$VNC_PORT" \
+        "${SSH_OPTS[@]}" "$SSH_USER@$IP" && TUNNEL_PID=$(lsof -ti :"$LOCAL_PORT" | head -1)
+fi
+
+echo "[remote-vnc] Tunnel active on localhost:$LOCAL_PORT"
+echo "[remote-vnc] Opening VNC viewer..."
+
+if command -v open >/dev/null 2>&1; then
+    open "vnc://localhost:$LOCAL_PORT"
+elif command -v vncviewer >/dev/null 2>&1; then
+    vncviewer "localhost::$LOCAL_PORT"
+else
+    echo "No VNC viewer found. Connect manually to: localhost:$LOCAL_PORT"
+    echo "Press Ctrl+C to close the tunnel."
+    read -r
+fi

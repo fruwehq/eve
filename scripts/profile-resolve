@@ -290,6 +290,7 @@ emit_vagrant() {
     "\n" +
     "  config.vm.provision \"shell\", inline: <<-SHELL\n" +
     "    set -e\n" +
+    "    export DEBIAN_FRONTEND=noninteractive\n" +
     "    echo \"Bootstrapping profile: " + $name + "\"\n" +
     "    echo \"Packages: " + $pkg_list + "\"\n" +
     "    sudo apt-get update -y\n" +

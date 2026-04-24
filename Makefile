@@ -1,12 +1,14 @@
 # Makefile
 .DEFAULT_GOAL := default
 .PHONY: all apply aws.login clean default destroy env generate help info \
-				init init.all ip lint logs moonlight moonlight.pair plan \
+				init init.all ip lint logs plan \
 				profiles.list profiles.menu providers.status provision \
-				provision.clear-state provision.restart rdp reboot show-password \
-				ssh ssh.wait sunshine sunshine.wait test test.profiles \
+				provision.clear-state provision.restart reboot \
+				remote.console remote.moonlight remote.moonlight.pair \
+				remote.rdp remote.sunshine remote.sunshine.wait remote.vnc remote.xpra \
+				show-password ssh ssh.wait test test.profiles \
 				test.shellcheck test.terraform test.update-golden upload \
-				validate xpra
+				validate
 
 TM_PARALLEL ?= 8
 
@@ -46,7 +48,7 @@ export TRUENAS_SSH_USER
 export TRUENAS_VM_ISO_DIR
 export VULTR_API_KEY
 
-all: init apply ssh.wait provision sunshine.wait moonlight.pair moonlight ## Full setup: apply, provision, pair Moonlight, start stream
+all: init apply ssh.wait provision remote.sunshine.wait remote.moonlight.pair remote.moonlight ## Full setup: apply, provision, pair Moonlight, start stream
 
 apply: ## Apply profile changes (terraform or vagrant)
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi
@@ -91,7 +93,7 @@ generate: ## Generate terraform configuration from terramate files
 help: ## Show this help message
 	@echo 'v2: Profile-Driven VM Platform'
 	@echo
-	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[$$()% a-zA-Z_.-]+:.*?##/ { printf "  \033[36m%-23s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[$$()% a-zA-Z_.-]+:.*?##/ { printf "  \033[36m%-30s\033[0m %s\n", $$1, $$2 } ' $(MAKEFILE_LIST)
 
 info: ## Print resolved profile data as JSON
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi
@@ -115,45 +117,6 @@ lint: ## Format terramate files in place
 logs: ## Stream the remote provisioning logs for a profile (OS-aware)
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi
 	@./scripts/profile-logs $(PROFILE)
-
-moonlight: sunshine.wait ## Start Moonlight stream
-	@$(RESOLVE_WINDOWS_IP); \
-	/Applications/Moonlight.app/Contents/MacOS/Moonlight stream --game-optimization $$IP "Desktop"
-
-moonlight.pair: sunshine.wait ## Pair Moonlight with Sunshine via a fixed PIN
-	@$(RESOLVE_WINDOWS_IP); \
-	PIN=1234; \
-	PAIR_RESPONSE_FILE=./tmp/moonlight-pair-response.json; \
-	mkdir -p ./tmp; \
-	rm -f $$PAIR_RESPONSE_FILE; \
-	printf '%s\n' "Starting Moonlight pairing against $$IP with PIN $$PIN..."; \
-	/Applications/Moonlight.app/Contents/MacOS/Moonlight pair --pin $$PIN $$IP & \
-	MOONLIGHT_PID=$$!; \
-	sleep 2; \
-	printf '%s\n' "Submitting pairing PIN to Sunshine..."; \
-	HTTP_CODE=$$(curl -sS -i -k \
-	  -u "sunshine:$(EPHEMERAL_SUNSHINE_PASSWORD)" \
-	  -H "Content-Type: application/json" \
-	  --data-binary "{\"pin\":\"$$PIN\",\"name\":\"ephemeral-client\"}" \
-	  -o $$PAIR_RESPONSE_FILE \
-	  -w "%{http_code}" \
-	  "https://$$IP:47990/api/pin"); \
-	CURL_EXIT=$$?; \
-	if [ $$CURL_EXIT -ne 0 ]; then \
-	  kill $$MOONLIGHT_PID >/dev/null 2>&1 || true; \
-	  wait $$MOONLIGHT_PID >/dev/null 2>&1 || true; \
-	  echo "Sunshine pairing API call failed."; \
-	  exit $$CURL_EXIT; \
-	fi; \
-	if ! printf '%s' "$$HTTP_CODE" | grep -q '^2'; then \
-	  kill $$MOONLIGHT_PID >/dev/null 2>&1 || true; \
-	  wait $$MOONLIGHT_PID >/dev/null 2>&1 || true; \
-	  echo "Sunshine pairing API returned HTTP $$HTTP_CODE."; \
-	  if [ -f $$PAIR_RESPONSE_FILE ]; then cat $$PAIR_RESPONSE_FILE; fi; \
-	  exit 1; \
-	fi; \
-	printf '%s\n' "Sunshine pairing API accepted the PIN. Waiting for Moonlight to finish..."; \
-	wait $$MOONLIGHT_PID
 
 plan: ## Plan profile changes (terraform or vagrant)
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi
@@ -199,7 +162,7 @@ providers.status: ## Check provider configuration and connectivity
 		if command -v vmrun >/dev/null 2>&1; then LOCAL_VMWARE_REACHABLE=yes; LOCAL_VMWARE_NOTES='vmrun available'; else LOCAL_VMWARE_NOTES='vagrant present, vmrun missing'; fi; \
 	fi; \
 	printf '%-17s  %-10s  %-9s  %s\n' 'local-vmware' "$$LOCAL_VMWARE_CONFIGURED" "$$LOCAL_VMWARE_REACHABLE" "$$LOCAL_VMWARE_NOTES"; \
-	TR_HOST="$${TRUENAS_HOST:-}"; TR_PORT="$${TRUENAS_SSH_PORT:-22}"; TR_USER="$${TRUENAS_SSH_USER:-terraform}"; \
+	TR_HOST="$${TRUENAS_HOST:-}"; TR_PORT="$${TRUENAS_SSH_PORT:-22}"; TR_USER="$${TRUENAS_SSH_USER:-terraform}'; \
 	TR_CONFIGURED=no; TR_REACHABLE=no; TR_NOTES='missing TRUENAS_HOST'; \
 	if [ -n "$$TR_HOST" ]; then \
 		TR_CONFIGURED=yes; TR_NOTES="host=$$TR_HOST"; \
@@ -234,7 +197,55 @@ provision.clear-state: ## Clear remote provisioning state, logs, and downloads
 
 provision.restart: provision.clear-state provision ## Clear remote state then re-provision
 
-rdp: ## Write ./tmp/windows.rdp and open it (auto-pastes the password)
+reboot: ## Reboot the instance
+	@$(RESOLVE_WINDOWS_IP); \
+	SSH_OPTS='-o StrictHostKeyChecking=no -o ServerAliveInterval=10 -o WarnWeakCrypto=no-pq-kex -i $(SSH_PUBLIC_KEY_FILE)'; \
+	ssh $$SSH_OPTS Administrator@$$IP 'shutdown /r /t 0'
+
+remote.console: ## Open the VM's graphical console (VMware Fusion / VirtualBox)
+	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi
+	@./scripts/remote-console $(PROFILE)
+
+remote.moonlight: remote.sunshine.wait ## Start Moonlight stream
+	@$(RESOLVE_WINDOWS_IP); \
+	/Applications/Moonlight.app/Contents/MacOS/Moonlight stream --game-optimization $$IP "Desktop"
+
+remote.moonlight.pair: remote.sunshine.wait ## Pair Moonlight with Sunshine via a fixed PIN
+	@$(RESOLVE_WINDOWS_IP); \
+	PIN=1234; \
+	PAIR_RESPONSE_FILE=./tmp/moonlight-pair-response.json; \
+	mkdir -p ./tmp; \
+	rm -f $$PAIR_RESPONSE_FILE; \
+	printf '%s\n' "Starting Moonlight pairing against $$IP with PIN $$PIN..."; \
+	/Applications/Moonlight.app/Contents/MacOS/Moonlight pair --pin $$PIN $$IP & \
+	MOONLIGHT_PID=$$!; \
+	sleep 2; \
+	printf '%s\n' "Submitting pairing PIN to Sunshine..."; \
+	HTTP_CODE=$$(curl -sS -i -k \
+	  -u "sunshine:$(EPHEMERAL_SUNSHINE_PASSWORD)" \
+	  -H "Content-Type: application/json" \
+	  --data-binary "{\"pin\":\"$$PIN\",\"name\":\"ephemeral-client\"}" \
+	  -o $$PAIR_RESPONSE_FILE \
+	  -w "%{http_code}" \
+	  "https://$$IP:47990/api/pin"); \
+	CURL_EXIT=$$?; \
+	if [ $$CURL_EXIT -ne 0 ]; then \
+	  kill $$MOONLIGHT_PID >/dev/null 2>&1 || true; \
+	  wait $$MOONLIGHT_PID >/dev/null 2>&1 || true; \
+	  echo "Sunshine pairing API call failed."; \
+	  exit $$CURL_EXIT; \
+	fi; \
+	if ! printf '%s' "$$HTTP_CODE" | grep -q '^2'; then \
+	  kill $$MOONLIGHT_PID >/dev/null 2>&1 || true; \
+	  wait $$MOONLIGHT_PID >/dev/null 2>&1 || true; \
+	  echo "Sunshine pairing API returned HTTP $$HTTP_CODE."; \
+	  if [ -f $$PAIR_RESPONSE_FILE ]; then cat $$PAIR_RESPONSE_FILE; fi; \
+	  exit 1; \
+	fi; \
+	printf '%s\n' "Sunshine pairing API accepted the PIN. Waiting for Moonlight to finish..."; \
+	wait $$MOONLIGHT_PID
+
+remote.rdp: ## Open RDP session to Windows instance
 	@$(RESOLVE_WINDOWS_IP); \
 	$(RESOLVE_WINDOWS_PASSWORD); \
 	printf '%s\n' \
@@ -252,28 +263,11 @@ rdp: ## Write ./tmp/windows.rdp and open it (auto-pastes the password)
 	sleep 3; \
 	osascript -e 'tell application "System Events" to keystroke "v" using command down' -e 'tell application "System Events" to key code 36'
 
-reboot: ## Reboot the instance
-	@$(RESOLVE_WINDOWS_IP); \
-	SSH_OPTS='-o StrictHostKeyChecking=no -o ServerAliveInterval=10 -o WarnWeakCrypto=no-pq-kex -i $(SSH_PUBLIC_KEY_FILE)'; \
-	ssh $$SSH_OPTS Administrator@$$IP 'shutdown /r /t 0'
-
-show-password: ## Display the instance's default password
-	@$(RESOLVE_WINDOWS_PASSWORD); \
-	echo "$$PW"
-
-ssh: ## SSH into the profile's instance
-	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi
-	@./scripts/profile-ssh $(PROFILE)
-
-ssh.wait: ## Wait until SSH on the profile's instance accepts connections
-	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi
-	@./scripts/profile-ssh-wait $(PROFILE)
-
-sunshine: ## Open the Sunshine web UI for the instance
+remote.sunshine: ## Open the Sunshine web UI for the instance
 	@$(RESOLVE_WINDOWS_IP); \
 	open "https://$$IP:47990" || open -a "Google Chrome" "https://$$IP:47990"
 
-sunshine.wait: ## Wait until the Sunshine API accepts authenticated requests
+remote.sunshine.wait: ## Wait until the Sunshine API accepts authenticated requests
 	@$(RESOLVE_WINDOWS_IP); \
 	ATTEMPT=1; \
 	MAX_ATTEMPTS=20; \
@@ -295,6 +289,27 @@ sunshine.wait: ## Wait until the Sunshine API accepts authenticated requests
 	done; \
 	printf '%s\n' "Sunshine API did not become ready in time."; \
 	exit 1
+
+remote.vnc: ## Open VNC viewer to the VM (requires vnc package in profile)
+	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi
+	@./scripts/remote-vnc $(PROFILE)
+
+remote.xpra: ## Launch a remote GUI app via Xpra (requires APP=<cmd>)
+	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi
+	@if [ -z "$(APP)" ]; then echo "Usage: make remote.xpra PROFILE=<name> APP=<command>"; exit 2; fi
+	@./scripts/profile-xpra $(PROFILE) $(APP)
+
+show-password: ## Display the instance's default password
+	@$(RESOLVE_WINDOWS_PASSWORD); \
+	echo "$$PW"
+
+ssh: ## SSH into the profile's instance
+	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi
+	@./scripts/profile-ssh $(PROFILE)
+
+ssh.wait: ## Wait until SSH on the profile's instance accepts connections
+	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi
+	@./scripts/profile-ssh-wait $(PROFILE)
 
 test: ## Run all tests (profiles, terraform validate, shellcheck)
 	@./scripts/test
@@ -345,8 +360,3 @@ upload: ## scp ./upload/* to the instance (skips files that already exist remote
 validate: ## Validate a profile from config/catalog.yaml
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi
 	@./scripts/profile-resolve --profile $(PROFILE) --validate
-
-xpra: ## Launch a remote GUI app via Xpra (requires APP=<cmd>)
-	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi
-	@if [ -z "$(APP)" ]; then echo "Usage: make xpra PROFILE=<name> APP=<command>"; exit 2; fi
-	@./scripts/profile-xpra $(PROFILE) $(APP)
