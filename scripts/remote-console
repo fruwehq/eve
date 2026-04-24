@@ -23,25 +23,32 @@ case "$PROVIDER" in
   local-vmware)
     VMX=$(find ".generated/$PROFILE/.vagrant/machines/default" -name '*.vmx' 2>/dev/null | head -1)
     if [ -z "$VMX" ]; then
-      echo "No VMX found. Is the VM running? Try: make apply PROFILE=$PROFILE" >&2
+      echo "No VMX found. Try: make apply PROFILE=$PROFILE" >&2
       exit 1
     fi
     if vmrun list | grep -q "$VMX"; then
-      echo "[remote.console] VM is running, opening VMware Fusion window"
-      open -a "VMware Fusion" "$VMX"
+      echo "[remote.console] VM is running headless, suspending and resuming with GUI"
+      vmrun -T fusion suspend "$VMX"
+      vmrun -T fusion start "$VMX" gui
     else
-      echo "[remote.console] Starting VM with GUI"
+      echo "[remote.console] VM is stopped, starting with GUI"
       vmrun -T fusion start "$VMX" gui
     fi
     ;;
   local-virtualbox)
-    UUID=$(cd ".generated/$PROFILE" && vboxmanage list runningvms | awk -F'"' '{print $2}' | head -1)
-    if [ -z "$UUID" ]; then
-      echo "No running VirtualBox VM found. Try: make apply PROFILE=$PROFILE" >&2
-      exit 1
+    VM_ID=$(cd ".generated/$PROFILE" && VBoxManage list runningvms 2>/dev/null | head -1 | awk -F'"' '{print $2}')
+    if [ -n "$VM_ID" ]; then
+      echo "[remote.console] VM is running, opening VirtualBox window"
+      VBoxManage startvm "$VM_ID" --type separate
+    else
+      VM_ID=$(cd ".generated/$PROFILE" && VBoxManage list vms 2>/dev/null | head -1 | awk -F'"' '{print $2}')
+      if [ -z "$VM_ID" ]; then
+        echo "No VirtualBox VM found. Try: make apply PROFILE=$PROFILE" >&2
+        exit 1
+      fi
+      echo "[remote.console] VM is stopped, starting with GUI"
+      VBoxManage startvm "$VM_ID" --type gui
     fi
-    echo "[remote.console] Opening VirtualBox window"
-    vboxmanage startvm "$UUID" --type separate
     ;;
   *)
     echo "remote.console: unsupported local provider: $PROVIDER" >&2

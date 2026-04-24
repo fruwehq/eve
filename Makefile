@@ -6,7 +6,8 @@
 				provision.clear-state provision.restart reboot \
 				remote.console remote.moonlight remote.moonlight.pair \
 				remote.rdp remote.sunshine remote.sunshine.wait remote.vnc remote.xpra \
-				show-password ssh ssh.wait test test.profiles \
+				show-password ssh ssh.wait start status stop \
+				test test.profiles \
 				test.shellcheck test.terraform test.update-golden upload \
 				validate
 
@@ -51,9 +52,9 @@ export VULTR_API_KEY
 all: init apply ssh.wait provision remote.sunshine.wait remote.moonlight.pair remote.moonlight ## Full setup: apply, provision, pair Moonlight, start stream
 
 apply: ## Apply profile changes (terraform or vagrant)
-	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi
-	@./scripts/profile-resolve --profile $(PROFILE) --validate
-	@ENGINE=$$(./scripts/profile-resolve --profile $(PROFILE) --emit env | awk -F= '/^ENGINE=/{print $$2}'); \
+	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
+	./scripts/profile-resolve --profile $(PROFILE) --validate; \
+	ENGINE=$$(./scripts/profile-resolve --profile $(PROFILE) --emit env | awk -F= '/^ENGINE=/{print $$2}'); \
 	if [ "$$ENGINE" = "vagrant" ]; then \
 		./scripts/vagrant-up $(PROFILE); \
 	else \
@@ -74,9 +75,9 @@ clean: ## Remove terramate-generated terraform files and cache
 default: help  ## Show help
 
 destroy: ## Destroy profile resources (terraform or vagrant)
-	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi
-	@./scripts/profile-resolve --profile $(PROFILE) --validate
-	@ENGINE=$$(./scripts/profile-resolve --profile $(PROFILE) --emit env | awk -F= '/^ENGINE=/{print $$2}'); \
+	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
+	./scripts/profile-resolve --profile $(PROFILE) --validate; \
+	ENGINE=$$(./scripts/profile-resolve --profile $(PROFILE) --emit env | awk -F= '/^ENGINE=/{print $$2}'); \
 	if [ "$$ENGINE" = "vagrant" ]; then \
 		./scripts/vagrant-destroy $(PROFILE); \
 	else \
@@ -84,8 +85,8 @@ destroy: ## Destroy profile resources (terraform or vagrant)
 	fi
 
 env: ## Print resolved profile data as env lines
-	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi
-	@./scripts/profile-resolve --profile $(PROFILE) --emit env
+	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
+	./scripts/profile-resolve --profile $(PROFILE) --emit env
 
 generate: ## Generate terraform configuration from terramate files
 	terramate generate
@@ -96,32 +97,32 @@ help: ## Show this help message
 	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[$$()% a-zA-Z_.-]+:.*?##/ { printf "  \033[36m%-30s\033[0m %s\n", $$1, $$2 } ' $(MAKEFILE_LIST)
 
 info: ## Print resolved profile data as JSON
-	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi
-	@./scripts/profile-resolve --profile $(PROFILE) --emit json
+	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
+	./scripts/profile-resolve --profile $(PROFILE) --emit json
 
 init: ## Initialize profile backend/providers (terraform only)
-	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi
-	@./scripts/profile-resolve --profile $(PROFILE) --validate
-	@./scripts/tf-init $(PROFILE)
+	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
+	./scripts/profile-resolve --profile $(PROFILE) --validate; \
+	./scripts/tf-init $(PROFILE)
 
 init.all: generate ## Init all stacks in parallel (set TM_PARALLEL=N)
 	terramate run --parallel=$(TM_PARALLEL) --continue-on-error -- terraform init -upgrade
 
 ip: ## Print the instance IP for a profile
-	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi
-	@./scripts/profile-ip $(PROFILE)
+	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
+	./scripts/profile-ip $(PROFILE)
 
 lint: ## Format terramate files in place
 	terramate fmt
 
 logs: ## Stream the remote provisioning logs for a profile (OS-aware)
-	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi
-	@./scripts/profile-logs $(PROFILE)
+	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
+	./scripts/profile-logs $(PROFILE)
 
 plan: ## Plan profile changes (terraform or vagrant)
-	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi
-	@./scripts/profile-resolve --profile $(PROFILE) --validate
-	@ENGINE=$$(./scripts/profile-resolve --profile $(PROFILE) --emit env | awk -F= '/^ENGINE=/{print $$2}'); \
+	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
+	./scripts/profile-resolve --profile $(PROFILE) --validate; \
+	ENGINE=$$(./scripts/profile-resolve --profile $(PROFILE) --emit env | awk -F= '/^ENGINE=/{print $$2}'); \
 	if [ "$$ENGINE" = "vagrant" ]; then \
 		./scripts/vagrant-up --plan $(PROFILE); \
 	else \
@@ -162,7 +163,7 @@ providers.status: ## Check provider configuration and connectivity
 		if command -v vmrun >/dev/null 2>&1; then LOCAL_VMWARE_REACHABLE=yes; LOCAL_VMWARE_NOTES='vmrun available'; else LOCAL_VMWARE_NOTES='vagrant present, vmrun missing'; fi; \
 	fi; \
 	printf '%-17s  %-10s  %-9s  %s\n' 'local-vmware' "$$LOCAL_VMWARE_CONFIGURED" "$$LOCAL_VMWARE_REACHABLE" "$$LOCAL_VMWARE_NOTES"; \
-	TR_HOST="$${TRUENAS_HOST:-}"; TR_PORT="$${TRUENAS_SSH_PORT:-22}"; TR_USER="$${TRUENAS_SSH_USER:-terraform}'; \
+	TR_HOST="$${TRUENAS_HOST:-}"; TR_PORT="$${TRUENAS_SSH_PORT:-22}"; TR_USER="$${TRUENAS_SSH_USER:-terraform}"; \
 	TR_CONFIGURED=no; TR_REACHABLE=no; TR_NOTES='missing TRUENAS_HOST'; \
 	if [ -n "$$TR_HOST" ]; then \
 		TR_CONFIGURED=yes; TR_NOTES="host=$$TR_HOST"; \
@@ -187,8 +188,8 @@ providers.status: ## Check provider configuration and connectivity
 	printf '%-17s  %-10s  %-9s  %s\n' 'vultr' "$$VULTR_CONFIGURED" "$$VULTR_REACHABLE" "$$VULTR_NOTES"
 
 provision: ## Upload and run OS-appropriate provisioning scripts on the instance
-	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi
-	@./scripts/profile-provision $(PROFILE)
+	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
+	./scripts/profile-provision $(PROFILE)
 
 provision.clear-state: ## Clear remote provisioning state, logs, and downloads
 	@$(RESOLVE_WINDOWS_IP); \
@@ -203,8 +204,8 @@ reboot: ## Reboot the instance
 	ssh $$SSH_OPTS Administrator@$$IP 'shutdown /r /t 0'
 
 remote.console: ## Open the VM's graphical console (VMware Fusion / VirtualBox)
-	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi
-	@./scripts/remote-console $(PROFILE)
+	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
+	./scripts/remote-console $(PROFILE)
 
 remote.moonlight: remote.sunshine.wait ## Start Moonlight stream
 	@$(RESOLVE_WINDOWS_IP); \
@@ -291,25 +292,37 @@ remote.sunshine.wait: ## Wait until the Sunshine API accepts authenticated reque
 	exit 1
 
 remote.vnc: ## Open VNC viewer to the VM (requires vnc package in profile)
-	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi
-	@./scripts/remote-vnc $(PROFILE)
+	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
+	./scripts/remote-vnc $(PROFILE)
 
 remote.xpra: ## Launch a remote GUI app via Xpra (requires APP=<cmd>)
-	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi
-	@if [ -z "$(APP)" ]; then echo "Usage: make remote.xpra PROFILE=<name> APP=<command>"; exit 2; fi
-	@./scripts/profile-xpra $(PROFILE) $(APP)
+	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
+	if [ -z "$(APP)" ]; then echo "Usage: make remote.xpra PROFILE=<name> APP=<command>"; exit 2; fi; \
+	./scripts/profile-xpra $(PROFILE) $(APP)
 
 show-password: ## Display the instance's default password
 	@$(RESOLVE_WINDOWS_PASSWORD); \
 	echo "$$PW"
 
 ssh: ## SSH into the profile's instance
-	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi
-	@./scripts/profile-ssh $(PROFILE)
+	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
+	./scripts/profile-ssh $(PROFILE)
 
 ssh.wait: ## Wait until SSH on the profile's instance accepts connections
-	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi
-	@./scripts/profile-ssh-wait $(PROFILE)
+	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
+	./scripts/profile-ssh-wait $(PROFILE)
+
+start: ## Start a stopped vagrant profile
+	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
+	./scripts/vagrant-up $(PROFILE)
+
+status: ## Show VM status (running/stopped/not created) and IP
+	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
+	./scripts/profile-status $(PROFILE)
+
+stop: ## Stop (suspend) a running vagrant profile
+	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
+	./scripts/vagrant-stop $(PROFILE)
 
 test: ## Run all tests (profiles, terraform validate, shellcheck)
 	@./scripts/test
@@ -358,5 +371,5 @@ upload: ## scp ./upload/* to the instance (skips files that already exist remote
 	' sh {} \;
 
 validate: ## Validate a profile from config/catalog.yaml
-	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi
-	@./scripts/profile-resolve --profile $(PROFILE) --validate
+	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
+	./scripts/profile-resolve --profile $(PROFILE) --validate
