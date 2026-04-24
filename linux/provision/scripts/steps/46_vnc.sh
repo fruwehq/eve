@@ -26,13 +26,25 @@ if ! dpkg -s dbus-x11 >/dev/null 2>&1; then
   apt_install dbus-x11
 fi
 
-if [ ! -d /usr/share/xsessions ] || [ -z "$(ls -A /usr/share/xsessions/ 2>/dev/null)" ]; then
-  log "### 46_vnc: no desktop session found, installing ubuntu-desktop-minimal"
-  DEBIAN_FRONTEND=noninteractive apt-get install -y ubuntu-desktop-minimal
+if ! command -v startxfce4 >/dev/null 2>&1; then
+  log "### 46_vnc: installing XFCE desktop (GNOME Shell does not work under VNC)"
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y xfce4
 fi
 
 mkdir -p ~/.vnc
 
+if ! sudo test -f /etc/polkit-1/localauthority/50-local.d/45-allow-colord.pkla; then
+  log "### 46_vnc: adding polkit rules for VNC session"
+  sudo mkdir -p /etc/polkit-1/localauthority/50-local.d
+  sudo tee /etc/polkit-1/localauthority/50-local.d/45-allow-colord.pkla > /dev/null << 'EOF'
+[Allow Colord all Users]
+Identity=unix-user:*
+Action=org.freedesktop.color-manager.create-device;org.freedesktop.color-manager.create-profile;org.freedesktop.color-manager.delete-device;org.freedesktop.color-manager.delete-profile;org.freedesktop.color-manager.modify-device;org.freedesktop.color-manager.modify-profile
+ResultAny=no
+ResultInactive=no
+ResultActive=yes
+EOF
+fi
 if [ ! -f ~/.vnc/passwd ]; then
   log "### 46_vnc: setting VNC password"
   printf 'vagrant\nvagrant\nn\n' | tigervncpasswd 2>&1
@@ -45,12 +57,12 @@ if [ ! -f ~/.vnc/xstartup ]; then
 unset SESSION_MANAGER
 unset DBUS_SESSION_BUS_ADDRESS
 export XDG_SESSION_TYPE=x11
-export XDG_CURRENT_DESKTOP=ubuntu:GNOME
+export XDG_CURRENT_DESKTOP=XFCE
 export GDK_BACKEND=x11
 export XDG_RUNTIME_DIR=/run/user/$(id -u)
 export DBUS_SESSION_BUS_ADDRESS=unix:path=$XDG_RUNTIME_DIR/bus
 eval $(dbus-launch --sh-syntax)
-gnome-session &
+startxfce4 &
 exec sleep infinity
 XEOF
   chmod +x ~/.vnc/xstartup
