@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# SSH into a profile's instance (or run a remote command).
+# Usage:
+#   scripts/profile-ssh <profile>                         # interactive shell
+#   scripts/profile-ssh <profile> -- <cmd> [args...]      # remote command
+#   scripts/profile-ssh <profile> --scp <local> <remote>  # scp helper
+
+set -euo pipefail
+
+PROFILE="${1:?Usage: scripts/profile-ssh <profile> [-- <cmd>] [--scp <local> <remote>]}"
+shift || true
+cd "$(git rev-parse --show-toplevel)"
+
+RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
+SSH_USER=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^SSH_USER=/{print $2}')
+
+IP=$(./scripts/profile-ip "$PROFILE")
+[ -n "$IP" ] || { echo "profile-ssh: could not resolve IP for $PROFILE" >&2; exit 1; }
+
+KEY_FILE="${SSH_PUBLIC_KEY_FILE:-}"
+# Derive the private key path from the public key by stripping a trailing .pub.
+if [ -n "$KEY_FILE" ] && [ "${KEY_FILE%.pub}" != "$KEY_FILE" ]; then
+  PRIV_KEY="${KEY_FILE%.pub}"
+else
+  PRIV_KEY="${SSH_PRIVATE_KEY_FILE:-}"
+fi
+
+SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=10)
+[ -n "$PRIV_KEY" ] && SSH_OPTS+=(-i "$PRIV_KEY")
+
+if [ "${1:-}" = "--scp" ]; then
+  shift
+  LOCAL_PATH="${1:?--scp requires <local> <remote>}"
+  REMOTE_PATH="${2:?--scp requires <local> <remote>}"
+  exec scp "${SSH_OPTS[@]}" -r "$LOCAL_PATH" "$SSH_USER@$IP:$REMOTE_PATH"
+fi
+
+if [ "${1:-}" = "--" ]; then
+  shift
+  exec ssh "${SSH_OPTS[@]}" "$SSH_USER@$IP" "$@"
+fi
+
+exec ssh "${SSH_OPTS[@]}" "$SSH_USER@$IP"

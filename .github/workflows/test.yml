@@ -1,0 +1,34 @@
+name: test
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # only used in PRs; don't use in default branches. This is used to identify the delta
+
+      - name: Install Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.14.9"
+          terraform_wrapper: false
+
+      - name: Install Terramate
+        uses: terramate-io/terramate-action@v3
+        with:
+          version: "0.16.0"
+
+      - name: Install shellcheck + jq + ruby
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y shellcheck jq ruby
+
+      - name: Run make test
+        run: make test

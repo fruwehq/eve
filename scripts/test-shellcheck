@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Run shellcheck on all shell scripts in the repo.
+# Skipped silently if shellcheck is not installed.
+
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+if ! command -v shellcheck >/dev/null 2>&1; then
+  echo "  shellcheck not installed; skipping (brew install shellcheck)" >&2
+  exit 0
+fi
+
+FILES=()
+while IFS= read -r f; do FILES+=("$f"); done < <(
+  find scripts -type f 2>/dev/null
+  find linux/provision/scripts -type f -name '*.sh' 2>/dev/null
+)
+
+FAIL=0
+for f in "${FILES[@]}"; do
+  # Only check files with a bash/sh shebang
+  head -c 80 "$f" | grep -qE '^#!(/usr/bin/env (ba)?sh|/bin/(ba)?sh)' || continue
+  if ! shellcheck -x --source-path=SCRIPTDIR "$f"; then
+    FAIL=$((FAIL + 1))
+  fi
+done
+
+[ "$FAIL" -eq 0 ]

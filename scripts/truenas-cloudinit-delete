@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Delete a cloud-init seed ISO from TrueNAS.
+# Usage: truenas-cloudinit-delete <truenas_host> <iso_path>
+# Env:   TRUENAS_API_KEY
+
+TRUENAS_HOST="${1:?truenas_host required}"
+ISO_PATH="${2:?iso_path required}"
+
+: "${TRUENAS_API_KEY:?TRUENAS_API_KEY must be set}"
+
+curl -k -sf -X POST \
+  -H "Authorization: Bearer $TRUENAS_API_KEY" \
+  -H "Content-Type: application/json" \
+  "https://$TRUENAS_HOST/api/v2.0/filesystem/delete" \
+  -d "{\"path\": \"$ISO_PATH\", \"recursive\": false}" \
+  || printf '[truenas-cloudinit-delete] warning: could not delete %s (may already be gone)\n' "$ISO_PATH" >&2
+
+printf '[truenas-cloudinit-delete] %s\n' "$ISO_PATH"

@@ -1,0 +1,87 @@
+#!/usr/bin/env sh
+set -eu
+
+PROFILE="${1:-}"
+
+if [ -z "$PROFILE" ]; then
+  echo "usage: scripts/profile-tf-env <profile>" >&2
+  exit 2
+fi
+
+RESOLVED_ENV="$(./scripts/profile-resolve --profile "$PROFILE" --emit env)"
+
+getv() {
+  printf '%s\n' "$RESOLVED_ENV" | awk -F= -v key="$1" '$1 == key { print substr($0, index($0, "=") + 1) }'
+}
+
+normalize_path() {
+  value="$1"
+  # shellcheck disable=SC2088,SC2016
+  # The patterns below are deliberately unexpanded string literals we match against.
+  case "$value" in
+    '~'|'~/'*)
+      printf '%s\n' "$HOME${value#\~}"
+      ;;
+    '$HOME'|'$HOME/'*)
+      printf '%s\n' "$HOME${value#\$HOME}"
+      ;;
+    '$(HOME)'|'$(HOME)/'*)
+      printf '%s\n' "$HOME${value#\$\(HOME\)}"
+      ;;
+    *)
+      printf '%s\n' "$value"
+      ;;
+  esac
+}
+
+quote() {
+  printf "%s" "$1" | sed "s/'/'\\''/g; 1s/^/'/; \$s/\$/'/"
+}
+
+print_kv() {
+  key="$1"
+  value="$2"
+  printf 'export %s=%s;\n' "$key" "$(quote "$value")"
+}
+
+PROVIDER="$(getv PROVIDER)"
+
+# Common — shared by every terraform-based provider
+print_kv TF_VAR_bundle_packages "$(getv BUNDLE_PACKAGES)"
+print_kv TF_VAR_location_name "$(getv LOCATION_NAME)"
+print_kv TF_VAR_os_family "$(getv OS_FAMILY)"
+print_kv TF_VAR_os_id "$(getv OS_ID)"
+print_kv TF_VAR_profile_name "$PROFILE"
+print_kv TF_VAR_ssh_public_key_file "$(normalize_path "${SSH_PUBLIC_KEY_FILE:-}")"
+
+case "$PROVIDER" in
+  aws)
+    print_kv TF_VAR_availability_zone "$(getv LOCATION_AVAILABILITY_ZONE)"
+    print_kv TF_VAR_disk_gb "$(getv VM_DISK_GB)"
+    print_kv TF_VAR_instance_type "$(getv VM_INSTANCE_TYPE)"
+    print_kv TF_VAR_region "$(getv LOCATION_REGION)"
+    print_kv TF_VAR_root_volume_type "$(getv VM_ROOT_VOLUME_TYPE)"
+    ;;
+  vultr)
+    print_kv TF_VAR_plan "$(getv VM_PLAN)"
+    print_kv TF_VAR_region "$(getv LOCATION_REGION)"
+    print_kv TF_VAR_vultr_os_id "$(getv VULTR_OS_ID)"
+    ;;
+  truenas)
+    print_kv TF_VAR_truenas_host "$(getv TRUENAS_HOST)"
+    print_kv TF_VAR_truenas_ssh_host_key_fingerprint "${TRUENAS_SSH_HOST_KEY_FINGERPRINT:-}"
+    print_kv TF_VAR_truenas_ssh_port "$(getv TRUENAS_SSH_PORT)"
+    print_kv TF_VAR_truenas_ssh_private_key_file \
+      "$(normalize_path "${TRUENAS_SSH_PRIVATE_KEY_FILE:-}")"
+    print_kv TF_VAR_truenas_ssh_user "$(getv TRUENAS_SSH_USER)"
+    print_kv TF_VAR_vm_autostart "$(getv VM_AUTOSTART)"
+    print_kv TF_VAR_vm_cpu_cores "$(getv VM_CPU_CORES)"
+    print_kv TF_VAR_vm_disk_gb "$(getv VM_DISK_GB)"
+    print_kv TF_VAR_vm_iso_dir "${TRUENAS_VM_ISO_DIR:-}"
+    print_kv TF_VAR_vm_memory_mb "$(getv VM_MEMORY_MB)"
+    print_kv TF_VAR_vm_nic_attach "$(getv VM_NIC_ATTACH)"
+    print_kv TF_VAR_vm_pool "$(getv VM_POOL)"
+    print_kv TF_VAR_vm_state "$(getv VM_STATE)"
+    print_kv TF_VAR_vm_vcpus "$(getv VM_VCPUS)"
+    ;;
+esac

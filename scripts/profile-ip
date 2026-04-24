@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Resolve the public/reachable IP of a profile's instance.
+# Usage: scripts/profile-ip <profile>
+#
+# Dispatches by engine/provider:
+#   - terraform + aws         -> output "public_ip"
+#   - terraform + vultr       -> output "vultr_instance_main_ip"
+#   - terraform + truenas     -> not implemented (VM IP comes from DHCP)
+#   - vagrant                 -> `vagrant ssh-config` hostname
+
+set -euo pipefail
+
+PROFILE="${1:?Usage: scripts/profile-ip <profile>}"
+cd "$(git rev-parse --show-toplevel)"
+
+RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
+ENGINE=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^ENGINE=/{print $2}')
+PROVIDER=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^PROVIDER=/{print $2}')
+TAGS=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^STACK_TAGS=/{print $2}')
+
+case "$ENGINE:$PROVIDER" in
+  terraform:aws)
+    terramate run --quiet --tags="$TAGS-services" -- terraform output -raw public_ip
+    ;;
+  terraform:vultr)
+    terramate run --quiet --tags="$TAGS-services" -- terraform output -raw vultr_instance_main_ip
+    ;;
+  terraform:truenas)
+    echo "profile-ip: truenas VM IP must be resolved via DHCP lease / DNS on TrueNAS host" >&2
+    exit 2
+    ;;
+  vagrant:*)
+    cd ".generated/$PROFILE"
+    vagrant ssh-config | awk '/HostName/ {print $2; exit}'
+    ;;
+  *)
+    echo "profile-ip: unsupported engine/provider: $ENGINE/$PROVIDER" >&2
+    exit 2
+    ;;
+esac

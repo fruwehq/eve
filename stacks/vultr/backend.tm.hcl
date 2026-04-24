@@ -14,6 +14,7 @@ generate_hcl "z_backend.tf" {
     terraform {
 
       backend "local" {
+        path = "${terramate.root.path.fs.absolute}/.terraform-cache-dir/state/${terramate.stack.path.relative}/terraform.tfstate"
       }
     }
   }

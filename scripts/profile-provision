@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+# Upload the OS-appropriate provisioning tree to the profile's instance
+# and run the bootstrap entry point.
+#
+# Usage: scripts/profile-provision <profile>
+#
+# Linux:   uploads ./linux/provision/   -> $HOME/provision    runs bootstrap.sh
+# Windows: uploads ./windows/provision/ -> C:\Users\<user>\provision  runs bootstrap.ps1
+
+set -euo pipefail
+
+PROFILE="${1:?Usage: scripts/profile-provision <profile>}"
+cd "$(git rev-parse --show-toplevel)"
+
+RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
+OS_FAMILY=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^OS_FAMILY=/{print $2}')
+OS_UI_MODE=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^OS_UI_MODE=/{print $2}')
+BUNDLE_PACKAGES=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^BUNDLE_PACKAGES=/{print $2}')
+PROFILE_NAME=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^PROFILE_NAME=/{print $2}')
+
+echo "[profile-provision] profile=$PROFILE os_family=$OS_FAMILY ui_mode=$OS_UI_MODE"
+
+./scripts/profile-ssh-wait "$PROFILE"
+
+case "$OS_FAMILY" in
+  ubuntu)
+    STAGE=$(mktemp -d)
+    trap 'rm -rf "$STAGE"' EXIT
+    cp -R linux/provision/scripts "$STAGE/scripts"
+    mkdir -p "$STAGE/state"
+    # bundle_packages: one package per line for cheap grep lookup in step scripts
+    printf '%s\n' "$BUNDLE_PACKAGES" | tr ',' '\n' > "$STAGE/state/bundle_packages"
+    # env file: sourced by runner.sh so steps see OS_UI_MODE / PROFILE_NAME etc.
+    cat > "$STAGE/state/env" <<EOF
+export OS_UI_MODE="$OS_UI_MODE"
+export OS_FAMILY="$OS_FAMILY"
+export PROFILE_NAME="$PROFILE_NAME"
+EOF
+
+    echo "[profile-provision] uploading linux/provision/ to remote"
+    # Remote paths are relative to $HOME (SFTP/SCP default) to avoid shell-expansion pitfalls.
+    ./scripts/profile-ssh "$PROFILE" -- 'mkdir -p ~/provision/state && rm -rf ~/provision/scripts'
+    ./scripts/profile-ssh "$PROFILE" --scp "$STAGE/scripts" 'provision/'
+    ./scripts/profile-ssh "$PROFILE" --scp "$STAGE/state/bundle_packages" 'provision/state/'
+    ./scripts/profile-ssh "$PROFILE" --scp "$STAGE/state/env" 'provision/state/'
+    echo "[profile-provision] running bootstrap.sh"
+    ./scripts/profile-ssh "$PROFILE" -- 'chmod +x ~/provision/scripts/bootstrap.sh ~/provision/scripts/runner.sh ~/provision/scripts/steps/*.sh ~/provision/scripts/lib/*.sh && ~/provision/scripts/bootstrap.sh'
+    ;;
+  windows)
+    # Windows password: env var override, else terraform output (vultr only).
+    WINDOWS_PASSWORD="${EPHEMERAL_WINDOWS_PASSWORD:-}"
+    if [ -z "$WINDOWS_PASSWORD" ]; then
+      PROVIDER=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^PROVIDER=/{print $2}')
+      TAGS=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^STACK_TAGS=/{print $2}')
+      case "$PROVIDER" in
+        vultr)
+          WINDOWS_PASSWORD=$(terramate run --quiet --tags="$TAGS-services" -- terraform output -raw vultr_instance_default_password)
+          ;;
+        *)
+          echo "[profile-provision] set EPHEMERAL_WINDOWS_PASSWORD (no terraform output available for provider=$PROVIDER)" >&2
+          exit 1
+          ;;
+      esac
+    fi
+    : "${EPHEMERAL_SUNSHINE_PASSWORD:?set EPHEMERAL_SUNSHINE_PASSWORD in .env.local}"
+
+    mkdir -p ./tmp
+    jq -n \
+      --arg wp "$WINDOWS_PASSWORD" \
+      --arg sp "$EPHEMERAL_SUNSHINE_PASSWORD" \
+      '{windows_password: $wp, sunshine_password: $sp}' \
+      > ./tmp/secrets.json
+
+    echo "[profile-provision] uploading windows/provision/ to remote"
+    ./scripts/profile-ssh "$PROFILE" -- 'New-Item -ItemType Directory -Force C:\Users\Administrator\provision | Out-Null; New-Item -ItemType Directory -Force C:\Users\Administrator\provision\state | Out-Null; if (Test-Path "C:\Users\Administrator\provision\scripts") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\scripts" }'
+    ./scripts/profile-ssh "$PROFILE" --scp windows/provision '/C:/Users/Administrator/'
+    ./scripts/profile-ssh "$PROFILE" --scp ./tmp/secrets.json '/C:/Users/Administrator/provision/state/secrets.json'
+    echo "[profile-provision] running bootstrap.ps1"
+    ./scripts/profile-ssh "$PROFILE" -- '& "C:\Users\Administrator\provision\scripts\bootstrap.ps1"'
+    ;;
+  *)
+    echo "[profile-provision] unknown os_family: $OS_FAMILY" >&2
+    exit 2
+    ;;
+esac

@@ -1,0 +1,3 @@
+@echo off
+mkdir C:\Windows\Temp 2>nul
+powershell.exe -NoProfile -ExecutionPolicy Bypass -EncodedCommand ${encoded_command} > C:\Windows\Temp\vultr-startup-cmd.log 2>&1

@@ -1,143 +1,278 @@
 generate_hcl "z_ec2_security_group.tf" {
   content {
+    # ── Profile-driven variables (overridden via TF_VAR_* from profile-tf-env) ──
+
+    variable "profile_name" {
+      type        = string
+      default     = "dev-sandbox"
+      description = "Profile name used for security group naming"
+    }
+
+    variable "os_family" {
+      type        = string
+      default     = "ubuntu"
+      description = "OS family: ubuntu or windows"
+    }
+
+    variable "bundle_packages" {
+      type        = string
+      default     = "ssh"
+      description = "Comma-separated list of bundle packages for rule selection"
+    }
+
+    data "aws_vpcs" "default" {
+      filter {
+        name   = "isDefault"
+        values = ["true"]
+      }
+    }
+
+    locals {
+      sg_name     = "profile-${replace(var.profile_name, "_", "-")}"
+      package_set = toset(split(",", var.bundle_packages))
+    }
+
     resource "aws_security_group" "default" {
-      name        = global.aws.security_group.name
-      description = "Security group for ephemeral cloud gaming Windows"
-      vpc_id      = aws_default_vpc.default.id
+      name        = local.sg_name
+      description = "Security group for profile: ${var.profile_name}"
+      vpc_id      = data.aws_vpcs.default.ids[0]
+
+      # ── Base (always included) ────────────────────────────────────────
 
       ingress {
-        from_port   = 80
-        to_port     = 80
+        from_port   = 22
+        to_port     = 22
         protocol    = "tcp"
         cidr_blocks = local.allowed_cidrs
-        description = "HTTP"
+        description = "SSH"
       }
-      ingress {
-        from_port   = 443
-        to_port     = 443
-        protocol    = "tcp"
-        cidr_blocks = local.allowed_cidrs
-        description = "HTTPS"
+
+      # ── Sunshine / Moonlight ──────────────────────────────────────────
+
+      dynamic "ingress" {
+        for_each = contains(local.package_set, "sunshine") ? [1] : []
+
+        content {
+          from_port   = 47984
+          to_port     = 47984
+          protocol    = "tcp"
+          cidr_blocks = local.allowed_cidrs
+          description = "Moonlight TCP"
+        }
       }
-      ingress {
-        from_port   = 3389
-        to_port     = 3389
-        protocol    = "tcp"
-        cidr_blocks = local.allowed_cidrs
-        description = "RDP"
+
+      dynamic "ingress" {
+        for_each = contains(local.package_set, "sunshine") ? [1] : []
+
+        content {
+          from_port   = 47989
+          to_port     = 47989
+          protocol    = "tcp"
+          cidr_blocks = local.allowed_cidrs
+          description = "Moonlight TCP"
+        }
       }
-      ingress {
-        from_port   = 8443
-        to_port     = 8443
-        protocol    = "tcp"
-        cidr_blocks = local.allowed_cidrs
-        description = "NICE DCV"
+
+      dynamic "ingress" {
+        for_each = contains(local.package_set, "sunshine") ? [1] : []
+
+        content {
+          from_port   = 47990
+          to_port     = 47990
+          protocol    = "tcp"
+          cidr_blocks = local.allowed_cidrs
+          description = "Sunshine Web UI"
+        }
       }
-      ingress {
-        from_port   = 8443
-        to_port     = 8443
-        protocol    = "udp"
-        cidr_blocks = local.allowed_cidrs
-        description = "NICE DCV"
+
+      dynamic "ingress" {
+        for_each = contains(local.package_set, "sunshine") ? [1] : []
+
+        content {
+          from_port   = 47998
+          to_port     = 47998
+          protocol    = "udp"
+          cidr_blocks = local.allowed_cidrs
+          description = "Moonlight UDP"
+        }
       }
-      ingress {
-        from_port   = 48010
-        to_port     = 48010
-        protocol    = "tcp"
-        cidr_blocks = local.allowed_cidrs
-        description = "Moonlight"
+
+      dynamic "ingress" {
+        for_each = contains(local.package_set, "sunshine") ? [1] : []
+
+        content {
+          from_port   = 47999
+          to_port     = 47999
+          protocol    = "udp"
+          cidr_blocks = local.allowed_cidrs
+          description = "Moonlight UDP"
+        }
       }
-      ingress {
-        from_port   = 48010
-        to_port     = 48010
-        protocol    = "udp"
-        cidr_blocks = local.allowed_cidrs
-        description = "Moonlight"
+
+      dynamic "ingress" {
+        for_each = contains(local.package_set, "sunshine") ? [1] : []
+
+        content {
+          from_port   = 48000
+          to_port     = 48000
+          protocol    = "udp"
+          cidr_blocks = local.allowed_cidrs
+          description = "Moonlight UDP"
+        }
       }
-      ingress {
-        from_port   = 47984
-        to_port     = 47984
-        protocol    = "tcp"
-        cidr_blocks = local.allowed_cidrs
-        description = "Moonlight"
+
+      dynamic "ingress" {
+        for_each = contains(local.package_set, "sunshine") ? [1] : []
+
+        content {
+          from_port   = 48002
+          to_port     = 48002
+          protocol    = "udp"
+          cidr_blocks = local.allowed_cidrs
+          description = "Moonlight UDP"
+        }
       }
-      ingress {
-        from_port   = 47989
-        to_port     = 47989
-        protocol    = "tcp"
-        cidr_blocks = local.allowed_cidrs
-        description = "Moonlight"
+
+      dynamic "ingress" {
+        for_each = contains(local.package_set, "sunshine") ? [1] : []
+
+        content {
+          from_port   = 48010
+          to_port     = 48010
+          protocol    = "tcp"
+          cidr_blocks = local.allowed_cidrs
+          description = "Moonlight TCP"
+        }
       }
-      ingress {
-        from_port   = 47998
-        to_port     = 47998
-        protocol    = "udp"
-        cidr_blocks = local.allowed_cidrs
-        description = "Moonlight"
+
+      dynamic "ingress" {
+        for_each = contains(local.package_set, "sunshine") ? [1] : []
+
+        content {
+          from_port   = 48010
+          to_port     = 48010
+          protocol    = "udp"
+          cidr_blocks = local.allowed_cidrs
+          description = "Moonlight UDP"
+        }
       }
-      ingress {
-        from_port   = 47999
-        to_port     = 47999
-        protocol    = "udp"
-        cidr_blocks = local.allowed_cidrs
-        description = "Moonlight"
+
+      # ── Steam ─────────────────────────────────────────────────────────
+
+      dynamic "ingress" {
+        for_each = contains(local.package_set, "steam") ? [1] : []
+
+        content {
+          from_port   = 27031
+          to_port     = 27031
+          protocol    = "udp"
+          cidr_blocks = local.allowed_cidrs
+          description = "Steam UDP"
+        }
       }
-      ingress {
-        from_port   = 48000
-        to_port     = 48000
-        protocol    = "udp"
-        cidr_blocks = local.allowed_cidrs
-        description = "Moonlight"
+
+      dynamic "ingress" {
+        for_each = contains(local.package_set, "steam") ? [1] : []
+
+        content {
+          from_port   = 27036
+          to_port     = 27036
+          protocol    = "tcp"
+          cidr_blocks = local.allowed_cidrs
+          description = "Steam TCP"
+        }
       }
-      ingress {
-        from_port   = 48002
-        to_port     = 48002
-        protocol    = "udp"
-        cidr_blocks = local.allowed_cidrs
-        description = "Moonlight"
+
+      dynamic "ingress" {
+        for_each = contains(local.package_set, "steam") ? [1] : []
+
+        content {
+          from_port   = 27037
+          to_port     = 27037
+          protocol    = "udp"
+          cidr_blocks = local.allowed_cidrs
+          description = "Steam UDP"
+        }
       }
-      ingress {
-        from_port   = 27036
-        to_port     = 27036
-        protocol    = "tcp"
-        cidr_blocks = local.allowed_cidrs
-        description = "Steam"
+
+      # ── RustDesk ──────────────────────────────────────────────────────
+
+      dynamic "ingress" {
+        for_each = contains(local.package_set, "rustdesk") ? [1] : []
+
+        content {
+          from_port   = 21116
+          to_port     = 21116
+          protocol    = "tcp"
+          cidr_blocks = local.allowed_cidrs
+          description = "RustDesk TCP"
+        }
       }
-      ingress {
-        from_port   = 27031
-        to_port     = 27031
-        protocol    = "udp"
-        cidr_blocks = local.allowed_cidrs
-        description = "Steam"
+
+      dynamic "ingress" {
+        for_each = contains(local.package_set, "rustdesk") ? [1] : []
+
+        content {
+          from_port   = 21116
+          to_port     = 21116
+          protocol    = "udp"
+          cidr_blocks = local.allowed_cidrs
+          description = "RustDesk UDP"
+        }
       }
-      ingress {
-        from_port   = 27037
-        to_port     = 27037
-        protocol    = "udp"
-        cidr_blocks = local.allowed_cidrs
-        description = "Steam"
+
+      dynamic "ingress" {
+        for_each = contains(local.package_set, "rustdesk") ? [1] : []
+
+        content {
+          from_port   = 21117
+          to_port     = 21117
+          protocol    = "tcp"
+          cidr_blocks = local.allowed_cidrs
+          description = "RustDesk TCP"
+        }
       }
-      ingress {
-        from_port   = 8000
-        to_port     = 8000
-        protocol    = "tcp"
-        cidr_blocks = local.allowed_cidrs
-        description = "RustDesk Server"
+
+      dynamic "ingress" {
+        for_each = contains(local.package_set, "rustdesk") ? [1] : []
+
+        content {
+          from_port   = 21118
+          to_port     = 21118
+          protocol    = "tcp"
+          cidr_blocks = local.allowed_cidrs
+          description = "RustDesk TCP"
+        }
       }
-      ingress {
-        from_port   = 21114
-        to_port     = 21114
-        protocol    = "tcp"
-        cidr_blocks = local.allowed_cidrs
-        description = "RustDesk Server"
+
+      dynamic "ingress" {
+        for_each = contains(local.package_set, "rustdesk") ? [1] : []
+
+        content {
+          from_port   = 21119
+          to_port     = 21119
+          protocol    = "tcp"
+          cidr_blocks = local.allowed_cidrs
+          description = "RustDesk TCP"
+        }
       }
-      ingress {
-        from_port   = 21116
-        to_port     = 21116
-        protocol    = "udp"
-        cidr_blocks = local.allowed_cidrs
-        description = "RustDesk Server"
+
+      # ── Windows-specific ──────────────────────────────────────────────
+
+      dynamic "ingress" {
+        for_each = var.os_family == "windows" ? [1] : []
+
+        content {
+          from_port   = 3389
+          to_port     = 3389
+          protocol    = "tcp"
+          cidr_blocks = local.allowed_cidrs
+          description = "RDP"
+        }
       }
+
+      # ── Egress ────────────────────────────────────────────────────────
+
       egress {
         from_port        = 0
         to_port          = 0

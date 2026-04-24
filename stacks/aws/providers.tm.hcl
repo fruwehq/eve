@@ -15,15 +15,20 @@ generate_hcl "z_providers.tf" {
       required_providers {
         aws = {
           source  = "hashicorp/aws"
-          version = "~> 6.0"
+          version = "6.41.0"
         }
       }
 
       required_version = global.terraform_version
     }
 
+    variable "region" {
+      type        = string
+      description = "AWS region (from profile location mapping via TF_VAR_region)"
+    }
+
     provider "aws" {
-      region = global.aws.region
+      region = var.region
 
       default_tags {
         tags = global.aws.tags
