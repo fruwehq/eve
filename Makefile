@@ -158,7 +158,12 @@ moonlight.pair: sunshine.wait ## Pair Moonlight with Sunshine via a fixed PIN
 plan: ## Plan profile changes (terraform or vagrant)
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi
 	@./scripts/profile-resolve --profile $(PROFILE) --validate
-	@./scripts/tf-plan $(PROFILE)
+	@ENGINE=$$(./scripts/profile-resolve --profile $(PROFILE) --emit env | awk -F= '/^ENGINE=/{print $$2}'); \
+	if [ "$$ENGINE" = "vagrant" ]; then \
+		./scripts/vagrant-up --plan $(PROFILE); \
+	else \
+		./scripts/tf-plan $(PROFILE); \
+	fi
 
 profiles.list: ## List available profiles with details
 	@./scripts/profiles-list --with-details
