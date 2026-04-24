@@ -1,0 +1,723 @@
+#!/usr/bin/env python3
+"""Textual controller for the profile-driven VM platform."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import signal
+import subprocess
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+
+try:
+    from textual import on
+    from textual.app import App, ComposeResult
+    from textual.containers import Container, Horizontal, Vertical
+    from textual.screen import ModalScreen
+    from textual.widgets import Button, DataTable, Footer, Header, Input, Label, RichLog, Static
+except ModuleNotFoundError as exc:
+    if exc.name == "textual":
+        print(
+            "Textual is not installed.\n\n"
+            "Install the TUI dependency first:\n"
+            "  python3 -m venv .venv\n"
+            "  . .venv/bin/activate\n"
+            "  python -m pip install -r requirements-tui.txt\n\n"
+            "Then run:\n"
+            "  make tui",
+            file=sys.stderr,
+        )
+        raise SystemExit(1) from exc
+    raise
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+@dataclass(frozen=True)
+class Profile:
+    name: str
+    machine: str
+    provider: str
+    engine: str
+    kind: str
+    os_id: str
+    os_family: str
+    os_ui_mode: str
+    location: str
+    bundles: str
+
+
+@dataclass(frozen=True)
+class CommandSpec:
+    target: str
+    group: str
+    description: str
+    needs_profile: bool = True
+    confirm: str | None = None
+    prompts: tuple[tuple[str, str], ...] = ()
+    passthrough: bool = False
+
+    @property
+    def label(self) -> str:
+        if self.confirm:
+            return f"! {self.target}"
+        return self.target
+
+
+COMMANDS: tuple[CommandSpec, ...] = (
+    CommandSpec("status", "Inspect", "Show VM status and IP"),
+    CommandSpec("validate", "Inspect", "Validate catalog compatibility"),
+    CommandSpec("info", "Inspect", "Print resolved profile JSON"),
+    CommandSpec("env", "Inspect", "Print resolved profile env"),
+    CommandSpec("ip", "Inspect", "Print resolved instance IP"),
+    CommandSpec("providers.status", "Inspect", "Check provider configuration", False),
+    CommandSpec(
+        "show-password",
+        "Inspect",
+        "Print Windows password",
+        confirm="This prints the selected Windows profile password into the output log.",
+    ),
+    CommandSpec("init", "Lifecycle", "Initialize backend/providers"),
+    CommandSpec("plan", "Lifecycle", "Preview changes"),
+    CommandSpec(
+        "apply",
+        "Lifecycle",
+        "Create or update resources",
+        confirm="Apply can create paid cloud resources or start local VMs.",
+    ),
+    CommandSpec(
+        "destroy",
+        "Lifecycle",
+        "Destroy profile resources",
+        confirm="Destroy deletes the selected profile's managed resources.",
+    ),
+    CommandSpec("start", "Lifecycle", "Start a stopped Vagrant profile"),
+    CommandSpec("stop", "Lifecycle", "Stop or suspend a Vagrant profile"),
+    CommandSpec(
+        "reboot",
+        "Lifecycle",
+        "Reboot Windows instance",
+        confirm="Reboot restarts the selected Windows instance.",
+    ),
+    CommandSpec("ssh.wait", "Provision", "Wait for SSH"),
+    CommandSpec("provision", "Provision", "Upload and run OS provisioning"),
+    CommandSpec(
+        "provision.clear-state",
+        "Provision",
+        "Clear Windows provision state",
+        confirm="This clears remote provisioning state, logs, and downloads.",
+    ),
+    CommandSpec(
+        "provision.restart",
+        "Provision",
+        "Clear state then re-provision",
+        confirm="Restarting provisioning clears remote state, logs, and downloads first.",
+    ),
+    CommandSpec("logs", "Provision", "Stream provisioning logs"),
+    CommandSpec("upload", "Provision", "Upload ./upload files"),
+    CommandSpec("ssh", "Access", "Open SSH session", passthrough=True),
+    CommandSpec("remote.console", "Access", "Open local VM console"),
+    CommandSpec("remote.vnc", "Access", "Open VNC viewer"),
+    CommandSpec("remote.rdp", "Access", "Open RDP session"),
+    CommandSpec("remote.sunshine", "Access", "Open Sunshine web UI"),
+    CommandSpec("remote.sunshine.wait", "Access", "Wait for Sunshine API"),
+    CommandSpec("remote.moonlight.pair", "Access", "Pair Moonlight"),
+    CommandSpec("remote.moonlight", "Access", "Start Moonlight stream"),
+    CommandSpec("remote.xpra.status", "Xpra", "Show remote Xpra status"),
+    CommandSpec("remote.xpra.apps", "Xpra", "List remote GUI apps"),
+    CommandSpec("remote.xpra.start", "Xpra", "Start remote Xpra server"),
+    CommandSpec(
+        "remote.xpra",
+        "Xpra",
+        "Launch app and attach",
+        prompts=(("APP", "App command to launch, for example: xterm or firefox"),),
+    ),
+    CommandSpec(
+        "remote.xpra.run",
+        "Xpra",
+        "Run app in existing session",
+        prompts=(("APP", "App command to run, for example: code or xterm -e htop"),),
+    ),
+    CommandSpec("remote.xpra.attach", "Xpra", "Attach local Xpra client"),
+    CommandSpec("remote.xpra.stop", "Xpra", "Stop remote Xpra server"),
+)
+
+
+def run_checked(args: list[str]) -> str:
+    result = subprocess.run(
+        args,
+        cwd=REPO_ROOT,
+        check=True,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    return result.stdout
+
+
+def load_profiles() -> list[Profile]:
+    names = [line.strip() for line in run_checked(["scripts/profiles-list"]).splitlines() if line.strip()]
+    profiles: list[Profile] = []
+
+    for name in names:
+        raw = run_checked(["scripts/profile-resolve", "--profile", name, "--emit", "json"])
+        data = json.loads(raw)
+        profile_data = data["profile"]
+        machine = data["machine"]
+        os_data = data["os"]
+
+        profiles.append(
+            Profile(
+                name=name,
+                machine=profile_data.get("machine", "-"),
+                provider=machine.get("provider", "-"),
+                engine=data.get("engine", "-"),
+                kind=machine.get("kind", "-"),
+                os_id=profile_data.get("os", "-"),
+                os_family=os_data.get("family", "-"),
+                os_ui_mode=os_data.get("ui_mode", "-"),
+                location=profile_data.get("location", "-"),
+                bundles=", ".join(profile_data.get("bundles", [])) or "-",
+            )
+        )
+
+    return profiles
+
+
+class ConfirmCommand(ModalScreen[bool]):
+    CSS = """
+    ConfirmCommand {
+        align: center middle;
+    }
+
+    #confirm-box {
+        width: 72;
+        height: auto;
+        border: heavy $error;
+        background: $surface;
+        padding: 1 2;
+    }
+
+    #confirm-title {
+        text-style: bold;
+        color: $error;
+        margin-bottom: 1;
+    }
+
+    #confirm-message {
+        margin-bottom: 1;
+    }
+
+    #confirm-buttons {
+        height: auto;
+        align: right middle;
+    }
+
+    #cancel {
+        margin-right: 1;
+    }
+    """
+
+    def __init__(self, target: str, message: str) -> None:
+        super().__init__()
+        self.target = target
+        self.message = message
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="confirm-box"):
+            yield Static(f"Confirm: make {self.target}", id="confirm-title")
+            yield Static(self.message, id="confirm-message")
+            with Horizontal(id="confirm-buttons"):
+                yield Button("Cancel", id="cancel", variant="default")
+                yield Button("Run", id="confirm-run", variant="error")
+
+    @on(Button.Pressed)
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(event.button.id == "confirm-run")
+
+
+class PromptValue(ModalScreen[str | None]):
+    CSS = """
+    PromptValue {
+        align: center middle;
+    }
+
+    #prompt-box {
+        width: 78;
+        height: auto;
+        border: heavy #2f6f73;
+        background: $surface;
+        padding: 1 2;
+    }
+
+    #prompt-title {
+        text-style: bold;
+        color: #fff7d6;
+        margin-bottom: 1;
+    }
+
+    #prompt-help {
+        color: #cdd5d8;
+        margin-bottom: 1;
+    }
+
+    #prompt-input {
+        margin-bottom: 1;
+    }
+
+    #prompt-buttons {
+        height: auto;
+        align: right middle;
+    }
+
+    #prompt-cancel {
+        margin-right: 1;
+    }
+    """
+
+    def __init__(self, name: str, message: str) -> None:
+        super().__init__()
+        self.name = name
+        self.message = message
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="prompt-box"):
+            yield Static(f"Set {self.name}", id="prompt-title")
+            yield Static(self.message, id="prompt-help")
+            yield Input(id="prompt-input")
+            with Horizontal(id="prompt-buttons"):
+                yield Button("Cancel", id="prompt-cancel", variant="default")
+                yield Button("Run", id="prompt-run", variant="success")
+
+    def on_mount(self) -> None:
+        self.query_one("#prompt-input", Input).focus()
+
+    @on(Input.Submitted, "#prompt-input")
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        value = event.value.strip()
+        self.dismiss(value or None)
+
+    @on(Button.Pressed)
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "prompt-run":
+            value = self.query_one("#prompt-input", Input).value.strip()
+            self.dismiss(value or None)
+        else:
+            self.dismiss(None)
+
+
+class EGameTui(App[None]):
+    TITLE = "Ephemeral VM Manager"
+    SUB_TITLE = "PROFILE-driven Make controller"
+    BINDINGS = [
+        ("q", "quit", "Quit"),
+        ("r", "run_selected", "Run"),
+        ("s", "stop_command", "Stop"),
+        ("c", "clear_log", "Clear"),
+    ]
+    CSS = """
+    Screen {
+        layout: vertical;
+    }
+
+    Header {
+        background: #102a2e;
+        color: #f8f4e8;
+    }
+
+    Footer {
+        background: #102a2e;
+        color: #f8f4e8;
+    }
+
+    #main {
+        height: 1fr;
+        background: #0d1117;
+    }
+
+    #left {
+        width: 45%;
+        min-width: 58;
+        height: 100%;
+        border-right: solid #2f6f73;
+        background: #121820;
+    }
+
+    #right {
+        width: 1fr;
+        height: 100%;
+        background: #10131a;
+    }
+
+    .panel-title {
+        height: 1;
+        padding: 0 1;
+        text-style: bold;
+        color: #fff7d6;
+        background: #264653;
+    }
+
+    #profiles {
+        height: 13;
+        background: #121820;
+    }
+
+    #details {
+        height: 8;
+        padding: 1 2;
+        color: #e9edf1;
+        background: #18202a;
+        border-top: solid #2f6f73;
+    }
+
+    #commands {
+        height: 1fr;
+        background: #121820;
+        border-top: solid #2f6f73;
+    }
+
+    #hero {
+        height: 5;
+        padding: 1 2;
+        background: #1d2b2f;
+        border-bottom: solid #b08d57;
+    }
+
+    #hero-title {
+        text-style: bold;
+        color: #ffffff;
+    }
+
+    #hero-subtitle {
+        color: #cdd5d8;
+    }
+
+    #toolbar {
+        height: 3;
+        padding: 0 1;
+        align: right middle;
+        background: #161a22;
+    }
+
+    #run {
+        margin-right: 1;
+    }
+
+    #stop {
+        margin-right: 1;
+    }
+
+    #log {
+        height: 1fr;
+        padding: 1;
+        background: #070a0d;
+        border-top: solid #b08d57;
+    }
+
+    DataTable {
+        height: 1fr;
+        color: #e2e8ec;
+        background: #121820;
+    }
+
+    DataTable > .datatable--header {
+        text-style: bold;
+        background: #1b3a3e;
+        color: #fff7d6;
+    }
+
+    DataTable > .datatable--cursor {
+        background: #2f6f73;
+        color: #ffffff;
+    }
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.profiles: list[Profile] = []
+        self.selected_profile: Profile | None = None
+        self.selected_command: CommandSpec | None = None
+        self.process: asyncio.subprocess.Process | None = None
+
+    def compose(self) -> ComposeResult:
+        yield Header()
+        with Horizontal(id="main"):
+            with Vertical(id="left"):
+                yield Static("Profiles", classes="panel-title")
+                yield DataTable(id="profiles")
+                yield Static("", id="details")
+                yield Static("Actions", classes="panel-title")
+                yield DataTable(id="commands")
+            with Vertical(id="right"):
+                with Vertical(id="hero"):
+                    yield Label("Profile-driven VM control", id="hero-title")
+                    yield Label("Select a profile, choose an action, and stream the existing make workflow.", id="hero-subtitle")
+                with Container(id="toolbar"):
+                    yield Button("Run", id="run", variant="success")
+                    yield Button("Stop", id="stop", variant="warning", disabled=True)
+                    yield Button("Clear", id="clear")
+                yield RichLog(id="log", wrap=True, highlight=True, markup=True)
+        yield Footer()
+
+    def on_mount(self) -> None:
+        self._configure_tables()
+        self._load_profiles()
+        self._load_commands()
+
+    def _configure_tables(self) -> None:
+        profile_table = self.query_one("#profiles", DataTable)
+        profile_table.cursor_type = "row"
+        profile_table.zebra_stripes = True
+        profile_table.add_columns("Profile", "Provider", "Engine", "OS")
+
+        command_table = self.query_one("#commands", DataTable)
+        command_table.cursor_type = "row"
+        command_table.zebra_stripes = True
+        command_table.add_columns("Target", "Group", "Description")
+
+    def _load_profiles(self) -> None:
+        log = self.query_one("#log", RichLog)
+        table = self.query_one("#profiles", DataTable)
+
+        try:
+            self.profiles = load_profiles()
+        except subprocess.CalledProcessError as exc:
+            log.write("[red]Failed to load profiles.[/red]")
+            if exc.stderr:
+                log.write(exc.stderr)
+            return
+
+        for profile in self.profiles:
+            table.add_row(
+                profile.name,
+                profile.provider,
+                profile.engine,
+                profile.os_id,
+                key=profile.name,
+            )
+
+        if self.profiles:
+            self.selected_profile = self.profiles[0]
+            table.move_cursor(row=0)
+            self._render_details()
+
+    def _load_commands(self) -> None:
+        table = self.query_one("#commands", DataTable)
+        for command in COMMANDS:
+            table.add_row(command.label, command.group, command.description, key=command.target)
+
+        self.selected_command = COMMANDS[0]
+        table.move_cursor(row=0)
+
+    def _profile_by_name(self, name: str) -> Profile | None:
+        return next((profile for profile in self.profiles if profile.name == name), None)
+
+    def _command_by_target(self, target: str) -> CommandSpec | None:
+        return next((command for command in COMMANDS if command.target == target), None)
+
+    def _render_details(self) -> None:
+        details = self.query_one("#details", Static)
+        if self.selected_profile is None:
+            details.update("No profile selected.")
+            return
+
+        profile = self.selected_profile
+        details.update(
+            "\n".join(
+                [
+                    f"[b]{profile.name}[/b]",
+                    f"machine={profile.machine} kind={profile.kind}",
+                    f"provider={profile.provider} engine={profile.engine} location={profile.location}",
+                    f"os={profile.os_id} family={profile.os_family} ui={profile.os_ui_mode}",
+                    f"bundles={profile.bundles}",
+                ]
+            )
+        )
+
+    @on(DataTable.RowSelected, "#profiles")
+    def on_profile_selected(self, event: DataTable.RowSelected) -> None:
+        profile = self._profile_by_name(str(event.row_key.value))
+        if profile is not None:
+            self.selected_profile = profile
+            self._render_details()
+
+    @on(DataTable.RowHighlighted, "#profiles")
+    def on_profile_highlighted(self, event: DataTable.RowHighlighted) -> None:
+        profile = self._profile_by_name(str(event.row_key.value))
+        if profile is not None:
+            self.selected_profile = profile
+            self._render_details()
+
+    @on(DataTable.RowSelected, "#commands")
+    def on_command_selected(self, event: DataTable.RowSelected) -> None:
+        command = self._command_by_target(str(event.row_key.value))
+        if command is not None:
+            self.selected_command = command
+            self._begin_command(command)
+
+    @on(DataTable.RowHighlighted, "#commands")
+    def on_command_highlighted(self, event: DataTable.RowHighlighted) -> None:
+        command = self._command_by_target(str(event.row_key.value))
+        if command is not None:
+            self.selected_command = command
+
+    @on(Button.Pressed, "#run")
+    def on_run_pressed(self) -> None:
+        self.action_run_selected()
+
+    @on(Button.Pressed, "#stop")
+    async def on_stop_pressed(self) -> None:
+        await self.action_stop_command()
+
+    @on(Button.Pressed, "#clear")
+    def on_clear_pressed(self) -> None:
+        self.action_clear_log()
+
+    def action_run_selected(self) -> None:
+        if self.selected_command is None:
+            self.notify("Select a command first", severity="warning")
+            return
+        self._begin_command(self.selected_command)
+
+    async def action_stop_command(self) -> None:
+        if self.process is None or self.process.returncode is not None:
+            return
+
+        log = self.query_one("#log", RichLog)
+        log.write("[yellow]Stopping command...[/yellow]")
+        try:
+            os.killpg(self.process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            return
+
+    def action_clear_log(self) -> None:
+        self.query_one("#log", RichLog).clear()
+
+    def _begin_command(self, command: CommandSpec) -> None:
+        if self.process is not None and self.process.returncode is None:
+            self.notify("A command is already running", severity="warning")
+            return
+
+        if command.needs_profile and self.selected_profile is None:
+            self.notify("Select a profile first", severity="warning")
+            return
+
+        if command.confirm:
+            self.push_screen(
+                ConfirmCommand(command.target, command.confirm),
+                callback=lambda confirmed: self._after_confirm(command, confirmed),
+            )
+            return
+
+        self._collect_prompts(command, [])
+
+    def _after_confirm(self, command: CommandSpec, confirmed: bool | None) -> None:
+        if confirmed:
+            self._collect_prompts(command, [])
+
+    def _collect_prompts(self, command: CommandSpec, args: list[str], index: int = 0) -> None:
+        if index >= len(command.prompts):
+            self._execute_command(command, args)
+            return
+
+        name, message = command.prompts[index]
+        self.push_screen(
+            PromptValue(name, message),
+            callback=lambda value: self._after_prompt(command, args, index, name, value),
+        )
+
+    def _after_prompt(
+        self,
+        command: CommandSpec,
+        args: list[str],
+        index: int,
+        name: str,
+        value: str | None,
+    ) -> None:
+        if not value:
+            return
+
+        self._collect_prompts(command, [*args, f"{name}={value}"], index + 1)
+
+    def _execute_command(self, command: CommandSpec, extra_args: list[str]) -> None:
+        args = ["make", command.target]
+        args.extend(extra_args)
+
+        if command.needs_profile:
+            assert self.selected_profile is not None
+            args.append(f"PROFILE={self.selected_profile.name}")
+
+        if command.passthrough:
+            self._run_passthrough(args)
+        else:
+            asyncio.create_task(self._stream_process(args))
+
+    def _run_passthrough(self, args: list[str]) -> None:
+        log = self.query_one("#log", RichLog)
+        log.write("")
+        log.write(f"[bold cyan]$ {' '.join(args)}[/bold cyan]")
+        log.write("[yellow]Suspending TUI for interactive terminal command...[/yellow]")
+
+        env = os.environ.copy()
+        if self.selected_profile is not None:
+            env["PROFILE"] = self.selected_profile.name
+
+        with self.suspend():
+            code = subprocess.run(args, cwd=REPO_ROOT, env=env, check=False).returncode
+
+        if code == 0:
+            log.write("[green]Interactive command finished successfully.[/green]")
+        else:
+            log.write(f"[red]Interactive command exited with status {code}.[/red]")
+
+    async def _stream_process(self, args: list[str]) -> None:
+        log = self.query_one("#log", RichLog)
+        stop_button = self.query_one("#stop", Button)
+        run_button = self.query_one("#run", Button)
+
+        log.write("")
+        log.write(f"[bold cyan]$ {' '.join(args)}[/bold cyan]")
+        stop_button.disabled = False
+        run_button.disabled = True
+
+        env = os.environ.copy()
+        if self.selected_profile is not None:
+            env["PROFILE"] = self.selected_profile.name
+
+        self.process = await asyncio.create_subprocess_exec(
+            *args,
+            cwd=REPO_ROOT,
+            env=env,
+            start_new_session=True,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+
+        assert self.process.stdout is not None
+        while True:
+            line = await self.process.stdout.readline()
+            if not line:
+                break
+            log.write(line.decode(errors="replace").rstrip())
+
+        code = await self.process.wait()
+        if code == 0:
+            log.write("[green]Command finished successfully.[/green]")
+        else:
+            log.write(f"[red]Command exited with status {code}.[/red]")
+
+        stop_button.disabled = True
+        run_button.disabled = False
+
+
+def main() -> int:
+    EGameTui().run()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

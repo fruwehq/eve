@@ -10,7 +10,7 @@
 				remote.xpra.stop remote.xpra.status remote.xpra.apps \
 				show-password ssh ssh.wait start status stop \
 				test test.profiles \
-				test.shellcheck test.terraform test.update-golden upload \
+				test.shellcheck test.terraform test.update-golden tui upload \
 				validate
 
 TM_PARALLEL ?= 8
@@ -243,6 +243,9 @@ test.terraform: ## terramate generate + terraform validate across provider stack
 
 test.update-golden: ## Regenerate tests/golden/*.env from current profile-resolve output
 	@UPDATE_GOLDEN=1 ./scripts/test-profiles
+
+tui: ## Launch the Textual profile manager
+	@if [ -x ./.venv/bin/python ]; then ./.venv/bin/python ./scripts/egame-tui; else ./scripts/egame-tui; fi
 
 upload: ## scp ./upload/* to the instance (skips files that already exist remotely)
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \

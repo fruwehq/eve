@@ -33,6 +33,9 @@ Terraform provider versions are pinned exactly in the Terramate provider templat
 # List available profiles
 make profiles.list
 
+# Launch the Textual profile manager
+make tui
+
 # Pick a profile interactively
 make profiles.menu
 
@@ -49,6 +52,26 @@ cp config/catalog.local.example.yaml config/catalog.local.yaml
 ```
 
 `config/catalog.local.yaml` is git-ignored and merged over the base catalog.
+
+### Textual TUI
+
+The TUI is a thin, visual wrapper around the existing Make targets. It discovers
+profiles from `scripts/profiles-list`, resolves details via
+`scripts/profile-resolve`, and runs commands as `make <target>
+PROFILE=<profile>` while streaming output. Targets that need extra Make
+variables, such as `APP=` for Xpra, prompt before running. Interactive terminal
+targets such as `ssh` temporarily suspend the TUI and attach to the real
+terminal so keyboard input, prompts, and terminal control sequences work
+normally.
+
+Install the optional TUI dependency:
+
+```bash
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install -r requirements-tui.txt
+make tui
+```
 
 ```bash
 # Validate and inspect a profile
