@@ -39,7 +39,7 @@ write_step() {
 # shellcheck disable=SC1091
 [ -f "$STATE_DIR/env" ] && . "$STATE_DIR/env"
 
-mapfile -t STEPS < <(find "$STEPS_DIR" -maxdepth 1 -type f -name '*.sh' | sort)
+mapfile -t STEPS < <(find "$STEPS_DIR" -maxdepth 1 -type f -name '*.sh' ! -name '._*' | sort)
 TOTAL=${#STEPS[@]}
 
 while : ; do
