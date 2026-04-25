@@ -33,17 +33,20 @@ fi
 
 mkdir -p ~/.vnc
 
-if ! sudo test -f /etc/polkit-1/localauthority/50-local.d/45-allow-colord.pkla; then
-  log "### 46_vnc: adding polkit rules for VNC session"
-  sudo mkdir -p /etc/polkit-1/localauthority/50-local.d
-  sudo tee /etc/polkit-1/localauthority/50-local.d/45-allow-colord.pkla > /dev/null << 'EOF'
-[Allow Colord all Users]
-Identity=unix-user:*
-Action=org.freedesktop.color-manager.create-device;org.freedesktop.color-manager.create-profile;org.freedesktop.color-manager.delete-device;org.freedesktop.color-manager.delete-profile;org.freedesktop.color-manager.modify-device;org.freedesktop.color-manager.modify-profile
-ResultAny=no
-ResultInactive=no
-ResultActive=yes
+# Suppress the colord polkit prompt that appears on every XFCE/VNC session.
+# Ubuntu 24.04 (polkit 124) silently ignores the legacy .pkla format — use the
+# JavaScript rule format under /etc/polkit-1/rules.d/ instead.
+POLKIT_RULE=/etc/polkit-1/rules.d/45-allow-colord.rules
+if ! sudo test -f "$POLKIT_RULE"; then
+  log "### 46_vnc: adding polkit rule for colord (rules.d / JS)"
+  sudo tee "$POLKIT_RULE" > /dev/null << 'EOF'
+polkit.addRule(function(action, subject) {
+    if (action.id.match(/^org\.freedesktop\.color-manager\./)) {
+        return polkit.Result.YES;
+    }
+});
 EOF
+  sudo systemctl restart polkit 2>/dev/null || true
 fi
 if [ ! -f ~/.vnc/passwd ]; then
   log "### 46_vnc: setting VNC password"
