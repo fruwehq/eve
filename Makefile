@@ -294,10 +294,37 @@ remote.vnc: ## Open VNC viewer to the VM (requires vnc package in profile)
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
 	./scripts/remote-vnc $(PROFILE)
 
-remote.xpra: ## Launch a remote GUI app via Xpra (requires APP=<cmd>)
+remote.xpra: ## Start server, launch app, and attach (requires APP=<cmd>)
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
 	if [ -z "$(APP)" ]; then echo "Usage: make remote.xpra PROFILE=<name> APP=<command>"; exit 2; fi; \
-	./scripts/profile-xpra $(PROFILE) $(APP)
+	./scripts/profile-xpra $(PROFILE) start && \
+	./scripts/profile-xpra $(PROFILE) run $(APP) && \
+	./scripts/profile-xpra $(PROFILE) attach
+
+remote.xpra.start: ## Start the xpra server on the remote
+	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
+	./scripts/profile-xpra $(PROFILE) start
+
+remote.xpra.attach: ## Attach local xpra client to the running session
+	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
+	./scripts/profile-xpra $(PROFILE) attach
+
+remote.xpra.run: ## Run an additional app on the existing Xpra session (requires APP=<cmd>)
+	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
+	if [ -z "$(APP)" ]; then echo "Usage: make remote.xpra.run PROFILE=<name> APP=<command>"; exit 2; fi; \
+	./scripts/profile-xpra $(PROFILE) run $(APP)
+
+remote.xpra.stop: ## Stop the remote xpra server
+	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
+	./scripts/profile-xpra $(PROFILE) stop
+
+remote.xpra.status: ## Show xpra server status
+	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
+	./scripts/profile-xpra $(PROFILE) status
+
+remote.xpra.apps: ## List available GUI apps on the remote instance
+	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
+	./scripts/profile-ssh $(PROFILE) -- 'awk -F= "/^Name=/{name=\$$2} /^Exec=/{exec=\$$2; sub(/ .*/,\"\",exec); if(name && exec) print name \"\\t\" exec; name=\"\"}" /usr/share/applications/*.desktop ~/.local/share/applications/*.desktop 2>/dev/null | sort -u -t$$'"'"'\t'"'"' -k1,1 | column -ts$$'"'"'\t'"'"
 
 show-password: ## Display the instance's default password (Windows)
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \

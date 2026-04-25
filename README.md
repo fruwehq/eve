@@ -208,11 +208,11 @@ The first invocation will spawn an Xpra server on the VM, tunnel it over SSH, an
 2. **Vagrant** — `brew install hashicorp/tap/vagrant`
 3. **Vagrant VMware plugin** — `vagrant plugin install vagrant-vmware-desktop`
 4. **Vagrant VMware Utility** — `brew install --cask vagrant-vmware-utility`, then:
-    ```bash
-    vagrant-vmware-utility certificate generate
-    vagrant-vmware-utility service install
-    ```
-    The service install step requires `sudo`.
+   ```bash
+   vagrant-vmware-utility certificate generate
+   vagrant-vmware-utility service install
+   ```
+   The service install step requires `sudo`.
 5. No cloud credentials needed
 
 ### Raspberry Pi / ARM metal (planned)

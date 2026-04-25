@@ -1,27 +1,29 @@
 #!/usr/bin/env bash
-# Launch a remote Linux GUI app via Xpra over SSH, rendered as a native-looking
-# window on the local macOS/Linux host (no full remote desktop required).
+# Start, stop, or run apps on a remote Xpra session over SSH.
 #
 # Usage:
-#   scripts/profile-xpra <profile> <app> [app-args...]
+#   scripts/profile-xpra <profile> start [app [args...]]
+#   scripts/profile-xpra <profile> stop
+#   scripts/profile-xpra <profile> run <app> [args...]
+#   scripts/profile-xpra <profile> attach
 #
-# Example:
-#   scripts/profile-xpra aws-ubuntu-dev-headless xeyes
-#   scripts/profile-xpra aws-ubuntu-dev-headless firefox https://example.com
+# Modes:
+#   start [app]  - start the xpra server (and optionally launch an app)
+#   stop         - stop the xpra server
+#   run <app>    - launch an app on the running session
+#   attach       - attach the local xpra client (foreground)
+#
+# The typical workflow:
+#   1. make remote.xpra.start PROFILE=... APP=xeyes   (start server + first app)
+#   2. make remote.xpra.run PROFILE=... APP=firefox    (add more apps)
+#   3. Ctrl-C in the attach terminal, or: make remote.xpra.stop PROFILE=...
 
 set -euo pipefail
 
-PROFILE="${1:?Usage: scripts/profile-xpra <profile> <app> [args...]}"
-APP="${2:?Usage: scripts/profile-xpra <profile> <app> [args...]}"
+PROFILE="${1:?Usage: scripts/profile-xpra <profile> <start|stop|run|attach> [args...]}"
+ACTION="${2:?Usage: scripts/profile-xpra <profile> <start|stop|run|attach> [args...]}"
 shift 2
 cd "$(git rev-parse --show-toplevel)"
-
-if ! command -v xpra >/dev/null 2>&1; then
-  echo "profile-xpra: xpra not installed locally." >&2
-  echo "  macOS:  install the signed .pkg from https://xpra.org/install/ (also needs XQuartz)." >&2
-  echo "  Linux:  apt-get install xpra  (or your distro equivalent)." >&2
-  exit 1
-fi
 
 RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
 ENGINE=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^ENGINE=/{print $2}')
@@ -50,13 +52,83 @@ SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ServerA
 [ "$SSH_PORT" != "22" ] && SSH_OPTS+=(-p "$SSH_PORT")
 
 DISPLAY_NUM="${XPRA_DISPLAY:-100}"
-START_CMD="$APP"
-if [ "$#" -gt 0 ]; then
-  START_CMD="$APP $*"
-fi
+XPRA_URI="ssh://$SSH_USER@$IP/$DISPLAY_NUM"
+SSH_CMD="ssh ${SSH_OPTS[*]}"
 
-echo "[profile-xpra] launching '$START_CMD' on $SSH_USER@$IP:$SSH_PORT (display :$DISPLAY_NUM)"
-exec xpra start "ssh://$SSH_USER@$IP/$DISPLAY_NUM" \
-  --ssh="ssh ${SSH_OPTS[*]}" \
-  --start-child="$START_CMD" \
-  --exit-with-children
+# shellcheck disable=SC2317
+remote_ssh() {
+  ssh "${SSH_OPTS[@]}" -l "$SSH_USER" "$IP" "$@"
+}
+
+case "$ACTION" in
+  start)
+    if ! command -v xpra >/dev/null 2>&1; then
+      echo "profile-xpra: xpra not installed locally." >&2
+      echo "  macOS:  install the signed .pkg from https://xpra.org/install/ (also needs XQuartz)." >&2
+      exit 1
+    fi
+
+    echo "[profile-xpra] starting server on display :$DISPLAY_NUM"
+    remote_ssh "xpra start :$DISPLAY_NUM" || {
+      echo "profile-xpra: remote 'xpra start :$DISPLAY_NUM' failed" >&2
+      echo "  Is xpra installed? Run: make provision PROFILE=$PROFILE" >&2
+      exit 1
+    }
+
+    echo "[profile-xpra] server running. Attach with: make remote.xpra.attach PROFILE=$PROFILE"
+    ;;
+
+  stop)
+    echo "[profile-xpra] stopping session on display :$DISPLAY_NUM"
+    remote_ssh "xpra stop :$DISPLAY_NUM" 2>/dev/null || true
+    xpra stop "$XPRA_URI" 2>/dev/null || true
+    echo "[profile-xpra] stopped"
+    ;;
+
+  status)
+    remote_ssh "xpra info :$DISPLAY_NUM 2>/dev/null" | grep -E '^(state|sessions|clients)' || {
+      echo "[profile-xpra] no session on display :$DISPLAY_NUM"
+      exit 1
+    }
+    ;;
+
+  run)
+    if [ "$#" -lt 1 ]; then
+      echo "Usage: scripts/profile-xpra <profile> run <app> [args...]" >&2
+      exit 1
+    fi
+    START_CMD="$*"
+    echo "[profile-xpra] launching '$START_CMD' on display :$DISPLAY_NUM"
+    remote_ssh "DISPLAY=:$DISPLAY_NUM nohup $START_CMD </dev/null >/dev/null 2>&1 &"
+    ;;
+
+  attach)
+    if ! command -v xpra >/dev/null 2>&1; then
+      echo "profile-xpra: xpra not installed locally." >&2
+      echo "  macOS:  install the signed .pkg from https://xpra.org/install/ (also needs XQuartz)." >&2
+      exit 1
+    fi
+
+    # shellcheck disable=SC2329
+    cleanup() {
+      echo "[profile-xpra] detaching"
+      kill "$XPRA_PID" 2>/dev/null || true
+      pkill -P "$XPRA_PID" 2>/dev/null || true
+    }
+    trap cleanup EXIT INT TERM
+
+    echo "[profile-xpra] attaching to display :$DISPLAY_NUM (press Ctrl-C to detach)"
+    xpra attach "$XPRA_URI" --ssh="$SSH_CMD" &
+
+    XPRA_PID=$!
+    wait $XPRA_PID 2>/dev/null
+    trap - EXIT INT TERM
+    kill "$XPRA_PID" 2>/dev/null || true
+    pkill -P "$XPRA_PID" 2>/dev/null || true
+    ;;
+
+  *)
+    echo "Unknown action: $ACTION (use start, stop, run, or attach)" >&2
+    exit 1
+    ;;
+esac

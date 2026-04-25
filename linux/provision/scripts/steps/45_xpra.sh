@@ -32,6 +32,6 @@ if [ ! -f "$REPO_LIST" ]; then
   sudo DEBIAN_FRONTEND=noninteractive apt-get update -y
 fi
 
-apt_install xpra
+apt_install xpra xpra-x11
 
 log "### 45_xpra: done"

@@ -39,7 +39,7 @@ EOF
 
     echo "[profile-provision] uploading linux/provision/ to remote"
     # Remote paths are relative to $HOME (SFTP/SCP default) to avoid shell-expansion pitfalls.
-    ./scripts/profile-ssh "$PROFILE" -- 'mkdir -p ~/provision/state && rm -rf ~/provision/scripts'
+    ./scripts/profile-ssh "$PROFILE" -- 'rm -rf ~/provision/state ~/provision/scripts && mkdir -p ~/provision/state'
     ./scripts/profile-ssh "$PROFILE" --scp "$STAGE/scripts" 'provision/'
     ./scripts/profile-ssh "$PROFILE" --scp "$STAGE/state/bundle_packages" 'provision/state/'
     ./scripts/profile-ssh "$PROFILE" --scp "$STAGE/state/env" 'provision/state/'
