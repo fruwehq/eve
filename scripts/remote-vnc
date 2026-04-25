@@ -20,7 +20,6 @@ SSH_USER=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^SSH_USER=/{print $2}')
 echo "[remote-vnc] Checking that remote VNC server is listening on port $VNC_PORT..."
 if ! ./scripts/profile-ssh "$PROFILE" -- "ss -tln 2>/dev/null | grep -q ':$VNC_PORT '"; then
     echo "[remote-vnc] Nothing listening on remote port $VNC_PORT." >&2
-    echo "[remote-vnc] If the VM was just (re)started, the VNC server is not persistent across reboots." >&2
     echo "[remote-vnc] Run: make provision PROFILE=$PROFILE" >&2
     exit 1
 fi

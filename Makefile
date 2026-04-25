@@ -197,11 +197,15 @@ remote.console: ## Open the VM's graphical console (VMware Fusion / VirtualBox)
 
 remote.moonlight: remote.sunshine.wait ## Start Moonlight stream
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
+	PKGS=$$(./scripts/profile-resolve --profile $(PROFILE) --emit env | awk -F= '/^BUNDLE_PACKAGES/{print $$2}'); \
+	echo "$$PKGS" | tr ',' '\n' | grep -qx sunshine || { echo "sunshine not in bundle — skipping"; exit 0; }; \
 	IP=$$(./scripts/profile-ip $(PROFILE)); \
 	/Applications/Moonlight.app/Contents/MacOS/Moonlight stream --game-optimization $$IP "Desktop"
 
 remote.moonlight.pair: remote.sunshine.wait ## Pair Moonlight with Sunshine via a fixed PIN
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
+	PKGS=$$(./scripts/profile-resolve --profile $(PROFILE) --emit env | awk -F= '/^BUNDLE_PACKAGES/{print $$2}'); \
+	echo "$$PKGS" | tr ',' '\n' | grep -qx sunshine || { echo "sunshine not in bundle — skipping"; exit 0; }; \
 	IP=$$(./scripts/profile-ip $(PROFILE)); \
 	PIN=1234; \
 	PAIR_RESPONSE_FILE=./tmp/moonlight-pair-response.json; \
@@ -262,6 +266,8 @@ remote.sunshine: ## Open the Sunshine web UI for the instance
 
 remote.sunshine.wait: ## Wait until the Sunshine API accepts authenticated requests
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
+	PKGS=$$(./scripts/profile-resolve --profile $(PROFILE) --emit env | awk -F= '/^BUNDLE_PACKAGES/{print $$2}'); \
+	echo "$$PKGS" | tr ',' '\n' | grep -qx sunshine || { echo "sunshine not in bundle — skipping"; exit 0; }; \
 	IP=$$(./scripts/profile-ip $(PROFILE)); \
 	ATTEMPT=1; \
 	MAX_ATTEMPTS=20; \
