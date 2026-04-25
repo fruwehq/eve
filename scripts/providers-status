@@ -1,9 +1,19 @@
 #!/usr/bin/env bash
 # Check provider configuration and connectivity.
+#
+# Usage:
+#   scripts/providers-status                    # show all providers (table)
+#   scripts/providers-status <provider>         # check one provider (table row)
+#   scripts/providers-status <provider> <field> # print single field (configured|reachable|notes)
 set -euo pipefail
 
+PROVIDER="${1:-}"
+FIELD="${2:-}"
+
+cd "$(git rev-parse --show-toplevel)"
+
 check_aws() {
-  local configured=no reachable=no notes="missing AWS_PROFILE/AWS credentials"
+  configured=no reachable=no notes="missing AWS_PROFILE/AWS credentials"
 
   if [ -n "${AWS_PROFILE:-}" ] || [ -n "${AWS_ACCESS_KEY_ID:-}" ]; then
     configured=yes
@@ -16,12 +26,10 @@ check_aws() {
       notes="configured, but aws sts failed - Please, run: make aws.login"
     fi
   fi
-
-  printf '%-17s  %-10s  %-9s  %s\n' 'aws' "$configured" "$reachable" "$notes"
 }
 
 check_local_virtualbox() {
-  local configured=no reachable=no notes="vagrant/virtualbox not found"
+  configured=no reachable=no notes="vagrant/virtualbox not found"
 
   if command -v vagrant >/dev/null 2>&1 || command -v VBoxManage >/dev/null 2>&1; then
     configured=yes
@@ -32,12 +40,10 @@ check_local_virtualbox() {
       notes="vagrant present, VBoxManage missing"
     fi
   fi
-
-  printf '%-17s  %-10s  %-9s  %s\n' 'local-virtualbox' "$configured" "$reachable" "$notes"
 }
 
 check_local_vmware() {
-  local configured=no reachable=no notes="vagrant/vmrun not found"
+  configured=no reachable=no notes="vagrant/vmrun not found"
 
   if command -v vagrant >/dev/null 2>&1 || command -v vmrun >/dev/null 2>&1; then
     configured=yes
@@ -48,15 +54,13 @@ check_local_vmware() {
       notes="vagrant present, vmrun missing"
     fi
   fi
-
-  printf '%-17s  %-10s  %-9s  %s\n' 'local-vmware' "$configured" "$reachable" "$notes"
 }
 
 check_truenas() {
   local host="${TRUENAS_HOST:-}"
   local port="${TRUENAS_SSH_PORT:-22}"
   local user="${TRUENAS_SSH_USER:-terraform}"
-  local configured=no reachable=no notes="missing TRUENAS_HOST"
+  configured=no reachable=no notes="missing TRUENAS_HOST"
 
   if [ -n "$host" ]; then
     configured=yes
@@ -87,12 +91,10 @@ check_truenas() {
       notes="api key accepted"
     fi
   fi
-
-  printf '%-17s  %-10s  %-9s  %s\n' 'truenas' "$configured" "$reachable" "$notes"
 }
 
 check_vultr() {
-  local configured=no reachable=no notes="missing VULTR_API_KEY"
+  configured=no reachable=no notes="missing VULTR_API_KEY"
 
   if [ -n "${VULTR_API_KEY:-}" ]; then
     configured=yes
@@ -104,16 +106,43 @@ check_vultr() {
       notes="configured, but api call failed"
     fi
   fi
-
-  printf '%-17s  %-10s  %-9s  %s\n' 'vultr' "$configured" "$reachable" "$notes"
 }
 
-cd "$(git rev-parse --show-toplevel)"
+print_row() {
+  local name="$1"
+  printf '%-17s  %-10s  %-9s  %s\n' "$name" "$configured" "$reachable" "$notes"
+}
 
-printf '%s\n' 'Provider           Configured  Reachable  Notes'
-printf '%s\n' '-----------------  ----------  ---------  -------------------------------------------'
-check_aws
-check_local_virtualbox
-check_local_vmware
-check_truenas
-check_vultr
+PROVIDERS="aws local-virtualbox local-vmware truenas vultr"
+
+if [ -n "$PROVIDER" ]; then
+  case "$PROVIDER" in
+    aws)               check_aws ;;
+    local-virtualbox)  check_local_virtualbox ;;
+    local-vmware)      check_local_vmware ;;
+    truenas)           check_truenas ;;
+    vultr)             check_vultr ;;
+    *)                 echo "Unknown provider: $PROVIDER (valid: $PROVIDERS)" >&2; exit 1 ;;
+  esac
+
+  if [ -n "$FIELD" ]; then
+    case "$FIELD" in
+      configured) printf '%s\n' "$configured" ;;
+      reachable)  printf '%s\n' "$reachable" ;;
+      notes)      printf '%s\n' "$notes" ;;
+      *)          echo "Unknown field: $FIELD (valid: configured, reachable, notes)" >&2; exit 1 ;;
+    esac
+  else
+    printf '%s\n' 'Provider           Configured  Reachable  Notes'
+    printf '%s\n' '-----------------  ----------  ---------  -------------------------------------------'
+    print_row "$PROVIDER"
+  fi
+else
+  printf '%s\n' 'Provider           Configured  Reachable  Notes'
+  printf '%s\n' '-----------------  ----------  ---------  -------------------------------------------'
+  check_aws;               print_row "aws"
+  check_local_virtualbox;  print_row "local-virtualbox"
+  check_local_vmware;      print_row "local-vmware"
+  check_truenas;           print_row "truenas"
+  check_vultr;             print_row "vultr"
+fi
