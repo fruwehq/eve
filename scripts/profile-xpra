@@ -127,8 +127,17 @@ case "$ACTION" in
     pkill -P "$XPRA_PID" 2>/dev/null || true
     ;;
 
+  apps)
+    # shellcheck disable=SC2016
+    remote_ssh 'for f in /usr/share/applications/*.desktop ~/.local/share/applications/*.desktop; do
+      name=$(grep "^Name=" "$f" 2>/dev/null | head -1 | cut -d= -f2-)
+      exec=$(grep "^Exec=" "$f" 2>/dev/null | head -1 | cut -d= -f2- | cut -d" " -f1)
+      [ -n "$name" ] && [ -n "$exec" ] && printf "%-40s %s\n" "$name" "$exec"
+    done 2>/dev/null | sort -u'
+    ;;
+
   *)
-    echo "Unknown action: $ACTION (use start, stop, run, or attach)" >&2
+    echo "Unknown action: $ACTION (use start, stop, run, attach, status, or apps)" >&2
     exit 1
     ;;
 esac

@@ -52,7 +52,7 @@ node_modules
 .env.local
 
 # Ignore upload folder
-upload
+/upload
 
 # v2 generated local artifacts
 .generated
