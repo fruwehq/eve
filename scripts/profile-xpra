@@ -24,20 +24,30 @@ if ! command -v xpra >/dev/null 2>&1; then
 fi
 
 RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
-SSH_USER=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^SSH_USER=/{print $2}')
+ENGINE=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^ENGINE=/{print $2}')
 
-IP=$(./scripts/profile-ip "$PROFILE")
-[ -n "$IP" ] || { echo "profile-xpra: could not resolve IP for $PROFILE" >&2; exit 1; }
-
-KEY_FILE="${SSH_PUBLIC_KEY_FILE:-}"
-if [ -n "$KEY_FILE" ] && [ "${KEY_FILE%.pub}" != "$KEY_FILE" ]; then
-  PRIV_KEY="${KEY_FILE%.pub}"
+if [ "$ENGINE" = "vagrant" ]; then
+  SSH_USER=vagrant
+  IP=$(./scripts/profile-ip "$PROFILE")
+  SSH_PORT=$(cd ".generated/$PROFILE" && vagrant ssh-config | awk '/Port/ {print $2; exit}')
+  PRIV_KEY=$(cd ".generated/$PROFILE" && vagrant ssh-config | awk '/IdentityFile/ {print $2; exit}')
 else
-  PRIV_KEY="${SSH_PRIVATE_KEY_FILE:-}"
+  SSH_USER=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^SSH_USER=/{print $2}')
+  IP=$(./scripts/profile-ip "$PROFILE")
+  SSH_PORT=22
+  KEY_FILE="${SSH_PUBLIC_KEY_FILE:-}"
+  if [ -n "$KEY_FILE" ] && [ "${KEY_FILE%.pub}" != "$KEY_FILE" ]; then
+    PRIV_KEY="${KEY_FILE%.pub}"
+  else
+    PRIV_KEY="${SSH_PRIVATE_KEY_FILE:-}"
+  fi
 fi
+
+[ -n "$IP" ] || { echo "profile-xpra: could not resolve IP for $PROFILE" >&2; exit 1; }
 
 SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=10)
 [ -n "$PRIV_KEY" ] && SSH_OPTS+=(-i "$PRIV_KEY")
+[ "$SSH_PORT" != "22" ] && SSH_OPTS+=(-p "$SSH_PORT")
 
 DISPLAY_NUM="${XPRA_DISPLAY:-100}"
 START_CMD="$APP"
@@ -45,8 +55,8 @@ if [ "$#" -gt 0 ]; then
   START_CMD="$APP $*"
 fi
 
-echo "[profile-xpra] launching '$START_CMD' on $SSH_USER@$IP (display :$DISPLAY_NUM)"
+echo "[profile-xpra] launching '$START_CMD' on $SSH_USER@$IP:$SSH_PORT (display :$DISPLAY_NUM)"
 exec xpra start "ssh://$SSH_USER@$IP/$DISPLAY_NUM" \
   --ssh="ssh ${SSH_OPTS[*]}" \
-  --start="$START_CMD" \
+  --start-child="$START_CMD" \
   --exit-with-children
