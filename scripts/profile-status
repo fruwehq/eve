@@ -50,14 +50,14 @@ case "$ENGINE" in
     fi
     ;;
   terraform)
-    STACK_TAG="$PROVIDER:services"
-    if ! terramate run --tags="$STACK_TAG" -- terraform output -json >/dev/null 2>&1; then
-      VM_STATUS="no state"
+    IP=$(./scripts/profile-ip "$PROFILE" 2>/dev/null || true)
+    if [ -n "$IP" ]; then
+      VM_STATUS="running"
+      printf '%-15s %s\n' "IP:" "$IP"
     else
-      IP=$(terramate run --tags="$STACK_TAG" -- terraform output -raw "${PROVIDER}_instance_main_ip" 2>/dev/null || true)
-      if [ -n "$IP" ]; then
-        VM_STATUS="running"
-        printf '%-15s %s\n' "IP:" "$IP"
+      STACK_TAG="$PROVIDER:services"
+      if ! terramate run --tags="$STACK_TAG" -- terraform output -json >/dev/null 2>&1; then
+        VM_STATUS="no state"
       else
         VM_STATUS="created (no IP in state)"
       fi

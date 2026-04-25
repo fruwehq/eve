@@ -183,6 +183,14 @@ else
     error("Compatibility: sunshine requires desktop UI mode")
   else . end |
 
+  if (($bundle_packages | index("codex-cli")) != null and ($bundle_packages | index("dev-toolchain")) == null) then
+    error("Compatibility: codex-cli requires dev-toolchain in bundles")
+  else . end |
+
+  if (($bundle_packages | index("goose")) != null and ($bundle_packages | index("dev-toolchain")) == null) then
+    error("Compatibility: goose requires dev-toolchain in bundles")
+  else . end |
+
   if ((["aws","vultr","truenas","local-virtualbox","local-vmware"] | index($m.provider)) == null) then
     error("Unsupported provider in machine catalog: \($m.provider)")
   else . end |
@@ -253,6 +261,11 @@ emit_json() {
 }
 
 emit_vagrant() {
+  family=$(echo "$RESOLVED_JSON" | jq -r '.os.family')
+  if [ "$family" != "ubuntu" ]; then
+    echo "profile-resolve: --emit vagrant only supports os.family=ubuntu (got: $family)" >&2
+    exit 2
+  fi
   echo "$RESOLVED_JSON" | jq -r '
     . as $r |
     (if $r.machine.provider == "local-vmware" then "vmware_desktop" else "virtualbox" end) as $provider |
