@@ -27,9 +27,8 @@ case "$PROVIDER" in
       exit 1
     fi
     if vmrun list | grep -q "$VMX"; then
-      echo "[remote.console] VM is running headless, suspending and resuming with GUI"
-      vmrun -T fusion suspend "$VMX"
-      vmrun -T fusion start "$VMX" gui
+      echo "[remote.console] VM is running, opening Fusion console"
+      open -a "VMware Fusion" "$VMX"
     else
       echo "[remote.console] VM is stopped, starting with GUI"
       vmrun -T fusion start "$VMX" gui
