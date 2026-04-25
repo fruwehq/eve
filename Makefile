@@ -17,15 +17,6 @@ TM_PARALLEL ?= 8
 # one. If PROFILE is unset, interactive targets will prompt.
 PROFILE ?=
 
-# Resolve instance IP and password from terraform output.
-# Override with EPHEMERAL_WINDOWS_IP / EPHEMERAL_WINDOWS_PASSWORD to skip the
-# terraform output call (useful when the stack state is not local).
-RESOLVE_WINDOWS_IP = IP=$${EPHEMERAL_WINDOWS_IP:-$$(terramate run --tags=vultr:services:instance -- terraform output -raw vultr_instance_main_ip)}; \
-	if [ -z "$$IP" ]; then echo "Missing IP"; exit 1; fi
-
-RESOLVE_WINDOWS_PASSWORD = PW=$${EPHEMERAL_WINDOWS_PASSWORD:-$$(terramate run --tags=vultr:services:instance -- terraform output -raw vultr_instance_default_password)}; \
-	if [ -z "$$PW" ]; then echo "Missing password"; exit 1; fi
-
 # Load dotenv files
 -include .env
 -include .env.local
@@ -35,7 +26,6 @@ export AWS_PROFILE
 export AWS_REGION
 export AWS_SHARED_CREDENTIALS_FILE
 export EPHEMERAL_SUNSHINE_PASSWORD
-export EPHEMERAL_WINDOWS_IP
 export EPHEMERAL_WINDOWS_PASSWORD
 export MY_IP
 export SSH_PUBLIC_KEY_FILE
@@ -191,28 +181,28 @@ provision: ## Upload and run OS-appropriate provisioning scripts on the instance
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
 	./scripts/profile-provision $(PROFILE)
 
-provision.clear-state: ## Clear remote provisioning state, logs, and downloads
-	@$(RESOLVE_WINDOWS_IP); \
-	SSH_OPTS='-o StrictHostKeyChecking=no -o ServerAliveInterval=10 -o WarnWeakCrypto=no-pq-kex -i $(SSH_PUBLIC_KEY_FILE)'; \
-	ssh $$SSH_OPTS Administrator@$$IP 'if (Test-Path "C:\Users\Administrator\provision\state") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\state" }; if (Test-Path "C:\Users\Administrator\provision\logs") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\logs" }; if (Test-Path "C:\Users\Administrator\provision\downloads") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\downloads" }'
+provision.clear-state: ## Clear remote provisioning state, logs, and downloads (Windows)
+	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
+	./scripts/profile-ssh $(PROFILE) -- 'if (Test-Path "C:\Users\Administrator\provision\state") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\state" }; if (Test-Path "C:\Users\Administrator\provision\logs") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\logs" }; if (Test-Path "C:\Users\Administrator\provision\downloads") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\downloads" }'
 
 provision.restart: provision.clear-state provision ## Clear remote state then re-provision
 
-reboot: ## Reboot the instance
-	@$(RESOLVE_WINDOWS_IP); \
-	SSH_OPTS='-o StrictHostKeyChecking=no -o ServerAliveInterval=10 -o WarnWeakCrypto=no-pq-kex -i $(SSH_PUBLIC_KEY_FILE)'; \
-	ssh $$SSH_OPTS Administrator@$$IP 'shutdown /r /t 0'
+reboot: ## Reboot the instance (Windows)
+	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
+	./scripts/profile-ssh $(PROFILE) -- 'shutdown /r /t 0'
 
 remote.console: ## Open the VM's graphical console (VMware Fusion / VirtualBox)
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
 	./scripts/remote-console $(PROFILE)
 
 remote.moonlight: remote.sunshine.wait ## Start Moonlight stream
-	@$(RESOLVE_WINDOWS_IP); \
+	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
+	IP=$$(./scripts/profile-ip $(PROFILE)); \
 	/Applications/Moonlight.app/Contents/MacOS/Moonlight stream --game-optimization $$IP "Desktop"
 
 remote.moonlight.pair: remote.sunshine.wait ## Pair Moonlight with Sunshine via a fixed PIN
-	@$(RESOLVE_WINDOWS_IP); \
+	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
+	IP=$$(./scripts/profile-ip $(PROFILE)); \
 	PIN=1234; \
 	PAIR_RESPONSE_FILE=./tmp/moonlight-pair-response.json; \
 	mkdir -p ./tmp; \
@@ -247,8 +237,9 @@ remote.moonlight.pair: remote.sunshine.wait ## Pair Moonlight with Sunshine via 
 	wait $$MOONLIGHT_PID
 
 remote.rdp: ## Open RDP session to Windows instance
-	@$(RESOLVE_WINDOWS_IP); \
-	$(RESOLVE_WINDOWS_PASSWORD); \
+	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
+	IP=$$(./scripts/profile-ip $(PROFILE)); \
+	PW=$$(./scripts/profile-windows-password $(PROFILE)); \
 	printf '%s\n' \
 	  "full address:s:$$IP" \
 	  "username:s:Administrator" \
@@ -265,11 +256,13 @@ remote.rdp: ## Open RDP session to Windows instance
 	osascript -e 'tell application "System Events" to keystroke "v" using command down' -e 'tell application "System Events" to key code 36'
 
 remote.sunshine: ## Open the Sunshine web UI for the instance
-	@$(RESOLVE_WINDOWS_IP); \
+	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
+	IP=$$(./scripts/profile-ip $(PROFILE)); \
 	open "https://$$IP:47990" || open -a "Google Chrome" "https://$$IP:47990"
 
 remote.sunshine.wait: ## Wait until the Sunshine API accepts authenticated requests
-	@$(RESOLVE_WINDOWS_IP); \
+	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
+	IP=$$(./scripts/profile-ip $(PROFILE)); \
 	ATTEMPT=1; \
 	MAX_ATTEMPTS=20; \
 	printf '%s\n' "Waiting for Sunshine API on $$IP:47990..."; \
@@ -300,9 +293,9 @@ remote.xpra: ## Launch a remote GUI app via Xpra (requires APP=<cmd>)
 	if [ -z "$(APP)" ]; then echo "Usage: make remote.xpra PROFILE=<name> APP=<command>"; exit 2; fi; \
 	./scripts/profile-xpra $(PROFILE) $(APP)
 
-show-password: ## Display the instance's default password
-	@$(RESOLVE_WINDOWS_PASSWORD); \
-	echo "$$PW"
+show-password: ## Display the instance's default password (Windows)
+	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
+	./scripts/profile-windows-password $(PROFILE)
 
 ssh: ## SSH into the profile's instance
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
@@ -340,7 +333,8 @@ test.update-golden: ## Regenerate tests/golden/*.env from current profile-resolv
 	@UPDATE_GOLDEN=1 ./scripts/test-profiles
 
 upload: ## scp ./upload/* to the instance (skips files that already exist remotely)
-	@$(RESOLVE_WINDOWS_IP); \
+	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
+	IP=$$(./scripts/profile-ip $(PROFILE)); \
 	SSH_OPTS='-o StrictHostKeyChecking=no -o ServerAliveInterval=10 -o WarnWeakCrypto=no-pq-kex -i $(SSH_PUBLIC_KEY_FILE)'; \
 	REMOTE_UPLOAD_DIR='C:\Users\Administrator\upload'; \
 	REMOTE_DESKTOP_DIR='C:\Users\Administrator\Desktop\upload'; \

@@ -5,21 +5,15 @@ set -eu
 # Reads available profiles and prompts the user to pick one.
 # Outputs the selected profile name to stdout.
 # Usage: scripts/profile-menu
-#   Set SKIP_MENU=1 to auto-select the default (for non-interactive use).
-
-DEFAULT_PROFILE="local-vmware-ubuntu-dev-gui"
+#
+# There is no default profile — the user must always pick one explicitly.
+# Fails with a clear error in non-interactive contexts (no TTY).
 
 PROFILES=$(scripts/profiles-list)
 
-if [ -n "${SKIP_MENU:-}" ]; then
-  echo "$DEFAULT_PROFILE"
-  exit 0
-fi
-
-# If not a terminal, output the default
 if [ ! -t 0 ] || [ ! -t 1 ]; then
-  echo "$DEFAULT_PROFILE"
-  exit 0
+  echo "profile-menu: no TTY — pass PROFILE=<name> explicitly" >&2
+  exit 1
 fi
 
 echo ""
@@ -34,14 +28,13 @@ for name in $PROFILES; do
 done
 
 echo ""
-printf "  Select profile [1-%d] (default: %s): " "$((i - 1))" "$DEFAULT_PROFILE"
+printf "  Select profile [1-%d]: " "$((i - 1))"
 
 read -r selection 2>/dev/null || true
 
-# Handle empty input (use default)
 if [ -z "$selection" ]; then
-  echo "$DEFAULT_PROFILE"
-  exit 0
+  echo "Error: no selection" >&2
+  exit 1
 fi
 
 # Handle numeric selection

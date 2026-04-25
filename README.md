@@ -33,10 +33,10 @@ Terraform provider versions are pinned exactly in the Terramate provider templat
 # List available profiles
 make profiles.list
 
-# Pick a profile interactively (also auto-prompts if PROFILE is unset)
+# Pick a profile interactively
 make profiles.menu
 
-# default PROFILE is local-vbox-ubuntu-dev
+# Targets without PROFILE=… will prompt you to pick one
 make validate
 make plan
 ```
