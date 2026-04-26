@@ -10,6 +10,11 @@ if ! is_desktop; then
   exit 0
 fi
 
+if [ "$(dpkg --print-architecture)" != "amd64" ]; then
+  log "Steam only available on amd64 — skipping"
+  exit 0
+fi
+
 log "### 70_steam: installing Steam"
 
 if command -v steam >/dev/null 2>&1 || dpkg -l steam-launcher >/dev/null 2>&1; then
@@ -20,7 +25,6 @@ fi
 sudo dpkg --add-architecture i386
 apt_update_once
 
-# Steam requires the non-free 'multiverse' repo on Ubuntu.
 sudo add-apt-repository -y multiverse || true
 sudo DEBIAN_FRONTEND=noninteractive apt-get update -y
 

@@ -5,13 +5,14 @@
 				profiles.list profiles.menu providers.status provision \
 				provision.clear-state provision.restart reboot \
 				remote.console remote.moonlight remote.moonlight.pair \
-				remote.rdp remote.sunshine remote.sunshine.wait remote.vnc remote.xpra \
-				remote.xpra.start remote.xpra.attach remote.xpra.run \
-				remote.xpra.stop remote.xpra.status remote.xpra.apps \
+				remote.rdp remote.rustdesk remote.rustdesk.info \
+				remote.sunshine remote.sunshine.wait \
+				remote.vnc remote.xpra remote.xpra.apps remote.xpra.attach \
+				remote.xpra.run remote.xpra.start remote.xpra.status \
+				remote.xpra.stop \
 				show-password ssh ssh.wait start status stop \
-				test test.profiles \
-				test.shellcheck test.terraform test.update-golden upload \
-				validate
+				test test.profiles test.shellcheck test.terraform \
+				test.update-golden upload validate
 
 TM_PARALLEL ?= 8
 
@@ -30,6 +31,9 @@ export AWS_SHARED_CREDENTIALS_FILE
 export EPHEMERAL_SUNSHINE_PASSWORD
 export EPHEMERAL_WINDOWS_PASSWORD
 export MY_IP
+export RUSTDESK_KEY
+export RUSTDESK_PASSWORD
+export RUSTDESK_SERVER
 export SSH_PUBLIC_KEY_FILE
 export TRUENAS_API_KEY
 export TRUENAS_API_USER
@@ -159,6 +163,14 @@ remote.moonlight.pair: remote.sunshine.wait ## Pair Moonlight with Sunshine via 
 remote.rdp: ## Open RDP session to Windows instance
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
 	./scripts/remote-rdp $(PROFILE)
+
+remote.rustdesk: ## Open local RustDesk client connected to the instance
+	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
+	./scripts/remote-rustdesk $(PROFILE) connect
+
+remote.rustdesk.info: ## Print RustDesk connection details (ID, password, server)
+	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
+	./scripts/remote-rustdesk $(PROFILE)
 
 remote.sunshine: ## Open the Sunshine web UI for the instance
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \

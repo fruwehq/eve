@@ -214,6 +214,13 @@ profiles:
     bundles: [access-gui-safe, dev-sandbox-core, remote-apps]
     location: tokyo
 
+
+  - name: local-vmware-ubuntu-all
+    machine: local-vmware-medium
+    os: ubuntu-24.04-desktop-amd64
+    init: ssh-ubuntu-cloud-init
+    bundles: [access-gui-streaming, access-gui-safe, dev-sandbox-core, gaming-core, remote-apps]
+    location: tokyo
   - name: truenas-ubuntu-dev-headless
     machine: truenas-scale-medium
     os: ubuntu-24.04-server-amd64

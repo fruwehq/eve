@@ -9,6 +9,22 @@
 - Local catalog overrides (different machine sizes, personal zvol paths, etc.) go in `config/catalog.local.yaml` (git-ignored).
 - Scripts and terraform modules may declare variable defaults as a safety net (e.g. a terraform `default = "..."`) but the canonical, human-readable default always lives in `.env` or the catalog.
 
+## Privacy and sensitive files
+
+**Never read `.env.local`, `config/catalog.local.yaml`, or any other git-ignored file that may contain secrets, credentials, or personal configuration.** These files exist for the user to store sensitive data (API keys, passwords, personal server addresses) that must not be exposed to LLM context. If you need to know a value from these files, ask the user to provide it explicitly rather than reading the file.
+
+## Sorting convention
+
+Keep all lists alphabetically sorted unless there is an explicit ordering requirement (e.g. provisioning step numbers). This applies to:
+
+- `Makefile` — `export` block, `.PHONY` targets, target definitions
+- `.env` — section headers and variable declarations within each section
+- `config/catalog.yaml` — entries within `machines`, `oses`, `inits`, `packages`, `bundles`, `locations`, `profiles`
+- `scripts/profile-provision` — the `state/env` heredoc
+- Any other enumerated lists, arrays, or key-value blocks
+
+When adding a new entry, insert it in alphabetical position rather than appending to the end.
+
 ## Project layout
 
 ```

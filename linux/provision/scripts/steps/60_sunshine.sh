@@ -22,7 +22,9 @@ arch=$(dpkg --print-architecture)
 codename=$(. /etc/os-release && echo "$VERSION_CODENAME")
 case "$arch-$codename" in
   amd64-noble)  asset="sunshine-ubuntu-24.04-amd64.deb" ;;
+  arm64-noble)  asset="sunshine-ubuntu-24.04-arm64.deb" ;;
   amd64-jammy)  asset="sunshine-ubuntu-22.04-amd64.deb" ;;
+  arm64-jammy)  asset="sunshine-ubuntu-22.04-arm64.deb" ;;
   *) log "no known Sunshine package for $arch/$codename"; exit 1 ;;
 esac
 

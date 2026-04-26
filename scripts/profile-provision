@@ -31,10 +31,14 @@ case "$OS_FAMILY" in
     # bundle_packages: one package per line for cheap grep lookup in step scripts
     printf '%s\n' "$BUNDLE_PACKAGES" | tr ',' '\n' > "$STAGE/state/bundle_packages"
     # env file: sourced by runner.sh so steps see OS_UI_MODE / PROFILE_NAME etc.
+    # env file: sourced by runner.sh so steps see OS_UI_MODE / PROFILE_NAME etc.
     cat > "$STAGE/state/env" <<EOF
-export OS_UI_MODE="$OS_UI_MODE"
 export OS_FAMILY="$OS_FAMILY"
+export OS_UI_MODE="$OS_UI_MODE"
 export PROFILE_NAME="$PROFILE_NAME"
+export RUSTDESK_KEY="${RUSTDESK_KEY:-}"
+export RUSTDESK_PASSWORD="${RUSTDESK_PASSWORD:-}"
+export RUSTDESK_SERVER="${RUSTDESK_SERVER:-}"
 EOF
 
     echo "[profile-provision] uploading linux/provision/ to remote"

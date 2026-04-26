@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+USAGE="Usage: scripts/remote-rustdesk <profile> [connect]
+
+Prints the RustDesk connection details for a profile's instance.
+With 'connect', configures the local RustDesk client and opens a connection.
+"
+
+PROFILE="${1:?$USAGE}"
+ACTION="${2:-info}"
+cd "$(git rev-parse --show-toplevel)"
+
+SSH_CMD=(./scripts/profile-ssh "$PROFILE" --)
+
+ID=$("${SSH_CMD[@]}" 'rustdesk --get-id 2>/dev/null' | tr -d '[:space:]' || true)
+if [ -z "$ID" ]; then
+  echo "RustDesk ID not available — is the service running?" >&2
+  exit 1
+fi
+
+SERVER=$("${SSH_CMD[@]}" 'sudo grep -E "^(rendezvous_server|custom-rendezvous-server)" /root/.config/rustdesk/RustDesk2.toml 2>/dev/null | tail -1 | sed "s/^[^=]*= .//;s/.$//"' || true)
+KEY=$("${SSH_CMD[@]}" 'sudo grep "^key " /root/.config/rustdesk/RustDesk2.toml 2>/dev/null | sed "s/^key = .//;s/.$//"' || true)
+
+case "$ACTION" in
+  connect)
+    RUSTDESK_CLI=""
+    for candidate in \
+      rustdesk \
+      /Applications/RustDesk.app/Contents/MacOS/rustdesk \
+      /usr/bin/rustdesk; do
+      if command -v "$candidate" >/dev/null 2>&1 || [ -x "$candidate" ]; then
+        RUSTDESK_CLI="$candidate"
+        break
+      fi
+    done
+    if [ -z "$RUSTDESK_CLI" ]; then
+      echo "RustDesk client not found locally" >&2
+      exit 1
+    fi
+
+    PASSWORD_ARG=""
+    if [ -n "${RUSTDESK_PASSWORD:-}" ]; then
+      PASSWORD_ARG="--password"
+    fi
+
+    echo "Connecting to RustDesk ID $ID..."
+    nohup "$RUSTDESK_CLI" --connect "$ID" ${PASSWORD_ARG:+"$PASSWORD_ARG" "$RUSTDESK_PASSWORD"} >/dev/null 2>&1 &
+    ;;
+  info|*)
+    echo "RustDesk ID:  $ID"
+    echo "Server:       ${SERVER:-(default)}"
+    echo "Key:          ${KEY:-(not set)}"
+    ;;
+esac
