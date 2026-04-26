@@ -2,15 +2,15 @@
 # Open a VNC session to a profile's VM.
 # Usage: scripts/remote-vnc <profile>
 #
-# For vagrant profiles: tunnels VNC (5900) through SSH via vagrant
-# For terraform profiles: tunnels VNC (5900) through SSH via profile-ssh
+# For vagrant profiles: tunnels VNC (5901) through SSH via vagrant
+# For terraform profiles: tunnels VNC (5901) through SSH via profile-ssh
 
 set -euo pipefail
 
 PROFILE="${1:?Usage: scripts/remote-vnc <profile>}"
 cd "$(git rev-parse --show-toplevel)"
 
-VNC_PORT="${VNC_PORT:-5900}"
+VNC_PORT="${VNC_PORT:-5901}"
 LOCAL_PORT="${VNC_LOCAL_PORT:-15900}"
 
 RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)

@@ -35,6 +35,7 @@ export RUSTDESK_KEY
 export RUSTDESK_PASSWORD
 export RUSTDESK_SERVER
 export SSH_PUBLIC_KEY_FILE
+export TIMEZONE
 export TRUENAS_API_KEY
 export TRUENAS_API_USER
 export TRUENAS_HOST
@@ -144,9 +145,13 @@ provision.clear-state: ## Clear remote provisioning state, logs, and downloads (
 
 provision.restart: provision.clear-state provision ## Clear remote state then re-provision
 
-reboot: ## Reboot the instance (Windows)
+reboot: ## Reboot the instance
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	./scripts/profile-ssh $(PROFILE) -- 'shutdown /r /t 0'
+	OS_FAMILY=$$(./scripts/profile-resolve --profile $(PROFILE) --emit env | awk -F= '/^OS_FAMILY=/{print $$2}'); \
+	case "$$OS_FAMILY" in \
+		windows) ./scripts/profile-ssh $(PROFILE) -- 'shutdown /r /t 0' ;; \
+		*) ./scripts/profile-ssh $(PROFILE) -- 'sudo reboot' ;; \
+	esac
 
 remote.console: ## Open the VM's graphical console (VMware Fusion / VirtualBox)
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \

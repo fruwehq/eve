@@ -207,6 +207,13 @@ profiles:
     bundles: [access-headless, dev-sandbox-core]
     location: tokyo
 
+  - name: local-vbox-ubuntu-all
+    machine: local-virtualbox-medium
+    os: ubuntu-24.04-desktop-amd64
+    init: ssh-ubuntu-cloud-init
+    bundles: [access-gui-streaming, access-gui-safe, dev-sandbox-core, gaming-core, remote-apps]
+    location: tokyo
+
   - name: local-vmware-ubuntu-dev-gui
     machine: local-vmware-medium
     os: ubuntu-24.04-desktop-amd64

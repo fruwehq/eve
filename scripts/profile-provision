@@ -30,7 +30,12 @@ case "$OS_FAMILY" in
     mkdir -p "$STAGE/state"
     # bundle_packages: one package per line for cheap grep lookup in step scripts
     printf '%s\n' "$BUNDLE_PACKAGES" | tr ',' '\n' > "$STAGE/state/bundle_packages"
-    # env file: sourced by runner.sh so steps see OS_UI_MODE / PROFILE_NAME etc.
+    # Auto-detect host timezone if not explicitly set
+    _HOST_TZ="${TIMEZONE:-}"
+    if [ -z "$_HOST_TZ" ]; then
+      _LINK=$(readlink /etc/localtime 2>/dev/null || true)
+      _HOST_TZ=$(echo "$_LINK" | sed -n 's|.*/zoneinfo/||p')
+    fi
     # env file: sourced by runner.sh so steps see OS_UI_MODE / PROFILE_NAME etc.
     cat > "$STAGE/state/env" <<EOF
 export OS_FAMILY="$OS_FAMILY"
@@ -39,6 +44,7 @@ export PROFILE_NAME="$PROFILE_NAME"
 export RUSTDESK_KEY="${RUSTDESK_KEY:-}"
 export RUSTDESK_PASSWORD="${RUSTDESK_PASSWORD:-}"
 export RUSTDESK_SERVER="${RUSTDESK_SERVER:-}"
+export TIMEZONE="$_HOST_TZ"
 EOF
 
     echo "[profile-provision] uploading linux/provision/ to remote"

@@ -53,9 +53,7 @@ if [ ! -f ~/.vnc/passwd ]; then
   printf 'vagrant\nvagrant\nn\n' | tigervncpasswd 2>&1
 fi
 
-if [ ! -f ~/.vnc/xstartup ]; then
-  log "### 46_vnc: creating xstartup script"
-  cat > ~/.vnc/xstartup << 'XEOF'
+XSTARTUP_CONTENT=$(cat <<'XEOF'
 #!/bin/sh
 unset SESSION_MANAGER
 unset DBUS_SESSION_BUS_ADDRESS
@@ -68,32 +66,41 @@ eval $(dbus-launch --sh-syntax)
 startxfce4 &
 exec sleep infinity
 XEOF
+)
+
+if [ ! -f ~/.vnc/xstartup ] || [ "$XSTARTUP_CONTENT" != "$(cat ~/.vnc/xstartup)" ]; then
+  log "### 46_vnc: writing xstartup script"
+  printf '%s\n' "$XSTARTUP_CONTENT" > ~/.vnc/xstartup
   chmod +x ~/.vnc/xstartup
 fi
 
 UNIT_PATH=/etc/systemd/system/vncserver.service
-
-if ! sudo test -f "$UNIT_PATH"; then
-  log "### 46_vnc: installing systemd system unit for VNC"
-  sudo tee "$UNIT_PATH" >/dev/null <<EOF
+UNIT_CONTENT=$(cat <<EOF
 [Unit]
-Description=TigerVNC server on display :0
+Description=TigerVNC server on display :1
 After=network.target
 
 [Service]
 Type=forking
 User=$USER
 Environment=HOME=$HOME
-ExecStartPre=/bin/sh -c '/usr/bin/vncserver -kill :0 2>/dev/null || true'
-ExecStart=/usr/bin/vncserver :0 -geometry 1920x1080 -depth 24 -SecurityTypes VncAuth -AlwaysShared
-ExecStop=/usr/bin/vncserver -kill :0
+ExecStartPre=/bin/sh -c '/usr/bin/vncserver -kill :1 2>/dev/null || true'
+ExecStart=/usr/bin/vncserver :1 -geometry 1920x1080 -depth 24 -SecurityTypes VncAuth -AlwaysShared
+ExecStop=/usr/bin/vncserver -kill :1
 Restart=on-success
 RestartSec=3
 
 [Install]
 WantedBy=multi-user.target
 EOF
+)
+
+UNIT_CHANGED=0
+if ! sudo test -f "$UNIT_PATH" || ! echo "$UNIT_CONTENT" | sudo cmp -s - "$UNIT_PATH"; then
+  log "### 46_vnc: writing systemd system unit for VNC"
+  echo "$UNIT_CONTENT" | sudo tee "$UNIT_PATH" >/dev/null
   sudo systemctl daemon-reload
+  UNIT_CHANGED=1
 fi
 
 if sudo systemctl is-enabled vncserver.service >/dev/null 2>&1; then
@@ -103,7 +110,15 @@ else
   sudo systemctl enable vncserver.service
 fi
 
-if sudo systemctl is-active vncserver.service >/dev/null 2>&1; then
+if sudo systemctl is-active vncserver.service >/dev/null 2>&1 && ! ss -tlnp 2>/dev/null | grep -q ':5901 '; then
+  log "### 46_vnc: restarting VNC system unit on display :1"
+  sudo systemctl restart vncserver.service || true
+  sleep 2
+elif [ "$UNIT_CHANGED" = "1" ] && sudo systemctl is-active vncserver.service >/dev/null 2>&1; then
+  log "### 46_vnc: restarting VNC system unit after unit change"
+  sudo systemctl restart vncserver.service || true
+  sleep 2
+elif sudo systemctl is-active vncserver.service >/dev/null 2>&1; then
   log "### 46_vnc: VNC server already running"
 else
   log "### 46_vnc: starting VNC system unit"
@@ -113,8 +128,8 @@ fi
 
 if sudo systemctl is-active vncserver.service >/dev/null 2>&1; then
   log "### 46_vnc: VNC server running (systemd unit)"
-elif ss -tlnp 2>/dev/null | grep -q ':5900 '; then
-  log "### 46_vnc: VNC server running on port 5900"
+elif ss -tlnp 2>/dev/null | grep -q ':5901 '; then
+  log "### 46_vnc: VNC server running on port 5901"
 else
   log "### 46_vnc: WARNING — VNC server may not be running. Check: sudo systemctl status vncserver.service"
 fi
