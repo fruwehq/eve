@@ -7,6 +7,7 @@ Write-Host "#########################################################"
 Write-Host "Applying Windows tuning..."
 
 $changed = $false
+$needsReboot = $false
 
 function Set-RegistryValueIfNeeded {
   param(
@@ -62,6 +63,7 @@ if ($acMonitorTimeout -ne '0x00000000' -or $acStandbyTimeout -ne '0x00000000') {
   powercfg -change -monitor-timeout-ac 0
   powercfg -change -standby-timeout-ac 0
   $changed = $true
+  $needsReboot = $true
 }
 
 # Disable hibernation
@@ -145,6 +147,7 @@ if ($needsLanguageUpdate) {
   Set-WinUserLanguageList -LanguageList $languageList -Force -WarningAction SilentlyContinue
   Set-WinDefaultInputMethodOverride -InputTip $desiredInputTip
   $changed = $true
+  $needsReboot = $true
 }
 
 Set-RegistryValueIfNeeded `
@@ -163,9 +166,11 @@ Set-RegistryValueIfNeeded `
   -Name "Layout File" `
   -Value "kbd106.dll"
 
-if ($changed) {
+if ($needsReboot) {
   Write-Host "Windows tuning changed system settings. Requesting reboot..."
   New-Item $rebootFlag -ItemType File -Force | Out-Null
+} elseif ($changed) {
+  Write-Host "Windows tuning applied registry changes. No reboot needed."
 } else {
   Write-Host "Windows tuning already in desired state. No reboot requested."
 }
