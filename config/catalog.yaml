@@ -237,3 +237,11 @@ profiles:
     bundles: [access-headless, dev-sandbox-core]
     location: tokyo
     lifecycle: *ttl_default
+
+  - name: truenas-ubuntu-all
+    machine: truenas-scale-medium
+    os: ubuntu-24.04-desktop-amd64
+    init: ssh-ubuntu-cloud-init
+    bundles: [access-gui-streaming, access-gui-safe, dev-sandbox-core, gaming-core, remote-apps]
+    location: tokyo
+    lifecycle: *ttl_default
