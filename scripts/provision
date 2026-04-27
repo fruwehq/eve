@@ -49,12 +49,12 @@ EOF
 
     echo "[provision] uploading linux/provision/ to remote"
     # Remote paths are relative to $HOME (SFTP/SCP default) to avoid shell-expansion pitfalls.
-    ./scripts/profile-ssh "$PROFILE" -- 'rm -rf ~/provision/state ~/provision/scripts && mkdir -p ~/provision/state'
-    ./scripts/profile-ssh "$PROFILE" --scp "$STAGE/scripts" 'provision/'
-    ./scripts/profile-ssh "$PROFILE" --scp "$STAGE/state/bundle_packages" 'provision/state/'
-    ./scripts/profile-ssh "$PROFILE" --scp "$STAGE/state/env" 'provision/state/'
+    ./scripts/instance-ssh "$PROFILE" -- 'rm -rf ~/provision/state ~/provision/scripts && mkdir -p ~/provision/state'
+    ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/scripts" 'provision/'
+    ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/state/bundle_packages" 'provision/state/'
+    ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/state/env" 'provision/state/'
     echo "[provision] running bootstrap.sh"
-    ./scripts/profile-ssh "$PROFILE" -- 'chmod +x ~/provision/scripts/bootstrap.sh ~/provision/scripts/runner.sh ~/provision/scripts/steps/*.sh ~/provision/scripts/lib/*.sh && ~/provision/scripts/bootstrap.sh'
+    ./scripts/instance-ssh "$PROFILE" -- 'chmod +x ~/provision/scripts/bootstrap.sh ~/provision/scripts/runner.sh ~/provision/scripts/steps/*.sh ~/provision/scripts/lib/*.sh && ~/provision/scripts/bootstrap.sh'
     ;;
   windows)
     # Windows password: env var override, else terraform output (vultr only).
@@ -82,11 +82,11 @@ EOF
       > ./tmp/secrets.json
 
     echo "[provision] uploading windows/provision/ to remote"
-    ./scripts/profile-ssh "$PROFILE" -- 'New-Item -ItemType Directory -Force C:\Users\Administrator\provision | Out-Null; New-Item -ItemType Directory -Force C:\Users\Administrator\provision\state | Out-Null; if (Test-Path "C:\Users\Administrator\provision\scripts") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\scripts" }'
-    ./scripts/profile-ssh "$PROFILE" --scp windows/provision '/C:/Users/Administrator/'
-    ./scripts/profile-ssh "$PROFILE" --scp ./tmp/secrets.json '/C:/Users/Administrator/provision/state/secrets.json'
+    ./scripts/instance-ssh "$PROFILE" -- 'New-Item -ItemType Directory -Force C:\Users\Administrator\provision | Out-Null; New-Item -ItemType Directory -Force C:\Users\Administrator\provision\state | Out-Null; if (Test-Path "C:\Users\Administrator\provision\scripts") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\scripts" }'
+    ./scripts/instance-ssh "$PROFILE" --scp windows/provision '/C:/Users/Administrator/'
+    ./scripts/instance-ssh "$PROFILE" --scp ./tmp/secrets.json '/C:/Users/Administrator/provision/state/secrets.json'
     echo "[provision] running bootstrap.ps1"
-    ./scripts/profile-ssh "$PROFILE" -- '& "C:\Users\Administrator\provision\scripts\bootstrap.ps1"'
+    ./scripts/instance-ssh "$PROFILE" -- '& "C:\Users\Administrator\provision\scripts\bootstrap.ps1"'
     ;;
   *)
     echo "[provision] unknown os_family: $OS_FAMILY" >&2

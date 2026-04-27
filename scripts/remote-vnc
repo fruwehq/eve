@@ -3,7 +3,7 @@
 # Usage: scripts/remote-vnc <profile>
 #
 # For vagrant profiles: tunnels VNC (5901) through SSH via vagrant
-# For terraform profiles: tunnels VNC (5901) through SSH via profile-ssh
+# For terraform profiles: tunnels VNC (5901) through SSH via instance-ssh
 
 set -euo pipefail
 
@@ -18,7 +18,7 @@ ENGINE=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^ENGINE=/{print $2}')
 SSH_USER=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^SSH_USER=/{print $2}')
 
 echo "[remote-vnc] Checking that remote VNC server is listening on port $VNC_PORT..."
-if ! ./scripts/profile-ssh "$PROFILE" -- "ss -tln 2>/dev/null | grep -q ':$VNC_PORT '"; then
+if ! ./scripts/instance-ssh "$PROFILE" -- "ss -tln 2>/dev/null | grep -q ':$VNC_PORT '"; then
     echo "[remote-vnc] Nothing listening on remote port $VNC_PORT." >&2
     echo "[remote-vnc] Run: make provision PROFILE=$PROFILE" >&2
     exit 1
@@ -33,7 +33,7 @@ if lsof -ti ":$LOCAL_PORT" >/dev/null 2>&1; then
 fi
 
 if [ "$ENGINE" = "vagrant" ]; then
-    IP=$(./scripts/profile-ip "$PROFILE")
+    IP=$(./scripts/instance-ip "$PROFILE")
     SSH_PORT=$(cd ".generated/$PROFILE" && vagrant ssh-config | awk '/Port/ {print $2; exit}')
     PRIV_KEY=$(cd ".generated/$PROFILE" && vagrant ssh-config | awk '/IdentityFile/ {print $2; exit}')
 
@@ -42,7 +42,7 @@ if [ "$ENGINE" = "vagrant" ]; then
         -p "$SSH_PORT" -i "$PRIV_KEY" \
         "vagrant@$IP"
 else
-    IP=$(./scripts/profile-ip "$PROFILE")
+    IP=$(./scripts/instance-ip "$PROFILE")
     [ -n "$IP" ] || { echo "remote-vnc: could not resolve IP" >&2; exit 1; }
 
     KEY_FILE="${SSH_PUBLIC_KEY_FILE:-}"

@@ -5,8 +5,8 @@ set -euo pipefail
 PROFILE="${1:?Usage: scripts/remote-rdp <profile>}"
 cd "$(git rev-parse --show-toplevel)"
 
-IP=$(./scripts/profile-ip "$PROFILE")
-PW=$(./scripts/windows-password "$PROFILE")
+IP=$(./scripts/instance-ip "$PROFILE")
+PW=$(./scripts/instance-password "$PROFILE")
 
 mkdir -p ./tmp
 printf '%s\n' \

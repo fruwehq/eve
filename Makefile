@@ -97,7 +97,7 @@ init.all: generate ## Init all stacks in parallel (set TM_PARALLEL=N)
 
 ip: ## Print the instance IP for a profile
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	./scripts/profile-ip $(PROFILE)
+	./scripts/instance-ip $(PROFILE)
 
 lint: ## Format terramate files in place
 	terramate fmt
@@ -131,7 +131,7 @@ provision: ## Upload and run OS-appropriate provisioning scripts on the instance
 
 provision.clear-state: ## Clear remote provisioning state, logs, and downloads (Windows)
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	./scripts/profile-ssh $(PROFILE) -- 'if (Test-Path "C:\Users\Administrator\provision\state") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\state" }; if (Test-Path "C:\Users\Administrator\provision\logs") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\logs" }; if (Test-Path "C:\Users\Administrator\provision\downloads") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\downloads" }'
+	./scripts/instance-ssh $(PROFILE) -- 'if (Test-Path "C:\Users\Administrator\provision\state") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\state" }; if (Test-Path "C:\Users\Administrator\provision\logs") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\logs" }; if (Test-Path "C:\Users\Administrator\provision\downloads") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\downloads" }'
 
 provision.restart: provision.clear-state provision ## Clear remote state then re-provision
 
@@ -139,8 +139,8 @@ reboot: ## Reboot the instance
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
 	OS_FAMILY=$$(./scripts/profile-resolve --profile $(PROFILE) --emit env | awk -F= '/^OS_FAMILY=/{print $$2}'); \
 	case "$$OS_FAMILY" in \
-		windows) ./scripts/profile-ssh $(PROFILE) -- 'shutdown /r /t 0' ;; \
-		*) ./scripts/profile-ssh $(PROFILE) -- 'sudo reboot' ;; \
+		windows) ./scripts/instance-ssh $(PROFILE) -- 'shutdown /r /t 0' ;; \
+		*) ./scripts/instance-ssh $(PROFILE) -- 'sudo reboot' ;; \
 	esac
 
 remote.console: ## Open the VM's graphical console (VMware Fusion / VirtualBox)
@@ -169,7 +169,7 @@ remote.rustdesk.info: ## Print RustDesk connection details (ID, password, server
 
 remote.sunshine: ## Open the Sunshine web UI for the instance
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	IP=$$(./scripts/profile-ip $(PROFILE)); \
+	IP=$$(./scripts/instance-ip $(PROFILE)); \
 	open "https://$$IP:47990" || open -a "Google Chrome" "https://$$IP:47990"
 
 remote.sunshine.wait: ## Wait until the Sunshine API accepts authenticated requests
@@ -183,42 +183,42 @@ remote.vnc: ## Open VNC viewer to the VM (requires vnc package in profile)
 remote.xpra: ## Start server, launch app, and attach (requires APP=<cmd>)
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
 	if [ -z "$(APP)" ]; then echo "Usage: make remote.xpra PROFILE=<name> APP=<command>"; exit 2; fi; \
-	./scripts/profile-xpra $(PROFILE) start && \
-	./scripts/profile-xpra $(PROFILE) run $(APP) && \
-	./scripts/profile-xpra $(PROFILE) attach
+	./scripts/remote-xpra $(PROFILE) start && \
+	./scripts/remote-xpra $(PROFILE) run $(APP) && \
+	./scripts/remote-xpra $(PROFILE) attach
 
 remote.xpra.apps: ## List available GUI apps on the remote instance
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	./scripts/profile-xpra $(PROFILE) apps
+	./scripts/remote-xpra $(PROFILE) apps
 
 remote.xpra.attach: ## Attach local xpra client to the running session
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	./scripts/profile-xpra $(PROFILE) attach
+	./scripts/remote-xpra $(PROFILE) attach
 
 remote.xpra.run: ## Run an additional app on the existing Xpra session (requires APP=<cmd>)
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
 	if [ -z "$(APP)" ]; then echo "Usage: make remote.xpra.run PROFILE=<name> APP=<command>"; exit 2; fi; \
-	./scripts/profile-xpra $(PROFILE) run $(APP)
+	./scripts/remote-xpra $(PROFILE) run $(APP)
 
 remote.xpra.start: ## Start the xpra server on the remote
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	./scripts/profile-xpra $(PROFILE) start
+	./scripts/remote-xpra $(PROFILE) start
 
 remote.xpra.status: ## Show xpra server status
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	./scripts/profile-xpra $(PROFILE) status
+	./scripts/remote-xpra $(PROFILE) status
 
 remote.xpra.stop: ## Stop the remote xpra server
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	./scripts/profile-xpra $(PROFILE) stop
+	./scripts/remote-xpra $(PROFILE) stop
 
 show-password: ## Display the instance's default password (Windows)
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	./scripts/windows-password $(PROFILE)
+	./scripts/instance-password $(PROFILE)
 
 ssh: ## SSH into the profile's instance
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	./scripts/profile-ssh $(PROFILE)
+	./scripts/instance-ssh $(PROFILE)
 
 ssh.wait: ## Wait until SSH on the profile's instance accepts connections
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \

@@ -19,7 +19,7 @@ while [ "$i" -le "$MAX" ]; do
       exit 0
     fi
   else
-    if ./scripts/profile-ssh "$PROFILE" -- exit 0 >/dev/null 2>&1; then
+    if ./scripts/instance-ssh "$PROFILE" -- exit 0 >/dev/null 2>&1; then
       echo "SSH ready for profile $PROFILE"
       exit 0
     fi

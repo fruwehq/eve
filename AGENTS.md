@@ -43,13 +43,13 @@ scripts/
   profile-run                 # Interactive dispatcher when PROFILE is unset
   profile-menu                # Interactive profile picker (fzf-style)
   profiles-list               # List profiles with details
-  profile-ip / profile-ssh    # Instance IP + SSH wrappers (engine/provider aware)
+  instance-ip / instance-ssh    # Instance IP + SSH wrappers (engine/provider aware)
   tf-env                      # Emits TF_VAR_* exports, gated by provider
   provision                   # Upload + run the OS-appropriate provisioning tree
   ssh-wait                    # Poll SSH until reachable
   logs                        # Stream remote provisioning logs
   start / stop / status       # Power on/off and status for all providers
-  windows-password            # Display the instance's default password (Windows)
+  instance-password            # Display the instance's default password (Windows)
   tf-init / tf-plan / tf-apply / tf-destroy  # Terraform dispatchers (profile-driven)
   vagrant-up / vagrant-destroy  # Vagrant dispatchers (for local-* providers)
   truenas-cloudinit-upload    # Generates NoCloud seed ISO and uploads to TrueNAS REST API

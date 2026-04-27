@@ -11,7 +11,7 @@ PROFILE="${1:?$USAGE}"
 ACTION="${2:-info}"
 cd "$(git rev-parse --show-toplevel)"
 
-SSH_CMD=(./scripts/profile-ssh "$PROFILE" --)
+SSH_CMD=(./scripts/instance-ssh "$PROFILE" --)
 
 ID=$("${SSH_CMD[@]}" 'rustdesk --get-id 2>/dev/null' | tr -d '[:space:]' || true)
 if [ -z "$ID" ]; then

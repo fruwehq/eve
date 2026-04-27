@@ -11,7 +11,7 @@ if [ ! -d ./upload ]; then
   exit 0
 fi
 
-IP=$(./scripts/profile-ip "$PROFILE")
+IP=$(./scripts/instance-ip "$PROFILE")
 SSH_OPTS="-o StrictHostKeyChecking=no -o ServerAliveInterval=10 -o WarnWeakCrypto=no-pq-kex -i ${SSH_PUBLIC_KEY_FILE}"
 REMOTE_UPLOAD_DIR='C:\Users\Administrator\upload'
 REMOTE_DESKTOP_DIR='C:\Users\Administrator\Desktop\upload'

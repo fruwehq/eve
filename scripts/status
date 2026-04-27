@@ -104,7 +104,7 @@ case "$ENGINE" in
       esac
 
       if [ "$VM_STATUS" = "running" ]; then
-        IP=$(./scripts/profile-ip "$PROFILE" 2>/dev/null || true)
+        IP=$(./scripts/instance-ip "$PROFILE" 2>/dev/null || true)
         if [ -n "$IP" ]; then
           printf '%-15s %s\n' "IP:" "$IP"
         fi

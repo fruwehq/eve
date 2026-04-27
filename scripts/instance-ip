@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Resolve the public/reachable IP of a profile's instance.
-# Usage: scripts/profile-ip <profile>
+# Usage: scripts/instance-ip <profile>
 #
 # Dispatches by engine/provider:
 #   - terraform + aws         -> output "public_ip"
@@ -10,7 +10,7 @@
 
 set -euo pipefail
 
-PROFILE="${1:?Usage: scripts/profile-ip <profile>}"
+PROFILE="${1:?Usage: scripts/instance-ip <profile>}"
 cd "$(git rev-parse --show-toplevel)"
 
 RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
@@ -26,7 +26,7 @@ case "$ENGINE:$PROVIDER" in
     terramate run --quiet --tags="$TAGS-services" -- terraform output -raw vultr_instance_main_ip
     ;;
   terraform:truenas)
-    echo "profile-ip: truenas VM IP must be resolved via DHCP lease / DNS on TrueNAS host" >&2
+    echo "instance-ip: truenas VM IP must be resolved via DHCP lease / DNS on TrueNAS host" >&2
     exit 2
     ;;
   vagrant:*)
@@ -34,7 +34,7 @@ case "$ENGINE:$PROVIDER" in
     vagrant ssh-config | awk '/HostName/ {print $2; exit}'
     ;;
   *)
-    echo "profile-ip: unsupported engine/provider: $ENGINE/$PROVIDER" >&2
+    echo "instance-ip: unsupported engine/provider: $ENGINE/$PROVIDER" >&2
     exit 2
     ;;
 esac

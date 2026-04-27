@@ -8,7 +8,7 @@ cd "$(git rev-parse --show-toplevel)"
 PKGS=$(./scripts/profile-resolve --profile "$PROFILE" --emit env | awk -F= '/^BUNDLE_PACKAGES/{print $2}')
 echo "$PKGS" | tr ',' '\n' | grep -qx sunshine || { echo "sunshine not in bundle — skipping"; exit 0; }
 
-IP=$(./scripts/profile-ip "$PROFILE")
+IP=$(./scripts/instance-ip "$PROFILE")
 PIN=1234
 PAIR_RESPONSE_FILE=./tmp/moonlight-pair-response.json
 
