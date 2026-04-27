@@ -45,6 +45,7 @@ export EPHEMERAL_SUNSHINE_PASSWORD="${EPHEMERAL_SUNSHINE_PASSWORD:-}"
 export RUSTDESK_KEY="${RUSTDESK_KEY:-}"
 export RUSTDESK_PASSWORD="${RUSTDESK_PASSWORD:-}"
 export RUSTDESK_SERVER="${RUSTDESK_SERVER:-}"
+export SUNSHINE_VERSION="${SUNSHINE_VERSION:-}"
 export TIMEZONE="$_HOST_TZ"
 EOF
 
@@ -82,7 +83,8 @@ EOF
       --arg rk "${RUSTDESK_KEY:-}" \
       --arg rp "${RUSTDESK_PASSWORD:-}" \
       --arg rs "${RUSTDESK_SERVER:-}" \
-      '{windows_password: $wp, sunshine_password: $sp, rustdesk_key: $rk, rustdesk_password: $rp, rustdesk_server: $rs}' \
+      --arg sv "${SUNSHINE_VERSION:-}" \
+      '{windows_password: $wp, sunshine_password: $sp, rustdesk_key: $rk, rustdesk_password: $rp, rustdesk_server: $rs, sunshine_version: $sv}' \
       > ./tmp/secrets.json
 
     echo "[provision] uploading windows/provision/ to remote"

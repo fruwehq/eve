@@ -20,37 +20,25 @@ if ($alreadyInstalled) {
 }
 
 if (-not $alreadyInstalled) {
-  # Resolve latest Windows installer asset via GitHub API
-  $headers = @{ "User-Agent"="Mozilla/5.0"; "Accept"="application/vnd.github+json" }
-  $api = "https://api.github.com/repos/LizardByte/Sunshine/releases/latest"
-
-  $release = $null
-  for ($i = 1; $i -le 5; $i++) {
+  $sunshineVersion = $null
+  if ($env:SUNSHINE_VERSION) {
+    $sunshineVersion = $env:SUNSHINE_VERSION
+  } elseif ((Test-Path $secretsFile)) {
     try {
-      $release = Invoke-RestMethod -Uri $api -Headers $headers
-      break
-    } catch {
-      if ($i -eq 5) { throw }
-      Start-Sleep -Seconds 2
-    }
+      $secrets = Get-Content $secretsFile | ConvertFrom-Json
+      $sunshineVersion = $secrets.sunshine_version
+    } catch {}
   }
 
-  # Prefer the canonical Windows installer asset name used by Sunshine releases
-  $asset = $release.assets | Where-Object { $_.name -eq "Sunshine-Windows-AMD64-installer.exe" } | Select-Object -First 1
-
-  # Fallback (if naming changes slightly in the future)
-  if (-not $asset) {
-    $asset = $release.assets | Where-Object { $_.name -match "^Sunshine-Windows-.*-installer\.exe$" } | Select-Object -First 1
+  if (-not $sunshineVersion) {
+    throw "SUNSHINE_VERSION must be set in .env"
   }
 
-  if (-not $asset) {
-    throw "Could not find a Windows installer asset in the latest Sunshine release. Assets: $($release.assets.name -join ', ')"
-  }
+  $asset = "Sunshine-Windows-AMD64-installer.exe"
+  $url = "https://github.com/LizardByte/Sunshine/releases/download/v$sunshineVersion/$asset"
+  $file = "C:\Users\Administrator\provision\downloads\sunshine\$asset"
 
-  $url  = $asset.browser_download_url
-  $file = "C:\Users\Administrator\provision\downloads\sunshine\Sunshine-Windows-AMD64-installer.exe"
-
-  Write-Host "Downloading: $($asset.name)"
+  Write-Host "Downloading: $asset (v$sunshineVersion)"
   Download-File -Url $url -OutFile $file -SkipIfExists
   Unblock-File $file -ErrorAction SilentlyContinue
 

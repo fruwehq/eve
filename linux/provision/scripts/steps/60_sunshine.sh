@@ -17,22 +17,15 @@ if ! command -v sunshine >/dev/null 2>&1; then
   # shellcheck disable=SC1091
   codename=$(. /etc/os-release && echo "$VERSION_CODENAME")
   case "$arch-$codename" in
-    amd64-noble)  asset="sunshine-ubuntu-24.04-amd64.deb" ;;
-    arm64-noble)  asset="sunshine-ubuntu-24.04-arm64.deb" ;;
-    amd64-jammy)  asset="sunshine-ubuntu-22.04-amd64.deb" ;;
-    arm64-jammy)  asset="sunshine-ubuntu-22.04-arm64.deb" ;;
+    amd64-noble|amd64-resolute)    asset="sunshine-ubuntu-24.04-amd64.deb" ;;
+    arm64-noble|arm64-resolute)    asset="sunshine-ubuntu-24.04-arm64.deb" ;;
+    amd64-jammy)                   asset="sunshine-ubuntu-22.04-amd64.deb" ;;
+    arm64-jammy)                   asset="sunshine-ubuntu-22.04-arm64.deb" ;;
     *) log "no known Sunshine package for $arch/$codename"; exit 1 ;;
   esac
 
-  api="https://api.github.com/repos/LizardByte/Sunshine/releases/latest"
-  url=$(curl -fsSL "$api" \
-    | jq -r --arg name "$asset" '.assets[] | select(.name == $name) | .browser_download_url' \
-    | head -n1)
-
-  if [ -z "$url" ]; then
-    log "could not resolve Sunshine asset $asset from latest release"
-    exit 1
-  fi
+  : "${SUNSHINE_VERSION:?SUNSHINE_VERSION must be set in .env}"
+  url="https://github.com/LizardByte/Sunshine/releases/download/v${SUNSHINE_VERSION}/${asset}"
 
   deb="$DOWNLOADS_DIR/$asset"
   download "$url" "$deb"
