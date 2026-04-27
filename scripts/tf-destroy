@@ -20,5 +20,5 @@ echo "[tf-destroy] profile=$PROFILE tags=$TAGS"
 
 terramate generate
 
-eval "$(./scripts/profile-tf-env "$PROFILE")"
+eval "$(./scripts/tf-env "$PROFILE")"
 terramate run --tags="$TAGS" --reverse -- terraform destroy -auto-approve

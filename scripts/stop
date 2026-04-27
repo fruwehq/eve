@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PROFILE="${1:?Usage: scripts/profile-start <profile>}"
+PROFILE="${1:?Usage: scripts/stop <profile>}"
 cd "$(git rev-parse --show-toplevel)"
 
 RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
@@ -19,67 +19,67 @@ tf_attr() {
 
 case "$ENGINE" in
   vagrant)
-    exec ./scripts/vagrant-up "$PROFILE"
+    exec ./scripts/vagrant-stop "$PROFILE"
     ;;
   terraform)
     TAGS=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^STACK_TAGS=/{print $2}')
 
     STATE_JSON=$(terramate run --quiet --tags="$TAGS-services" -- terraform show -json 2>/dev/null) || true
     if [ -z "$STATE_JSON" ]; then
-      echo "[profile-start] No instance in state. Run 'make up PROFILE=$PROFILE' first." >&2
+      echo "[stop] No instance in state." >&2
       exit 1
     fi
 
     case "$PROVIDER" in
       aws)
         RAW=$(tf_attr "$STATE_JSON" "aws_instance.main" "instance_state")
-        if [ "$RAW" = "running" ]; then
-          echo "[profile-start] Already running"
+        if [ "$RAW" = "stopped" ]; then
+          echo "[stop] Already stopped"
           exit 0
         fi
         INSTANCE_ID=$(terramate run --quiet --tags="$TAGS-services" -- terraform output -raw instance_id)
         REGION=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^LOCATION_REGION=/{print $2}')
-        echo "[profile-start] Starting AWS instance $INSTANCE_ID in $REGION"
-        aws ec2 start-instances --instance-ids "$INSTANCE_ID" --region "$REGION" --output table
+        echo "[stop] Stopping AWS instance $INSTANCE_ID in $REGION"
+        aws ec2 stop-instances --instance-ids "$INSTANCE_ID" --region "$REGION" --output table
         ;;
       vultr)
         RAW=$(tf_attr "$STATE_JSON" "vultr_instance.default" "power_status")
-        if [ "$RAW" = "running" ]; then
-          echo "[profile-start] Already running"
+        if [ "$RAW" = "stopped" ]; then
+          echo "[stop] Already stopped"
           exit 0
         fi
         INSTANCE_ID=$(terramate run --quiet --tags="$TAGS-services" -- terraform output -raw instance_id)
-        echo "[profile-start] Starting Vultr instance $INSTANCE_ID"
+        echo "[stop] Halting Vultr instance $INSTANCE_ID"
         HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
           -H "Authorization: Bearer ${VULTR_API_KEY}" \
-          "https://api.vultr.com/v2/instances/$INSTANCE_ID/start")
+          "https://api.vultr.com/v2/instances/$INSTANCE_ID/halt")
         if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
-          echo "[profile-start] Instance start initiated (HTTP $HTTP_CODE)"
+          echo "[stop] Instance halt initiated (HTTP $HTTP_CODE)"
         else
-          echo "[profile-start] Failed to start instance (HTTP $HTTP_CODE)" >&2
+          echo "[stop] Failed to halt instance (HTTP $HTTP_CODE)" >&2
           exit 1
         fi
         ;;
       truenas)
         RAW=$(tf_attr "$STATE_JSON" "truenas_vm.this" "state")
-        if [ "${RAW^^}" = "RUNNING" ]; then
-          echo "[profile-start] Already running"
+        if [ "${RAW^^}" = "STOPPED" ]; then
+          echo "[stop] Already stopped"
           exit 0
         fi
         VM_ID=$(terramate run --quiet --tags="$TAGS-services" -- terraform output -raw truenas_vm_id)
-        echo "[profile-start] Starting TrueNAS VM $VM_ID"
+        echo "[stop] Stopping TrueNAS VM $VM_ID"
         HTTP_CODE=$(curl -ksS -o /dev/null -w "%{http_code}" -X POST \
           -H "Authorization: Bearer ${TRUENAS_API_KEY}" \
-          "https://${TRUENAS_HOST}/api/v2.0/vm/id/$VM_ID/start")
+          "https://${TRUENAS_HOST}/api/v2.0/vm/id/$VM_ID/stop")
         if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
-          echo "[profile-start] VM start initiated (HTTP $HTTP_CODE)"
+          echo "[stop] VM stop initiated (HTTP $HTTP_CODE)"
         else
-          echo "[profile-start] Failed to start VM (HTTP $HTTP_CODE)" >&2
+          echo "[stop] Failed to stop VM (HTTP $HTTP_CODE)" >&2
           exit 1
         fi
         ;;
       *)
-        echo "[profile-start] Unsupported provider: $PROVIDER" >&2
+        echo "[stop] Unsupported provider: $PROVIDER" >&2
         exit 1
         ;;
     esac
@@ -87,7 +87,7 @@ case "$ENGINE" in
     terramate run --quiet --tags="$TAGS-services" -- terraform refresh 2>/dev/null || true
     ;;
   *)
-    echo "[profile-start] Unsupported engine: $ENGINE" >&2
+    echo "[stop] Unsupported engine: $ENGINE" >&2
     exit 1
     ;;
 esac

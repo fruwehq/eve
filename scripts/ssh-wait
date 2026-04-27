@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Wait until SSH on the profile's instance accepts connections.
-# Usage: scripts/profile-ssh-wait <profile> [max-attempts]
+# Usage: scripts/ssh-wait <profile> [max-attempts]
 
 set -euo pipefail
 
-PROFILE="${1:?Usage: scripts/profile-ssh-wait <profile> [max-attempts]}"
+PROFILE="${1:?Usage: scripts/ssh-wait <profile> [max-attempts]}"
 MAX=${2:-60}
 cd "$(git rev-parse --show-toplevel)"
 

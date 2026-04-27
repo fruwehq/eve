@@ -4,7 +4,7 @@ set -eu
 PROFILE="${1:-}"
 
 if [ -z "$PROFILE" ]; then
-  echo "usage: scripts/profile-tf-env <profile>" >&2
+  echo "usage: scripts/tf-env <profile>" >&2
   exit 2
 fi
 

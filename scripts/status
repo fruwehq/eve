@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PROFILE="${1:?Usage: scripts/profile-status <profile>}"
+PROFILE="${1:?Usage: scripts/status <profile>}"
 cd "$(git rev-parse --show-toplevel)"
 
 RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)

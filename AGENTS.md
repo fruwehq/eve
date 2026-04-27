@@ -20,7 +20,7 @@ Keep all lists alphabetically sorted unless there is an explicit ordering requir
 - `Makefile` — `export` block, `.PHONY` targets, target definitions
 - `.env` — section headers and variable declarations within each section
 - `config/catalog.yaml` — entries within `machines`, `oses`, `inits`, `packages`, `bundles`, `locations`, `profiles`
-- `scripts/profile-provision` — the `state/env` heredoc
+- `scripts/provision` — the `state/env` heredoc
 - Any other enumerated lists, arrays, or key-value blocks
 
 When adding a new entry, insert it in alphabetical position rather than appending to the end.
@@ -40,14 +40,16 @@ stacks/
   aws/        truenas/        vultr/       # 10-shared (networking) + 20-services per provider
 scripts/
   profile-resolve             # Resolves a profile name → env / JSON / Vagrantfile
-  profile-tf-env              # Emits TF_VAR_* exports, gated by provider
   profile-run                 # Interactive dispatcher when PROFILE is unset
   profile-menu                # Interactive profile picker (fzf-style)
   profiles-list               # List profiles with details
   profile-ip / profile-ssh    # Instance IP + SSH wrappers (engine/provider aware)
-  profile-ssh-wait            # Poll SSH until reachable
-  profile-provision           # Upload + run the OS-appropriate provisioning tree
-  profile-logs                # Stream remote provisioning logs
+  tf-env                      # Emits TF_VAR_* exports, gated by provider
+  provision                   # Upload + run the OS-appropriate provisioning tree
+  ssh-wait                    # Poll SSH until reachable
+  logs                        # Stream remote provisioning logs
+  start / stop / status       # Power on/off and status for all providers
+  windows-password            # Display the instance's default password (Windows)
   tf-init / tf-plan / tf-apply / tf-destroy  # Terraform dispatchers (profile-driven)
   vagrant-up / vagrant-destroy  # Vagrant dispatchers (for local-* providers)
   truenas-cloudinit-upload    # Generates NoCloud seed ISO and uploads to TrueNAS REST API
@@ -67,7 +69,7 @@ tests/golden/                  # Frozen profile-resolve env snapshots
 
 1. Add it (commented, with its default) to `.env` with a short inline comment.
 2. Export it in the `Makefile` export block.
-3. Thread it through `scripts/profile-tf-env` as a `TF_VAR_*` if terraform needs it (remember to gate it inside the right `PROVIDER` case), or use it directly via the exported environment.
+3. Thread it through `scripts/tf-env` as a `TF_VAR_*` if terraform needs it (remember to gate it inside the right `PROVIDER` case), or use it directly via the exported environment.
 4. Do **not** use `${VAR:-fallback}` in scripts — the fallback belongs in `.env`.
 
 ## Adding a new profile / machine / OS / bundle
@@ -81,7 +83,7 @@ tests/golden/                  # Frozen profile-resolve env snapshots
 
 - Provider blocks and `required_providers` live in `providers.tm.hcl` files, not in stack or resource config files.
 - Each provider's variables (host, key paths, ports) are declared alongside the provider block in the same generated file.
-- Profile-driven values (region, instance type, plan, OS id, AZ) are threaded through as `TF_VAR_*` from `scripts/profile-tf-env`; do **not** hardcode them in stack globals.
+- Profile-driven values (region, instance type, plan, OS id, AZ) are threaded through as `TF_VAR_*` from `scripts/tf-env`; do **not** hardcode them in stack globals.
 - TrueNAS is a special case: the parent `stacks/truenas/providers.tm.hcl` generates only `required_version`; the child `stacks/truenas/20-services/providers.tm.hcl` generates the full provider + variables (which the module at `modules/truenas/vm.tm.hcl` then relies on — see the note at `null_resource.cloudinit_iso` about `var.truenas_host`).
 
 ## Catalog kinds: vm vs metal

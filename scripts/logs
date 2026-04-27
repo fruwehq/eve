@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Stream the remote provisioning logs for a profile.
-# Usage: scripts/profile-logs <profile>
+# Usage: scripts/logs <profile>
 
 set -euo pipefail
 
-PROFILE="${1:?Usage: scripts/profile-logs <profile>}"
+PROFILE="${1:?Usage: scripts/logs <profile>}"
 cd "$(git rev-parse --show-toplevel)"
 
 RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
@@ -20,7 +20,7 @@ case "$OS_FAMILY" in
     exec ./scripts/profile-ssh "$PROFILE" -- "if (Test-Path 'C:\\Users\\Administrator\\provision\\scripts\\logs.ps1') { & 'C:\\Users\\Administrator\\provision\\scripts\\logs.ps1' } else { Write-Output 'No logs script found. Run make provision first.' }"
     ;;
   *)
-    echo "[profile-logs] unknown os_family: $OS_FAMILY" >&2
+    echo "[logs] unknown os_family: $OS_FAMILY" >&2
     exit 2
     ;;
 esac

@@ -104,7 +104,7 @@ lint: ## Format terramate files in place
 
 logs: ## Stream the remote provisioning logs for a profile (OS-aware)
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	./scripts/profile-logs $(PROFILE)
+	./scripts/logs $(PROFILE)
 
 plan: ## Plan profile changes (terraform or vagrant)
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
@@ -127,7 +127,7 @@ providers.status: ## Check provider configuration and connectivity
 
 provision: ## Upload and run OS-appropriate provisioning scripts on the instance
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	./scripts/profile-provision $(PROFILE)
+	./scripts/provision $(PROFILE)
 
 provision.clear-state: ## Clear remote provisioning state, logs, and downloads (Windows)
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
@@ -214,7 +214,7 @@ remote.xpra.stop: ## Stop the remote xpra server
 
 show-password: ## Display the instance's default password (Windows)
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	./scripts/profile-windows-password $(PROFILE)
+	./scripts/windows-password $(PROFILE)
 
 ssh: ## SSH into the profile's instance
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
@@ -222,19 +222,19 @@ ssh: ## SSH into the profile's instance
 
 ssh.wait: ## Wait until SSH on the profile's instance accepts connections
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	./scripts/profile-ssh-wait $(PROFILE)
+	./scripts/ssh-wait $(PROFILE)
 
 start: up ## Start (power on) a stopped instance (runs up first if not created)
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	./scripts/profile-start $(PROFILE)
+	./scripts/start $(PROFILE)
 
 status: ## Show VM status (running/stopped/not created) and IP
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	./scripts/profile-status $(PROFILE)
+	./scripts/status $(PROFILE)
 
 stop: ## Stop (power off) a running instance without destroying
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	./scripts/profile-stop $(PROFILE)
+	./scripts/stop $(PROFILE)
 
 test: ## Run all tests (profiles, terraform validate, shellcheck)
 	@./scripts/test
