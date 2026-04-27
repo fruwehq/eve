@@ -90,9 +90,9 @@ case "$ENGINE" in
           ;;
         truenas)
           RAW=$(tf_attr "$STATE_JSON" "truenas_vm.this" "state")
-          case "${RAW^^}" in
-            RUNNING) VM_STATUS="running" ;;
-            STOPPED) VM_STATUS="stopped" ;;
+          case "$RAW" in
+            [Rr][Uu][Nn][Nn][Ii][Nn][Gg]) VM_STATUS="running" ;;
+            [Ss][Tt][Oo][Pp][Pp][Ee][Dd]) VM_STATUS="stopped" ;;
             "") VM_STATUS="not created" ;;
             *) VM_STATUS="$RAW" ;;
           esac
