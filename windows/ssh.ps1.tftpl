@@ -1,3 +1,6 @@
+$logFile = "C:\Windows\Temp\vultr-startup-cmd.log"
+Start-Transcript -Path $logFile -Append -Force
+
 Write-Host "Installing OpenSSH Server..."
 #
 # --- Install user's SSH public key ---
@@ -58,8 +61,7 @@ if (Test-Path $config) {
 }
 
 # Install PowerShell 7 if it is not already present. Wait for winget to become available first.
-# winget may install PS7 as an MSIX package (e.g. to WindowsApps) rather than the traditional
-# MSI path, so we use Get-Command to resolve the actual pwsh.exe location after install.
+# All downstream provisioning scripts require PS7, so this is a hard requirement.
 $pwshCmd = Get-Command pwsh -ErrorAction SilentlyContinue
 if (-not $pwshCmd) {
     Write-Host "Waiting for winget to become available..."
@@ -78,27 +80,25 @@ if (-not $pwshCmd) {
     }
 
     if (-not $wingetCmd) {
-        Write-Host "WARNING: winget did not become available. Falling back to Windows PowerShell 5.1."
-    } else {
-        Write-Host "Installing PowerShell 7..."
-        & $wingetCmd.Source install --id Microsoft.PowerShell --source winget --accept-package-agreements --accept-source-agreements
-        $pwshCmd = Get-Command pwsh -ErrorAction SilentlyContinue
+        Write-Error "FATAL: winget did not become available. Cannot install PowerShell 7."
+        Stop-Transcript
+        exit 1
     }
+
+    Write-Host "Installing PowerShell 7..."
+    & $wingetCmd.Source install --id Microsoft.PowerShell --source winget --accept-package-agreements --accept-source-agreements
+    $pwshCmd = Get-Command pwsh -ErrorAction SilentlyContinue
 
     if (-not $pwshCmd) {
-        Write-Host "WARNING: PowerShell 7 not found after install. Falling back to Windows PowerShell 5.1."
-    } else {
-        Write-Host "PowerShell 7 installed at $($pwshCmd.Source)"
+        Write-Error "FATAL: PowerShell 7 not found after install."
+        Stop-Transcript
+        exit 1
     }
+
+    Write-Host "PowerShell 7 installed at $($pwshCmd.Source)"
 }
 
-# Configure the SSH default shell. Prefer PowerShell 7 if installed, otherwise fall back to Windows PowerShell.
-$defaultShell = if ($pwshCmd) {
-    $pwshCmd.Source
-} else {
-    Write-Host "WARNING: Using Windows PowerShell 5.1 as default SSH shell."
-    "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
-}
+$defaultShell = $pwshCmd.Source
 Write-Host "Setting OpenSSH DefaultShell to $defaultShell"
 
 # Enable CTRL-D in PowerShell profile (only if PS7 is available)
@@ -135,3 +135,5 @@ Start-Service sshd
 Write-Host "SSH setup complete."
 Write-Host "You can now connect using:"
 Write-Host "ssh Administrator@<SERVER_IP>"
+
+Stop-Transcript

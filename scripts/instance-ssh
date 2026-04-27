@@ -49,7 +49,7 @@ else
 fi
 
 SSH_OPTS=(-o StrictHostKeyChecking=no -o ServerAliveInterval=10 -o WarnWeakCrypto=no-pq-kex)
-[ -n "$PRIV_KEY" ] && SSH_OPTS+=(-i "$PRIV_KEY")
+[ -n "$PRIV_KEY" ] && SSH_OPTS+=(-i "$PRIV_KEY" -o IdentitiesOnly=yes)
 
 if [ "${1:-}" = "--scp" ]; then
   shift
