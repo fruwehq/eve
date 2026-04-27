@@ -90,6 +90,13 @@ Set-RegistryValueIfNeeded `
   -Type DWord `
   -Value 1
 
+# Disable Server Manager auto-launch at logon
+Set-RegistryValueIfNeeded `
+  -Path "HKLM:\SOFTWARE\Microsoft\ServerManager" `
+  -Name DoNotOpenServerManagerAtLogon `
+  -Type DWord `
+  -Value 1
+
 # Configure Windows auto-logon for the local Administrator account
 Set-RegistryValueIfNeeded -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" -Name AutoAdminLogon -Value "1"
 Set-RegistryValueIfNeeded -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" -Name DefaultUserName -Value $User
