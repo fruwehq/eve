@@ -106,9 +106,9 @@ State is tracked in `$HOME/provision/state/state.json` on the VM — provisionin
 
 ## Remote GUI apps via Xpra (no full desktop)
 
-Xpra forwards individual remote Linux applications over SSH and renders them as native-looking windows on the local host — useful when you want one remote app (e.g. a browser, IDE, or X11 tool) without pulling up a full remote desktop. Xpra is bundle-gated by the `remote-apps` bundle, so it is only installed on profiles that opt in.
+Xpra forwards individual remote applications over SSH and renders them as native-looking windows on the local host — useful when you want one remote app (e.g. a browser, IDE, or X11 tool) without pulling up a full remote desktop. Xpra is bundle-gated by the `remote-apps` bundle, so it is only installed on profiles that opt in.
 
-> Linux profiles only. Windows xpra only supports whole-desktop "shadow" mode, which doesn't add anything over Sunshine/RDP/RustDesk — for Windows profiles use `make remote.sunshine`, `make remote.rdp`, or `make remote.rustdesk`.
+> Linux profiles use virtual displays (`xpra start :N`). Windows profiles use shadow mode via Scheduled Task + SSH tunnel.
 
 ### Local install (macOS)
 

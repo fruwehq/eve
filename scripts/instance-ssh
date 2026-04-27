@@ -48,7 +48,7 @@ else
   PRIV_KEY="${SSH_PRIVATE_KEY_FILE:-}"
 fi
 
-SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=10)
+SSH_OPTS=(-o StrictHostKeyChecking=no -o ServerAliveInterval=10 -o WarnWeakCrypto=no-pq-kex)
 [ -n "$PRIV_KEY" ] && SSH_OPTS+=(-i "$PRIV_KEY")
 
 if [ "${1:-}" = "--scp" ]; then

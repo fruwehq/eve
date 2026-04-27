@@ -58,8 +58,10 @@ if (Test-Path $config) {
 }
 
 # Install PowerShell 7 if it is not already present. Wait for winget to become available first.
-$pwsh7Path = "C:\Program Files\PowerShell\7\pwsh.exe"
-if (-not (Test-Path $pwsh7Path)) {
+# winget may install PS7 as an MSIX package (e.g. to WindowsApps) rather than the traditional
+# MSI path, so we use Get-Command to resolve the actual pwsh.exe location after install.
+$pwshCmd = Get-Command pwsh -ErrorAction SilentlyContinue
+if (-not $pwshCmd) {
     Write-Host "Waiting for winget to become available..."
     $wingetCmd = $null
     $maxAttempts = 30
@@ -76,37 +78,48 @@ if (-not (Test-Path $pwsh7Path)) {
     }
 
     if (-not $wingetCmd) {
-        throw "winget did not become available in time."
+        Write-Host "WARNING: winget did not become available. Falling back to Windows PowerShell 5.1."
+    } else {
+        Write-Host "Installing PowerShell 7..."
+        & $wingetCmd.Source install --id Microsoft.PowerShell --source winget --accept-package-agreements --accept-source-agreements
+        $pwshCmd = Get-Command pwsh -ErrorAction SilentlyContinue
     }
 
-    Write-Host "Installing PowerShell 7..."
-    & $wingetCmd.Source install --id Microsoft.PowerShell --source winget --accept-package-agreements --accept-source-agreements
-
-    if (-not (Test-Path $pwsh7Path)) {
-        throw "PowerShell 7 installation finished, but $pwsh7Path was not found."
+    if (-not $pwshCmd) {
+        Write-Host "WARNING: PowerShell 7 not found after install. Falling back to Windows PowerShell 5.1."
+    } else {
+        Write-Host "PowerShell 7 installed at $($pwshCmd.Source)"
     }
-}
-
-# Enable CTRL-D
-$profileDir = "C:\Users\Administrator\Documents\PowerShell"
-$profilePath = Join-Path $profileDir "Microsoft.PowerShell_profile.ps1"
-
-if (-not (Test-Path $profileDir)) {
-    New-Item -ItemType Directory -Path $profileDir -Force | Out-Null
-}
-
-if (-not (Test-Path $profilePath)) {
-    New-Item -ItemType File -Path $profilePath -Force | Out-Null
-}
-
-$ctrlDLine = 'Set-PSReadLineKeyHandler -Key Ctrl+d -Function DeleteCharOrExit'
-if (-not (Select-String -Path $profilePath -Pattern ([regex]::Escape($ctrlDLine)) -Quiet -ErrorAction SilentlyContinue)) {
-    Add-Content -Path $profilePath -Value $ctrlDLine
 }
 
 # Configure the SSH default shell. Prefer PowerShell 7 if installed, otherwise fall back to Windows PowerShell.
-$defaultShell = "C:\Program Files\PowerShell\7\pwsh.exe"
+$defaultShell = if ($pwshCmd) {
+    $pwshCmd.Source
+} else {
+    Write-Host "WARNING: Using Windows PowerShell 5.1 as default SSH shell."
+    "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
+}
 Write-Host "Setting OpenSSH DefaultShell to $defaultShell"
+
+# Enable CTRL-D in PowerShell profile (only if PS7 is available)
+if ($pwshCmd) {
+    $profileDir = "C:\Users\Administrator\Documents\PowerShell"
+    $profilePath = Join-Path $profileDir "Microsoft.PowerShell_profile.ps1"
+
+    if (-not (Test-Path $profileDir)) {
+        New-Item -ItemType Directory -Path $profileDir -Force | Out-Null
+    }
+
+    if (-not (Test-Path $profilePath)) {
+        New-Item -ItemType File -Path $profilePath -Force | Out-Null
+    }
+
+    $ctrlDLine = 'Set-PSReadLineKeyHandler -Key Ctrl+d -Function DeleteCharOrExit'
+    if (-not (Select-String -Path $profilePath -Pattern ([regex]::Escape($ctrlDLine)) -Quiet -ErrorAction SilentlyContinue)) {
+        Add-Content -Path $profilePath -Value $ctrlDLine
+    }
+}
+
 New-ItemProperty `
   -Path "HKLM:\SOFTWARE\OpenSSH" `
   -Name DefaultShell `
