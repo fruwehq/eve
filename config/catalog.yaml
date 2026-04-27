@@ -57,7 +57,7 @@ machines:
     kind: vm
     defaults:
       cpu_cores: 4
-      vcpus: 1
+      vcpus: 2
       memory_mb: 8192
       disk_gb: 30
       network: br0
