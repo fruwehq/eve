@@ -6,37 +6,21 @@
 #   scripts/remote-xpra <profile> stop
 #   scripts/remote-xpra <profile> run <app> [args...]
 #   scripts/remote-xpra <profile> attach
+#   scripts/remote-xpra <profile> apps
+#   scripts/remote-xpra <profile> status
 #
-# Modes:
-#   start [app]  - start the xpra server (and optionally launch an app)
-#   stop         - stop the xpra server
-#   run <app>    - launch an app on the running session
-#   attach       - attach the local xpra client (foreground)
-#
-# The typical workflow:
-#   1. make remote.xpra.start PROFILE=... APP=xeyes   (start server + first app)
-#   2. make remote.xpra.run PROFILE=... APP=firefox    (add more apps)
-#   3. Ctrl-C in the attach terminal, or: make remote.xpra.stop PROFILE=...
+# Linux:    uses virtual displays (xpra start :N)
+# Windows:  uses shadow mode via Scheduled Task (interactive session) + SSH tunnel
 
 set -euo pipefail
 
-PROFILE="${1:?Usage: scripts/remote-xpra <profile> <start|stop|run|attach> [args...]}"
-ACTION="${2:?Usage: scripts/remote-xpra <profile> <start|stop|run|attach> [args...]}"
+PROFILE="${1:?Usage: scripts/remote-xpra <profile> <start|stop|run|attach|apps|status> [args...]}"
+ACTION="${2:?Usage: scripts/remote-xpra <profile> <start|stop|run|attach|apps|status> [args...]}"
 shift 2
 cd "$(git rev-parse --show-toplevel)"
 
 RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
 ENGINE=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^ENGINE=/{print $2}')
-OS_FAMILY=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^OS_FAMILY=/{print $2}')
-
-if [ "$OS_FAMILY" = "windows" ]; then
-  echo "remote-xpra: Windows is not supported. Xpra on Windows only does whole-desktop shadow mode," >&2
-  echo "  which doesn't add anything over Sunshine/RDP/RustDesk. Use one of:" >&2
-  echo "    make remote.sunshine PROFILE=$PROFILE   (gaming, low-latency)" >&2
-  echo "    make remote.rdp      PROFILE=$PROFILE   (desktop)" >&2
-  echo "    make remote.rustdesk PROFILE=$PROFILE   (desktop, NAT-friendly)" >&2
-  exit 2
-fi
 
 if [ "$ENGINE" = "vagrant" ]; then
   SSH_USER=vagrant
@@ -57,13 +41,23 @@ fi
 
 [ -n "$IP" ] || { echo "remote-xpra: could not resolve IP for $PROFILE" >&2; exit 1; }
 
-SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=10)
+SSH_OPTS=(-o StrictHostKeyChecking=no -o ServerAliveInterval=10 -o WarnWeakCrypto=no-pq-kex)
 [ -n "$PRIV_KEY" ] && SSH_OPTS+=(-i "$PRIV_KEY")
 [ "$SSH_PORT" != "22" ] && SSH_OPTS+=(-p "$SSH_PORT")
 
 DISPLAY_NUM="${XPRA_DISPLAY:-100}"
-XPRA_URI="ssh://$SSH_USER@$IP/$DISPLAY_NUM"
 SSH_CMD="ssh ${SSH_OPTS[*]}"
+OS_FAMILY=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^OS_FAMILY=/{print $2}')
+
+XPRA_TCP_PORT="${XPRA_TCP_PORT:-14500}"
+XPRA_SCTASK_SHADOW="XpraShadow"
+XPRA_SCTASK_RUN="XpraRunApp"
+
+if [ "$OS_FAMILY" = "windows" ]; then
+  XPRA_URI="tcp://localhost:$XPRA_TCP_PORT"
+else
+  XPRA_URI="ssh://$SSH_USER@$IP/$DISPLAY_NUM"
+fi
 
 # shellcheck disable=SC2317
 remote_ssh() {
@@ -78,28 +72,55 @@ case "$ACTION" in
       exit 1
     fi
 
-    echo "[remote-xpra] starting server on display :$DISPLAY_NUM"
-    remote_ssh "xpra start :$DISPLAY_NUM" || {
-      echo "remote-xpra: remote 'xpra start :$DISPLAY_NUM' failed" >&2
-      echo "  Is xpra installed? Run: make provision PROFILE=$PROFILE" >&2
-      exit 1
-    }
+    if [ "$OS_FAMILY" = "windows" ]; then
+      echo "[remote-xpra] activating interactive session on Windows"
+      # shellcheck disable=SC2016
+      remote_ssh 'tscon 1 /dest:console 2>$null; $null = New-Item -ItemType Directory -Force C:\Users\Administrator\upload'
+      remote_ssh "Set-Content -Path C:\Users\Administrator\upload\start-xpra-shadow.ps1 -Value \"Start-Process -FilePath 'C:\Program Files\Xpra\Xpra_cmd.exe' -ArgumentList 'shadow','--bind-tcp=127.0.0.1:$XPRA_TCP_PORT' -WindowStyle Hidden\" -Force" 2>/dev/null
+      remote_ssh "SchTasks /Create /SC ONCE /TN $XPRA_SCTASK_SHADOW /TR \"powershell -ExecutionPolicy Bypass -File C:\Users\Administrator\upload\start-xpra-shadow.ps1\" /ST 00:00 /RU Administrator /IT /F" 2>/dev/null
+      remote_ssh "SchTasks /Run /TN $XPRA_SCTASK_SHADOW" || {
+        echo "remote-xpra: remote xpra shadow failed to start" >&2
+        echo "  Is xpra installed? Run: make provision PROFILE=$PROFILE" >&2
+        exit 1
+      }
+      echo "[remote-xpra] shadow server started in interactive session (TCP localhost:$XPRA_TCP_PORT via SSH tunnel)"
+    else
+      echo "[remote-xpra] starting server on display :$DISPLAY_NUM"
+      remote_ssh "xpra start :$DISPLAY_NUM" || {
+        echo "remote-xpra: remote 'xpra start :$DISPLAY_NUM' failed" >&2
+        echo "  Is xpra installed? Run: make provision PROFILE=$PROFILE" >&2
+        exit 1
+      }
+    fi
 
     echo "[remote-xpra] server running. Attach with: make remote.xpra.attach PROFILE=$PROFILE"
     ;;
 
   stop)
-    echo "[remote-xpra] stopping session on display :$DISPLAY_NUM"
-    remote_ssh "xpra stop :$DISPLAY_NUM" 2>/dev/null || true
-    xpra stop "$XPRA_URI" 2>/dev/null || true
+    if [ "$OS_FAMILY" = "windows" ]; then
+      echo "[remote-xpra] stopping shadow server"
+      # shellcheck disable=SC2154
+      remote_ssh "Stop-Process -Name Xpra_cmd -Force -ErrorAction SilentlyContinue; Stop-Process -Name Xpra -Force -ErrorAction SilentlyContinue; SchTasks /Delete /TN $XPRA_SCTASK_SHADOW /F 2>$null; SchTasks /Delete /TN $XPRA_SCTASK_RUN /F 2>$null" 2>/dev/null || true
+    else
+      echo "[remote-xpra] stopping session on display :$DISPLAY_NUM"
+      remote_ssh "xpra stop :$DISPLAY_NUM" 2>/dev/null || true
+      xpra stop "$XPRA_URI" 2>/dev/null || true
+    fi
     echo "[remote-xpra] stopped"
     ;;
 
   status)
-    remote_ssh "xpra info :$DISPLAY_NUM 2>/dev/null" | grep -E '^(state|sessions|clients)' || {
-      echo "[remote-xpra] no session on display :$DISPLAY_NUM"
-      exit 1
-    }
+    if [ "$OS_FAMILY" = "windows" ]; then
+      remote_ssh "Get-Process -Name Xpra_cmd -ErrorAction SilentlyContinue | Format-Table Id,ProcessName,SessionId -AutoSize" || {
+        echo "[remote-xpra] no shadow server running"
+        exit 1
+      }
+    else
+      remote_ssh "xpra info :$DISPLAY_NUM 2>/dev/null" | grep -E '^(state|sessions|clients)' || {
+        echo "[remote-xpra] no session on display :$DISPLAY_NUM"
+        exit 1
+      }
+    fi
     ;;
 
   run)
@@ -108,8 +129,12 @@ case "$ACTION" in
       exit 1
     fi
     START_CMD="$*"
-    echo "[remote-xpra] launching '$START_CMD' on display :$DISPLAY_NUM"
-    remote_ssh "DISPLAY=:$DISPLAY_NUM nohup $START_CMD </dev/null >/dev/null 2>&1 &"
+    echo "[remote-xpra] launching '$START_CMD'"
+    if [ "$OS_FAMILY" = "windows" ]; then
+      remote_ssh "SchTasks /Create /SC ONCE /TN $XPRA_SCTASK_RUN /TR \"$START_CMD\" /ST 00:00 /RU Administrator /IT /F 2>&1 | Out-Null; SchTasks /Run /TN $XPRA_SCTASK_RUN" 2>/dev/null
+    else
+      remote_ssh "DISPLAY=:$DISPLAY_NUM nohup $START_CMD </dev/null >/dev/null 2>&1 &"
+    fi
     ;;
 
   attach)
@@ -119,31 +144,59 @@ case "$ACTION" in
       exit 1
     fi
 
-    # shellcheck disable=SC2329
-    cleanup() {
-      echo "[remote-xpra] detaching"
+    if [ "$OS_FAMILY" = "windows" ]; then
+      ssh "${SSH_OPTS[@]}" -l "$SSH_USER" -N -L "${XPRA_TCP_PORT}:127.0.0.1:${XPRA_TCP_PORT}" "$IP" &
+      TUNNEL_PID=$!
+      sleep 1
+
+      # shellcheck disable=SC2329
+      cleanup() {
+        echo "[remote-xpra] detaching"
+        kill "$XPRA_PID" 2>/dev/null || true
+        pkill -P "$XPRA_PID" 2>/dev/null || true
+        kill "$TUNNEL_PID" 2>/dev/null || true
+      }
+      trap cleanup EXIT INT TERM
+
+      echo "[remote-xpra] attaching to shadow session via SSH tunnel (press Ctrl-C to detach)"
+      xpra attach "$XPRA_URI" --desktop-fullscreen=yes &
+      XPRA_PID=$!
+      wait $XPRA_PID 2>/dev/null
+      trap - EXIT INT TERM
       kill "$XPRA_PID" 2>/dev/null || true
       pkill -P "$XPRA_PID" 2>/dev/null || true
-    }
-    trap cleanup EXIT INT TERM
+      kill "$TUNNEL_PID" 2>/dev/null || true
+    else
+      # shellcheck disable=SC2329
+      cleanup() {
+        echo "[remote-xpra] detaching"
+        kill "$XPRA_PID" 2>/dev/null || true
+        pkill -P "$XPRA_PID" 2>/dev/null || true
+      }
+      trap cleanup EXIT INT TERM
 
-    echo "[remote-xpra] attaching to display :$DISPLAY_NUM (press Ctrl-C to detach)"
-    xpra attach "$XPRA_URI" --ssh="$SSH_CMD" &
-
-    XPRA_PID=$!
-    wait $XPRA_PID 2>/dev/null
-    trap - EXIT INT TERM
-    kill "$XPRA_PID" 2>/dev/null || true
-    pkill -P "$XPRA_PID" 2>/dev/null || true
+      echo "[remote-xpra] attaching to display :$DISPLAY_NUM (press Ctrl-C to detach)"
+      xpra attach "$XPRA_URI" --ssh="$SSH_CMD" &
+      XPRA_PID=$!
+      wait $XPRA_PID 2>/dev/null
+      trap - EXIT INT TERM
+      kill "$XPRA_PID" 2>/dev/null || true
+      pkill -P "$XPRA_PID" 2>/dev/null || true
+    fi
     ;;
 
   apps)
-    # shellcheck disable=SC2016
-    remote_ssh 'for f in /usr/share/applications/*.desktop ~/.local/share/applications/*.desktop; do
-      name=$(grep "^Name=" "$f" 2>/dev/null | head -1 | cut -d= -f2-)
-      exec=$(grep "^Exec=" "$f" 2>/dev/null | head -1 | cut -d= -f2- | cut -d" " -f1)
-      [ -n "$name" ] && [ -n "$exec" ] && printf "%-40s %s\n" "$name" "$exec"
-    done 2>/dev/null | sort -u'
+    if [ "$OS_FAMILY" = "windows" ]; then
+      # shellcheck disable=SC2016
+      remote_ssh 'Get-ChildItem -Path "$env:ProgramData\Microsoft\Windows\Start Menu\Programs","$env:APPDATA\Microsoft\Windows\Start Menu\Programs" -Filter *.lnk -Recurse | ForEach-Object { $name=$_.BaseName; $target=(New-Object -ComObject WScript.Shell).CreateShortcut($_.FullName).TargetPath; if($target){"{0,-40} {1}" -f $name,$target}} | Sort-Object -Unique'
+    else
+      # shellcheck disable=SC2016
+      remote_ssh 'for f in /usr/share/applications/*.desktop ~/.local/share/applications/*.desktop; do
+        name=$(grep "^Name=" "$f" 2>/dev/null | head -1 | cut -d= -f2-)
+        exec=$(grep "^Exec=" "$f" 2>/dev/null | head -1 | cut -d= -f2- | cut -d" " -f1)
+        [ -n "$name" ] && [ -n "$exec" ] && printf "%-40s %s\n" "$name" "$exec"
+      done 2>/dev/null | sort -u'
+    fi
     ;;
 
   *)

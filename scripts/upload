@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Upload ./upload/* to a Windows instance via SCP.
+# Upload ./upload/* to a remote instance via instance-ssh / instance-ssh --scp.
 # Skips files that already exist remotely.
 set -euo pipefail
 
@@ -11,17 +11,16 @@ if [ ! -d ./upload ]; then
   exit 0
 fi
 
-IP=$(./scripts/instance-ip "$PROFILE")
-SSH_OPTS="-o StrictHostKeyChecking=no -o ServerAliveInterval=10 -o WarnWeakCrypto=no-pq-kex -i ${SSH_PUBLIC_KEY_FILE}"
+SSH="./scripts/instance-ssh $PROFILE --"
 REMOTE_UPLOAD_DIR='C:\Users\Administrator\upload'
 REMOTE_DESKTOP_DIR='C:\Users\Administrator\Desktop\upload'
 
-printf '%s\n' "Preparing remote upload folder on $IP..."
-# shellcheck disable=SC2086,SC2029
-ssh $SSH_OPTS "Administrator@$IP" "New-Item -ItemType Directory -Force '$REMOTE_UPLOAD_DIR' | Out-Null; if (!(Test-Path '$REMOTE_DESKTOP_DIR')) { cmd /c mklink /J \"$REMOTE_DESKTOP_DIR\" \"$REMOTE_UPLOAD_DIR\" >nul 2>&1 }"
+printf '%s\n' "Preparing remote upload folder..."
+$SSH "New-Item -ItemType Directory -Force '$REMOTE_UPLOAD_DIR' | Out-Null; if (!(Test-Path '$REMOTE_DESKTOP_DIR')) { cmd /c mklink /J \"$REMOTE_DESKTOP_DIR\" \"$REMOTE_UPLOAD_DIR\" >nul 2>&1 }"
 
 find ./upload -type f ! -name '.gitkeep' -exec sh -c '
-  FILE="$1"
+  PROFILE="$1"
+  FILE="$2"
   REL_PATH="${FILE#./upload/}"
   REL_PATH_WIN=$(printf "%s" "$REL_PATH" | sed "s#/#\\\\\\\\#g")
   REL_DIR=$(dirname "$REL_PATH")
@@ -33,14 +32,12 @@ find ./upload -type f ! -name '.gitkeep' -exec sh -c '
     REMOTE_DIR="C:\\Users\\Administrator\\upload\\$REL_DIR_WIN"
   fi
 
-  # shellcheck disable=SC2086
-  ssh '"$SSH_OPTS"' "Administrator@$IP" "New-Item -ItemType Directory -Force '\"'$REMOTE_DIR'\"' | Out-Null"
+  ./scripts/instance-ssh "$PROFILE" -- "New-Item -ItemType Directory -Force '\"'$REMOTE_DIR'\"' | Out-Null"
 
-  # shellcheck disable=SC2086
-  if ssh '"$SSH_OPTS"' "Administrator@$IP" "if (Test-Path '\"'C:\\Users\\Administrator\\upload\\$REL_PATH_WIN'\"') { exit 0 } else { exit 1 }" >/dev/null 2>&1; then
+  if ./scripts/instance-ssh "$PROFILE" -- "if (Test-Path '\"'C:\\Users\\Administrator\\upload\\$REL_PATH_WIN'\"') { exit 0 } else { exit 1 }" >/dev/null 2>&1; then
     printf "%s\n" "Skipping existing upload file: $REL_PATH"
   else
     printf "%s\n" "Uploading: $REL_PATH"
-    scp '"$SSH_OPTS"' "$FILE" "Administrator@$IP:/C:/Users/Administrator/upload/$REL_PATH"
+    ./scripts/instance-ssh "$PROFILE" --scp "$FILE" "C:/Users/Administrator/upload/$REL_PATH"
   fi
-' sh {} \;
+' sh "$PROFILE" {} \;
