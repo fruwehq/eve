@@ -13,14 +13,36 @@ cd "$(git rev-parse --show-toplevel)"
 
 SSH_CMD=(./scripts/instance-ssh "$PROFILE" --)
 
-ID=$("${SSH_CMD[@]}" 'rustdesk --get-id 2>/dev/null' | tr -d '[:space:]' || true)
+OS_FAMILY=$(./scripts/profile-resolve --profile "$PROFILE" --emit env | awk -F= '/^OS_FAMILY=/{print $2}')
+
+case "$OS_FAMILY" in
+  windows)
+    # shellcheck disable=SC2016  # PowerShell $_ / $rd / $cfg are not bash expansions
+    RD_LOCATE='$rd = @("C:\Program Files\RustDesk\rustdesk.exe","C:\Program Files (x86)\RustDesk\rustdesk.exe","C:\Program Files\RustDesk\RustDesk.exe","C:\Program Files (x86)\RustDesk\RustDesk.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1'
+    # shellcheck disable=SC2016
+    CFG_LOCATE='$cfg = @("C:\Windows\ServiceProfiles\LocalService\AppData\Roaming\RustDesk\config\RustDesk2.toml","C:\Windows\System32\config\systemprofile\AppData\Roaming\RustDesk\config\RustDesk2.toml","$env:APPDATA\RustDesk\config\RustDesk2.toml") | Where-Object { Test-Path $_ } | Select-Object -First 1'
+    # shellcheck disable=SC2016
+    GET_ID_CMD="$RD_LOCATE; if (\$rd) { & \$rd --get-id } else { Write-Error 'rustdesk.exe not found on remote' }"
+    # shellcheck disable=SC2016
+    SERVER_CMD="$CFG_LOCATE; if (\$cfg) { Get-Content \$cfg | Select-String -Pattern '^(rendezvous_server|custom-rendezvous-server)' | Select-Object -Last 1 | ForEach-Object { (\$_ -split '=',2)[1].Trim().Trim(\"'\") } }"
+    # shellcheck disable=SC2016
+    KEY_CMD="$CFG_LOCATE; if (\$cfg) { Get-Content \$cfg | Select-String -Pattern '^key ' | Select-Object -First 1 | ForEach-Object { (\$_ -split '=',2)[1].Trim().Trim(\"'\") } }"
+    ;;
+  *)
+    GET_ID_CMD='rustdesk --get-id 2>/dev/null'
+    SERVER_CMD='sudo grep -E "^(rendezvous_server|custom-rendezvous-server)" /root/.config/rustdesk/RustDesk2.toml 2>/dev/null | tail -1 | sed "s/^[^=]*= .//;s/.$//"'
+    KEY_CMD='sudo grep "^key " /root/.config/rustdesk/RustDesk2.toml 2>/dev/null | sed "s/^key = .//;s/.$//"'
+    ;;
+esac
+
+ID=$("${SSH_CMD[@]}" "$GET_ID_CMD" | tr -d '[:space:]' || true)
 if [ -z "$ID" ]; then
   echo "RustDesk ID not available — is the service running?" >&2
   exit 1
 fi
 
-SERVER=$("${SSH_CMD[@]}" 'sudo grep -E "^(rendezvous_server|custom-rendezvous-server)" /root/.config/rustdesk/RustDesk2.toml 2>/dev/null | tail -1 | sed "s/^[^=]*= .//;s/.$//"' || true)
-KEY=$("${SSH_CMD[@]}" 'sudo grep "^key " /root/.config/rustdesk/RustDesk2.toml 2>/dev/null | sed "s/^key = .//;s/.$//"' || true)
+SERVER=$("${SSH_CMD[@]}" "$SERVER_CMD" | tr -d '\r' || true)
+KEY=$("${SSH_CMD[@]}" "$KEY_CMD" | tr -d '\r' || true)
 
 case "$ACTION" in
   connect)

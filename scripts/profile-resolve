@@ -277,6 +277,34 @@ emit_vagrant() {
 
     { docker: ($r.bundle_packages | index("docker") != null), dev: ($r.bundle_packages | index("dev-toolchain") != null) } as $flags |
 
+    # Port forwards: vagrant defaults to NAT and only forwards SSH, so each
+    # remote-access port has to be enumerated here or remote-* helpers on the
+    # host (which always hit 127.0.0.1 for vagrant) cannot reach the VM.
+    (
+      (if ($r.bundle_packages | index("sunshine")) != null then
+        "  # Sunshine / Moonlight\n" +
+        "  config.vm.network \"forwarded_port\", guest: 47984, host: 47984, auto_correct: true\n" +
+        "  config.vm.network \"forwarded_port\", guest: 47989, host: 47989, auto_correct: true\n" +
+        "  config.vm.network \"forwarded_port\", guest: 47990, host: 47990, auto_correct: true\n" +
+        "  config.vm.network \"forwarded_port\", guest: 48010, host: 48010, auto_correct: true\n" +
+        "  config.vm.network \"forwarded_port\", guest: 47998, host: 47998, protocol: \"udp\", auto_correct: true\n" +
+        "  config.vm.network \"forwarded_port\", guest: 47999, host: 47999, protocol: \"udp\", auto_correct: true\n" +
+        "  config.vm.network \"forwarded_port\", guest: 48000, host: 48000, protocol: \"udp\", auto_correct: true\n"
+      else "" end) +
+      (if ($r.bundle_packages | index("vnc")) != null then
+        "  # VNC\n" +
+        "  config.vm.network \"forwarded_port\", guest: 5901, host: 5901, auto_correct: true\n"
+      else "" end) +
+      (if ($r.bundle_packages | index("xpra")) != null then
+        "  # Xpra\n" +
+        "  config.vm.network \"forwarded_port\", guest: 14500, host: 14500, auto_correct: true\n"
+      else "" end) +
+      (if ($r.bundle_packages | index("rdp")) != null then
+        "  # RDP\n" +
+        "  config.vm.network \"forwarded_port\", guest: 3389, host: 3389, auto_correct: true\n"
+      else "" end)
+    ) as $port_forwards |
+
     # Build bundle-aware install lines (each line must be indented by 4 spaces)
     (if $flags.docker then
       "    # Install Docker\n" +
@@ -301,6 +329,8 @@ emit_vagrant() {
     "    v.memory = " + $memory + "\n" +
     "  end\n" +
     "\n" +
+    $port_forwards +
+    (if $port_forwards != "" then "\n" else "" end) +
     "  config.vm.provision \"shell\", inline: <<-SHELL\n" +
     "    set -e\n" +
     "    export DEBIAN_FRONTEND=noninteractive\n" +

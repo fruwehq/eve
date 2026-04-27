@@ -41,6 +41,36 @@ autologin-user-timeout=0
 user-session=xfce
 EOF
 
+# LightDM's pam_succeed_if rule for the autologin path keys off the `autologin`
+# group on Debian/Ubuntu; ensure the user is in it. Cloud-init Ubuntu users have
+# `*` in /etc/shadow which blocks pam_unix during the lock-screen unlock — having
+# the user in `nopasswdlogin` bypasses the password challenge entirely.
+sudo groupadd --system autologin 2>/dev/null || true
+sudo groupadd --system nopasswdlogin 2>/dev/null || true
+sudo usermod -aG autologin "$USER"
+sudo usermod -aG nopasswdlogin "$USER"
+
+# Without this, xfce4-screensaver/light-locker locks the auto-logged-in session
+# after a few minutes and prompts for the user's (often-unset) Unix password,
+# which is the prompt RustDesk shows after auth.
+sudo DEBIAN_FRONTEND=noninteractive apt-get remove -y --purge xfce4-screensaver light-locker 2>/dev/null || true
+sudo systemctl disable --now xfce4-screensaver.service 2>/dev/null || true
+
+# Belt-and-suspenders: pin the xfconf settings so even if a screensaver gets
+# pulled back in by another package, it stays disabled.
+mkdir -p "$HOME/.config/xfce4/xfconf/xfce-perchannel-xml"
+cat > "$HOME/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-screensaver.xml" <<'XEOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<channel name="xfce4-screensaver" version="1.0">
+  <property name="lock" type="empty">
+    <property name="enabled" type="bool" value="false"/>
+  </property>
+  <property name="saver" type="empty">
+    <property name="enabled" type="bool" value="false"/>
+  </property>
+</channel>
+XEOF
+
 mkdir -p "$HOME/.config/rustdesk"
 sudo mkdir -p /root/.config/rustdesk
 
