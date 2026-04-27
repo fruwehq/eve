@@ -55,17 +55,12 @@ if (-not $Pass) {
 }
 
 # Prevent display sleep / system standby while on AC power
-$powerOutputBefore = @(
-  & powercfg /query SCHEME_CURRENT SUB_VIDEO VIDEOIDLE 2>$null
-  & powercfg /query SCHEME_CURRENT SUB_SLEEP STANDBYIDLE 2>$null
-) | Out-String
-powercfg -change -monitor-timeout-ac 0
-powercfg -change -standby-timeout-ac 0
-$powerOutputAfter = @(
-  & powercfg /query SCHEME_CURRENT SUB_VIDEO VIDEOIDLE 2>$null
-  & powercfg /query SCHEME_CURRENT SUB_SLEEP STANDBYIDLE 2>$null
-) | Out-String
-if ($powerOutputBefore -ne $powerOutputAfter) {
+$acMonitorTimeout = (powercfg /query SCHEME_CURRENT SUB_VIDEO VIDEOIDLE | Select-String "Current AC Power Setting Index:" | Select-Object -First 1) -replace '.*:\s*', ''
+$acStandbyTimeout = (powercfg /query SCHEME_CURRENT SUB_SLEEP STANDBYIDLE | Select-String "Current AC Power Setting Index:" | Select-Object -First 1) -replace '.*:\s*', ''
+if ($acMonitorTimeout -ne '0x00000000' -or $acStandbyTimeout -ne '0x00000000') {
+  Write-Host "Setting monitor-timeout-ac=0, standby-timeout-ac=0"
+  powercfg -change -monitor-timeout-ac 0
+  powercfg -change -standby-timeout-ac 0
   $changed = $true
 }
 
