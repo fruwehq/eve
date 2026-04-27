@@ -1,4 +1,4 @@
-# TrueNAS VM module (real provider resource)
+# TrueNAS VM module (zvol-based disks with automated image writing)
 
 generate_hcl "z_truenas_vm.tf" {
   content {
@@ -49,14 +49,14 @@ generate_hcl "z_truenas_vm.tf" {
       default = 30
     }
 
+    variable "vm_base_dir" {
+      type    = string
+      default = ""
+    }
+
     variable "vm_pool" {
       type    = string
       default = "main"
-    }
-
-    variable "vm_iso_dir" {
-      type    = string
-      default = ""
     }
 
     variable "vm_zvol_prefix" {
@@ -74,52 +74,60 @@ generate_hcl "z_truenas_vm.tf" {
     }
 
     locals {
-      vm_name  = join("", regexall("[a-zA-Z0-9]+", var.profile_name))
-      iso_path = "${var.vm_iso_dir}/${local.vm_name}-cidata.iso"
-      zvol_path = "${var.vm_zvol_prefix}/${local.vm_name}"
+      vm_name    = join("", regexall("[a-zA-Z0-9]+", var.profile_name))
+      base_dir   = var.vm_base_dir
+      iso_path   = "${local.base_dir}/iso/${local.vm_name}-${var.os_id}-cidata.iso"
+      images_dir = "${local.base_dir}/images"
+      zvol_path  = "${var.vm_zvol_prefix}/${local.vm_name}"
+      zvol_device = "/dev/zvol/${var.vm_pool}/${local.zvol_path}"
     }
 
-    resource "null_resource" "ensure_parent_dataset" {
+    resource "null_resource" "verify_parent_dataset" {
       triggers = {
-        pool    = var.vm_pool
-        prefix  = var.vm_zvol_prefix
-        host    = var.truenas_host
+        base_dir = local.base_dir
       }
 
       provisioner "local-exec" {
-        command = "\"$(git rev-parse --show-toplevel)/scripts/truenas-dataset-ensure\" '${var.truenas_host}' '${var.vm_pool}' '${var.vm_zvol_prefix}'"
+        command = "\"$(git rev-parse --show-toplevel)/scripts/truenas-dataset-verify\" '${local.base_dir}'"
       }
     }
 
     resource "truenas_zvol" "this" {
-      depends_on = [null_resource.ensure_parent_dataset]
+      depends_on = [null_resource.verify_parent_dataset]
       pool       = var.vm_pool
       path       = local.zvol_path
-      volsize    = "${var.vm_disk_gb}G"
       sparse     = true
+      volsize    = "${var.vm_disk_gb * 1024}M"
     }
 
     resource "null_resource" "write_cloud_image" {
       count = var.cloud_image_url != "" ? 1 : 0
 
+      depends_on = [truenas_zvol.this]
+
       triggers = {
-        zvol_id        = truenas_zvol.this.id
+        zvol_id         = truenas_zvol.this.id
         cloud_image_url = var.cloud_image_url
-        truenas_host   = var.truenas_host
-        vm_disk_gb     = var.vm_disk_gb
+        disk_gb         = var.vm_disk_gb
       }
 
       provisioner "local-exec" {
-        command = "\"$(git rev-parse --show-toplevel)/scripts/truenas-image-write\" '${var.truenas_host}' '${self.triggers.zvol_id}' '${var.cloud_image_url}' '${var.vm_disk_gb}'"
+        command = join(" ", [
+          "\"$(git rev-parse --show-toplevel)/scripts/truenas-vm-disk-prepare\"",
+          "'${var.truenas_host}'",
+          "'${local.images_dir}'",
+          "'${local.zvol_device}'",
+          "'${local.vm_name}'",
+          "'${var.cloud_image_url}'",
+          "'${var.vm_disk_gb}'",
+        ])
       }
     }
 
     resource "null_resource" "cloudinit_iso" {
-      # var.truenas_host is declared in stacks/truenas/20-services/providers.tm.hcl
-      # (both generate_hcl blocks land in the same stack). Keep that in mind if this
-      # module is ever lifted out to a standalone Terraform module.
       triggers = {
         vm_name        = local.vm_name
+        os_id          = var.os_id
         truenas_host   = var.truenas_host
         iso_path       = local.iso_path
         ssh_public_key = trimspace(file(var.ssh_public_key_file))
@@ -136,7 +144,10 @@ generate_hcl "z_truenas_vm.tf" {
     }
 
     resource "truenas_vm" "this" {
-      depends_on  = [truenas_zvol.this, null_resource.cloudinit_iso, null_resource.write_cloud_image]
+      depends_on = [
+        null_resource.write_cloud_image,
+        null_resource.cloudinit_iso,
+      ]
       autostart   = var.vm_autostart
       cores       = var.vm_cpu_cores
       description = "Profile=${var.profile_name}; OS=${var.os_id}; Location=${var.location_name}"
@@ -151,7 +162,7 @@ generate_hcl "z_truenas_vm.tf" {
       }
 
       disk {
-        path = "/dev/zvol/${truenas_zvol.this.id}"
+        path = local.zvol_device
         type = "VIRTIO"
       }
 

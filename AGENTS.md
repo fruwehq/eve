@@ -13,6 +13,16 @@
 
 **Never read `.env.local`, `config/catalog.local.yaml`, or any other git-ignored file that may contain secrets, credentials, or personal configuration.** These files exist for the user to store sensitive data (API keys, passwords, personal server addresses) that must not be exposed to LLM context. If you need to know a value from these files, ask the user to provide it explicitly rather than reading the file.
 
+## Git workflow
+
+**Do not commit or push unless the user explicitly asks.** Stage changes with `git add` to avoid the terramate "repository has uncommitted files" error (terramate refuses to run when the working tree is dirty), but leave committing and pushing to the user.
+
+When the user asks to commit:
+
+1. Run `git status`, `git diff --staged`, and `git log --oneline -5` in parallel.
+2. Draft a commit message following the project's conventional commit style.
+3. Commit with `git commit` and push with `git push` only after the user approves.
+
 ## Sorting convention
 
 Keep all lists alphabetically sorted unless there is an explicit ordering requirement (e.g. provisioning step numbers). This applies to:

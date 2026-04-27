@@ -1,16 +1,42 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Generate a NoCloud cloud-init seed ISO and upload it to TrueNAS.
+# Generate a NoCloud cloud-init seed ISO and upload it to TrueNAS via SCP.
 # Usage: truenas-cloudinit-upload <vm_name> <ssh_public_key_file> <truenas_host> <iso_path>
-# Env:   TRUENAS_API_KEY
 
 VM_NAME="${1:?vm_name required}"
 SSH_PUBLIC_KEY_FILE="${2:?ssh_public_key_file required}"
 TRUENAS_HOST="${3:?truenas_host required}"
 ISO_PATH="${4:?iso_path required}"
 
-: "${TRUENAS_API_KEY:?TRUENAS_API_KEY must be set}"
+normalize_path() {
+  local value="$1"
+  # shellcheck disable=SC2088,SC2016
+  case "$value" in
+    '~'|'~/'*)
+      printf '%s' "$HOME${value#\~}"
+      ;;
+    '$HOME'|'$HOME/'*)
+      printf '%s' "$HOME${value#\$HOME}"
+      ;;
+    '$(HOME)'|'$(HOME)/'*)
+      printf '%s' "$HOME${value#\$\(HOME\)}"
+      ;;
+    *)
+      printf '%s' "$value"
+      ;;
+  esac
+}
+
+SSH_USER="${TRUENAS_SSH_USER:-terraform}"
+SSH_OPTS=(-o StrictHostKeyChecking=no -o IdentitiesOnly=yes)
+if [ -n "${TRUENAS_SSH_PRIVATE_KEY_FILE:-}" ]; then
+  SSH_KEY="$(normalize_path "${TRUENAS_SSH_PRIVATE_KEY_FILE}")"
+  if [ ! -f "${SSH_KEY}" ]; then
+    SSH_KEY="${HOME}${SSH_KEY}"
+  fi
+  SSH_OPTS+=(-i "${SSH_KEY}")
+fi
 
 SSH_PUBLIC_KEY=$(cat "$SSH_PUBLIC_KEY_FILE")
 
@@ -43,10 +69,8 @@ hdiutil makehybrid \
   "$TMPDIR/cidata" \
   >/dev/null
 
-curl -k -sf -X POST \
-  -H "Authorization: Bearer $TRUENAS_API_KEY" \
-  -F "data={\"path\": \"$ISO_PATH\"}" \
-  -F "file=@$TMPDIR/cidata.iso" \
-  "https://$TRUENAS_HOST/api/v2.0/filesystem/put"
+# shellcheck disable=SC2029
+ssh "${SSH_OPTS[@]}" "${SSH_USER}@${TRUENAS_HOST}" "mkdir -p '$(dirname "$ISO_PATH")'"
+scp "${SSH_OPTS[@]}" "$TMPDIR/cidata.iso" "${SSH_USER}@${TRUENAS_HOST}:${ISO_PATH}"
 
-printf '[truenas-cloudinit-upload] %s → %s\n' "$VM_NAME" "$ISO_PATH"
+printf '[truenas-cloudinit-upload] %s -> %s\n' "$VM_NAME" "$ISO_PATH"

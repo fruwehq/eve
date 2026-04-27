@@ -1,20 +1,43 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Delete a cloud-init seed ISO from TrueNAS.
+# Delete a cloud-init seed ISO from TrueNAS via SSH.
 # Usage: truenas-cloudinit-delete <truenas_host> <iso_path>
-# Env:   TRUENAS_API_KEY
 
 TRUENAS_HOST="${1:?truenas_host required}"
 ISO_PATH="${2:?iso_path required}"
 
-: "${TRUENAS_API_KEY:?TRUENAS_API_KEY must be set}"
+normalize_path() {
+  local value="$1"
+  # shellcheck disable=SC2088,SC2016
+  case "$value" in
+    '~'|'~/'*)
+      printf '%s' "$HOME${value#\~}"
+      ;;
+    '$HOME'|'$HOME/'*)
+      printf '%s' "$HOME${value#\$HOME}"
+      ;;
+    '$(HOME)'|'$(HOME)/'*)
+      printf '%s' "$HOME${value#\$\(HOME\)}"
+      ;;
+    *)
+      printf '%s' "$value"
+      ;;
+  esac
+}
 
-curl -k -sf -X POST \
-  -H "Authorization: Bearer $TRUENAS_API_KEY" \
-  -H "Content-Type: application/json" \
-  "https://$TRUENAS_HOST/api/v2.0/filesystem/delete" \
-  -d "{\"path\": \"$ISO_PATH\", \"recursive\": false}" \
+SSH_USER="${TRUENAS_SSH_USER:-terraform}"
+SSH_OPTS=(-o StrictHostKeyChecking=no -o IdentitiesOnly=yes)
+if [ -n "${TRUENAS_SSH_PRIVATE_KEY_FILE:-}" ]; then
+  SSH_KEY="$(normalize_path "${TRUENAS_SSH_PRIVATE_KEY_FILE}")"
+  if [ ! -f "${SSH_KEY}" ]; then
+    SSH_KEY="${HOME}${SSH_KEY}"
+  fi
+  SSH_OPTS+=(-i "${SSH_KEY}")
+fi
+
+# shellcheck disable=SC2029
+ssh "${SSH_OPTS[@]}" "${SSH_USER}@${TRUENAS_HOST}" "rm -f '${ISO_PATH}'" \
   || printf '[truenas-cloudinit-delete] warning: could not delete %s (may already be gone)\n' "$ISO_PATH" >&2
 
 printf '[truenas-cloudinit-delete] %s\n' "$ISO_PATH"

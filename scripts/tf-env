@@ -76,14 +76,14 @@ case "$PROVIDER" in
       "$(normalize_path "${TRUENAS_SSH_PRIVATE_KEY_FILE:-}")"
     print_kv TF_VAR_truenas_ssh_user "$(getv TRUENAS_SSH_USER)"
     print_kv TF_VAR_vm_autostart "$(getv VM_AUTOSTART)"
+    print_kv TF_VAR_vm_base_dir "${TRUENAS_VM_BASE_DIR:-}"
     print_kv TF_VAR_vm_cpu_cores "$(getv VM_CPU_CORES)"
     print_kv TF_VAR_vm_disk_gb "$(getv VM_DISK_GB)"
-    print_kv TF_VAR_vm_iso_dir "${TRUENAS_VM_ISO_DIR:-}"
     print_kv TF_VAR_vm_memory_mb "$(getv VM_MEMORY_MB)"
     print_kv TF_VAR_vm_nic_attach "$(getv VM_NIC_ATTACH)"
-    print_kv TF_VAR_vm_pool "${TRUENAS_VM_POOL:-$(getv VM_POOL)}"
+    print_kv TF_VAR_vm_pool "${TRUENAS_VM_POOL:-}"
     print_kv TF_VAR_vm_state "$(getv VM_STATE)"
     print_kv TF_VAR_vm_vcpus "$(getv VM_VCPUS)"
-    print_kv TF_VAR_vm_zvol_prefix "${TRUENAS_VM_ZVOL_PREFIX:-vms}"
+    print_kv TF_VAR_vm_zvol_prefix "${TRUENAS_VM_ZVOL_PREFIX:-}"
     ;;
 esac

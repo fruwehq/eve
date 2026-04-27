@@ -26,8 +26,32 @@ case "$ENGINE:$PROVIDER" in
     terramate run --quiet --tags="$TAGS-services" -- terraform output -raw vultr_instance_main_ip
     ;;
   terraform:truenas)
-    echo "instance-ip: truenas VM IP must be resolved via DHCP lease / DNS on TrueNAS host" >&2
-    exit 2
+    SSH_HOST="${TRUENAS_HOST:?}"
+    SSH_USER="${TRUENAS_SSH_USER:-terraform}"
+    SSH_OPTS=(-o StrictHostKeyChecking=no -o IdentitiesOnly=yes)
+    if [ -n "${TRUENAS_SSH_PRIVATE_KEY_FILE:-}" ]; then
+      SSH_KEY="$TRUENAS_SSH_PRIVATE_KEY_FILE"
+      # shellcheck disable=SC2088,SC2016
+      case "$SSH_KEY" in
+        '$(HOME)'|'$(HOME)/'*) SSH_KEY="${HOME}${SSH_KEY#\$\(HOME\)}" ;;
+        '$HOME'|'$HOME/'*) SSH_KEY="${HOME}${SSH_KEY#\$HOME}" ;;
+        '~'|'~/'*) SSH_KEY="${HOME}${SSH_KEY#\~}" ;;
+      esac
+      SSH_OPTS+=(-i "$SSH_KEY")
+    fi
+    if [ -n "${TRUENAS_SSH_PORT:-}" ] && [ "${TRUENAS_SSH_PORT}" != "22" ]; then
+      SSH_OPTS+=(-p "$TRUENAS_SSH_PORT")
+    fi
+    # TrueNAS assigns MACs with 00:a0:98 prefix; look up VM IP via ARP
+    # shellcheck disable=SC2029
+    IP=$(ssh "${SSH_OPTS[@]}" "${SSH_USER}@${SSH_HOST}" \
+      "cat /proc/net/arp | awk '/br0/ && /00:a0:98/ {print \$1; found=1; exit} END {exit !found}'" \
+      2>/dev/null) || true
+    if [ -z "$IP" ]; then
+      echo "instance-ip: could not resolve TrueNAS VM IP via ARP" >&2
+      exit 2
+    fi
+    printf '%s\n' "$IP"
     ;;
   vagrant:*)
     cd ".generated/$PROFILE"

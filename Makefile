@@ -10,7 +10,7 @@
 				remote.vnc remote.xpra remote.xpra.apps remote.xpra.attach \
 				remote.xpra.run remote.xpra.start remote.xpra.status \
 				remote.xpra.stop \
-				show-password ssh ssh.wait start status stop \
+				show-password ssh ssh.truenas ssh.wait start status stop \
 				test test.profiles test.shellcheck test.terraform \
 				test.update-golden up upload validate
 
@@ -43,7 +43,7 @@ export TRUENAS_SSH_HOST_KEY_FINGERPRINT
 export TRUENAS_SSH_PORT
 export TRUENAS_SSH_PRIVATE_KEY_FILE
 export TRUENAS_SSH_USER
-export TRUENAS_VM_ISO_DIR
+export TRUENAS_VM_BASE_DIR
 export TRUENAS_VM_POOL
 export TRUENAS_VM_ZVOL_PREFIX
 export VULTR_API_KEY
@@ -221,6 +221,12 @@ show-password: ## Display the instance's default password (Windows)
 ssh: ## SSH into the profile's instance
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
 	./scripts/instance-ssh $(PROFILE)
+
+ssh.truenas: ## SSH directly into the TrueNAS host (no profile needed)
+	@opts="-o StrictHostKeyChecking=no -o IdentitiesOnly=yes"; \
+	if [ -n "$$TRUENAS_SSH_PRIVATE_KEY_FILE" ]; then opts="$$opts -i $$TRUENAS_SSH_PRIVATE_KEY_FILE"; fi; \
+	if [ -n "$$TRUENAS_SSH_PORT" ]; then opts="$$opts -p $$TRUENAS_SSH_PORT"; fi; \
+	exec ssh $$opts "$${TRUENAS_SSH_USER:-root}@$${TRUENAS_HOST}"
 
 ssh.wait: ## Wait until SSH on the profile's instance accepts connections
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \

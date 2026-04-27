@@ -179,22 +179,29 @@ The first invocation will spawn an Xpra server on the VM, tunnel it over SSH, an
 1. **SSH key** — generate a keypair for Terraform to use
 2. **TrueNAS user** — create a Terraform user with SSH access and `terraform` group
 3. **API key** — generate one in TrueNAS → API Keys (used for cloud-init ISO upload)
-4. **Required env vars** (in `.env.local`):
-   - `TRUENAS_HOST` — e.g. `192.168.0.52` or `truenas.home.arpa`
-   - `TRUENAS_SSH_USER` — e.g. `terraform`
-   - `TRUENAS_SSH_PRIVATE_KEY_FILE` — path to private key
-   - `TRUENAS_SSH_HOST_KEY_FINGERPRINT` — e.g. `SHA256:...`
-   - `TRUENAS_API_KEY` — REST API key for cloud-init ISO upload
-5. **Optional env vars** (defaults in `.env`, override in `.env.local`):
-   - `TRUENAS_SSH_PORT` (default: `22`)
-   - `TRUENAS_VM_ISO_DIR` (default: `/mnt/main/iso`) — path on TrueNAS where cloud-init ISOs are stored
-6. **One-time disk setup** — write the Ubuntu 24.04 cloud image to the zvol before first boot:
-   ```bash
-   # On TrueNAS (after up creates the zvol):
-   curl -O https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.img
-   dd if=ubuntu-24.04-server-cloudimg-amd64.img of=/dev/zvol/main/vms/truenasubuntudevheadless bs=4M
-   ```
-7. **Network**: must be reachable (LAN or VPN)
+ 4. **Required env vars** (in `.env.local`):
+    - `TRUENAS_HOST` — e.g. `192.168.0.52` or `truenas.home.arpa`
+    - `TRUENAS_SSH_USER` — e.g. `terraform`
+    - `TRUENAS_SSH_PRIVATE_KEY_FILE` — path to private key
+    - `TRUENAS_SSH_HOST_KEY_FINGERPRINT` — e.g. `SHA256:...`
+    - `TRUENAS_API_KEY` — REST API key for cloud-init ISO upload
+    - `TRUENAS_VM_BASE_DIR` — base directory for VM files (e.g. `/mnt/pool1/egame`)
+    - `TRUENAS_VM_POOL` — ZFS pool for zvols (e.g. `pool1`)
+    - `TRUENAS_VM_ZVOL_PREFIX` — dataset path prefix for zvols (e.g. `egame`)
+ 5. **Optional env vars** (defaults in `.env`, override in `.env.local`):
+    - `TRUENAS_SSH_PORT` (default: `22`)
+ 6. **One-time ZFS setup** — create the parent dataset:
+    ```bash
+    # On TrueNAS web UI: Storage > pool1 > Add Dataset (preset: Generic)
+    #   Name: egame    →  creates pool1/egame
+    ```
+    The dataset (`pool1/egame`) must exist before `make up`. Subdirectories (`iso/`, `images/`) are created automatically.
+ 7. **One-time sudoers setup** — the Terraform user needs `sudo dd` access to write cloud images to zvols. Add to sudoers (`visudo` on TrueNAS):
+    ```
+    terraform ALL=(ALL) NOPASSWD: /usr/bin/dd if=/mnt/pool1/egame/images/* of=/dev/zvol/pool1/egame/*
+    ```
+    Adjust path to `/bin/dd` if using TrueNAS CORE (FreeBSD).
+ 8. **Disk image setup** — `make up` downloads the cloud image directly to the NAS, writes it to a zvol, and resizes the partition. No manual `dd` needed.
 
 ### VirtualBox (local, Apple Silicon ⚠️)
 
