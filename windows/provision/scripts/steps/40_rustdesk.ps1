@@ -100,7 +100,7 @@ for ($i = 1; $i -le 15; $i++) {
 #
 # Idempotency note: the password+salt hash gets a fresh salt every time `--password`
 # runs, which invalidates whatever per-peer hash the local RustDesk client cached on
-# its last successful connect — meaning the local "Remember password" stops working
+# its last successful connect -- meaning the local "Remember password" stops working
 # and the user gets prompted again. So we only rewrite config / reset password when
 # the desired settings actually differ from what's already on disk.
 if ($rustdeskServer -or $rustdeskKey -or $rustdeskPassword) {
@@ -160,12 +160,12 @@ if ($rustdeskServer -or $rustdeskKey -or $rustdeskPassword) {
     if ($rustdeskPassword) {
       # Setting the permanent password generates a fresh salt server-side, which
       # is why we only do this when the config changed (i.e. first install or a
-      # genuine password rotation) — not on every reprovision.
+      # genuine password rotation) -- not on every reprovision.
       Write-Host "Setting permanent password via CLI..."
       & $rustdeskExe --password $rustdeskPassword | Out-Null
     }
   } else {
-    Write-Host "RustDesk config already matches desired state — leaving password/salt intact."
+    Write-Host "RustDesk config already matches desired state -- leaving password/salt intact."
   }
 }
 
