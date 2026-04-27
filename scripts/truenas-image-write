@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# Download a cloud image and write it to a TrueNAS zvol via SSH.
+#
+# Usage: scripts/truenas-image-write <host> <zvol_id> <image_url> <disk_gb>
+#
+# The script:
+#   1. Downloads the image to a temp file (with curl --continue-at -)
+#   2. Uploads it to TrueNAS via SFTP
+#   3. Writes it to the zvol with dd over SSH
+#   4. Extends the zvol to the desired size if the image is smaller
+#   5. Cleans up the remote temp file
+#
+# Idempotent: if the zvol already has a partition table, the write is skipped.
+
+set -euo pipefail
+
+HOST="${1:?Usage: truenas-image-write <host> <zvol_id> <image_url> <disk_gb>}"
+ZVOL_ID="${2:?}"
+IMAGE_URL="${3:?}"
+DISK_GB="${4:?}"
+
+ZVOL_PATH="/dev/zvol/${ZVOL_ID}"
+REMOTE_IMG="/tmp/$(basename "$IMAGE_URL")"
+
+SSH_OPTS=(-o StrictHostKeyChecking=no -o IdentitiesOnly=yes)
+if [ -n "${TRUENAS_SSH_PRIVATE_KEY_FILE:-}" ]; then
+  SSH_OPTS+=(-i "$TRUENAS_SSH_PRIVATE_KEY_FILE")
+fi
+if [ -n "${TRUENAS_SSH_PORT:-}" ]; then
+  SSH_OPTS+=(-p "$TRUENAS_SSH_PORT")
+fi
+SSH_USER="${TRUENAS_SSH_USER:-root}"
+
+# shellcheck disable=SC2029
+ssh_cmd() { ssh "${SSH_OPTS[@]}" "${SSH_USER}@${HOST}" "$@"; }
+
+# Check if zvol already has content (partition table / filesystem)
+# If fdisk can read partitions, the image was already written
+echo "[truenas-image-write] Checking if zvol already has an image..."
+if ssh_cmd "fdisk -l '${ZVOL_PATH}' 2>/dev/null | grep -q 'Disklabel type'" 2>/dev/null; then
+  echo "[truenas-image-write] Zvol already has a partition table. Skipping image write."
+  exit 0
+fi
+
+# Download image locally (cached)
+LOCAL_IMG="$(mktemp -t truenas-image-XXXXXX "${HOME}/tmp/truenas-image-XXXXXX" 2>/dev/null || echo "${TMPDIR:-/tmp}/truenas-image-$$")"
+trap 'rm -f "$LOCAL_IMG"' EXIT
+
+if [ -f "$LOCAL_IMG" ] && [ -s "$LOCAL_IMG" ]; then
+  echo "[truenas-image-write] Using cached image: $LOCAL_IMG"
+else
+  echo "[truenas-image-write] Downloading ${IMAGE_URL}..."
+  curl --fail --continue-at - --location --progress-bar --output "$LOCAL_IMG" "$IMAGE_URL"
+fi
+
+echo "[truenas-image-write] Uploading image to ${HOST}:${REMOTE_IMG}..."
+scp "${SSH_OPTS[@]}" "$LOCAL_IMG" "${SSH_USER}@${HOST}:${REMOTE_IMG}"
+
+echo "[truenas-image-write] Writing image to ${ZVOL_PATH}..."
+ssh_cmd "dd if='${REMOTE_IMG}' of='${ZVOL_PATH}' bs=4M status=progress && sync"
+
+echo "[truenas-image-write] Resizing partition to fill ${DISK_GB}G disk..."
+ssh_cmd "growpart '${ZVOL_PATH}' 1 2>/dev/null || true"
+ssh_cmd "resize2fs '${ZVOL_PATH}1' 2>/dev/null || true"
+
+echo "[truenas-image-write] Cleaning up remote image..."
+ssh_cmd "rm -f '${REMOTE_IMG}'"
+
+echo "[truenas-image-write] Done."

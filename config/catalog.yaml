@@ -76,6 +76,7 @@ oses:
     vagrant_box: bento/ubuntu-24.04
     # Vultr OS ID (from `vultr-cli os list`). Override in catalog.local.yaml if stale.
     vultr_os_id: 2284  # Ubuntu 24.04 LTS x64
+    cloud_image_url: https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.img
 
   - id: ubuntu-24.04-desktop-amd64
     family: ubuntu
@@ -84,6 +85,7 @@ oses:
     ui_mode: desktop
     vagrant_box: bento/ubuntu-24.04
     vultr_os_id: 2284  # Ubuntu 24.04 LTS x64
+    cloud_image_url: https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.img
 
   - id: windows-server-2025
     family: windows

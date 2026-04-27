@@ -250,6 +250,7 @@ emit_env() {
     "LOCATION_REGION=" + ($locp.region // ""),
     "LOCATION_AVAILABILITY_ZONE=" + ($locp.availability_zone // ""),
     "SSH_USER=" + (if (.os.family == "windows") then "Administrator" else "ubuntu" end),
+    "CLOUD_IMAGE_URL=" + (.os.cloud_image_url // ""),
     "TRUENAS_HOST=" + (env.TRUENAS_HOST // $locp.host // ""),
     "TRUENAS_SSH_PORT=" + ((env.TRUENAS_SSH_PORT // (($locp.ssh_port // 22) | tostring))),
     "TRUENAS_SSH_USER=" + (env.TRUENAS_SSH_USER // $locp.ssh_user // "terraform")
