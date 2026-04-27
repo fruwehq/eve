@@ -41,7 +41,11 @@ if (-not (Test-Path $rustdeskExe)) {
   Unblock-File $file -ErrorAction SilentlyContinue
 
   Write-Host "Running RustDesk installer (silent)..."
-  $proc = Start-Process -FilePath $file -ArgumentList "--silent-install" -Wait -PassThru
+  $proc = Start-Process -FilePath $file -ArgumentList "--silent-install" -PassThru
+  if (-not $proc.WaitForExit(300000)) {
+    $proc.Kill()
+    throw "RustDesk installer timed out after 5 minutes"
+  }
   if ($proc.ExitCode -ne 0) {
     throw "RustDesk installer failed with exit code $($proc.ExitCode)"
   }
