@@ -73,6 +73,10 @@ generate_hcl "z_vultr_instance.tf" {
       user_data = local.is_windows ? null : base64encode("#cloud-config\n${local.linux_user_data}")
     }
 
+    output "instance_id" {
+      value = vultr_instance.default.id
+    }
+
     output "vultr_instance_default_password" {
       description = "Default password (Windows only — empty for Linux cloud-init profiles)"
       value       = vultr_instance.default.default_password

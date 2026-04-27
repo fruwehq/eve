@@ -16,6 +16,15 @@ printf '%-15s %s\n' "OS:" "$OS_FAMILY"
 
 VM_STATUS="unknown"
 
+tf_attr() {
+  local json="$1" address="$2" attr="$3"
+  printf '%s' "$json" | jq -r --arg addr "$address" --arg attr "$attr" \
+    '(.values // {} | .root_module // {} | .resources // [])
+     | map(select(.address == $addr))
+     | map(.values[$attr])
+     | first // ""' 2>/dev/null
+}
+
 case "$ENGINE" in
   vagrant)
     GENERATED_DIR=".generated/$PROFILE"
@@ -50,16 +59,55 @@ case "$ENGINE" in
     fi
     ;;
   terraform)
-    IP=$(./scripts/profile-ip "$PROFILE" 2>/dev/null || true)
-    if [ -n "$IP" ]; then
-      VM_STATUS="running"
-      printf '%-15s %s\n' "IP:" "$IP"
+    TAGS=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^STACK_TAGS=/{print $2}')
+    STATE_JSON=$(terramate run --quiet --tags="$TAGS-services" -- terraform show -json 2>/dev/null) || true
+
+    if [ -z "$STATE_JSON" ]; then
+      VM_STATUS="not created"
     else
-      STACK_TAG="$PROVIDER:services"
-      if ! terramate run --tags="$STACK_TAG" -- terraform output -json >/dev/null 2>&1; then
-        VM_STATUS="no state"
-      else
-        VM_STATUS="created (no IP in state)"
+      case "$PROVIDER" in
+        aws)
+          RAW=$(tf_attr "$STATE_JSON" "aws_instance.main" "instance_state")
+          case "$RAW" in
+            "") VM_STATUS="not created" ;;
+            *) VM_STATUS="$RAW" ;;
+          esac
+          ;;
+        vultr)
+          RAW=$(tf_attr "$STATE_JSON" "vultr_instance.default" "power_status")
+          case "$RAW" in
+            running) VM_STATUS="running" ;;
+            stopped) VM_STATUS="stopped" ;;
+            "")
+              RAW2=$(tf_attr "$STATE_JSON" "vultr_instance.default" "status")
+              case "$RAW2" in
+                active) VM_STATUS="running" ;;
+                "") VM_STATUS="not created" ;;
+                *) VM_STATUS="$RAW2" ;;
+              esac
+              ;;
+            *) VM_STATUS="$RAW" ;;
+          esac
+          ;;
+        truenas)
+          RAW=$(tf_attr "$STATE_JSON" "truenas_vm.this" "state")
+          case "${RAW^^}" in
+            RUNNING) VM_STATUS="running" ;;
+            STOPPED) VM_STATUS="stopped" ;;
+            "") VM_STATUS="not created" ;;
+            *) VM_STATUS="$RAW" ;;
+          esac
+          ;;
+        *)
+          VM_STATUS="unsupported provider ($PROVIDER)"
+          ;;
+      esac
+
+      if [ "$VM_STATUS" = "running" ]; then
+        IP=$(./scripts/profile-ip "$PROFILE" 2>/dev/null || true)
+        if [ -n "$IP" ]; then
+          printf '%-15s %s\n' "IP:" "$IP"
+        fi
       fi
     fi
     ;;

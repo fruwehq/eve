@@ -58,15 +58,15 @@ make info PROFILE=aws-ubuntu-dev-headless
 # Cloud profile (terraform engine)
 make init PROFILE=aws-ubuntu-dev-headless
 make plan PROFILE=aws-ubuntu-dev-headless
-make apply PROFILE=aws-ubuntu-dev-headless
+make up PROFILE=aws-ubuntu-dev-headless
 make provision PROFILE=aws-ubuntu-dev-headless  # installs bundle packages on the VM
 make ssh PROFILE=aws-ubuntu-dev-headless
-make destroy PROFILE=aws-ubuntu-dev-headless
+make down PROFILE=aws-ubuntu-dev-headless
 
 # Local profile (vagrant engine)
 make plan PROFILE=local-vbox-ubuntu-dev
-make apply PROFILE=local-vbox-ubuntu-dev
-make destroy PROFILE=local-vbox-ubuntu-dev
+make up PROFILE=local-vbox-ubuntu-dev
+make down PROFILE=local-vbox-ubuntu-dev
 
 # TrueNAS profile (real provider wiring)
 make validate PROFILE=truenas-ubuntu-dev-headless
@@ -83,13 +83,13 @@ make info PROFILE=truenas-ubuntu-dev-headless
 
 make init PROFILE=truenas-ubuntu-dev-headless
 make plan PROFILE=truenas-ubuntu-dev-headless
-make apply PROFILE=truenas-ubuntu-dev-headless
-make destroy PROFILE=truenas-ubuntu-dev-headless
+make up PROFILE=truenas-ubuntu-dev-headless
+make down PROFILE=truenas-ubuntu-dev-headless
 ```
 
 ## Post-boot provisioning (Linux + Windows)
 
-After `apply` creates an instance, run `provision` to install bundle packages:
+After `up` creates an instance, run `provision` to install bundle packages:
 
 ```bash
 make ssh.wait PROFILE=aws-ubuntu-dev-headless   # optional — wait for SSH
@@ -190,7 +190,7 @@ The first invocation will spawn an Xpra server on the VM, tunnel it over SSH, an
    - `TRUENAS_VM_ISO_DIR` (default: `/mnt/main/iso`) — path on TrueNAS where cloud-init ISOs are stored
 6. **One-time disk setup** — write the Ubuntu 24.04 cloud image to the zvol before first boot:
    ```bash
-   # On TrueNAS (after apply creates the zvol):
+   # On TrueNAS (after up creates the zvol):
    curl -O https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.img
    dd if=ubuntu-24.04-server-cloudimg-amd64.img of=/dev/zvol/main/vms/truenasubuntudevheadless bs=4M
    ```

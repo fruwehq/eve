@@ -1,6 +1,6 @@
 # Makefile
 .DEFAULT_GOAL := default
-.PHONY: all apply aws.login clean default destroy env generate help info \
+.PHONY: all aws.login clean default down env generate help info \
 				init init.all ip lint logs plan \
 				profiles.list profiles.menu providers.status provision \
 				provision.clear-state provision.restart reboot \
@@ -12,7 +12,7 @@
 				remote.xpra.stop \
 				show-password ssh ssh.wait start status stop \
 				test test.profiles test.shellcheck test.terraform \
-				test.update-golden upload validate
+				test.update-golden up upload validate
 
 TM_PARALLEL ?= 8
 
@@ -46,17 +46,7 @@ export TRUENAS_SSH_USER
 export TRUENAS_VM_ISO_DIR
 export VULTR_API_KEY
 
-all: init apply ssh.wait provision remote.sunshine.wait remote.moonlight.pair remote.moonlight ## Full setup: apply, provision, pair Moonlight, start stream
-
-apply: ## Apply profile changes (terraform or vagrant)
-	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	./scripts/profile-resolve --profile $(PROFILE) --validate; \
-	ENGINE=$$(./scripts/profile-resolve --profile $(PROFILE) --emit env | awk -F= '/^ENGINE=/{print $$2}'); \
-	if [ "$$ENGINE" = "vagrant" ]; then \
-		./scripts/vagrant-up $(PROFILE); \
-	else \
-		./scripts/tf-apply $(PROFILE); \
-	fi
+all: init up ssh.wait provision remote.sunshine.wait remote.moonlight.pair remote.moonlight ## Full setup: up, provision, pair Moonlight, start stream
 
 aws.login: ## Refresh AWS CLI login session for the selected profile
 	aws login --profile $(AWS_PROFILE)
@@ -71,7 +61,7 @@ clean: ## Remove terramate-generated terraform files and cache
 
 default: help  ## Show help
 
-destroy: ## Destroy profile resources (terraform or vagrant)
+down: ## Destroy profile resources (terraform or vagrant)
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
 	./scripts/profile-resolve --profile $(PROFILE) --validate; \
 	ENGINE=$$(./scripts/profile-resolve --profile $(PROFILE) --emit env | awk -F= '/^ENGINE=/{print $$2}'); \
@@ -197,9 +187,9 @@ remote.xpra: ## Start server, launch app, and attach (requires APP=<cmd>)
 	./scripts/profile-xpra $(PROFILE) run $(APP) && \
 	./scripts/profile-xpra $(PROFILE) attach
 
-remote.xpra.start: ## Start the xpra server on the remote
+remote.xpra.apps: ## List available GUI apps on the remote instance
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	./scripts/profile-xpra $(PROFILE) start
+	./scripts/profile-xpra $(PROFILE) apps
 
 remote.xpra.attach: ## Attach local xpra client to the running session
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
@@ -210,17 +200,17 @@ remote.xpra.run: ## Run an additional app on the existing Xpra session (requires
 	if [ -z "$(APP)" ]; then echo "Usage: make remote.xpra.run PROFILE=<name> APP=<command>"; exit 2; fi; \
 	./scripts/profile-xpra $(PROFILE) run $(APP)
 
-remote.xpra.stop: ## Stop the remote xpra server
+remote.xpra.start: ## Start the xpra server on the remote
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	./scripts/profile-xpra $(PROFILE) stop
+	./scripts/profile-xpra $(PROFILE) start
 
 remote.xpra.status: ## Show xpra server status
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
 	./scripts/profile-xpra $(PROFILE) status
 
-remote.xpra.apps: ## List available GUI apps on the remote instance
+remote.xpra.stop: ## Stop the remote xpra server
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	./scripts/profile-xpra $(PROFILE) apps
+	./scripts/profile-xpra $(PROFILE) stop
 
 show-password: ## Display the instance's default password (Windows)
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
@@ -234,17 +224,17 @@ ssh.wait: ## Wait until SSH on the profile's instance accepts connections
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
 	./scripts/profile-ssh-wait $(PROFILE)
 
-start: ## Start a stopped vagrant profile
+start: up ## Start (power on) a stopped instance (runs up first if not created)
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	./scripts/vagrant-up $(PROFILE)
+	./scripts/profile-start $(PROFILE)
 
 status: ## Show VM status (running/stopped/not created) and IP
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
 	./scripts/profile-status $(PROFILE)
 
-stop: ## Stop (suspend) a running vagrant profile
+stop: ## Stop (power off) a running instance without destroying
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	./scripts/vagrant-stop $(PROFILE)
+	./scripts/profile-stop $(PROFILE)
 
 test: ## Run all tests (profiles, terraform validate, shellcheck)
 	@./scripts/test
@@ -260,6 +250,16 @@ test.terraform: ## terramate generate + terraform validate across provider stack
 
 test.update-golden: ## Regenerate tests/golden/*.env from current profile-resolve output
 	@UPDATE_GOLDEN=1 ./scripts/test-profiles
+
+up: ## Create and start profile resources (terraform or vagrant)
+	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
+	./scripts/profile-resolve --profile $(PROFILE) --validate; \
+	ENGINE=$$(./scripts/profile-resolve --profile $(PROFILE) --emit env | awk -F= '/^ENGINE=/{print $$2}'); \
+	if [ "$$ENGINE" = "vagrant" ]; then \
+		./scripts/vagrant-up $(PROFILE); \
+	else \
+		./scripts/tf-apply $(PROFILE); \
+	fi
 
 upload: ## scp ./upload/* to the instance (skips files that already exist remotely)
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \

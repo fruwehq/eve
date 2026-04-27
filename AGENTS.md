@@ -88,8 +88,8 @@ tests/golden/                  # Frozen profile-resolve env snapshots
 
 Machine entries declare a `kind:` field. Current supported kinds:
 
-- `kind: vm` — disposable VM lifecycle (aws, vultr, truenas, local-virtualbox, local-vmware). `apply` creates, `destroy` deletes.
-- `kind: metal` — persistent hardware (planned: raspberry-pi). `destroy` tears down managed workloads, **not** the machine. Don't force metal targets through VM lifecycle assumptions.
+- `kind: vm` — disposable VM lifecycle (aws, vultr, truenas, local-virtualbox, local-vmware). `up` creates, `down` deletes.
+- `kind: metal` — persistent hardware (planned: raspberry-pi). `down` tears down managed workloads, **not** the machine. Don't force metal targets through VM lifecycle assumptions.
 
 See [docs/raspberry-pi-provider.md](docs/raspberry-pi-provider.md) for the metal design guardrails.
 
@@ -128,11 +128,11 @@ When adding a shell script: ensure `#!/usr/bin/env bash|sh`, run `make test.shel
 
 ## TrueNAS VM lifecycle
 
-`apply` for a TrueNAS profile:
+`up` for a TrueNAS profile:
 1. Creates a `truenas_zvol` (empty block device at `/dev/zvol/<pool>/vms/<vm_name>`).
 2. Generates a NoCloud cloud-init seed ISO locally (`hdiutil makehybrid`) and uploads it to TrueNAS via REST API (`TRUENAS_API_KEY`).
 3. Creates the `truenas_vm` with the zvol as `disk` and the ISO as `cdrom`, started (`state = RUNNING`).
 
 **One-time manual step**: write the Ubuntu cloud image to the zvol before the VM can boot (see README.md → TrueNAS setup).
 
-`destroy` removes the VM, zvol, and cloud-init ISO.
+`down` removes the VM, zvol, and cloud-init ISO.
