@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Ensure a ZFS dataset exists on a TrueNAS server.
+# Creates each intermediate level that doesn't exist.
+#
+# Usage: scripts/truenas-dataset-ensure <host> <pool> <path>
+#
+# Example: truenas-dataset-ensure 192.168.0.52 pool1 terraform_home/terraform/vms
+#   Ensures: pool1/terraform_home, pool1/terraform_home/terraform, pool1/terraform_home/terraform/vms
+
+set -euo pipefail
+
+HOST="${1:?Usage: truenas-dataset-ensure <host> <pool> <path>}"
+POOL="${2:?}"
+DATASET_PATH="${3:?}"
+
+SSH_OPTS=(-o StrictHostKeyChecking=no -o IdentitiesOnly=yes)
+if [ -n "${TRUENAS_SSH_PRIVATE_KEY_FILE:-}" ]; then
+  SSH_OPTS+=(-i "$TRUENAS_SSH_PRIVATE_KEY_FILE")
+fi
+if [ -n "${TRUENAS_SSH_PORT:-}" ]; then
+  SSH_OPTS+=(-p "$TRUENAS_SSH_PORT")
+fi
+SSH_USER="${TRUENAS_SSH_USER:-root}"
+
+# shellcheck disable=SC2029
+ssh_cmd() { ssh "${SSH_OPTS[@]}" "${SSH_USER}@${HOST}" "$@"; }
+
+# Walk each level of the path and create if missing
+CURRENT="$POOL"
+IFS='/' read -ra PARTS <<< "$DATASET_PATH"
+for part in "${PARTS[@]}"; do
+  CURRENT="${CURRENT}/${part}"
+  if ssh_cmd "zfs list '${CURRENT}'" >/dev/null 2>&1; then
+    echo "[truenas-dataset-ensure] ${CURRENT} already exists"
+  else
+    echo "[truenas-dataset-ensure] Creating ${CURRENT}..."
+    ssh_cmd "zfs create '${CURRENT}'"
+  fi
+done
+
+echo "[truenas-dataset-ensure] Done."

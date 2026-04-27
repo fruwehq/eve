@@ -81,8 +81,9 @@ case "$PROVIDER" in
     print_kv TF_VAR_vm_iso_dir "${TRUENAS_VM_ISO_DIR:-}"
     print_kv TF_VAR_vm_memory_mb "$(getv VM_MEMORY_MB)"
     print_kv TF_VAR_vm_nic_attach "$(getv VM_NIC_ATTACH)"
-    print_kv TF_VAR_vm_pool "$(getv VM_POOL)"
+    print_kv TF_VAR_vm_pool "${TRUENAS_VM_POOL:-$(getv VM_POOL)}"
     print_kv TF_VAR_vm_state "$(getv VM_STATE)"
     print_kv TF_VAR_vm_vcpus "$(getv VM_VCPUS)"
+    print_kv TF_VAR_vm_zvol_prefix "${TRUENAS_VM_ZVOL_PREFIX:-vms}"
     ;;
 esac

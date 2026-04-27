@@ -56,7 +56,12 @@ generate_hcl "z_truenas_vm.tf" {
 
     variable "vm_iso_dir" {
       type    = string
-      default = "/mnt/main/iso"
+      default = ""
+    }
+
+    variable "vm_zvol_prefix" {
+      type    = string
+      default = "vms"
     }
 
     variable "ssh_public_key_file" {
@@ -71,13 +76,27 @@ generate_hcl "z_truenas_vm.tf" {
     locals {
       vm_name  = join("", regexall("[a-zA-Z0-9]+", var.profile_name))
       iso_path = "${var.vm_iso_dir}/${local.vm_name}-cidata.iso"
+      zvol_path = "${var.vm_zvol_prefix}/${local.vm_name}"
+    }
+
+    resource "null_resource" "ensure_parent_dataset" {
+      triggers = {
+        pool    = var.vm_pool
+        prefix  = var.vm_zvol_prefix
+        host    = var.truenas_host
+      }
+
+      provisioner "local-exec" {
+        command = "\"$(git rev-parse --show-toplevel)/scripts/truenas-dataset-ensure\" '${var.truenas_host}' '${var.vm_pool}' '${var.vm_zvol_prefix}'"
+      }
     }
 
     resource "truenas_zvol" "this" {
-      pool    = var.vm_pool
-      path    = "vms/${local.vm_name}"
-      volsize = "${var.vm_disk_gb}G"
-      sparse  = true
+      depends_on = [null_resource.ensure_parent_dataset]
+      pool       = var.vm_pool
+      path       = local.zvol_path
+      volsize    = "${var.vm_disk_gb}G"
+      sparse     = true
     }
 
     resource "null_resource" "write_cloud_image" {
