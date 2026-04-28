@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+# Validate fixture instances and compare emitted env to golden snapshots.
+# Usage:        scripts/test-instances
+# Refresh:      UPDATE_GOLDEN=1 scripts/test-instances
+
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+FIXTURE="tests/fixtures/instances.yaml"
+GOLDEN_DIR="tests/golden/instances"
+UPDATE="${UPDATE_GOLDEN:-0}"
+
+mkdir -p "$GOLDEN_DIR"
+
+# Keep output deterministic regardless of local host configuration.
+unset TRUENAS_HOST TRUENAS_SSH_PORT TRUENAS_SSH_USER \
+      TRUENAS_SSH_PRIVATE_KEY_FILE TRUENAS_SSH_HOST_KEY_FINGERPRINT \
+      TRUENAS_API_KEY TRUENAS_API_USER SSH_PUBLIC_KEY_FILE
+
+FAIL=0
+INSTANCES=$(./scripts/instance-list --registry "$FIXTURE" --json | jq -r '.instances[].name')
+
+for instance in $INSTANCES; do
+  if ! ./scripts/instance-resolve --registry "$FIXTURE" --instance "$instance" --validate >/dev/null 2>&1; then
+    printf '  [FAIL] validate: %s\n' "$instance" >&2
+    ./scripts/instance-resolve --registry "$FIXTURE" --instance "$instance" --validate >&2 || true
+    FAIL=$((FAIL + 1))
+    continue
+  fi
+
+  actual=$(./scripts/instance-resolve --registry "$FIXTURE" --instance "$instance" --emit env | LC_ALL=C sort)
+  golden="$GOLDEN_DIR/$instance.env"
+
+  if [ "$UPDATE" = "1" ]; then
+    printf '%s\n' "$actual" > "$golden"
+    printf '  [UPDATE] %s\n' "$golden"
+    continue
+  fi
+
+  if [ ! -f "$golden" ]; then
+    printf '  [FAIL] missing golden: %s (run: UPDATE_GOLDEN=1 make test.instances)\n' "$golden" >&2
+    FAIL=$((FAIL + 1))
+    continue
+  fi
+
+  if ! diff -u "$golden" <(printf '%s\n' "$actual") >/dev/null; then
+    printf '  [FAIL] golden mismatch: %s\n' "$instance" >&2
+    diff -u "$golden" <(printf '%s\n' "$actual") >&2 || true
+    FAIL=$((FAIL + 1))
+    continue
+  fi
+
+  printf '  [OK] %s\n' "$instance"
+done
+
+tmp_registry="$(mktemp "${TMPDIR:-/tmp}/egame-instance-test.XXXXXX")"
+invalid_output="$(mktemp "${TMPDIR:-/tmp}/egame-instance-test-output.XXXXXX")"
+trap 'rm -f "$tmp_registry" "$invalid_output"' EXIT
+rm -f "$tmp_registry"
+
+if ./scripts/instance-create \
+  --registry "$tmp_registry" \
+  --name test-dev \
+  --recipe local-vmware-ubuntu-dev-gui \
+  --disk-gb 90 \
+  --memory-mb 8192 >/dev/null; then
+  if ./scripts/instance-resolve --registry "$tmp_registry" --instance test-dev --validate >/dev/null; then
+    printf '  [OK] create valid instance\n'
+  else
+    printf '  [FAIL] created instance did not validate\n' >&2
+    FAIL=$((FAIL + 1))
+  fi
+else
+  printf '  [FAIL] create valid instance\n' >&2
+  FAIL=$((FAIL + 1))
+fi
+
+before_invalid="$(cat "$tmp_registry")"
+if ./scripts/instance-create \
+  --registry "$tmp_registry" \
+  --name bad-a \
+  --recipe no-such-recipe >"$invalid_output" 2>&1; then
+  printf '  [FAIL] invalid instance create succeeded\n' >&2
+  FAIL=$((FAIL + 1))
+elif [ "$(cat "$tmp_registry")" = "$before_invalid" ]; then
+  printf '  [OK] reject invalid instance without registry write\n'
+else
+  printf '  [FAIL] invalid instance create changed registry\n' >&2
+  FAIL=$((FAIL + 1))
+fi
+
+[ "$FAIL" -eq 0 ]
