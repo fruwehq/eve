@@ -35,6 +35,9 @@ if [ -n "${TRUENAS_SSH_PRIVATE_KEY_FILE:-}" ]; then
   fi
   SSH_OPTS+=(-i "${SSH_KEY}")
 fi
+if [ -n "${TRUENAS_SSH_PORT:-}" ] && [ "${TRUENAS_SSH_PORT}" != "22" ]; then
+  SSH_OPTS+=(-p "${TRUENAS_SSH_PORT}")
+fi
 
 # shellcheck disable=SC2029
 ssh "${SSH_OPTS[@]}" "${SSH_USER}@${TRUENAS_HOST}" "rm -f '${ISO_PATH}'" \
