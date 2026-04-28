@@ -274,7 +274,6 @@ emit_vagrant() {
     $r.profile.name as $name |
     (($r.machine.defaults.cpus // 2) | tostring) as $cpus |
     (($r.machine.defaults.memory_mb // 4096) | tostring) as $memory |
-    (($r.os.ui_mode // "headless") == "desktop") as $gui |
     ($r.bundle_packages | join(" ")) as $pkg_list |
 
     { docker: ($r.bundle_packages | index("docker") != null), dev: ($r.bundle_packages | index("dev-toolchain") != null) } as $flags |
@@ -329,7 +328,8 @@ emit_vagrant() {
     "  config.vm.provider \"" + $provider + "\" do |v|\n" +
     "    v.cpus = " + $cpus + "\n" +
     "    v.memory = " + $memory + "\n" +
-    (if $gui then "    v.gui = true\n" else "" end) +
+    "    # Set VAGRANT_SHOW_CONSOLE=1 to open the hypervisor console window.\n" +
+    "    v.gui = ENV[\"VAGRANT_SHOW_CONSOLE\"] == \"1\"\n" +
     "  end\n" +
     "\n" +
     $port_forwards +
