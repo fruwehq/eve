@@ -47,6 +47,7 @@ export TRUENAS_SSH_USER
 export TRUENAS_VM_BASE_DIR
 export TRUENAS_VM_POOL
 export TRUENAS_VM_ZVOL_PREFIX
+export VAGRANT_SHOW_CONSOLE
 export VULTR_API_KEY
 
 all: init up ssh.wait provision remote.sunshine.wait remote.moonlight.pair remote.moonlight ## Full setup: up, provision, pair Moonlight, start stream
