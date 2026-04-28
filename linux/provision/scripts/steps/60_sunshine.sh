@@ -30,6 +30,17 @@ if ! command -v sunshine >/dev/null 2>&1; then
   deb="$DOWNLOADS_DIR/$asset"
   download "$url" "$deb"
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "$deb"
+
+  # The noble deb is built against Ubuntu 24.04 libs. On newer releases the
+  # sonames have bumped — create compatibility symlinks so the binary can load.
+  # shellcheck disable=SC1091
+  codename=$(. /etc/os-release && echo "$VERSION_CODENAME")
+  if [ "$codename" != "noble" ] && [ "$codename" != "jammy" ]; then
+    log "### 60_sunshine: patching shared-library sonames for $codename"
+    sudo ln -sf libminiupnpc.so.21 /usr/lib/x86_64-linux-gnu/libminiupnpc.so.17 2>/dev/null || true
+    sudo ln -sf libicuuc.so.78 /usr/lib/x86_64-linux-gnu/libicuuc.so.74 2>/dev/null || true
+    sudo ldconfig
+  fi
 else
   log "sunshine already installed — skipping install"
 fi

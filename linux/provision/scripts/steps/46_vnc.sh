@@ -31,7 +31,9 @@ if ! command -v startxfce4 >/dev/null 2>&1; then
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y xfce4
 fi
 
-mkdir -p ~/.vnc
+VNC_HOME=~/.config/tigervnc
+mkdir -p "$VNC_HOME"
+rm -rf ~/.vnc
 
 # Suppress the colord polkit prompt that appears on every XFCE/VNC session.
 # Ubuntu 24.04 (polkit 124) silently ignores the legacy .pkla format — use the
@@ -48,7 +50,7 @@ polkit.addRule(function(action, subject) {
 EOF
   sudo systemctl restart polkit 2>/dev/null || true
 fi
-if [ ! -f ~/.vnc/passwd ]; then
+if [ ! -f "$VNC_HOME/passwd" ]; then
   log "### 46_vnc: setting VNC password"
   printf 'vagrant\nvagrant\nn\n' | tigervncpasswd 2>&1
 fi
@@ -68,10 +70,10 @@ exec sleep infinity
 XEOF
 )
 
-if [ ! -f ~/.vnc/xstartup ] || [ "$XSTARTUP_CONTENT" != "$(cat ~/.vnc/xstartup)" ]; then
+if [ ! -f "$VNC_HOME/xstartup" ] || [ "$XSTARTUP_CONTENT" != "$(cat "$VNC_HOME/xstartup")" ]; then
   log "### 46_vnc: writing xstartup script"
-  printf '%s\n' "$XSTARTUP_CONTENT" > ~/.vnc/xstartup
-  chmod +x ~/.vnc/xstartup
+  printf '%s\n' "$XSTARTUP_CONTENT" > "$VNC_HOME/xstartup"
+  chmod +x "$VNC_HOME/xstartup"
 fi
 
 UNIT_PATH=/etc/systemd/system/vncserver.service
