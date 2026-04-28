@@ -1,8 +1,10 @@
 # Makefile
 .DEFAULT_GOAL := default
 .PHONY: all aws.login clean default down env generate help info \
-				init init.all ip lint logs plan \
+				init init.all instance.create instance.env instance.info \
+				instance.list instance.validate ip lint logs plan \
 				profiles.list profiles.menu providers.status provision \
+				recipes.list \
 				provision.clear-state provision.restart provision.wait reboot \
 				remote.console remote.moonlight remote.moonlight.pair \
 				remote.rdp remote.rustdesk remote.rustdesk.info \
@@ -11,7 +13,7 @@
 				remote.xpra.desktop remote.xpra.run remote.xpra.start remote.xpra.status \
 				remote.xpra.stop \
 				show-password ssh ssh.run ssh.truenas ssh.wait start status stop \
-				test test.profiles test.shellcheck test.terraform \
+				test test.instances test.profiles test.shellcheck test.terraform \
 				test.update-golden up update upload validate
 
 TM_PARALLEL ?= 8
@@ -19,6 +21,9 @@ TM_PARALLEL ?= 8
 # Profile selection: set PROFILE= explicitly, or run `make profiles.menu` to pick
 # one. If PROFILE is unset, interactive targets will prompt.
 PROFILE ?=
+
+# v3 concrete instance selection. Instances live in .egame/instances.yaml.
+INSTANCE ?=
 
 # Load dotenv files
 -include .env
@@ -103,7 +108,7 @@ generate: ## Generate terraform configuration from terramate files
 	terramate generate
 
 help: ## Show this help message
-	@echo 'v2: Profile-Driven VM Platform'
+	@echo 'v3: Instance-Driven VM Platform'
 	@echo
 	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[$$()% a-zA-Z_.-]+:.*?##/ { printf "  \033[36m%-30s\033[0m %s\n", $$1, $$2 } ' $(MAKEFILE_LIST)
 
@@ -123,6 +128,38 @@ init: ## Initialize profile backend/providers (terraform only)
 
 init.all: generate ## Init all stacks in parallel (set TM_PARALLEL=N)
 	terramate run --parallel=$(TM_PARALLEL) --continue-on-error -- terraform init -upgrade
+
+instance.create: ## Create a local instance registry entry (NAME=<name> RECIPE=<recipe>)
+	@if [ -z "$(NAME)" ] || [ -z "$(RECIPE)" ]; then echo "Usage: make instance.create NAME=<name> RECIPE=<recipe> [BUNDLES=a,b] [DISK_GB=n] [MEMORY_MB=n]"; exit 2; fi; \
+	args="--name $(NAME) --recipe $(RECIPE)"; \
+	if [ -n "$(MACHINE)" ]; then args="$$args --machine $(MACHINE)"; fi; \
+	if [ -n "$(OS)" ]; then args="$$args --os $(OS)"; fi; \
+	if [ -n "$(INIT)" ]; then args="$$args --init $(INIT)"; fi; \
+	if [ -n "$(LOCATION)" ]; then args="$$args --location $(LOCATION)"; fi; \
+	if [ -n "$(BUNDLES)" ]; then args="$$args --bundles $(BUNDLES)"; fi; \
+	if [ -n "$(DISK_GB)" ]; then args="$$args --disk-gb $(DISK_GB)"; fi; \
+	if [ -n "$(MEMORY_MB)" ]; then args="$$args --memory-mb $(MEMORY_MB)"; fi; \
+	if [ -n "$(CPU_CORES)" ]; then args="$$args --cpu-cores $(CPU_CORES)"; fi; \
+	if [ -n "$(VCPUS)" ]; then args="$$args --vcpus $(VCPUS)"; fi; \
+	if [ -n "$(INSTANCE_TYPE)" ]; then args="$$args --instance-type $(INSTANCE_TYPE)"; fi; \
+	if [ -n "$(ROOT_VOLUME_TYPE)" ]; then args="$$args --root-volume-type $(ROOT_VOLUME_TYPE)"; fi; \
+	if [ -n "$(PLAN)" ]; then args="$$args --plan $(PLAN)"; fi; \
+	./scripts/instance-create $$args
+
+instance.env: ## Print resolved concrete instance data as env lines
+	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make instance.env INSTANCE=<name>"; exit 2; fi; \
+	./scripts/instance-resolve --instance $(INSTANCE) --emit env
+
+instance.info: ## Print resolved concrete instance data as JSON
+	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make instance.info INSTANCE=<name>"; exit 2; fi; \
+	./scripts/instance-resolve --instance $(INSTANCE) --emit json | jq .
+
+instance.list: ## List local concrete instances
+	@./scripts/instance-list
+
+instance.validate: ## Validate a concrete instance from .egame/instances.yaml
+	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make instance.validate INSTANCE=<name>"; exit 2; fi; \
+	./scripts/instance-resolve --instance $(INSTANCE) --validate
 
 ip: ## Print the instance IP for a profile
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
@@ -156,6 +193,9 @@ profiles.menu: ## Interactive profile selector
 
 providers.status: ## Check provider configuration and connectivity
 	@./scripts/providers-status
+
+recipes.list: ## List reusable VM recipes
+	@./scripts/recipes-list --with-details
 
 provision: ## Upload and run OS-appropriate provisioning scripts on the instance
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
@@ -298,8 +338,11 @@ stop: ## Stop (power off) a running instance without destroying
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
 	./scripts/stop $(PROFILE)
 
-test: ## Run all tests (profiles, terraform validate, shellcheck)
+test: ## Run all tests (profiles, instances, terraform validate, shellcheck)
 	@./scripts/test
+
+test.instances: ## Validate fixture instances and compare emitted env to golden snapshots
+	@./scripts/test-instances
 
 test.profiles: ## Validate all profiles and compare emitted env to golden snapshots
 	@./scripts/test-profiles
@@ -312,6 +355,7 @@ test.terraform: ## terramate generate + terraform validate across provider stack
 
 test.update-golden: ## Regenerate tests/golden/*.env from current profile-resolve output
 	@UPDATE_GOLDEN=1 ./scripts/test-profiles
+	@UPDATE_GOLDEN=1 ./scripts/test-instances
 
 up: ## Create and start profile resources (terraform or vagrant)
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \

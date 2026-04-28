@@ -1,0 +1,24 @@
+version: 1
+instances:
+  - name: dev-a
+    recipe: local-vmware-ubuntu-dev-gui
+    overrides:
+      disk_gb: 120
+      memory_mb: 12288
+
+  - name: aws-gpu-a
+    recipe: aws-ubuntu-dev-headless
+    machine: aws-gpu-g5
+    overrides:
+      disk_gb: 240
+      instance_type: g5.xlarge
+      root_volume_type: gp3
+
+  - name: truenas-all-a
+    recipe: truenas-ubuntu-all
+    overrides:
+      disk_gb: 64
+      vcpus: 4
+
+  - name: rpi-all-a
+    recipe: rpi-ubuntu-all

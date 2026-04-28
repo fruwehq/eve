@@ -1,4 +1,4 @@
-# v2: Profile-Driven VM Platform
+# v3: Instance-Driven VM Platform
 
 > Work in progress: this repo is evolving from gaming-only infra into a layered machine-composition platform (machine + OS + init + workloads), supporting cloud and local targets.
 >
@@ -17,7 +17,31 @@ scp -r ~/src/personal/ephemeral-cloud-gaming/windows/provision/* vultr:/C:/provi
 ssh vultr "pwsh C:\provision\bootstrap.ps1"
 ```
 
-## v2 profile workflow (new)
+## v3 instance workflow
+
+v3 introduces concrete local instances on top of reusable recipes. Recipes still
+come from the existing catalog entries, while concrete instances live in the
+git-ignored local registry at `.egame/instances.yaml`.
+
+```bash
+# List reusable recipes
+make recipes.list
+
+# Create a concrete instance entry
+make instance.create NAME=dev-a RECIPE=local-vmware-ubuntu-dev-gui DISK_GB=120 MEMORY_MB=12288
+
+# List and inspect concrete instances
+make instance.list
+make instance.info INSTANCE=dev-a
+make instance.env INSTANCE=dev-a
+make instance.validate INSTANCE=dev-a
+```
+
+This first v3 slice resolves concrete instances and preserves the current
+provider execution layer. Later slices will move lifecycle commands from
+`PROFILE=` to `INSTANCE=`.
+
+## v2 profile workflow
 
 Profiles are defined in `config/catalog.yaml` and resolved by `scripts/profile-resolve`.
 

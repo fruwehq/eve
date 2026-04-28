@@ -1,0 +1,16 @@
+#!/usr/bin/env sh
+set -eu
+
+# List reusable VM recipes from the catalog.
+# Usage: scripts/recipes-list [--with-details]
+
+DETAILS=0
+if [ "${1:-}" = "--with-details" ]; then
+  DETAILS=1
+fi
+
+if [ "$DETAILS" -eq 1 ]; then
+  ./scripts/profiles-list --with-details | sed '1s/PROFILE/RECIPE/;2s/-------/------/'
+else
+  ./scripts/profiles-list
+fi
