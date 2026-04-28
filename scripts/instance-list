@@ -1,0 +1,59 @@
+#!/usr/bin/env ruby
+# List concrete local VM instances from the instance registry.
+
+require "json"
+require "yaml"
+
+ROOT = File.expand_path("..", __dir__)
+DEFAULT_REGISTRY_PATH = File.join(ROOT, ".egame/instances.yaml")
+
+def usage
+  warn "Usage: scripts/instance-list [--json] [--registry <path>]"
+end
+
+def load_any(path)
+  return {} unless File.exist?(path)
+  YAML.safe_load(File.read(path), permitted_classes: [], aliases: true) || {}
+end
+
+json = false
+registry_path = DEFAULT_REGISTRY_PATH
+
+args = ARGV.dup
+until args.empty?
+  case args.shift
+  when "--json"
+    json = true
+  when "--registry"
+    registry_path = File.expand_path(args.shift, Dir.pwd)
+  when "-h", "--help"
+    usage
+    exit 0
+  else
+    usage
+    exit 2
+  end
+end
+
+registry = load_any(registry_path)
+instances = registry["instances"] || []
+
+if json
+  puts JSON.pretty_generate({ "instances" => instances })
+  exit 0
+end
+
+if instances.empty?
+  puts "No instances found. Create one with: make instance.create NAME=<name> RECIPE=<recipe>"
+  exit 0
+end
+
+printf "%-28s %-32s %-24s %-24s\n", "INSTANCE", "RECIPE", "MACHINE", "OS"
+printf "%-28s %-32s %-24s %-24s\n", "--------", "------", "-------", "--"
+instances.each do |instance|
+  printf "%-28s %-32s %-24s %-24s\n",
+         instance["name"],
+         instance["recipe"] || "-",
+         instance["machine"] || "-",
+         instance["os"] || "-"
+end
