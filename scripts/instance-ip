@@ -30,7 +30,7 @@ case "$ENGINE:$PROVIDER" in
     RESOLVED_TRUENAS_SSH_PORT=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^TRUENAS_SSH_PORT=/{print $2}')
     RESOLVED_TRUENAS_SSH_USER=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^TRUENAS_SSH_USER=/{print $2}')
 
-    VM_MAC=$(terramate run --quiet --tags="$TAGS-services" -- terraform output -raw truenas_vm_mac)
+    VM_NAME=$(terramate run --quiet --tags="$TAGS-services" -- terraform output -raw truenas_vm_name)
     SSH_USER="${TRUENAS_SSH_USER:-$RESOLVED_TRUENAS_SSH_USER}"
     SSH_HOST="${TRUENAS_HOST:-$RESOLVED_TRUENAS_HOST}"
     if [ -z "$SSH_HOST" ]; then
@@ -49,14 +49,38 @@ case "$ENGINE:$PROVIDER" in
     SSH_PORT="${TRUENAS_SSH_PORT:-$RESOLVED_TRUENAS_SSH_PORT}"
     [ -n "$SSH_PORT" ] && [ "$SSH_PORT" != "22" ] && NAS_OPTS+=(-p "$SSH_PORT")
 
-    # shellcheck disable=SC2029
-    IP=$(ssh "${NAS_OPTS[@]}" "${SSH_USER}@${SSH_HOST}" \
-      "awk -v mac='$VM_MAC' 'tolower(\$4) == tolower(mac) {print \$1; exit}' /proc/net/arp")
-    if [ -z "$IP" ]; then
-      echo "instance-ip: no ARP entry found for TrueNAS VM MAC '$VM_MAC'" >&2
+    # TrueNAS auto-generates NIC MACs but does not expose them in Terraform or
+    # vm.device.query. Match the VM by its cloud-init hostname instead.
+    CANDIDATES=$(ssh "${NAS_OPTS[@]}" "${SSH_USER}@${SSH_HOST}" \
+      "awk '/br0/ && /00:a0:98/ {print \$1}' /proc/net/arp")
+    if [ -z "$CANDIDATES" ]; then
+      echo "instance-ip: no TrueNAS VM ARP candidates found" >&2
       exit 2
     fi
-    printf '%s\n' "$IP"
+
+    VM_SSH_OPTS=(-o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=1)
+    SSH_PUBLIC_KEY_FILE="${SSH_PUBLIC_KEY_FILE:-}"
+    # shellcheck disable=SC2088,SC2016
+    case "$SSH_PUBLIC_KEY_FILE" in
+      '$(HOME)'|'$(HOME)/'*) SSH_PUBLIC_KEY_FILE="${HOME}${SSH_PUBLIC_KEY_FILE#\$\(HOME\)}" ;;
+      '$HOME'|'$HOME/'*) SSH_PUBLIC_KEY_FILE="${HOME}${SSH_PUBLIC_KEY_FILE#\$HOME}" ;;
+      '~'|'~/'*) SSH_PUBLIC_KEY_FILE="${HOME}${SSH_PUBLIC_KEY_FILE#\~}" ;;
+    esac
+    [ -n "$SSH_PUBLIC_KEY_FILE" ] && VM_SSH_KEY="${SSH_PUBLIC_KEY_FILE%.pub}" && VM_SSH_OPTS+=(-i "$VM_SSH_KEY")
+
+    FOUND=""
+    for IP in $CANDIDATES; do
+      HOSTNAME=$(ssh "${VM_SSH_OPTS[@]}" "ubuntu@${IP}" hostname 2>/dev/null) || continue
+      if [ "$HOSTNAME" = "$VM_NAME" ]; then
+        FOUND="$IP"
+        break
+      fi
+    done
+    if [ -z "$FOUND" ]; then
+      echo "instance-ip: no TrueNAS ARP candidate matched hostname '$VM_NAME'" >&2
+      exit 2
+    fi
+    printf '%s\n' "$FOUND"
     ;;
   vagrant:*)
     cd ".generated/$PROFILE"
