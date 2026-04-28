@@ -223,6 +223,7 @@ fi
 
 emit_env() {
   echo "$RESOLVED_JSON" | jq -r '
+    def env_or($name; $fallback): ((env[$name] | select(. != "")) // $fallback);
     (.machine.provider) as $provider |
     (.location[$provider] // {}) as $locp |
     "PROFILE_NAME=" + .profile.name,
@@ -251,9 +252,9 @@ emit_env() {
     "LOCATION_AVAILABILITY_ZONE=" + ($locp.availability_zone // ""),
     "SSH_USER=" + (if (.os.family == "windows") then "Administrator" else "ubuntu" end),
     "CLOUD_IMAGE_URL=" + (.os.cloud_image_url // ""),
-    "TRUENAS_HOST=" + (env.TRUENAS_HOST // $locp.host // ""),
-    "TRUENAS_SSH_PORT=" + ((env.TRUENAS_SSH_PORT // (($locp.ssh_port // 22) | tostring))),
-    "TRUENAS_SSH_USER=" + (env.TRUENAS_SSH_USER // $locp.ssh_user // "terraform")
+    "TRUENAS_HOST=" + env_or("TRUENAS_HOST"; $locp.host // ""),
+    "TRUENAS_SSH_PORT=" + env_or("TRUENAS_SSH_PORT"; (($locp.ssh_port // 22) | tostring)),
+    "TRUENAS_SSH_USER=" + env_or("TRUENAS_SSH_USER"; $locp.ssh_user // "terraform")
   '
 }
 

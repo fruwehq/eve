@@ -178,5 +178,9 @@ generate_hcl "z_truenas_vm.tf" {
     output "truenas_vm_name" {
       value = truenas_vm.this.name
     }
+
+    output "truenas_vm_mac" {
+      value = try(truenas_vm.this.nic[0].mac, "")
+    }
   }
 }
