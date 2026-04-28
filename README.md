@@ -143,12 +143,12 @@ Then re-run `make provision PROFILE=…` to install `xpra` on the VM.
 ### Launch an app
 
 ```bash
-make xpra PROFILE=aws-ubuntu-dev-headless APP=xeyes          # smoke test
-make xpra PROFILE=aws-ubuntu-dev-headless APP=firefox        # browser
-make xpra PROFILE=aws-ubuntu-dev-headless APP="xterm -e htop"
+make remote.xpra PROFILE=aws-ubuntu-dev-headless APP=xeyes          # smoke test
+make remote.xpra PROFILE=aws-ubuntu-dev-headless APP=firefox        # browser
+make remote.xpra PROFILE=aws-ubuntu-dev-headless APP="xterm -e htop"
 ```
 
-The first invocation will spawn an Xpra server on the VM, tunnel it over SSH, and attach a local client window. Closing the app exits the Xpra session (`--exit-with-children`).
+The target starts an Xpra server on the VM, launches the requested app, and attaches a local client window. Use `make remote.xpra.stop PROFILE=...` to stop the remote session.
 
 ## Provider setup guides
 

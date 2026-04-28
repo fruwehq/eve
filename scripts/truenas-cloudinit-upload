@@ -37,6 +37,9 @@ if [ -n "${TRUENAS_SSH_PRIVATE_KEY_FILE:-}" ]; then
   fi
   SSH_OPTS+=(-i "${SSH_KEY}")
 fi
+if [ -n "${TRUENAS_SSH_PORT:-}" ] && [ "${TRUENAS_SSH_PORT}" != "22" ]; then
+  SSH_OPTS+=(-p "${TRUENAS_SSH_PORT}")
+fi
 
 SSH_PUBLIC_KEY=$(cat "$SSH_PUBLIC_KEY_FILE")
 
