@@ -79,17 +79,19 @@ NoDisplay=false
 X-GNOME-Autostart-enabled=true
 EOF
 
-# Try to bring it up immediately if a user session is already running, so
-# remote-sunshine-wait can succeed without an extra reboot.
-if pgrep -u "$USER" -x sunshine >/dev/null 2>&1; then
+XDG_RUNTIME_DIR="/run/user/$(id -u)"
+export XDG_RUNTIME_DIR
+
+systemctl --user enable sunshine 2>/dev/null || true
+
+if systemctl --user is-active sunshine >/dev/null 2>&1; then
   log "### 60_sunshine: sunshine already running"
-else
-  if [ -n "${DISPLAY:-}" ] || [ -d "/run/user/$(id -u)" ]; then
-    log "### 60_sunshine: starting sunshine in current user session"
+elif [ -d "$XDG_RUNTIME_DIR" ]; then
+  log "### 60_sunshine: starting sunshine via systemd"
+  systemctl --user start sunshine 2>/dev/null || \
     setsid nohup sunshine "$SUN_CONF" >>"$LOGS_DIR/sunshine.log" 2>&1 < /dev/null &
-  else
-    log "### 60_sunshine: no user session yet — sunshine will start at next autologin"
-  fi
+else
+  log "### 60_sunshine: no user session yet — sunshine will start at next autologin"
 fi
 
 log "### 60_sunshine: done"
