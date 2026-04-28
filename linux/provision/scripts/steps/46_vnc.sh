@@ -31,9 +31,14 @@ if ! command -v startxfce4 >/dev/null 2>&1; then
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y xfce4
 fi
 
-VNC_HOME=~/.config/tigervnc
+VNC_VERSION=$(dpkg-query -W -f '${Version}' tigervnc-standalone-server 2>/dev/null | grep -oP '^\d+\.\d+' || echo "0.0")
+if dpkg --compare-versions "$VNC_VERSION" ge "1.15"; then
+  VNC_HOME=~/.config/tigervnc
+  rm -rf ~/.vnc
+else
+  VNC_HOME=~/.vnc
+fi
 mkdir -p "$VNC_HOME"
-rm -rf ~/.vnc
 
 # Suppress the colord polkit prompt that appears on every XFCE/VNC session.
 # Ubuntu 24.04 (polkit 124) silently ignores the legacy .pkla format — use the
