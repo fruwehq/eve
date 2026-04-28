@@ -59,7 +59,7 @@ check_local_vmware() {
 check_truenas() {
   local host="${TRUENAS_HOST:-}"
   local port="${TRUENAS_SSH_PORT:-22}"
-  local user="${TRUENAS_SSH_USER:-terraform}"
+  local user="${TRUENAS_SSH_USER:-}"
   configured=no reachable=no notes="missing TRUENAS_HOST"
 
   if [ -n "$host" ]; then
@@ -71,7 +71,7 @@ check_truenas() {
     else
       notes="ssh port $port unreachable"
     fi
-    if [ -n "${TRUENAS_SSH_PRIVATE_KEY_FILE:-}" ] && [ -f "${TRUENAS_SSH_PRIVATE_KEY_FILE}" ]; then
+    if [ -n "$user" ] && [ -n "${TRUENAS_SSH_PRIVATE_KEY_FILE:-}" ] && [ -f "${TRUENAS_SSH_PRIVATE_KEY_FILE}" ]; then
       mkdir -p ./tmp
       if ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new \
         -o UserKnownHostsFile=./tmp/known_hosts \

@@ -24,6 +24,12 @@ PROFILE ?=
 -include .env
 -include .env.local
 
+# TIMEZONE is the only "documented in .env" variable that defaults instead of
+# erroring when unset: fall back to the host's configured timezone.
+ifeq ($(strip $(TIMEZONE)),)
+TIMEZONE := $(shell readlink /etc/localtime 2>/dev/null | sed 's|.*/zoneinfo/||')
+endif
+
 export AWS_CONFIG_FILE
 export AWS_PROFILE
 export AWS_REGION
@@ -31,6 +37,7 @@ export AWS_SHARED_CREDENTIALS_FILE
 export EPHEMERAL_SUNSHINE_PASSWORD
 export EPHEMERAL_WINDOWS_PASSWORD
 export MY_IP
+export RASPBERRY_PI_HOST
 export RUSTDESK_KEY
 export RUSTDESK_PASSWORD
 export RUSTDESK_SERVER
@@ -48,6 +55,7 @@ export TRUENAS_VM_BASE_DIR
 export TRUENAS_VM_POOL
 export TRUENAS_VM_ZVOL_PREFIX
 export VAGRANT_SHOW_CONSOLE
+export VM_USER_NAME
 export VULTR_API_KEY
 
 all: init up ssh.wait provision remote.sunshine.wait remote.moonlight.pair remote.moonlight ## Full setup: up, provision, pair Moonlight, start stream
@@ -225,10 +233,11 @@ ssh: ## SSH into the profile's instance
 	./scripts/instance-ssh $(PROFILE)
 
 ssh.truenas: ## SSH directly into the TrueNAS host (no profile needed)
-	@opts="-o StrictHostKeyChecking=no -o IdentitiesOnly=yes"; \
+	@./scripts/env-require TRUENAS_HOST TRUENAS_SSH_USER; \
+	opts="-o StrictHostKeyChecking=no -o IdentitiesOnly=yes"; \
 	if [ -n "$$TRUENAS_SSH_PRIVATE_KEY_FILE" ]; then opts="$$opts -i $$TRUENAS_SSH_PRIVATE_KEY_FILE"; fi; \
 	if [ -n "$$TRUENAS_SSH_PORT" ]; then opts="$$opts -p $$TRUENAS_SSH_PORT"; fi; \
-	exec ssh $$opts "$${TRUENAS_SSH_USER:-root}@$${TRUENAS_HOST}"
+	exec ssh $$opts "$${TRUENAS_SSH_USER}@$${TRUENAS_HOST}"
 
 ssh.wait: ## Wait until SSH on the profile's instance accepts connections
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \

@@ -61,6 +61,7 @@ case "$ENGINE" in
         fi
         ;;
       truenas)
+        ./scripts/env-require TRUENAS_SSH_USER
         RAW=$(tf_attr "$STATE_JSON" "truenas_vm.this" "state")
         if [ "$(printf '%s' "$RAW" | tr '[:lower:]' '[:upper:]')" = "RUNNING" ]; then
           echo "[start] Already running"
@@ -79,7 +80,7 @@ case "$ENGINE" in
             *) printf '%s' "$value" ;;
           esac
         }
-        SSH_USER="${TRUENAS_SSH_USER:-terraform}"
+        SSH_USER="${TRUENAS_SSH_USER}"
         SSH_OPTS=(-o StrictHostKeyChecking=no -o IdentitiesOnly=yes)
         if [ -n "${TRUENAS_SSH_PRIVATE_KEY_FILE:-}" ]; then
           SSH_KEY="$(normalize_path "${TRUENAS_SSH_PRIVATE_KEY_FILE}")"

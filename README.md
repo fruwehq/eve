@@ -179,9 +179,9 @@ The target starts an Xpra server on the VM, launches the requested app, and atta
 1. **SSH key** — generate a keypair for Terraform to use
 2. **TrueNAS user** — create a Terraform user with SSH access and `terraform` group
 3. **API key** — generate one in TrueNAS → API Keys (used for cloud-init ISO upload)
- 4. **Required env vars** (in `.env.local`):
+ 4. **Required env vars** (in `.env.local`) — runtime errors out clearly if any are unset:
     - `TRUENAS_HOST` — e.g. `192.168.0.52` or `truenas.home.arpa`
-    - `TRUENAS_SSH_USER` — e.g. `terraform`
+    - `TRUENAS_SSH_USER` — e.g. `terraform` (required; no built-in default)
     - `TRUENAS_SSH_PRIVATE_KEY_FILE` — path to private key
     - `TRUENAS_SSH_HOST_KEY_FINGERPRINT` — e.g. `SHA256:...`
     - `TRUENAS_API_KEY` — REST API key for cloud-init ISO upload
@@ -224,16 +224,43 @@ The target starts an Xpra server on the VM, launches the requested app, and atta
    The service install step requires `sudo`.
 5. No cloud credentials needed
 
-### Raspberry Pi / ARM metal (planned)
+### Raspberry Pi / ARM metal
 
-This repo's current local runtimes are VM-oriented (`local-virtualbox`, `local-vmware`, `truenas`).
-For a Raspberry Pi, the better fit is a future `provider: raspberry-pi` machine entry with `kind: metal` rather than trying to force the Pi into a VM-host role.
+The Pi is wired in as `provider: raspberry-pi`, `kind: metal` — a first-class target alongside the VM-oriented runtimes (`local-virtualbox`, `local-vmware`, `truenas`), but with a simpler lifecycle: there is nothing to "create" or "destroy" remotely. You flash the SD card by hand once, then the repo SSHs in to do the rest.
 
 Recommended shape:
 
 - Use the Pi as a persistent ARM sandbox host running one main Linux install.
 - Let this repo manage first-boot/bootstrap and post-boot workload provisioning.
 - Reserve VM-host orchestration for x86/TrueNAS when you need stronger guest isolation or x86 compatibility.
+
+#### Required env vars
+
+Set in `.env.local`:
+
+- `RASPBERRY_PI_HOST` — e.g. `rapi.local` or the Pi's LAN IP
+- `VM_USER_NAME` — the username preseeded into the SD card image (see Imager step below)
+- `SSH_PUBLIC_KEY_FILE` — path to the public key whose private half is loaded in your agent
+
+These are validated at runtime by [scripts/env-require](scripts/env-require) — `make ssh PROFILE=rpi-ubuntu-all` errors clearly if any are missing.
+
+#### Initial SD card image (first boot)
+
+Flash **Ubuntu Server 24.04 LTS (64-bit)** with the official [Raspberry Pi Imager](https://www.raspberrypi.com/software/). Use Server (not Desktop) so the install stays reproducible — provisioning installs the GUI / Sunshine / etc. afterward, matching the Vagrant flow.
+
+In Imager's advanced options (gear icon), preseed:
+
+- **Hostname**: e.g. `rpi5`
+- **Username**: `terraform` — matches `ssh_user` for the other remote-provisioned profiles ([config/catalog.yaml](config/catalog.yaml)) so the Pi doesn't introduce a third naming convention.
+- **Password**: a long throwaway. Provisioning enforces `PasswordAuthentication no`, so it only matters until first SSH-in.
+- **SSH**: enabled, "Allow public-key authentication only", paste your public key.
+- **Wi-Fi**: optional; fine for first boot / provisioning. Prefer **Ethernet** for actual streaming — Sunshine over Wi-Fi tends to surface as jitter and frame drops well before bandwidth is the bottleneck.
+
+After flashing, boot the Pi, wait ~30s for it to come up, then verify reachability before pointing provisioning at it:
+
+```bash
+ssh terraform@rpi5.local      # mDNS on the LAN; over VPN, use the LAN IP or a real DNS record
+```
 
 See: [docs/raspberry-pi-provider.md](docs/raspberry-pi-provider.md)
 
@@ -276,3 +303,7 @@ Host vultr
   IdentityFile ~/.ssh/id_xxx
   ServerAliveInterval 10
 ```
+
+## License
+
+MIT — see [LICENSE](LICENSE).

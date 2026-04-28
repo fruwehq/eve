@@ -68,6 +68,7 @@ case "$PROVIDER" in
     print_kv TF_VAR_vultr_os_id "$(getv VULTR_OS_ID)"
     ;;
   truenas)
+    ./scripts/env-require TRUENAS_SSH_USER
     print_kv TF_VAR_cloud_image_url "$(getv CLOUD_IMAGE_URL)"
     print_kv TF_VAR_truenas_host "$(getv TRUENAS_HOST)"
     print_kv TF_VAR_truenas_ssh_host_key_fingerprint "${TRUENAS_SSH_HOST_KEY_FINGERPRINT:-}"

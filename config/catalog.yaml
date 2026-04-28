@@ -52,6 +52,15 @@ machines:
     kind: vm
     defaults: *local_medium
 
+  - name: raspberry-pi-5
+    provider: raspberry-pi
+    kind: metal
+    defaults:
+      # CPU / memory / disk are physical attributes of the Pi, not knobs this
+      # repo can set. Only architecture is recorded so provisioning can pick
+      # arm64 binaries.
+      architecture: arm64
+
   - name: truenas-scale-medium
     provider: truenas
     kind: vm
@@ -87,6 +96,16 @@ oses:
     vultr_os_id: 2284  # Ubuntu 24.04 LTS x64
     cloud_image_url: https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.img
 
+  - id: ubuntu-24.04-desktop-arm64
+    family: ubuntu
+    version: "24.04"
+    arch: arm64
+    ui_mode: desktop
+    # No cloud_image_url: arm64 metal targets (e.g. Raspberry Pi) are flashed
+    # by hand via Raspberry Pi Imager. Provisioning installs the GUI/streaming
+    # stack on top of a server install — same pattern as the *-desktop-amd64
+    # entries that point at the server cloud image.
+
   - id: windows-server-2025
     family: windows
     version: "2025"
@@ -101,6 +120,10 @@ inits:
   - id: ssh-ubuntu-cloud-init
     os_family: ubuntu
     features: [ssh, hardening, nonroot-user]
+
+  - id: ssh-ubuntu-metal
+    os_family: ubuntu
+    features: [ssh, hardening]
 
   - id: ssh-windows-powershell7
     os_family: windows
@@ -166,12 +189,15 @@ locations:
       host: local
     local-vmware:
       host: local
+    raspberry-pi:
+      # Host comes from RASPBERRY_PI_HOST env var (required at runtime).
+      ssh_port: 22
     truenas:
       # Canonical TrueNAS endpoint for this catalog.
       # Override in .env.local (TRUENAS_HOST) if needed.
       host: truenas.home.arpa
       ssh_port: 22
-      ssh_user: terraform
+      # ssh_user comes from TRUENAS_SSH_USER (required at runtime).
       # Used by module defaults if machine.network is omitted
       bridge: br0
       pool: main
@@ -245,3 +271,10 @@ profiles:
     bundles: [access-gui-streaming, access-gui-safe, dev-sandbox-core, gaming-core, remote-apps]
     location: tokyo
     lifecycle: *ttl_default
+
+  - name: rpi-ubuntu-all
+    machine: raspberry-pi-5
+    os: ubuntu-24.04-desktop-arm64
+    init: ssh-ubuntu-metal
+    bundles: [access-gui-streaming, access-gui-safe, dev-sandbox-core, gaming-core, remote-apps]
+    location: tokyo

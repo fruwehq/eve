@@ -191,7 +191,7 @@ else
     error("Compatibility: goose requires dev-toolchain in bundles")
   else . end |
 
-  if ((["aws","vultr","truenas","local-virtualbox","local-vmware"] | index($m.provider)) == null) then
+  if ((["aws","local-virtualbox","local-vmware","raspberry-pi","truenas","vultr"] | index($m.provider)) == null) then
     error("Unsupported provider in machine catalog: \($m.provider)")
   else . end |
 
@@ -206,7 +206,12 @@ else
     init: $i,
     location: $l,
     bundle_packages: $bundle_packages,
-    engine: (if (($m.provider // "") | startswith("local-")) then "vagrant" else "terraform" end),
+    engine: (
+      if ($m.kind // "") == "metal" then "metal"
+      elif (($m.provider // "") | startswith("local-")) then "vagrant"
+      else "terraform"
+      end
+    ),
     stack_tags: ($m.provider // "")
   }
 end'
@@ -250,11 +255,18 @@ emit_env() {
     "VULTR_OS_ID=" + ((.os.vultr_os_id // 0) | tostring),
     "LOCATION_REGION=" + ($locp.region // ""),
     "LOCATION_AVAILABILITY_ZONE=" + ($locp.availability_zone // ""),
-    "SSH_USER=" + (if (.os.family == "windows") then "Administrator" else "ubuntu" end),
+    "SSH_USER=" + (
+      if (.os.family == "windows") then "Administrator"
+      elif ($provider == "raspberry-pi") then env_or("VM_USER_NAME"; "")
+      else "ubuntu"
+      end
+    ),
     "CLOUD_IMAGE_URL=" + (.os.cloud_image_url // ""),
+    "RASPBERRY_PI_HOST=" + env_or("RASPBERRY_PI_HOST"; $locp.host // ""),
     "TRUENAS_HOST=" + env_or("TRUENAS_HOST"; $locp.host // ""),
     "TRUENAS_SSH_PORT=" + env_or("TRUENAS_SSH_PORT"; (($locp.ssh_port // 22) | tostring)),
-    "TRUENAS_SSH_USER=" + env_or("TRUENAS_SSH_USER"; $locp.ssh_user // "terraform")
+    "TRUENAS_SSH_USER=" + env_or("TRUENAS_SSH_USER"; $locp.ssh_user // ""),
+    "VM_USER_NAME=" + env_or("VM_USER_NAME"; "")
   '
 }
 

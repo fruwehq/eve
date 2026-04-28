@@ -19,6 +19,10 @@ PROVIDER=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^PROVIDER=/{print $2}')
 TAGS=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^STACK_TAGS=/{print $2}')
 
 case "$ENGINE:$PROVIDER" in
+  metal:raspberry-pi)
+    ./scripts/env-require RASPBERRY_PI_HOST
+    printf '%s\n' "$RASPBERRY_PI_HOST"
+    ;;
   terraform:aws)
     terramate run --quiet --tags="$TAGS-services" -- terraform output -raw public_ip
     ;;
@@ -26,6 +30,7 @@ case "$ENGINE:$PROVIDER" in
     terramate run --quiet --tags="$TAGS-services" -- terraform output -raw vultr_instance_main_ip
     ;;
   terraform:truenas)
+    ./scripts/env-require TRUENAS_SSH_USER
     RESOLVED_TRUENAS_HOST=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^TRUENAS_HOST=/{print $2}')
     RESOLVED_TRUENAS_SSH_PORT=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^TRUENAS_SSH_PORT=/{print $2}')
     RESOLVED_TRUENAS_SSH_USER=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^TRUENAS_SSH_USER=/{print $2}')
