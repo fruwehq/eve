@@ -18,14 +18,19 @@ OS_FAMILY=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^OS_FAMILY=/{print $2}')
 # Each probe returns two lines:
 #   line 1: DONE | RUNNING | MISSING
 #   line 2: latest "Running step ..." line from the log (or empty)
+#
+# DONE requires "Provisioning complete." to appear AFTER the most recent
+# "Running step" line — `provision` (without clear-state) doesn't wipe the log
+# file, so a stale completion marker from a prior run can otherwise short-
+# circuit the wait while a new run is mid-flight.
 case "$OS_FAMILY" in
   ubuntu)
     # shellcheck disable=SC2016 # $log/$HOME are expanded by the remote shell.
-    PROBE='log="$HOME/provision/logs/provision.log"; if [ -f "$log" ]; then if grep -q "Provisioning complete\." "$log"; then echo DONE; else echo RUNNING; fi; grep -E "Running step \[.*\] " "$log" | tail -n 1 || true; else echo MISSING; fi'
+    PROBE='log="$HOME/provision/logs/provision.log"; if [ ! -f "$log" ]; then echo MISSING; exit 0; fi; last_step=$(awk "/Running step / {n=NR} END {print n+0}" "$log"); last_done=$(awk "/Provisioning complete\\./ {n=NR} END {print n+0}" "$log"); if [ "$last_done" -gt "$last_step" ] && [ "$last_done" -gt 0 ]; then echo DONE; else echo RUNNING; fi; grep -E "Running step " "$log" | tail -n 1 || true'
     ;;
   windows)
-    # shellcheck disable=SC2016 # $log/$lines/$last are remote PowerShell vars.
-    PROBE='$log = "C:\Users\Administrator\provision\logs\provision.log"; if (Test-Path $log) { $lines = Get-Content $log; if ($lines | Select-String -Pattern "Provisioning complete\." -Quiet) { "DONE" } else { "RUNNING" }; $last = $lines | Select-String -Pattern "Running step" | Select-Object -Last 1; if ($last) { $last.Line } } else { "MISSING" }'
+    # shellcheck disable=SC2016 # $log/$lines/$lastStep/$lastDone are remote PowerShell vars.
+    PROBE='$log = "C:\Users\Administrator\provision\logs\provision.log"; if (-not (Test-Path $log)) { "MISSING"; exit 0 }; $lines = Get-Content $log; $lastStep = -1; $lastDone = -1; for ($i = 0; $i -lt $lines.Count; $i++) { if ($lines[$i] -match "Running step ") { $lastStep = $i }; if ($lines[$i] -match "Provisioning complete\.") { $lastDone = $i } }; if ($lastDone -gt $lastStep -and $lastDone -ge 0) { "DONE" } else { "RUNNING" }; $last = $lines | Select-String -Pattern "Running step" | Select-Object -Last 1; if ($last) { $last.Line }'
     ;;
   *)
     echo "wait-for-provision: unknown os_family: $OS_FAMILY" >&2
