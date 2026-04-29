@@ -5,7 +5,7 @@
 set -euo pipefail
 
 PROFILE="${1:?Usage: scripts/ssh-wait <profile> [max-wait-seconds]}"
-MAX_SECONDS=${2:-120}
+MAX_SECONDS=${2:-1200}
 POLL_INTERVAL=2
 cd "$(git rev-parse --show-toplevel)"
 
