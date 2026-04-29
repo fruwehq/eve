@@ -63,11 +63,16 @@ set_sunshine_config() {
   fi
 }
 
+unset_sunshine_config() {
+  local key="$1"
+  sed -i "/^${key}[[:space:]]*=/d" "$SUN_CONF" 2>/dev/null || true
+}
+
 set_sunshine_config origin_web_ui_allowed wan
+unset_sunshine_config fps
+unset_sunshine_config resolutions
 
 if [ "${PROVIDER:-}" = "raspberry-pi" ]; then
-  pi_resolution="${EPHEMERAL_DISPLAY_RESOLUTION:-1024x768}"
-
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y kmod
   sudo groupadd --system uinput 2>/dev/null || true
   sudo usermod -aG input "$USER"
@@ -90,8 +95,6 @@ EOF
   set_sunshine_config sw_preset ultrafast
   set_sunshine_config sw_tune zerolatency
   set_sunshine_config max_bitrate "${SUNSHINE_MAX_BITRATE_KBPS:-3000}"
-  set_sunshine_config resolutions "[640x480, 800x600, 1024x768, 1280x720, 1920x1080, ${pi_resolution}]"
-  set_sunshine_config fps "[10, 30]"
 fi
 
 # Set Sunshine web UI credentials (matches Windows step 10's behavior).
