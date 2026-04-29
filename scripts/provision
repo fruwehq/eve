@@ -41,6 +41,7 @@ case "$OS_FAMILY" in
 export OS_FAMILY="$OS_FAMILY"
 export OS_UI_MODE="$OS_UI_MODE"
 export PROFILE_NAME="$PROFILE_NAME"
+export EPHEMERAL_DISPLAY_RESOLUTION="${EPHEMERAL_DISPLAY_RESOLUTION:-}"
 export EPHEMERAL_SUNSHINE_PASSWORD="${EPHEMERAL_SUNSHINE_PASSWORD:-}"
 export RUSTDESK_KEY="${RUSTDESK_KEY:-}"
 export RUSTDESK_PASSWORD="${RUSTDESK_PASSWORD:-}"
@@ -80,19 +81,20 @@ EOF
     jq -n \
       --arg wp "$WINDOWS_PASSWORD" \
       --arg sp "$EPHEMERAL_SUNSHINE_PASSWORD" \
+      --arg dr "${EPHEMERAL_DISPLAY_RESOLUTION:-}" \
       --arg rk "${RUSTDESK_KEY:-}" \
       --arg rp "${RUSTDESK_PASSWORD:-}" \
       --arg rs "${RUSTDESK_SERVER:-}" \
       --arg sv "${SUNSHINE_VERSION:-}" \
-      '{windows_password: $wp, sunshine_password: $sp, rustdesk_key: $rk, rustdesk_password: $rp, rustdesk_server: $rs, sunshine_version: $sv}' \
-      > ./tmp/secrets.json
+      '{windows_password: $wp, sunshine_password: $sp, display_resolution: $dr, rustdesk_key: $rk, rustdesk_password: $rp, rustdesk_server: $rs, sunshine_version: $sv}' \
+      > ./tmp/env.json
 
     echo "[provision] uploading windows/provision/ to remote"
     # Clear scripts AND state — without state reset, currentStep can outrun the
     # available step files when new steps are added, silently skipping them.
     ./scripts/instance-ssh "$PROFILE" -- 'New-Item -ItemType Directory -Force C:\Users\Administrator\provision | Out-Null; if (Test-Path "C:\Users\Administrator\provision\scripts") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\scripts" }; if (Test-Path "C:\Users\Administrator\provision\state") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\state" }; New-Item -ItemType Directory -Force C:\Users\Administrator\provision\state | Out-Null'
     ./scripts/instance-ssh "$PROFILE" --scp windows/provision '/C:/Users/Administrator/'
-    ./scripts/instance-ssh "$PROFILE" --scp ./tmp/secrets.json '/C:/Users/Administrator/provision/state/secrets.json'
+    ./scripts/instance-ssh "$PROFILE" --scp ./tmp/env.json '/C:/Users/Administrator/provision/state/env.json'
     echo "[provision] running bootstrap.ps1"
     ./scripts/instance-ssh "$PROFILE" -- '& "C:\Users\Administrator\provision\scripts\bootstrap.ps1"'
     ;;

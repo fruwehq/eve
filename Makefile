@@ -10,7 +10,7 @@
 				remote.vnc remote.xpra remote.xpra.apps remote.xpra.attach \
 				remote.xpra.run remote.xpra.start remote.xpra.status \
 				remote.xpra.stop \
-				show-password ssh ssh.truenas ssh.wait start status stop \
+				show-password ssh ssh.run ssh.truenas ssh.wait start status stop \
 				test test.profiles test.shellcheck test.terraform \
 				test.update-golden up upload validate
 
@@ -34,6 +34,7 @@ export AWS_CONFIG_FILE
 export AWS_PROFILE
 export AWS_REGION
 export AWS_SHARED_CREDENTIALS_FILE
+export EPHEMERAL_DISPLAY_RESOLUTION
 export EPHEMERAL_SUNSHINE_PASSWORD
 export EPHEMERAL_WINDOWS_PASSWORD
 export MY_IP
@@ -231,6 +232,12 @@ show-password: ## Display the instance's default password (Windows)
 ssh: ## SSH into the profile's instance
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
 	./scripts/instance-ssh $(PROFILE)
+
+ssh.run: ## Run a remote command on the profile's instance (command read from stdin)
+	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
+	if [ -t 0 ]; then echo "Usage: echo '<command>' | make ssh.run PROFILE=<name>"; exit 2; fi; \
+	cmd=$$(cat); \
+	./scripts/instance-ssh $(PROFILE) -- "$$cmd"
 
 ssh.truenas: ## SSH directly into the TrueNAS host (no profile needed)
 	@./scripts/env-require TRUENAS_HOST TRUENAS_SSH_USER; \

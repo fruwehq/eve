@@ -29,6 +29,11 @@ generate_hcl "z_truenas_vm.tf" {
       default = 1
     }
 
+    variable "vm_cpu_mode" {
+      type    = string
+      default = "CUSTOM"
+    }
+
     variable "vm_autostart" {
       type    = bool
       default = true
@@ -150,6 +155,7 @@ generate_hcl "z_truenas_vm.tf" {
       ]
       autostart   = var.vm_autostart
       cores       = var.vm_cpu_cores
+      cpu_mode    = var.vm_cpu_mode
       description = "Profile=${var.profile_name}; OS=${var.os_id}; Location=${var.location_name}"
       memory      = var.vm_memory_mb
       name        = local.vm_name

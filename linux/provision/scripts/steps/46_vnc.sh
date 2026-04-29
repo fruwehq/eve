@@ -81,6 +81,8 @@ if [ ! -f "$VNC_HOME/xstartup" ] || [ "$XSTARTUP_CONTENT" != "$(cat "$VNC_HOME/x
   chmod +x "$VNC_HOME/xstartup"
 fi
 
+VNC_GEOMETRY="${EPHEMERAL_DISPLAY_RESOLUTION:-1920x1080}"
+
 UNIT_PATH=/etc/systemd/system/vncserver.service
 UNIT_CONTENT=$(cat <<EOF
 [Unit]
@@ -92,7 +94,7 @@ Type=forking
 User=$USER
 Environment=HOME=$HOME
 ExecStartPre=/bin/sh -c '/usr/bin/vncserver -kill :1 2>/dev/null || true'
-ExecStart=/usr/bin/vncserver :1 -geometry 1920x1080 -depth 24 -SecurityTypes VncAuth -AlwaysShared
+ExecStart=/usr/bin/vncserver :1 -geometry $VNC_GEOMETRY -depth 24 -SecurityTypes VncAuth -AlwaysShared
 ExecStop=/usr/bin/vncserver -kill :1
 Restart=on-success
 RestartSec=3

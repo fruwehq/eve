@@ -11,7 +11,7 @@ Write-Host "Ensuring Sunshine is installed and configured..."
 $sunshineDir = "${env:ProgramFiles}\Sunshine"
 $sunshineExe = Join-Path $sunshineDir "sunshine.exe"
 $configPath = Join-Path $sunshineDir "config\sunshine.conf"
-$secretsFile = "C:\Users\Administrator\provision\state\secrets.json"
+$envFile = "C:\Users\Administrator\provision\state\env.json"
 $sunshinePassword = $env:EPHEMERAL_SUNSHINE_PASSWORD
 
 $alreadyInstalled = Test-Path $sunshineDir
@@ -23,10 +23,10 @@ if (-not $alreadyInstalled) {
   $sunshineVersion = $null
   if ($env:SUNSHINE_VERSION) {
     $sunshineVersion = $env:SUNSHINE_VERSION
-  } elseif ((Test-Path $secretsFile)) {
+  } elseif ((Test-Path $envFile)) {
     try {
-      $secrets = Get-Content $secretsFile | ConvertFrom-Json
-      $sunshineVersion = $secrets.sunshine_version
+      $envData = Get-Content $envFile | ConvertFrom-Json
+      $sunshineVersion = $envData.sunshine_version
     } catch {}
   }
 
@@ -60,19 +60,19 @@ if (-not (Select-String -Path $configPath -Pattern "^\s*origin_web_ui_allowed\s*
   Add-Content -Path $configPath -Value "`norigin_web_ui_allowed = wan`n"
 }
 
-# Set Sunshine Web UI credentials from the environment or secrets file.
+# Set Sunshine Web UI credentials from the environment or env.json.
 # Use a fixed username to keep provisioning simple and reproducible.
-if (-not $sunshinePassword -and (Test-Path $secretsFile)) {
+if (-not $sunshinePassword -and (Test-Path $envFile)) {
   try {
-    $secrets = Get-Content $secretsFile | ConvertFrom-Json
-    $sunshinePassword = $secrets.sunshine_password
+    $envData = Get-Content $envFile | ConvertFrom-Json
+    $sunshinePassword = $envData.sunshine_password
   } catch {
-    throw "Failed to read Sunshine password from $secretsFile"
+    throw "Failed to read Sunshine password from $envFile"
   }
 }
 
 if (-not $sunshinePassword) {
-  throw "Sunshine password not provided. Set EPHEMERAL_SUNSHINE_PASSWORD or create $secretsFile with a sunshine_password field."
+  throw "Sunshine password not provided. Set EPHEMERAL_SUNSHINE_PASSWORD or create $envFile with a sunshine_password field."
 }
 
 if (!(Test-Path $sunshineExe)) {
