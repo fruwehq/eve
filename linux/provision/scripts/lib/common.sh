@@ -45,7 +45,7 @@ download() {
   local out="$2"
   [ -f "$out" ] && { log "already downloaded: $out"; return 0; }
   mkdir -p "$(dirname "$out")"
-  curl -fsSL --retry 5 --retry-delay 2 -o "$out" "$url"
+  curl -fsSL --retry 8 --retry-delay 3 --retry-all-errors --connect-timeout 20 -o "$out" "$url"
 }
 
 request_reboot() {

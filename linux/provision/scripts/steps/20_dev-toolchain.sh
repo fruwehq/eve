@@ -12,13 +12,15 @@ apt_install build-essential pkg-config libssl-dev python3 python3-pip python3-ve
 
 if ! command -v node >/dev/null 2>&1; then
   log "installing Node.js (NodeSource LTS)"
-  curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
+  download https://deb.nodesource.com/setup_lts.x "$DOWNLOADS_DIR/nodesource_setup_lts.sh"
+  sudo -E bash "$DOWNLOADS_DIR/nodesource_setup_lts.sh"
   apt_install nodejs
 fi
 
 if ! command -v rustc >/dev/null 2>&1; then
   log "installing Rust (rustup)"
-  curl -fsSL https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
+  download https://sh.rustup.rs "$DOWNLOADS_DIR/rustup-init.sh"
+  sh "$DOWNLOADS_DIR/rustup-init.sh" -s -- -y --default-toolchain stable --profile minimal
 fi
 
 log "### 20_dev-toolchain: done"
