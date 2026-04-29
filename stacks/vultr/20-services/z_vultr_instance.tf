@@ -55,8 +55,8 @@ locals {
 resource "vultr_startup_script" "windows_ssh" {
   count = local.is_windows ? 1 : 0
   name  = "${var.profile_name}-windows-ssh"
-  script = base64encode(templatefile("/Users/chris/src/personal/ephemeral-cloud-gaming/modules/vultr/templates/windows-startup.cmd.tftpl", {
-    encoded_command = textencodebase64(templatefile("/Users/chris/src/personal/ephemeral-cloud-gaming/windows/ssh.ps1.tftpl", {
+  script = base64encode(templatefile("/Users/chris/src/personal/ephemeral-cloud-gaming-dev-tools/modules/vultr/templates/windows-startup.cmd.tftpl", {
+    encoded_command = textencodebase64(templatefile("/Users/chris/src/personal/ephemeral-cloud-gaming-dev-tools/windows/ssh.ps1.tftpl", {
       public_key = trimspace(file(pathexpand(var.ssh_public_key_file)))
     }), "UTF-16LE")
   }))

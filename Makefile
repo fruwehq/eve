@@ -12,7 +12,7 @@
 				remote.xpra.stop \
 				show-password ssh ssh.truenas ssh.wait start status stop \
 				test test.profiles test.shellcheck test.terraform \
-				test.update-golden up upload validate
+				test.update-golden up update upload validate
 
 TM_PARALLEL ?= 8
 
@@ -146,6 +146,10 @@ provision.clear-state: ## Clear remote provisioning state, logs, and downloads (
 	./scripts/instance-ssh $(PROFILE) -- 'if (Test-Path "C:\Users\Administrator\provision\state") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\state" }; if (Test-Path "C:\Users\Administrator\provision\logs") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\logs" }; if (Test-Path "C:\Users\Administrator\provision\downloads") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\downloads" }'
 
 provision.restart: provision.clear-state provision ## Clear remote state then re-provision
+
+update: ## Update all installed tools to latest versions
+	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
+	./scripts/update-tools $(PROFILE)
 
 reboot: ## Reboot the instance
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \

@@ -243,6 +243,7 @@ emit_env() {
     "BUNDLE_PACKAGES=" + (.bundle_packages | join(",")),
     "VM_MEMORY_MB=" + ((.machine.defaults.memory_mb // 0) | tostring),
     "VM_CPU_CORES=" + ((.machine.defaults.cpu_cores // .machine.defaults.cpus // 0) | tostring),
+    "VM_CPU_MODE=" + (.machine.defaults.cpu_mode // ""),
     "VM_VCPUS=" + ((.machine.defaults.vcpus // 1) | tostring),
     "VM_AUTOSTART=" + ((.machine.defaults.autostart // true) | tostring),
     "VM_STATE=" + (.machine.defaults.state // "STOPPED"),
