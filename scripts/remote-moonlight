@@ -21,9 +21,23 @@ if [ -n "${EPHEMERAL_MOONLIGHT_BITRATE_KBPS:-}" ]; then
   EXTRA_ARGS+=(--bitrate "$EPHEMERAL_MOONLIGHT_BITRATE_KBPS")
 fi
 if [ -n "${EPHEMERAL_MOONLIGHT_VIDEO_CODEC:-}" ]; then
+  case "$EPHEMERAL_MOONLIGHT_VIDEO_CODEC" in
+    auto|H.264|HEVC|AV1) ;;
+    *)
+      echo "remote-moonlight: invalid EPHEMERAL_MOONLIGHT_VIDEO_CODEC='$EPHEMERAL_MOONLIGHT_VIDEO_CODEC' (valid: auto, H.264, HEVC, AV1)" >&2
+      exit 2
+      ;;
+  esac
   EXTRA_ARGS+=(--video-codec "$EPHEMERAL_MOONLIGHT_VIDEO_CODEC")
 fi
 if [ -n "${EPHEMERAL_MOONLIGHT_VIDEO_DECODER:-}" ]; then
+  case "$EPHEMERAL_MOONLIGHT_VIDEO_DECODER" in
+    auto|hardware|software) ;;
+    *)
+      echo "remote-moonlight: invalid EPHEMERAL_MOONLIGHT_VIDEO_DECODER='$EPHEMERAL_MOONLIGHT_VIDEO_DECODER' (valid: auto, hardware, software)" >&2
+      exit 2
+      ;;
+  esac
   EXTRA_ARGS+=(--video-decoder "$EPHEMERAL_MOONLIGHT_VIDEO_DECODER")
 fi
 
