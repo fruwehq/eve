@@ -11,6 +11,8 @@ DOWNLOADS_DIR="$PROVISION_ROOT/downloads"
 REBOOT_FLAG="$STATE_DIR/reboot.flag"
 BUNDLE_PACKAGES_FILE="$STATE_DIR/bundle_packages"
 
+export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+
 mkdir -p "$STATE_DIR" "$LOGS_DIR" "$DOWNLOADS_DIR"
 
 log() {

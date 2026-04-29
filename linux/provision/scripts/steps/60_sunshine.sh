@@ -66,6 +66,22 @@ set_sunshine_config() {
 set_sunshine_config origin_web_ui_allowed wan
 
 if [ "${PROVIDER:-}" = "raspberry-pi" ]; then
+  pi_resolution="${EPHEMERAL_DISPLAY_RESOLUTION:-1024x768}"
+
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y kmod
+  sudo groupadd --system uinput 2>/dev/null || true
+  sudo usermod -aG input "$USER"
+  sudo usermod -aG uinput "$USER"
+  echo uinput | sudo tee /etc/modules-load.d/egame-uinput.conf >/dev/null
+  sudo modprobe uinput 2>/dev/null || true
+  sudo tee /etc/udev/rules.d/70-egame-uinput.rules >/dev/null <<'EOF'
+KERNEL=="uinput", SUBSYSTEM=="misc", OPTIONS+="static_node=uinput", MODE="0660", GROUP="uinput", TAG+="uaccess"
+EOF
+  sudo udevadm control --reload-rules 2>/dev/null || true
+  sudo udevadm trigger /dev/uinput 2>/dev/null || true
+  sudo chgrp uinput /dev/uinput 2>/dev/null || true
+  sudo chmod 0660 /dev/uinput 2>/dev/null || true
+
   set_sunshine_config output_name 0
   set_sunshine_config encoder software
   set_sunshine_config min_threads 1
@@ -74,7 +90,7 @@ if [ "${PROVIDER:-}" = "raspberry-pi" ]; then
   set_sunshine_config sw_preset ultrafast
   set_sunshine_config sw_tune zerolatency
   set_sunshine_config max_bitrate "${SUNSHINE_MAX_BITRATE_KBPS:-3000}"
-  set_sunshine_config resolutions "[640x480, 800x600, 1024x768]"
+  set_sunshine_config resolutions "[640x480, 800x600, 1024x768, 1280x720, 1920x1080, ${pi_resolution}]"
   set_sunshine_config fps "[10, 30]"
 fi
 
@@ -91,6 +107,22 @@ fi
 # is persistent with linger enabled; XFCE autostart creates a second generated
 # app-sunshine@autostart.service and can race or duplicate CPU-heavy encoders.
 rm -f "$HOME/.config/autostart/sunshine.desktop"
+
+if [ "${PROVIDER:-}" = "raspberry-pi" ]; then
+  cat > "$HOME/.config/sunshine/apps.json" <<'EOF'
+{
+  "env": {
+    "PATH": "$(PATH):$(HOME)/.local/bin"
+  },
+  "apps": [
+    {
+      "name": "Desktop",
+      "image-path": "desktop.png"
+    }
+  ]
+}
+EOF
+fi
 
 XDG_RUNTIME_DIR="/run/user/$(id -u)"
 export XDG_RUNTIME_DIR
@@ -118,13 +150,18 @@ sunshine_kms_ready() {
 start_sunshine_with_display() {
   export DISPLAY="$SUN_DISPLAY"
   export XAUTHORITY="$SUN_XAUTHORITY"
+  [ -x "$HOME/.local/bin/egame-set-display-mode" ] && "$HOME/.local/bin/egame-set-display-mode" || true
   systemctl --user import-environment DISPLAY XAUTHORITY XDG_RUNTIME_DIR 2>/dev/null || true
   systemctl --user start sunshine 2>/dev/null || \
     setsid nohup sunshine "$SUN_CONF" >>"$LOGS_DIR/sunshine.log" 2>&1 < /dev/null &
 }
 
 if systemctl --user is-active sunshine >/dev/null 2>&1; then
-  log "### 60_sunshine: sunshine already running"
+  log "### 60_sunshine: restarting sunshine to reload config"
+  export DISPLAY="$SUN_DISPLAY"
+  export XAUTHORITY="$SUN_XAUTHORITY"
+  [ -x "$HOME/.local/bin/egame-set-display-mode" ] && "$HOME/.local/bin/egame-set-display-mode" || true
+  systemctl --user restart sunshine 2>/dev/null || true
 elif [ -d "$XDG_RUNTIME_DIR" ] && { sunshine_display_ready || sunshine_kms_ready; }; then
   log "### 60_sunshine: starting sunshine on display $SUN_DISPLAY"
   start_sunshine_with_display
