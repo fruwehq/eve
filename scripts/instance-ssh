@@ -45,8 +45,7 @@ if [ "$ENGINE" = "metal" ]; then
       if [ -n "${RASPBERRY_PI_IP:-}" ]; then
         IP="$RASPBERRY_PI_IP"
       else
-        ./scripts/env-require RASPBERRY_PI_HOST
-        IP="$RASPBERRY_PI_HOST"
+        IP=$(./scripts/instance-ip "$PROFILE")
       fi
       SSH_USER=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^SSH_USER=/{print $2}')
       ;;
@@ -70,7 +69,7 @@ fi
 
 SSH_OPTS=(-o StrictHostKeyChecking=no -o ServerAliveInterval=10 -o WarnWeakCrypto=no-pq-kex)
 [ -n "$PRIV_KEY" ] && SSH_OPTS+=(-i "$PRIV_KEY" -o IdentitiesOnly=yes)
-if [ "$ENGINE:$PROVIDER" = "metal:raspberry-pi" ] && [ -n "${RASPBERRY_PI_IP:-}" ] && [ -n "${RASPBERRY_PI_HOST:-}" ]; then
+if [ "$ENGINE:$PROVIDER" = "metal:raspberry-pi" ] && [ -n "${RASPBERRY_PI_HOST:-}" ] && [ "$IP" != "$RASPBERRY_PI_HOST" ]; then
   SSH_OPTS+=(-o "HostKeyAlias=$RASPBERRY_PI_HOST")
 fi
 

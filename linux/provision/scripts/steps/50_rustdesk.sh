@@ -191,7 +191,11 @@ if [ -n "${RUSTDESK_PASSWORD:-}" ]; then
   if [ "$rd_server_ready" -ne 1 ]; then
     log "### 50_rustdesk: warn: user server was not detected; attempting --password for $rd_user anyway"
   fi
-  if ! sudo env HOME="$HOME" XDG_RUNTIME_DIR="/run/user/$rd_uid" rustdesk --password "$RUSTDESK_PASSWORD"; then
+  if sudo rustdesk --password "$RUSTDESK_PASSWORD"; then
+    log "### 50_rustdesk: permanent password set via admin service"
+  elif env HOME="$HOME" XDG_RUNTIME_DIR="/run/user/$rd_uid" rustdesk --password "$RUSTDESK_PASSWORD"; then
+    log "### 50_rustdesk: permanent password set via user server"
+  else
     log "### 50_rustdesk: warn: --password failed (server-user=$rd_user); client will be prompted to set one"
   fi
 fi

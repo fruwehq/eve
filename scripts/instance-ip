@@ -74,6 +74,42 @@ ssh_host_ip() {
   [ -n "$ip" ] && printf '%s\n' "$ip"
 }
 
+discover_ssh_ip() {
+  local user="$1"
+  local key_file="${SSH_PUBLIC_KEY_FILE:-}"
+  local priv_key=""
+  local candidates=""
+  local candidate
+  local found
+
+  if [ -n "$key_file" ] && [ "${key_file%.pub}" != "$key_file" ]; then
+    priv_key="${key_file%.pub}"
+  else
+    priv_key="${SSH_PRIVATE_KEY_FILE:-}"
+  fi
+
+  if command -v arp >/dev/null 2>&1; then
+    candidates=$(arp -an 2>/dev/null | awk '
+      /\([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+\)/ && $0 !~ /incomplete/ {
+        gsub(/[()]/, "", $2)
+        print $2
+      }' | sort -u)
+  fi
+
+  local ssh_opts=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes -o ConnectTimeout=2 -o ConnectionAttempts=1 -o WarnWeakCrypto=no-pq-kex)
+  [ -n "$priv_key" ] && ssh_opts+=(-i "$priv_key" -o IdentitiesOnly=yes)
+
+  for candidate in $candidates; do
+    found=$(ssh "${ssh_opts[@]}" "$user@$candidate" "hostname -I | awk '{print \$1}'" 2>/dev/null || true)
+    if [ -n "$found" ]; then
+      printf '%s\n' "$found"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
 case "$ENGINE:$PROVIDER" in
   metal:raspberry-pi)
     ./scripts/env-require VM_USER_NAME
@@ -84,7 +120,11 @@ case "$ENGINE:$PROVIDER" in
     fi
     if [ -z "$IP" ]; then
       SSH_USER=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^SSH_USER=/{print $2}')
+      SSH_USER="${SSH_USER:-$VM_USER_NAME}"
       IP=$(ssh_host_ip "$RASPBERRY_PI_HOST" "$SSH_USER" || true)
+    fi
+    if [ -z "$IP" ]; then
+      IP=$(discover_ssh_ip "$SSH_USER" || true)
     fi
     if [ -z "$IP" ]; then
       echo "instance-ip: could not resolve RASPBERRY_PI_HOST '$RASPBERRY_PI_HOST' to an IP address" >&2
