@@ -39,20 +39,20 @@ function Set-RegistryValueIfNeeded {
 
 $rebootFlag = "C:\Users\Administrator\provision\state\reboot.flag"
 $User       = "Administrator"
-$SecretsFile = "C:\Users\Administrator\provision\state\secrets.json"
+$EnvFile = "C:\Users\Administrator\provision\state\env.json"
 $Pass = $env:EPHEMERAL_WINDOWS_PASSWORD
 
-if (-not $Pass -and (Test-Path $SecretsFile)) {
+if (-not $Pass -and (Test-Path $EnvFile)) {
   try {
-    $Secrets = Get-Content $SecretsFile | ConvertFrom-Json
-    $Pass = $Secrets.windows_password
+    $EnvData = Get-Content $EnvFile | ConvertFrom-Json
+    $Pass = $EnvData.windows_password
   } catch {
-    throw "Failed to read Windows password from $SecretsFile"
+    throw "Failed to read Windows password from $EnvFile"
   }
 }
 
 if (-not $Pass) {
-  throw "Windows password not provided. Set EPHEMERAL_WINDOWS_PASSWORD or create $SecretsFile with a windows_password field."
+  throw "Windows password not provided. Set EPHEMERAL_WINDOWS_PASSWORD or create $EnvFile with a windows_password field."
 }
 
 # Prevent display sleep / system standby while on AC power

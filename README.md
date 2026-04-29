@@ -100,7 +100,7 @@ make logs PROFILE=aws-ubuntu-dev-headless       # tail remote logs
 `make provision` dispatches by the profile's `os_family`:
 
 - Linux: uploads [linux/provision/](linux/provision/) to `$HOME/provision` on the VM, installs a `systemd` unit, and runs numbered steps (`00_base`, `10_docker`, `20_dev-toolchain`, `30_codex-cli`, `40_goose`, `45_xpra`, `50_rustdesk`, `60_sunshine`, `70_steam`, `99_finish`). Each step is skipped if its package id is not in the profile's bundles.
-- Windows: uploads [windows/provision/](windows/provision/) to `C:\Users\Administrator\provision` and runs `bootstrap.ps1`, which registers a Scheduled Task that walks a similar sorted `steps/` directory. Requires `EPHEMERAL_WINDOWS_PASSWORD` (or a terraform output) and `EPHEMERAL_SUNSHINE_PASSWORD` — used to build `./tmp/secrets.json` and scp it into the provision state dir.
+- Windows: uploads [windows/provision/](windows/provision/) to `C:\Users\Administrator\provision` and runs `bootstrap.ps1`, which registers a Scheduled Task that walks a similar sorted `steps/` directory. Requires `EPHEMERAL_WINDOWS_PASSWORD` (or a terraform output) and `EPHEMERAL_SUNSHINE_PASSWORD` — used to build `./tmp/env.json` and scp it into the provision state dir.
 
 State is tracked in `$HOME/provision/state/state.json` on the VM — provisioning resumes from the last completed step after a reboot.
 

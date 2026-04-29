@@ -12,10 +12,6 @@ IP=$(./scripts/instance-ip "$PROFILE")
 MAX_ATTEMPTS=20
 ATTEMPT=1
 
-RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
-OS_FAMILY=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^OS_FAMILY=/{print $2}')
-SSH_CMD=(./scripts/instance-ssh "$PROFILE" --)
-
 printf '%s\n' "Waiting for Sunshine API on $IP:47990..."
 while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
   HTTP_CODE=$(curl -sS -k \
@@ -26,19 +22,6 @@ while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
   if printf '%s' "$HTTP_CODE" | grep -q '^2'; then
     printf '%s\n' "Sunshine API is ready on $IP:47990"
     exit 0
-  fi
-  if [ "$ATTEMPT" -eq 3 ]; then
-    printf '%s\n' "Sunshine not responding — starting via SSH..."
-    case "$OS_FAMILY" in
-      windows)
-        # shellcheck disable=SC2016
-        "${SSH_CMD[@]}" 'Start-Process "C:\Program Files\Sunshine\Sunshine.exe" -WindowStyle Hidden' 2>/dev/null || true
-        ;;
-      *)
-        # shellcheck disable=SC2016
-        "${SSH_CMD[@]}" 'XDG_RUNTIME_DIR="/run/user/$(id -u)" systemctl --user start sunshine 2>/dev/null || nohup sunshine </dev/null >/dev/null 2>&1 &' || true
-        ;;
-    esac
   fi
   printf '%s\n' "Sunshine API not ready yet (attempt $ATTEMPT/$MAX_ATTEMPTS, http=$HTTP_CODE). Sleeping 2 seconds..."
   sleep 2

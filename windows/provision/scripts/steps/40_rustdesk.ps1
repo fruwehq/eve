@@ -74,19 +74,19 @@ if (-not (Test-Path $rustdeskShim)) {
   Copy-Item -Path $rustdeskExe -Destination $rustdeskShim -Force
 }
 
-# Read RustDesk config delivered via secrets.json (see scripts/provision).
-$secretsFile = "C:\Users\Administrator\provision\state\secrets.json"
+# Read RustDesk config delivered via env.json (see scripts/provision).
+$envFile = "C:\Users\Administrator\provision\state\env.json"
 $rustdeskKey = $null
 $rustdeskServer = $null
 $rustdeskPassword = $null
-if (Test-Path $secretsFile) {
+if (Test-Path $envFile) {
   try {
-    $secrets = Get-Content $secretsFile | ConvertFrom-Json
-    $rustdeskKey      = $secrets.rustdesk_key
-    $rustdeskServer   = $secrets.rustdesk_server
-    $rustdeskPassword = $secrets.rustdesk_password
+    $envData = Get-Content $envFile | ConvertFrom-Json
+    $rustdeskKey      = $envData.rustdesk_key
+    $rustdeskServer   = $envData.rustdesk_server
+    $rustdeskPassword = $envData.rustdesk_password
   } catch {
-    Write-Warning "Failed to parse secrets file: $secretsFile"
+    Write-Warning "Failed to parse env file: $envFile"
   }
 }
 
