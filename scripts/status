@@ -26,6 +26,24 @@ tf_attr() {
 }
 
 case "$ENGINE" in
+  metal)
+    case "$PROVIDER" in
+      raspberry-pi)
+        IP=$(./scripts/instance-ip "$PROFILE" 2>/dev/null || true)
+        if [ -n "$IP" ]; then
+          printf '%-15s %s\n' "IP:" "$IP"
+        fi
+        if ./scripts/instance-ssh "$PROFILE" -- exit 0 >/dev/null 2>&1; then
+          VM_STATUS="running"
+        else
+          VM_STATUS="unreachable"
+        fi
+        ;;
+      *)
+        VM_STATUS="unsupported provider ($PROVIDER)"
+        ;;
+    esac
+    ;;
   vagrant)
     GENERATED_DIR=".generated/$PROFILE"
     if [ ! -d "$GENERATED_DIR" ]; then

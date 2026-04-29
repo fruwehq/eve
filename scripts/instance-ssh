@@ -41,9 +41,14 @@ PROVIDER=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^PROVIDER=/{print $2}')
 if [ "$ENGINE" = "metal" ]; then
   case "$PROVIDER" in
     raspberry-pi)
-      ./scripts/env-require RASPBERRY_PI_HOST VM_USER_NAME SSH_PUBLIC_KEY_FILE
-      IP="$RASPBERRY_PI_HOST"
-      SSH_USER="$VM_USER_NAME"
+      ./scripts/env-require VM_USER_NAME
+      if [ -n "${RASPBERRY_PI_IP:-}" ]; then
+        IP="$RASPBERRY_PI_IP"
+      else
+        ./scripts/env-require RASPBERRY_PI_HOST
+        IP="$RASPBERRY_PI_HOST"
+      fi
+      SSH_USER=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^SSH_USER=/{print $2}')
       ;;
     *)
       echo "instance-ssh: metal engine: unsupported provider '$PROVIDER'" >&2
@@ -65,6 +70,9 @@ fi
 
 SSH_OPTS=(-o StrictHostKeyChecking=no -o ServerAliveInterval=10 -o WarnWeakCrypto=no-pq-kex)
 [ -n "$PRIV_KEY" ] && SSH_OPTS+=(-i "$PRIV_KEY" -o IdentitiesOnly=yes)
+if [ "$ENGINE:$PROVIDER" = "metal:raspberry-pi" ] && [ -n "${RASPBERRY_PI_IP:-}" ] && [ -n "${RASPBERRY_PI_HOST:-}" ]; then
+  SSH_OPTS+=(-o "HostKeyAlias=$RASPBERRY_PI_HOST")
+fi
 
 if [ "${1:-}" = "--scp" ]; then
   shift

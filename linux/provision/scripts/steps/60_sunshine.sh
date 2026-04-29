@@ -52,8 +52,30 @@ log "### 60_sunshine: configuring web UI"
 mkdir -p "$HOME/.config/sunshine"
 SUN_CONF="$HOME/.config/sunshine/sunshine.conf"
 touch "$SUN_CONF"
-if ! grep -q '^origin_web_ui_allowed' "$SUN_CONF"; then
-  echo 'origin_web_ui_allowed = wan' >> "$SUN_CONF"
+
+set_sunshine_config() {
+  local key="$1"
+  local value="$2"
+  if grep -q "^${key}[[:space:]]*=" "$SUN_CONF"; then
+    sed -i "s|^${key}[[:space:]]*=.*|${key} = ${value}|" "$SUN_CONF"
+  else
+    printf '%s = %s\n' "$key" "$value" >> "$SUN_CONF"
+  fi
+}
+
+set_sunshine_config origin_web_ui_allowed wan
+
+if [ "${PROVIDER:-}" = "raspberry-pi" ]; then
+  set_sunshine_config output_name 0
+  set_sunshine_config encoder software
+  set_sunshine_config min_threads 1
+  set_sunshine_config hevc_mode 1
+  set_sunshine_config av1_mode 1
+  set_sunshine_config sw_preset ultrafast
+  set_sunshine_config sw_tune zerolatency
+  set_sunshine_config max_bitrate "${SUNSHINE_MAX_BITRATE_KBPS:-3000}"
+  set_sunshine_config resolutions "[640x480, 800x600, 1024x768]"
+  set_sunshine_config fps "[10, 30]"
 fi
 
 # Set Sunshine web UI credentials (matches Windows step 10's behavior).
@@ -65,33 +87,49 @@ else
   log "### 60_sunshine: EPHEMERAL_SUNSHINE_PASSWORD not set — skipping creds"
 fi
 
-# Sunshine needs an active X session to capture the screen, so it runs as a
-# user-session autostart entry rather than a system service. The XFCE session
-# launched by LightDM autologin (configured in 50_rustdesk.sh) fires this.
-mkdir -p "$HOME/.config/autostart"
-cat > "$HOME/.config/autostart/sunshine.desktop" <<EOF
-[Desktop Entry]
-Type=Application
-Name=Sunshine
-Exec=/usr/bin/sunshine $SUN_CONF
-Hidden=false
-NoDisplay=false
-X-GNOME-Autostart-enabled=true
-EOF
+# Sunshine must have exactly one owner. The package-provided systemd user unit
+# is persistent with linger enabled; XFCE autostart creates a second generated
+# app-sunshine@autostart.service and can race or duplicate CPU-heavy encoders.
+rm -f "$HOME/.config/autostart/sunshine.desktop"
 
 XDG_RUNTIME_DIR="/run/user/$(id -u)"
 export XDG_RUNTIME_DIR
+SUN_DISPLAY="${SUNSHINE_DISPLAY:-:0}"
+SUN_XAUTHORITY="${XAUTHORITY:-$HOME/.Xauthority}"
 
+sudo loginctl enable-linger "$USER"
 systemctl --user enable sunshine 2>/dev/null || true
+systemctl --user add-wants default.target sunshine.service 2>/dev/null || true
+
+sunshine_display_ready() {
+  DISPLAY="$SUN_DISPLAY" XAUTHORITY="$SUN_XAUTHORITY" xrandr --query >/dev/null 2>&1
+}
+
+sunshine_kms_ready() {
+  local connector="${RASPBERRY_PI_HDMI_CONNECTOR:-HDMI-A-1}"
+  [ "${PROVIDER:-}" = "raspberry-pi" ] || return 1
+  for status in /sys/class/drm/card*-"$connector"/status; do
+    [ -e "$status" ] || continue
+    grep -qx connected "$status" && return 0
+  done
+  return 1
+}
+
+start_sunshine_with_display() {
+  export DISPLAY="$SUN_DISPLAY"
+  export XAUTHORITY="$SUN_XAUTHORITY"
+  systemctl --user import-environment DISPLAY XAUTHORITY XDG_RUNTIME_DIR 2>/dev/null || true
+  systemctl --user start sunshine 2>/dev/null || \
+    setsid nohup sunshine "$SUN_CONF" >>"$LOGS_DIR/sunshine.log" 2>&1 < /dev/null &
+}
 
 if systemctl --user is-active sunshine >/dev/null 2>&1; then
   log "### 60_sunshine: sunshine already running"
-elif [ -d "$XDG_RUNTIME_DIR" ]; then
-  log "### 60_sunshine: starting sunshine via systemd"
-  systemctl --user start sunshine 2>/dev/null || \
-    setsid nohup sunshine "$SUN_CONF" >>"$LOGS_DIR/sunshine.log" 2>&1 < /dev/null &
+elif [ -d "$XDG_RUNTIME_DIR" ] && { sunshine_display_ready || sunshine_kms_ready; }; then
+  log "### 60_sunshine: starting sunshine on display $SUN_DISPLAY"
+  start_sunshine_with_display
 else
-  log "### 60_sunshine: no user session yet — sunshine will start at next autologin"
+  log "### 60_sunshine: no usable user display yet — sunshine will start at next autologin"
 fi
 
 log "### 60_sunshine: done"

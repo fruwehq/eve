@@ -6,6 +6,7 @@
 #   scripts/remote-xpra <profile> stop
 #   scripts/remote-xpra <profile> run <app> [args...]
 #   scripts/remote-xpra <profile> attach
+#   scripts/remote-xpra <profile> desktop
 #   scripts/remote-xpra <profile> apps
 #   scripts/remote-xpra <profile> status
 #
@@ -46,6 +47,8 @@ SSH_OPTS=(-o StrictHostKeyChecking=no -o ServerAliveInterval=10 -o WarnWeakCrypt
 [ "$SSH_PORT" != "22" ] && SSH_OPTS+=(-p "$SSH_PORT")
 
 DISPLAY_NUM="${XPRA_DISPLAY:-100}"
+DESKTOP_DISPLAY_NUM="${XPRA_DESKTOP_DISPLAY:-101}"
+DESKTOP_GEOMETRY="${XPRA_DESKTOP_GEOMETRY:-1920x1080}"
 SSH_CMD="ssh ${SSH_OPTS[*]}"
 OS_FAMILY=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^OS_FAMILY=/{print $2}')
 
@@ -104,7 +107,6 @@ case "$ACTION" in
     else
       echo "[remote-xpra] stopping session on display :$DISPLAY_NUM"
       remote_ssh "xpra stop :$DISPLAY_NUM" 2>/dev/null || true
-      xpra stop "$XPRA_URI" 2>/dev/null || true
     fi
     echo "[remote-xpra] stopped"
     ;;
@@ -128,12 +130,19 @@ case "$ACTION" in
       echo "Usage: scripts/remote-xpra <profile> run <app> [args...]" >&2
       exit 1
     fi
+    APP_BIN="$1"
     START_CMD="$*"
     echo "[remote-xpra] launching '$START_CMD'"
     if [ "$OS_FAMILY" = "windows" ]; then
       remote_ssh "SchTasks /Create /SC ONCE /TN $XPRA_SCTASK_RUN /TR \"$START_CMD\" /ST 00:00 /RU Administrator /IT /F 2>&1 | Out-Null; SchTasks /Run /TN $XPRA_SCTASK_RUN" 2>/dev/null
     else
-      remote_ssh "DISPLAY=:$DISPLAY_NUM nohup $START_CMD </dev/null >/dev/null 2>&1 &"
+      remote_ssh "xpra info :$DISPLAY_NUM >/dev/null 2>&1 || xpra start :$DISPLAY_NUM"
+      remote_ssh "command -v -- '$APP_BIN' >/dev/null" || {
+        echo "remote-xpra: remote command not found: $APP_BIN" >&2
+        echo "  Try: make remote.xpra.apps PROFILE=$PROFILE" >&2
+        exit 1
+      }
+      remote_ssh "log=/tmp/xpra-run-$DISPLAY_NUM.log; : > \"\$log\"; DISPLAY=:$DISPLAY_NUM setsid $START_CMD </dev/null >>\"\$log\" 2>&1 & pid=\$!; sleep 1; if ! kill -0 \"\$pid\" 2>/dev/null; then echo \"remote-xpra: '$START_CMD' exited immediately\" >&2; cat \"\$log\" >&2; exit 1; fi"
     fi
     ;;
 
@@ -159,14 +168,15 @@ case "$ACTION" in
       trap cleanup EXIT INT TERM
 
       echo "[remote-xpra] attaching to shadow session via SSH tunnel (press Ctrl-C to detach)"
-      xpra attach "$XPRA_URI" --desktop-fullscreen=yes &
+      xpra attach "$XPRA_URI" --desktop-fullscreen=yes --clipboard=yes &
       XPRA_PID=$!
-      wait $XPRA_PID 2>/dev/null
+      wait $XPRA_PID 2>/dev/null || true
       trap - EXIT INT TERM
       kill "$XPRA_PID" 2>/dev/null || true
       pkill -P "$XPRA_PID" 2>/dev/null || true
       kill "$TUNNEL_PID" 2>/dev/null || true
     else
+      remote_ssh "xpra info :$DISPLAY_NUM >/dev/null 2>&1 || xpra start :$DISPLAY_NUM"
       # shellcheck disable=SC2329
       cleanup() {
         echo "[remote-xpra] detaching"
@@ -176,13 +186,44 @@ case "$ACTION" in
       trap cleanup EXIT INT TERM
 
       echo "[remote-xpra] attaching to display :$DISPLAY_NUM (press Ctrl-C to detach)"
-      xpra attach "$XPRA_URI" --ssh="$SSH_CMD" &
+      xpra attach "$XPRA_URI" --ssh="$SSH_CMD" --clipboard=yes &
       XPRA_PID=$!
-      wait $XPRA_PID 2>/dev/null
+      wait $XPRA_PID 2>/dev/null || true
       trap - EXIT INT TERM
       kill "$XPRA_PID" 2>/dev/null || true
       pkill -P "$XPRA_PID" 2>/dev/null || true
     fi
+    ;;
+
+  desktop)
+    if ! command -v xpra >/dev/null 2>&1; then
+      echo "remote-xpra: xpra not installed locally." >&2
+      echo "  macOS:  install the signed .pkg from https://xpra.org/install/ (also needs XQuartz)." >&2
+      exit 1
+    fi
+    if [ "$OS_FAMILY" = "windows" ]; then
+      echo "remote-xpra: desktop mode is only implemented for Linux profiles; use remote.xpra.attach for Windows shadow mode." >&2
+      exit 2
+    fi
+
+    echo "[remote-xpra] starting desktop on display :$DESKTOP_DISPLAY_NUM (${DESKTOP_GEOMETRY})"
+    remote_ssh "xpra info :$DESKTOP_DISPLAY_NUM >/dev/null 2>&1 || xpra start-desktop :$DESKTOP_DISPLAY_NUM --resize-display=$DESKTOP_GEOMETRY --start=startxfce4"
+
+    # shellcheck disable=SC2329
+    cleanup() {
+      echo "[remote-xpra] detaching desktop"
+      kill "$XPRA_PID" 2>/dev/null || true
+      pkill -P "$XPRA_PID" 2>/dev/null || true
+    }
+    trap cleanup EXIT INT TERM
+
+    echo "[remote-xpra] attaching to desktop :$DESKTOP_DISPLAY_NUM (press Ctrl-C to detach)"
+    xpra attach "ssh://$SSH_USER@$IP/$DESKTOP_DISPLAY_NUM" --ssh="$SSH_CMD" --desktop-fullscreen=no --desktop-scaling=1 --clipboard=yes &
+    XPRA_PID=$!
+    wait $XPRA_PID 2>/dev/null || true
+    trap - EXIT INT TERM
+    kill "$XPRA_PID" 2>/dev/null || true
+    pkill -P "$XPRA_PID" 2>/dev/null || true
     ;;
 
   apps)

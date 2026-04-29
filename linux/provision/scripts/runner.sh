@@ -12,10 +12,17 @@ LOGS_DIR="$PROVISION_ROOT/logs"
 STATE_FILE="$STATE_DIR/state.json"
 REBOOT_FLAG="$STATE_DIR/reboot.flag"
 LOG_FILE="$LOGS_DIR/provision.log"
+LOCK_FILE="$STATE_DIR/runner.lock"
 
 export PROVISION_ROOT
 
 mkdir -p "$STATE_DIR" "$LOGS_DIR"
+
+exec 9>"$LOCK_FILE"
+if ! flock -n 9; then
+  printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "Another provisioning runner is already active." | tee -a "$LOG_FILE"
+  exit 1
+fi
 
 log() {
   printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" | tee -a "$LOG_FILE"

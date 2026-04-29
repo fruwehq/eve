@@ -64,11 +64,34 @@ VNC_PASSWORD="${VNC_PASSWORD:-vagrant}"
 echo "[remote-vnc] Tunnel active on localhost:$LOCAL_PORT"
 echo "[remote-vnc] Opening VNC viewer..."
 
-if command -v open >/dev/null 2>&1; then
-    open "vnc://:${VNC_PASSWORD}@127.0.0.1:${LOCAL_PORT}"
-    echo "[remote-vnc] Tunnel will stay open. Run: kill \$(lsof -ti :$LOCAL_PORT) to close."
+VNC_AUTH_ARGS=()
+VNC_PASSWD_FILE=""
+if command -v mktemp >/dev/null 2>&1; then
+    VNC_PASSWD_FILE=$(mktemp "${TMPDIR:-/tmp}/egame-vnc-passwd.XXXXXX")
+    chmod 600 "$VNC_PASSWD_FILE"
+    if ./scripts/instance-ssh "$PROFILE" -- 'if [ -f ~/.config/tigervnc/passwd ]; then cat ~/.config/tigervnc/passwd; elif [ -f ~/.vnc/passwd ]; then cat ~/.vnc/passwd; else exit 1; fi' > "$VNC_PASSWD_FILE"; then
+        VNC_AUTH_ARGS=(-passwd "$VNC_PASSWD_FILE")
+    else
+        rm -f "$VNC_PASSWD_FILE"
+        VNC_PASSWD_FILE=""
+        echo "[remote-vnc] Could not fetch VNC password file; enter password '${VNC_PASSWORD}' if prompted."
+    fi
+fi
+
+cleanup() {
+    [ -z "$VNC_PASSWD_FILE" ] || rm -f "$VNC_PASSWD_FILE"
+}
+trap cleanup EXIT
+
+if [ -n "${VNC_VIEWER_CMD:-}" ]; then
+    # shellcheck disable=SC2086
+    $VNC_VIEWER_CMD -Shared -AcceptClipboard -SendClipboard "${VNC_AUTH_ARGS[@]}" "127.0.0.1::$LOCAL_PORT"
 elif command -v vncviewer >/dev/null 2>&1; then
-    vncviewer "127.0.0.1::$LOCAL_PORT"
+    vncviewer -Shared -AcceptClipboard -SendClipboard "${VNC_AUTH_ARGS[@]}" "127.0.0.1::$LOCAL_PORT"
+elif command -v open >/dev/null 2>&1; then
+    open "vnc://:${VNC_PASSWORD}@127.0.0.1:${LOCAL_PORT}"
+    echo "[remote-vnc] Using macOS Screen Sharing fallback. Clipboard support is limited; install TigerVNC for better VNC behavior."
+    echo "[remote-vnc] Tunnel will stay open. Run: kill \$(lsof -ti :$LOCAL_PORT) to close."
 else
     echo "No VNC viewer found. Connect manually to: 127.0.0.1:$LOCAL_PORT"
     echo "Press Ctrl+C to close the tunnel."

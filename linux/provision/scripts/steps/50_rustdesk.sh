@@ -41,6 +41,45 @@ autologin-user-timeout=0
 user-session=xfce
 EOF
 
+if [ "${PROVIDER:-}" = "raspberry-pi" ]; then
+  hdmi_connector="${RASPBERRY_PI_HDMI_CONNECTOR:-HDMI-A-1}"
+  hdmi_mode="${RASPBERRY_PI_HDMI_MODE:-1024x768@60D}"
+  xrandr_output="${hdmi_connector/HDMI-A/HDMI}"
+  xrandr_mode="${hdmi_mode%@*}"
+  xrandr_mode="${xrandr_mode%D}"
+  hdmi_token="video=${hdmi_connector}:${hdmi_mode}"
+  if [ -w /boot/firmware/cmdline.txt ] || sudo test -w /boot/firmware/cmdline.txt; then
+    if ! grep -qwF "$hdmi_token" /boot/firmware/cmdline.txt; then
+      log "### 50_rustdesk: forcing Raspberry Pi headless HDMI mode $hdmi_token"
+      sudo cp /boot/firmware/cmdline.txt /boot/firmware/cmdline.txt.egame.bak
+      sudo sed -i -E "s#(^| )video=${hdmi_connector}:[^ ]+##g; s#\$# ${hdmi_token}#" /boot/firmware/cmdline.txt
+      log "### 50_rustdesk: reboot required for $hdmi_token to take effect"
+    fi
+  else
+    log "### 50_rustdesk: warn: /boot/firmware/cmdline.txt not writable; cannot force headless HDMI"
+  fi
+
+  sudo mkdir -p /etc/X11/xorg.conf.d
+  sudo tee /etc/X11/xorg.conf.d/10-raspi-kms.conf >/dev/null <<EOF
+Section "Device"
+    Identifier "Raspberry Pi KMS Display"
+    Driver "modesetting"
+    Option "kmsdev" "/dev/dri/card1"
+EndSection
+EOF
+
+  mkdir -p "$HOME/.config/autostart"
+  cat > "$HOME/.config/autostart/egame-display-mode.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=Set display mode
+Exec=sh -c 'xrandr --output "$xrandr_output" --mode "$xrandr_mode" 2>/dev/null || true'
+Hidden=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+EOF
+fi
+
 # LightDM's pam_succeed_if rule for the autologin path keys off the `autologin`
 # group on Debian/Ubuntu; ensure the user is in it. Cloud-init Ubuntu users have
 # `*` in /etc/shadow which blocks pam_unix during the lock-screen unlock — having
@@ -132,28 +171,28 @@ for i in $(seq 1 15); do
   sleep 2
 done
 
+rd_user="$USER"
+rd_uid=$(id -u "$rd_user")
+rd_server_ready=0
+
 for i in $(seq 1 15); do
-  if ps -eo user,cmd 2>/dev/null | awk '/[r]ustdesk --server/ && $1!="root" {found=1} END {exit !found}'; then
+  if ps -eo user,cmd 2>/dev/null | awk -v user="$rd_user" '$1==user && /[r]ustdesk/ && /--server/ {found=1} END {exit !found}'; then
+    rd_server_ready=1
     break
   fi
   log "### 50_rustdesk: waiting for user server ($i/15)..."
   sleep 1
 done
 
-rd_user=$(ps -eo user,cmd 2>/dev/null | awk '/[r]ustdesk --server/ && $1!="root" {print $1; exit}')
-rd_uid=""
-[ -n "$rd_user" ] && rd_uid=$(id -u "$rd_user" 2>/dev/null || true)
-
 # Set permanent password — must run after the user-side `rustdesk --server`
 # owns its IPC socket.
 if [ -n "${RUSTDESK_PASSWORD:-}" ]; then
   log "### 50_rustdesk: setting permanent password"
-  if [ -n "$rd_user" ] && [ -n "$rd_uid" ]; then
-    if ! sudo XDG_RUNTIME_DIR="/run/user/$rd_uid" rustdesk --password "$RUSTDESK_PASSWORD"; then
-      log "### 50_rustdesk: warn: --password failed (server-user=$rd_user); client will be prompted to set one"
-    fi
-  else
-    log "### 50_rustdesk: warn: could not find non-root 'rustdesk --server' process; skipping --password"
+  if [ "$rd_server_ready" -ne 1 ]; then
+    log "### 50_rustdesk: warn: user server was not detected; attempting --password for $rd_user anyway"
+  fi
+  if ! sudo env HOME="$HOME" XDG_RUNTIME_DIR="/run/user/$rd_uid" rustdesk --password "$RUSTDESK_PASSWORD"; then
+    log "### 50_rustdesk: warn: --password failed (server-user=$rd_user); client will be prompted to set one"
   fi
 fi
 
