@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+USAGE="Usage: scripts/update-tools <profile>
+
+Updates all installed tools on a remote instance to their latest versions.
+"
+
+PROFILE="${1:?$USAGE}"
+cd "$(git rev-parse --show-toplevel)"
+
+OS_FAMILY=$(./scripts/profile-resolve --profile "$PROFILE" --emit env | awk -F= '/^OS_FAMILY=/{print $2}')
+SSH_CMD=(./scripts/instance-ssh "$PROFILE" --)
+
+case "$OS_FAMILY" in
+  ubuntu)
+    log() { printf '[update] %s\n' "$*"; }
+
+    log "Updating apt packages..."
+    "${SSH_CMD[@]}" 'sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq && sudo DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -qq' || true
+
+    log "Updating VS Code..."
+    "${SSH_CMD[@]}" 'sudo DEBIAN_FRONTEND=noninteractive apt-get install --only-upgrade -y code 2>/dev/null' || log "vscode not installed"
+
+    log "Updating Claude..."
+    "${SSH_CMD[@]}" 'command -v claude >/dev/null 2>&1 && curl -fsSL https://claude.ai/install.sh | sh || echo "skip"' || true
+
+    log "Updating OpenCode..."
+    "${SSH_CMD[@]}" 'command -v opencode >/dev/null 2>&1 && curl -fsSL https://opencode.ai/install | bash || echo "skip"' || true
+
+    log "Updating Codex CLI..."
+    "${SSH_CMD[@]}" 'command -v codex >/dev/null 2>&1 && sudo npm update -g @openai/codex || echo "skip"' || true
+
+    log "Updating Goose..."
+    "${SSH_CMD[@]}" 'command -v goose >/dev/null 2>&1 && goose update 2>/dev/null || echo "skip"' || true
+
+    log "Updating Hermes..."
+    "${SSH_CMD[@]}" 'command -v hermes >/dev/null 2>&1 && hermes update || echo "skip"' || true
+
+    log "Updating RustDesk..."
+    "${SSH_CMD[@]}" 'command -v rustdesk >/dev/null 2>&1 && sudo DEBIAN_FRONTEND=noninteractive apt-get install --only-upgrade -y rustdesk 2>/dev/null || echo "skip"' || true
+
+    log "Updating Sunshine..."
+    "${SSH_CMD[@]}" 'dpkg -l sunshine >/dev/null 2>&1 && sudo DEBIAN_FRONTEND=noninteractive apt-get install --only-upgrade -y sunshine 2>/dev/null || echo "skip"' || true
+
+    log "Updating Docker..."
+    "${SSH_CMD[@]}" 'command -v docker >/dev/null 2>&1 && sudo apt-get install --only-upgrade -y docker-ce docker-ce-cli containerd.io 2>/dev/null || echo "skip"' || true
+
+    log "Updating Rust..."
+    "${SSH_CMD[@]}" 'command -v rustup >/dev/null 2>&1 && rustup update || echo "skip"' || true
+
+    log "All tools updated."
+    ;;
+  windows)
+    echo "Windows update not yet implemented"
+    exit 1
+    ;;
+  *)
+    echo "Unsupported OS family: $OS_FAMILY"
+    exit 1
+    ;;
+esac

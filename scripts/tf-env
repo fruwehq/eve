@@ -79,6 +79,7 @@ case "$PROVIDER" in
     print_kv TF_VAR_vm_autostart "$(getv VM_AUTOSTART)"
     print_kv TF_VAR_vm_base_dir "${TRUENAS_VM_BASE_DIR:-}"
     print_kv TF_VAR_vm_cpu_cores "$(getv VM_CPU_CORES)"
+    print_kv TF_VAR_vm_cpu_mode "$(getv VM_CPU_MODE)"
     print_kv TF_VAR_vm_disk_gb "$(getv VM_DISK_GB)"
     print_kv TF_VAR_vm_memory_mb "$(getv VM_MEMORY_MB)"
     print_kv TF_VAR_vm_nic_attach "$(getv VM_NIC_ATTACH)"

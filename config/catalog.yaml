@@ -66,6 +66,7 @@ machines:
     kind: vm
     defaults:
       cpu_cores: 4
+      cpu_mode: HOST-PASSTHROUGH
       vcpus: 2
       memory_mb: 8192
       disk_gb: 30
@@ -138,15 +139,19 @@ inits:
 # Workload package catalog
 # -----------------------------------------------------------------------------
 packages:
+  - id: claude
   - id: codex-cli
   - id: dev-toolchain
   - id: docker
   - id: goose
+  - id: hermes
+  - id: opencode
   - id: rdp
   - id: rustdesk
   - id: ssh
   - id: steam
   - id: sunshine
+  - id: vscode
   - id: vnc
   - id: xpra
 
@@ -170,7 +175,7 @@ bundles:
     includes: [ssh, xpra]
 
   - id: dev-sandbox-core
-    includes: [docker, dev-toolchain, goose, codex-cli]
+    includes: [docker, dev-toolchain, goose, claude, codex-cli, hermes, opencode, vscode]
 
   - id: gaming-core
     includes: [sunshine, steam, rustdesk]
