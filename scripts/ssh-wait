@@ -12,24 +12,34 @@ cd "$(git rev-parse --show-toplevel)"
 RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
 ENGINE=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^ENGINE=/{print $2}')
 
-elapsed=0
-while [ "$elapsed" -lt "$MAX_SECONDS" ]; do
+# SECONDS is bash's built-in wall-clock counter from script start. It captures
+# the time taken by SSH attempts themselves (which can take several seconds
+# each, especially during early boot when ports are slow to respond) — counting
+# only completed poll cycles would underreport.
+SECONDS=0
+
+try_ssh() {
   if [ "$ENGINE" = "vagrant" ]; then
-    if (cd ".generated/$PROFILE" && vagrant ssh -c "exit 0" >/dev/null 2>&1); then
-      printf "\rSSH ready for profile %s (%ds)                     \n" "$PROFILE" "$elapsed"
-      exit 0
-    fi
+    (cd ".generated/$PROFILE" && vagrant ssh -c "exit 0" >/dev/null 2>&1)
   else
-    if ./scripts/instance-ssh "$PROFILE" -- exit 0 >/dev/null 2>&1; then
-      printf "\rSSH ready for profile %s (%ds)                     \n" "$PROFILE" "$elapsed"
-      exit 0
-    fi
+    ./scripts/instance-ssh "$PROFILE" -- exit 0 >/dev/null 2>&1
   fi
-  for (( remaining=POLL_INTERVAL; remaining > 0; remaining-- )); do
-    printf "\rwaiting for SSH (%ds elapsed, next poll in %ds)..." "$elapsed" "$remaining"
+}
+
+while [ "$SECONDS" -lt "$MAX_SECONDS" ]; do
+  # Print before the attempt — SSH probes can block for several seconds, and
+  # without this update the line stays stuck on the previous countdown.
+  printf "\rchecking SSH (%ds/%ds elapsed)...                         " "$SECONDS" "$MAX_SECONDS"
+  if try_ssh; then
+    printf "\rSSH ready for profile %s (%ds)                     \n" "$PROFILE" "$SECONDS"
+    exit 0
+  fi
+  next_poll=$((SECONDS + POLL_INTERVAL))
+  while [ "$SECONDS" -lt "$next_poll" ] && [ "$SECONDS" -lt "$MAX_SECONDS" ]; do
+    remaining=$((next_poll - SECONDS))
+    printf "\rwaiting for SSH (%ds/%ds elapsed, next poll in %ds)...   " "$SECONDS" "$MAX_SECONDS" "$remaining"
     sleep 1
   done
-  elapsed=$((elapsed + POLL_INTERVAL))
 done
 
 echo "SSH did not become ready in time for profile $PROFILE (${MAX_SECONDS}s)" >&2
