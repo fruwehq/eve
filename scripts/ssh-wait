@@ -1,33 +1,36 @@
 #!/usr/bin/env bash
 # Wait until SSH on the profile's instance accepts connections.
-# Usage: scripts/ssh-wait <profile> [max-attempts]
+# Usage: scripts/ssh-wait <profile> [max-wait-seconds]
 
 set -euo pipefail
 
-PROFILE="${1:?Usage: scripts/ssh-wait <profile> [max-attempts]}"
-MAX=${2:-60}
+PROFILE="${1:?Usage: scripts/ssh-wait <profile> [max-wait-seconds]}"
+MAX_SECONDS=${2:-120}
+POLL_INTERVAL=2
 cd "$(git rev-parse --show-toplevel)"
 
 RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
 ENGINE=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^ENGINE=/{print $2}')
 
-i=1
-while [ "$i" -le "$MAX" ]; do
+elapsed=0
+while [ "$elapsed" -lt "$MAX_SECONDS" ]; do
   if [ "$ENGINE" = "vagrant" ]; then
     if (cd ".generated/$PROFILE" && vagrant ssh -c "exit 0" >/dev/null 2>&1); then
-      echo "SSH ready for profile $PROFILE"
+      printf "\rSSH ready for profile %s (%ds)                     \n" "$PROFILE" "$elapsed"
       exit 0
     fi
   else
     if ./scripts/instance-ssh "$PROFILE" -- exit 0 >/dev/null 2>&1; then
-      echo "SSH ready for profile $PROFILE"
+      printf "\rSSH ready for profile %s (%ds)                     \n" "$PROFILE" "$elapsed"
       exit 0
     fi
   fi
-  echo "waiting for SSH ($i/$MAX)..."
-  sleep 5
-  i=$((i + 1))
+  for (( remaining=POLL_INTERVAL; remaining > 0; remaining-- )); do
+    printf "\rwaiting for SSH (%ds elapsed, next poll in %ds)..." "$elapsed" "$remaining"
+    sleep 1
+  done
+  elapsed=$((elapsed + POLL_INTERVAL))
 done
 
-echo "SSH did not become ready in time for profile $PROFILE" >&2
+echo "SSH did not become ready in time for profile $PROFILE (${MAX_SECONDS}s)" >&2
 exit 1

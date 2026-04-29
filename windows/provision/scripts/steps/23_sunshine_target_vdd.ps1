@@ -4,77 +4,69 @@ Write-Host "#########################################################"
 Write-Host "### Start 23"
 Write-Host "#########################################################"
 
-# Sunshine couples capture to the encoding GPU (NVIDIA NVENC) and by default
-# captures NVIDIA's adapter output rather than VDD. Force capture to VDD by
-# writing output_name to sunshine.conf using the GDI display name Sunshine
-# itself reports in its log (the JSON "Currently available display devices"
-# block, which includes friendly_name and EDID).
-#
-# This requires Sunshine to be running so it has emitted the display list.
+# After step 22, VDD is the only active display on the desktop.  NVIDIA's
+# adapter stays present for NVENC encoding.  DXGI Desktop Duplication captures
+# the entire virtual desktop — which is now VDD's resolution alone.  We just
+# ensure Sunshine has no stale output_name override and restart it.
 
 $confPath = 'C:\Program Files\Sunshine\config\sunshine.conf'
-$logPath = 'C:\Program Files\Sunshine\config\sunshine.log'
-$exePath = 'C:\Program Files\Sunshine\sunshine.exe'
+$exePath  = 'C:\Program Files\Sunshine\sunshine.exe'
 
 function Restart-Sunshine {
-  $svc = Get-Service -Name 'SunshineService' -ErrorAction SilentlyContinue
-  if ($svc) {
-    Restart-Service -Name 'SunshineService' -Force
-    return
-  }
-  Get-Process -Name 'sunshine' -ErrorAction SilentlyContinue | Stop-Process -Force
-  Start-Sleep -Seconds 2
-  Start-Process -FilePath $exePath -WindowStyle Hidden
+    $svc = Get-Service -Name 'SunshineService' -ErrorAction SilentlyContinue
+    if ($svc) {
+        Restart-Service -Name 'SunshineService' -Force
+        return
+    }
+    Get-Process -Name 'sunshine' -ErrorAction SilentlyContinue | Stop-Process -Force
+    Start-Sleep -Seconds 2
+    Start-Process -FilePath $exePath -WindowStyle Hidden
 }
 
-function Get-VddDisplayName {
-  if (-not (Test-Path -LiteralPath $logPath)) { return $null }
-  $log = Get-Content -LiteralPath $logPath -Raw
-  # Match all "Currently available display devices:\n[...]" JSON arrays.
-  $rx = [regex]::new('(?ms)Currently available display devices:\s*\r?\n(\[.*?\])\r?\n')
-  $matches = $rx.Matches($log)
-  if ($matches.Count -eq 0) { return $null }
-  $jsonText = $matches[$matches.Count - 1].Groups[1].Value
-  $displays = $jsonText | ConvertFrom-Json
-  $vdd = $displays | Where-Object {
-    ($_.friendly_name -and $_.friendly_name -match 'VDD') -or
-    ($_.edid -and $_.edid.manufacturer_id -eq 'MTT')
-  } | Select-Object -First 1
-  if ($vdd) { return [string]$vdd.display_name }
-  return $null
-}
-
-# Force Sunshine to emit a fresh display list, then poll for it.
-Restart-Sunshine
-
-$timeoutSeconds = 60
-$start = Get-Date
-$vddDisplayName = $null
-while (((Get-Date) - $start).TotalSeconds -lt $timeoutSeconds) {
-  Start-Sleep -Seconds 2
-  $vddDisplayName = Get-VddDisplayName
-  if ($vddDisplayName) { break }
-}
-
-if (-not $vddDisplayName) {
-  throw "Could not determine VDD's display_name from Sunshine log within $timeoutSeconds seconds. Inspect $logPath."
-}
-
-Write-Host "VDD display: $vddDisplayName"
-
-# Update sunshine.conf — drop any existing output_name lines, append the new one.
-$cfgLines = if (Test-Path -LiteralPath $confPath) { Get-Content -LiteralPath $confPath } else { @() }
-$filtered = $cfgLines | Where-Object { $_ -notmatch '^\s*output_name\s*=' }
-$desiredLines = @($filtered) + @("output_name = $vddDisplayName")
-$desiredContent = ($desiredLines -join "`r`n") + "`r`n"
-
-$existingContent = if (Test-Path -LiteralPath $confPath) { (Get-Content -LiteralPath $confPath -Raw) } else { '' }
-if ($existingContent -ne $desiredContent) {
-  Write-Host "Writing output_name = $vddDisplayName to $confPath"
-  Set-Content -LiteralPath $confPath -Value $desiredContent -NoNewline -Encoding ASCII
-  Restart-Sunshine
+$markerPath = 'C:\Users\Administrator\provision\state\display-config-done.flag'
+if (-not (Test-Path $markerPath)) {
+    Write-Host "Waiting for display-config marker ..."
+    $deadline = (Get-Date).AddSeconds(120)
+    while ((Get-Date) -lt $deadline -and -not (Test-Path $markerPath)) {
+        Start-Sleep -Seconds 3
+    }
+    if (-not (Test-Path $markerPath)) {
+        Write-Host "WARNING: display-config marker not found. Continuing anyway."
+    } else {
+        Write-Host "Display config: $((Get-Content $markerPath -Raw).Trim())"
+    }
 } else {
-  Write-Host "$confPath already targets $vddDisplayName."
+    Write-Host "Display config already done: $((Get-Content $markerPath -Raw).Trim())"
+}
+
+# Ensure config file exists
+if (-not (Test-Path $confPath)) {
+    $confDir = Split-Path $confPath -Parent
+    if (-not (Test-Path $confDir)) { New-Item -ItemType Directory -Path $confDir -Force | Out-Null }
+    New-Item -ItemType File -Path $confPath -Force | Out-Null
+}
+
+# Remove any stale output_name line.  With VDD as the sole desktop display,
+# Sunshine captures the full virtual desktop at VDD's resolution via NVIDIA's
+# DXGI adapter + NVENC encoder automatically.
+$cfgLines = @(Get-Content -LiteralPath $confPath)
+$filtered = @($cfgLines | Where-Object { $_ -notmatch '^\s*output_name\s*=' })
+$desired  = ($filtered | Where-Object { $_.Trim() -ne '' }) -join "`r`n"
+$existing = Get-Content -LiteralPath $confPath -Raw -ErrorAction SilentlyContinue
+
+if ($existing -ne $desired) {
+    Write-Host "Updating Sunshine config (removing output_name)."
+    Set-Content -LiteralPath $confPath -Value $desired -NoNewline -Encoding ASCII
+    Write-Host "Restarting Sunshine ..."
+    Restart-Sunshine
+} else {
+    Write-Host "Sunshine config already correct (no output_name)."
+}
+
+Start-Sleep -Seconds 5
+$svc = Get-Service -Name 'SunshineService' -ErrorAction SilentlyContinue
+if ($svc) {
+    Write-Host "Sunshine service: $($svc.Status)"
 }
 
 Write-Host "---------------------------------------------------------"
