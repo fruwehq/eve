@@ -18,6 +18,22 @@ tf_attr() {
 }
 
 case "$ENGINE" in
+  metal)
+    case "$PROVIDER" in
+      raspberry-pi)
+        if ./scripts/instance-ssh "$PROFILE" -- exit 0 >/dev/null 2>&1; then
+          echo "[start] Raspberry Pi is already reachable"
+          exit 0
+        fi
+        echo "[start] Raspberry Pi is not reachable. Power it on physically, then retry." >&2
+        exit 1
+        ;;
+      *)
+        echo "[start] Unsupported metal provider: $PROVIDER" >&2
+        exit 1
+        ;;
+    esac
+    ;;
   vagrant)
     exec ./scripts/vagrant-up "$PROFILE"
     ;;

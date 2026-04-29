@@ -8,7 +8,7 @@
 				remote.rdp remote.rustdesk remote.rustdesk.info \
 				remote.sunshine remote.sunshine.wait \
 				remote.vnc remote.xpra remote.xpra.apps remote.xpra.attach \
-				remote.xpra.run remote.xpra.start remote.xpra.status \
+				remote.xpra.desktop remote.xpra.run remote.xpra.start remote.xpra.status \
 				remote.xpra.stop \
 				show-password ssh ssh.run ssh.truenas ssh.wait start status stop \
 				test test.profiles test.shellcheck test.terraform \
@@ -35,14 +35,23 @@ export AWS_PROFILE
 export AWS_REGION
 export AWS_SHARED_CREDENTIALS_FILE
 export EPHEMERAL_DISPLAY_RESOLUTION
+export EPHEMERAL_DISPLAY_FPS
+export EPHEMERAL_MOONLIGHT_BITRATE_KBPS
+export EPHEMERAL_MOONLIGHT_VIDEO_CODEC
+export EPHEMERAL_MOONLIGHT_VIDEO_DECODER
 export EPHEMERAL_SUNSHINE_PASSWORD
 export EPHEMERAL_WINDOWS_PASSWORD
 export MY_IP
 export RASPBERRY_PI_HOST
+export RASPBERRY_PI_HDMI_CONNECTOR
+export RASPBERRY_PI_HDMI_MODE
+export RASPBERRY_PI_IP
+export RASPBERRY_PI_USER_PASSWORD
 export RUSTDESK_KEY
 export RUSTDESK_PASSWORD
 export RUSTDESK_SERVER
 export SSH_PUBLIC_KEY_FILE
+export SUNSHINE_MAX_BITRATE_KBPS
 export SUNSHINE_VERSION
 export TIMEZONE
 export TRUENAS_API_KEY
@@ -80,6 +89,8 @@ down: ## Destroy profile resources (terraform or vagrant)
 	ENGINE=$$(./scripts/profile-resolve --profile $(PROFILE) --emit env | awk -F= '/^ENGINE=/{print $$2}'); \
 	if [ "$$ENGINE" = "vagrant" ]; then \
 		./scripts/vagrant-destroy $(PROFILE); \
+	elif [ "$$ENGINE" = "metal" ]; then \
+		echo "[down] PROFILE=$(PROFILE) is metal hardware; nothing to destroy."; \
 	else \
 		./scripts/tf-destroy $(PROFILE); \
 	fi
@@ -103,7 +114,12 @@ info: ## Print resolved profile data as JSON
 init: ## Initialize profile backend/providers (terraform only)
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
 	./scripts/profile-resolve --profile $(PROFILE) --validate; \
-	./scripts/tf-init $(PROFILE)
+	ENGINE=$$(./scripts/profile-resolve --profile $(PROFILE) --emit env | awk -F= '/^ENGINE=/{print $$2}'); \
+	if [ "$$ENGINE" = "metal" ]; then \
+		echo "[init] PROFILE=$(PROFILE) is metal hardware; no Terraform backend to initialize."; \
+	else \
+		./scripts/tf-init $(PROFILE); \
+	fi
 
 init.all: generate ## Init all stacks in parallel (set TM_PARALLEL=N)
 	terramate run --parallel=$(TM_PARALLEL) --continue-on-error -- terraform init -upgrade
@@ -125,6 +141,9 @@ plan: ## Plan profile changes (terraform or vagrant)
 	ENGINE=$$(./scripts/profile-resolve --profile $(PROFILE) --emit env | awk -F= '/^ENGINE=/{print $$2}'); \
 	if [ "$$ENGINE" = "vagrant" ]; then \
 		./scripts/vagrant-up --plan $(PROFILE); \
+	elif [ "$$ENGINE" = "metal" ]; then \
+		echo "[plan] PROFILE=$(PROFILE) is metal hardware; provisioning will run over SSH."; \
+		./scripts/profile-resolve --profile $(PROFILE) --emit env; \
 	else \
 		./scripts/tf-plan $(PROFILE); \
 	fi
@@ -142,9 +161,14 @@ provision: ## Upload and run OS-appropriate provisioning scripts on the instance
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
 	./scripts/provision $(PROFILE)
 
-provision.clear-state: ## Clear remote provisioning state, logs, and downloads (Windows)
+provision.clear-state: ## Clear remote provisioning state, logs, and downloads
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	./scripts/instance-ssh $(PROFILE) -- 'if (Test-Path "C:\Users\Administrator\provision\state") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\state" }; if (Test-Path "C:\Users\Administrator\provision\logs") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\logs" }; if (Test-Path "C:\Users\Administrator\provision\downloads") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\downloads" }'
+	OS_FAMILY=$$(./scripts/profile-resolve --profile $(PROFILE) --emit env | awk -F= '/^OS_FAMILY=/{print $$2}'); \
+	case "$$OS_FAMILY" in \
+		ubuntu) ./scripts/instance-ssh $(PROFILE) -- 'rm -rf ~/provision/state ~/provision/logs ~/provision/downloads' ;; \
+		windows) ./scripts/instance-ssh $(PROFILE) -- 'if (Test-Path "C:\Users\Administrator\provision\state") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\state" }; if (Test-Path "C:\Users\Administrator\provision\logs") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\logs" }; if (Test-Path "C:\Users\Administrator\provision\downloads") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\downloads" }' ;; \
+		*) echo "[provision.clear-state] unknown os_family: $$OS_FAMILY" >&2; exit 2 ;; \
+	esac
 
 provision.restart: provision.clear-state provision ## Clear remote state then re-provision
 
@@ -211,6 +235,10 @@ remote.xpra.apps: ## List available GUI apps on the remote instance
 remote.xpra.attach: ## Attach local xpra client to the running session
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
 	./scripts/remote-xpra $(PROFILE) attach
+
+remote.xpra.desktop: ## Start and attach an Xpra full desktop session
+	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
+	./scripts/remote-xpra $(PROFILE) desktop
 
 remote.xpra.run: ## Run an additional app on the existing Xpra session (requires APP=<cmd>)
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
@@ -287,6 +315,8 @@ up: ## Create and start profile resources (terraform or vagrant)
 	ENGINE=$$(./scripts/profile-resolve --profile $(PROFILE) --emit env | awk -F= '/^ENGINE=/{print $$2}'); \
 	if [ "$$ENGINE" = "vagrant" ]; then \
 		./scripts/vagrant-up $(PROFILE); \
+	elif [ "$$ENGINE" = "metal" ]; then \
+		echo "[up] PROFILE=$(PROFILE) is metal hardware; nothing to create."; \
 	else \
 		./scripts/tf-apply $(PROFILE); \
 	fi

@@ -26,6 +26,10 @@ if ! dpkg -s dbus-x11 >/dev/null 2>&1; then
   apt_install dbus-x11
 fi
 
+if ! dpkg -s autocutsel >/dev/null 2>&1; then
+  apt_install autocutsel
+fi
+
 if ! command -v startxfce4 >/dev/null 2>&1; then
   log "### 46_vnc: installing XFCE desktop (GNOME Shell does not work under VNC)"
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y xfce4
@@ -70,6 +74,13 @@ export GDK_BACKEND=x11
 export XDG_RUNTIME_DIR=/run/user/$(id -u)
 export DBUS_SESSION_BUS_ADDRESS=unix:path=$XDG_RUNTIME_DIR/bus
 eval $(dbus-launch --sh-syntax)
+if command -v vncconfig >/dev/null 2>&1; then
+  vncconfig -nowin &
+fi
+if command -v autocutsel >/dev/null 2>&1; then
+  autocutsel -fork -selection PRIMARY
+  autocutsel -fork -selection CLIPBOARD
+fi
 startxfce4 &
 exec sleep infinity
 XEOF

@@ -18,6 +18,18 @@ tf_attr() {
 }
 
 case "$ENGINE" in
+  metal)
+    case "$PROVIDER" in
+      raspberry-pi)
+        echo "[stop] Requesting Raspberry Pi shutdown over SSH"
+        ./scripts/instance-ssh "$PROFILE" -- 'sudo shutdown -h now'
+        ;;
+      *)
+        echo "[stop] Unsupported metal provider: $PROVIDER" >&2
+        exit 1
+        ;;
+    esac
+    ;;
   vagrant)
     exec ./scripts/vagrant-stop "$PROFILE"
     ;;
