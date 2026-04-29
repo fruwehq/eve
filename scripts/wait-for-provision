@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# Poll the remote until provisioning has finished. Survives reboots that the
+# provisioning state machine triggers between steps (SSH probes simply fail
+# while the VM is rebooting and we retry on the next interval).
+#
+# Usage: scripts/wait-for-provision <profile> [max-wait-seconds]
+
+set -euo pipefail
+
+PROFILE="${1:?Usage: scripts/wait-for-provision <profile> [max-wait-seconds]}"
+MAX_SECONDS=${2:-3600}
+POLL_INTERVAL=10
+cd "$(git rev-parse --show-toplevel)"
+
+RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
+OS_FAMILY=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^OS_FAMILY=/{print $2}')
+
+# Each probe returns two lines:
+#   line 1: DONE | RUNNING | MISSING
+#   line 2: latest "Running step ..." line from the log (or empty)
+case "$OS_FAMILY" in
+  ubuntu)
+    # shellcheck disable=SC2016 # $log/$HOME are expanded by the remote shell.
+    PROBE='log="$HOME/provision/logs/provision.log"; if [ -f "$log" ]; then if grep -q "Provisioning complete\." "$log"; then echo DONE; else echo RUNNING; fi; grep -E "Running step \[.*\] " "$log" | tail -n 1 || true; else echo MISSING; fi'
+    ;;
+  windows)
+    # shellcheck disable=SC2016 # $log/$lines/$last are remote PowerShell vars.
+    PROBE='$log = "C:\Users\Administrator\provision\logs\provision.log"; if (Test-Path $log) { $lines = Get-Content $log; if ($lines | Select-String -Pattern "Provisioning complete\." -Quiet) { "DONE" } else { "RUNNING" }; $last = $lines | Select-String -Pattern "Running step" | Select-Object -Last 1; if ($last) { $last.Line } } else { "MISSING" }'
+    ;;
+  *)
+    echo "wait-for-provision: unknown os_family: $OS_FAMILY" >&2
+    exit 2
+    ;;
+esac
+
+# Strip leading timestamp ("YYYY-MM-DD HH:MM:SS ") and the redundant
+# "Running step " prefix from a log line, leaving e.g. "[11/12] 40_rustdesk.ps1".
+clean_step() { sed -E -e 's/^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9:]+ //' -e 's/^Running step //'; }
+
+SECONDS=0
+last_step="(none yet)"
+
+print_status() {
+  printf "\r[%ds/%ds] %s — last step: %s                                                       " \
+    "$SECONDS" "$MAX_SECONDS" "$1" "$last_step"
+}
+
+while [ "$SECONDS" -lt "$MAX_SECONDS" ]; do
+  print_status "probing"
+  if result=$(./scripts/instance-ssh "$PROFILE" -- "$PROBE" 2>/dev/null); then
+    state=$(printf '%s\n' "$result" | sed -n '1p' | tr -d '\r')
+    step_line=$(printf '%s\n' "$result" | sed -n '2p' | tr -d '\r')
+    if [ -n "$step_line" ]; then
+      last_step=$(printf '%s' "$step_line" | clean_step)
+    fi
+    if [ "$state" = "DONE" ]; then
+      printf "\rProvisioning complete for profile %s (%ds, last step: %s)                                       \n" "$PROFILE" "$SECONDS" "$last_step"
+      exit 0
+    fi
+    print_status "connected"
+  else
+    print_status "waiting for SSH (reboot in progress?)"
+  fi
+  sleep "$POLL_INTERVAL"
+done
+
+printf "\n"
+echo "Provisioning did not finish in time for profile $PROFILE (${MAX_SECONDS}s)" >&2
+echo "Last seen step: $last_step" >&2
+exit 1

@@ -3,7 +3,7 @@
 .PHONY: all aws.login clean default down env generate help info \
 				init init.all ip lint logs plan \
 				profiles.list profiles.menu providers.status provision \
-				provision.clear-state provision.restart reboot \
+				provision.clear-state provision.restart provision.wait reboot \
 				remote.console remote.moonlight remote.moonlight.pair \
 				remote.rdp remote.rustdesk remote.rustdesk.info \
 				remote.sunshine remote.sunshine.wait \
@@ -68,7 +68,7 @@ export VAGRANT_SHOW_CONSOLE
 export VM_USER_NAME
 export VULTR_API_KEY
 
-all: init up ssh.wait provision remote.sunshine.wait remote.moonlight.pair remote.moonlight ## Full setup: up, provision, pair Moonlight, start stream
+all: init up ssh.wait provision provision.wait remote.sunshine.wait remote.moonlight.pair remote.moonlight ## Full setup: up, provision, pair Moonlight, start stream
 
 aws.login: ## Refresh AWS CLI login session for the selected profile
 	aws login --profile $(AWS_PROFILE)
@@ -171,6 +171,10 @@ provision.clear-state: ## Clear remote provisioning state, logs, and downloads
 	esac
 
 provision.restart: provision.clear-state provision ## Clear remote state then re-provision
+
+provision.wait: ## Wait until provisioning finishes (survives intermediate reboots)
+	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
+	./scripts/wait-for-provision $(PROFILE)
 
 update: ## Update all installed tools to latest versions
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
