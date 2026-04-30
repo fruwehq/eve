@@ -153,7 +153,9 @@ sunshine_kms_ready() {
 start_sunshine_with_display() {
   export DISPLAY="$SUN_DISPLAY"
   export XAUTHORITY="$SUN_XAUTHORITY"
-  [ -x "$HOME/.local/bin/egame-set-display-mode" ] && "$HOME/.local/bin/egame-set-display-mode" || true
+  if [ -x "$HOME/.local/bin/egame-set-display-mode" ]; then
+    "$HOME/.local/bin/egame-set-display-mode" || true
+  fi
   systemctl --user import-environment DISPLAY XAUTHORITY XDG_RUNTIME_DIR 2>/dev/null || true
   systemctl --user start sunshine 2>/dev/null || \
     setsid nohup sunshine "$SUN_CONF" >>"$LOGS_DIR/sunshine.log" 2>&1 < /dev/null &
@@ -163,7 +165,9 @@ if systemctl --user is-active sunshine >/dev/null 2>&1; then
   log "### 60_sunshine: restarting sunshine to reload config"
   export DISPLAY="$SUN_DISPLAY"
   export XAUTHORITY="$SUN_XAUTHORITY"
-  [ -x "$HOME/.local/bin/egame-set-display-mode" ] && "$HOME/.local/bin/egame-set-display-mode" || true
+  if [ -x "$HOME/.local/bin/egame-set-display-mode" ]; then
+    "$HOME/.local/bin/egame-set-display-mode" || true
+  fi
   systemctl --user restart sunshine 2>/dev/null || true
 elif [ -d "$XDG_RUNTIME_DIR" ] && { sunshine_display_ready || sunshine_kms_ready; }; then
   log "### 60_sunshine: starting sunshine on display $SUN_DISPLAY"
