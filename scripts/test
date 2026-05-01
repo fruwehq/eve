@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Top-level test orchestrator. Runs all project checks.
+# Usage: scripts/test              # run all
+#        scripts/test profiles     # run only one suite
+#        UPDATE_GOLDEN=1 scripts/test profiles  # refresh goldens
+
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+FAIL=0
+if [ "$#" -eq 0 ]; then
+  SUITES=(profiles terraform shellcheck)
+else
+  SUITES=("$@")
+fi
+
+run() {
+  local name="$1"; shift
+  printf '\n== %s ==\n' "$name"
+  if "$@"; then
+    printf '[OK]   %s\n' "$name"
+  else
+    printf '[FAIL] %s\n' "$name"
+    FAIL=$((FAIL + 1))
+  fi
+}
+
+for suite in "${SUITES[@]}"; do
+  case "$suite" in
+    profiles)   run "profiles"   ./scripts/test-profiles   ;;
+    terraform)  run "terraform"  ./scripts/test-terraform  ;;
+    shellcheck) run "shellcheck" ./scripts/test-shellcheck ;;
+    *) echo "unknown suite: $suite" >&2; exit 2 ;;
+  esac
+done
+
+if [ "$FAIL" -ne 0 ]; then
+  printf '\n%d suite(s) failed.\n' "$FAIL" >&2
+  exit 1
+fi
+printf '\nAll tests passed.\n'

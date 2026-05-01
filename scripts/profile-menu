@@ -1,0 +1,64 @@
+#!/usr/bin/env sh
+set -eu
+
+# Interactive profile selector.
+# Reads available profiles and prompts the user to pick one.
+# Outputs the selected profile name to stdout.
+# Usage: scripts/profile-menu
+#
+# There is no default profile — the user must always pick one explicitly.
+# Fails with a clear error in non-interactive contexts (no TTY).
+
+PROFILES=$(scripts/profiles-list)
+
+if [ ! -t 0 ] || [ ! -t 1 ]; then
+  echo "profile-menu: no TTY — pass PROFILE=<name> explicitly" >&2
+  exit 1
+fi
+
+echo ""
+echo "  Available profiles:"
+echo "  -------------------"
+echo ""
+
+i=1
+for name in $PROFILES; do
+  printf "  %2d) %s\n" "$i" "$name"
+  i=$((i + 1))
+done
+
+echo ""
+printf "  Select profile [1-%d]: " "$((i - 1))"
+
+read -r selection 2>/dev/null || true
+
+if [ -z "$selection" ]; then
+  echo "Error: no selection" >&2
+  exit 1
+fi
+
+# Handle numeric selection
+case "$selection" in
+  *[!0-9]*)
+    # Non-numeric — treat as profile name
+    if echo "$PROFILES" | grep -qx "$selection"; then
+      echo "$selection"
+      exit 0
+    fi
+    echo "Error: unknown profile '$selection'" >&2
+    exit 1
+    ;;
+esac
+
+# Numeric selection
+count=0
+for name in $PROFILES; do
+  count=$((count + 1))
+  if [ "$count" -eq "$selection" ]; then
+    echo "$name"
+    exit 0
+  fi
+done
+
+echo "Error: selection $selection out of range (1-$count)" >&2
+exit 1

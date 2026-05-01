@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+# Upload the OS-appropriate provisioning tree to the profile's instance
+# and run the bootstrap entry point.
+#
+# Usage: scripts/provision <profile>
+#
+# Linux:   uploads ./linux/provision/   -> $HOME/provision    runs bootstrap.sh
+# Windows: uploads ./windows/provision/ -> C:\Users\<user>\provision  runs bootstrap.ps1
+
+set -euo pipefail
+
+PROFILE="${1:?Usage: scripts/provision <profile>}"
+cd "$(git rev-parse --show-toplevel)"
+
+RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
+OS_FAMILY=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^OS_FAMILY=/{print $2}')
+OS_UI_MODE=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^OS_UI_MODE=/{print $2}')
+BUNDLE_PACKAGES=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^BUNDLE_PACKAGES=/{print $2}')
+PROFILE_NAME=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^PROFILE_NAME=/{print $2}')
+PROVIDER=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^PROVIDER=/{print $2}')
+
+echo "[provision] profile=$PROFILE os_family=$OS_FAMILY ui_mode=$OS_UI_MODE"
+
+./scripts/ssh-wait "$PROFILE"
+
+case "$OS_FAMILY" in
+  ubuntu)
+    if ! ./scripts/instance-ssh "$PROFILE" -- 'sudo -n true' >/dev/null 2>&1; then
+      if [ "$PROVIDER" = "raspberry-pi" ] && [ -n "${RASPBERRY_PI_USER_PASSWORD:-}" ]; then
+        echo "[provision] configuring passwordless sudo for Raspberry Pi provisioning"
+        # shellcheck disable=SC2016
+        printf '%s\n' "$RASPBERRY_PI_USER_PASSWORD" | ./scripts/instance-ssh "$PROFILE" -- \
+          'tmp=$(mktemp); printf "%s ALL=(ALL) NOPASSWD:ALL\n" "$USER" > "$tmp"; chmod 0440 "$tmp"; sudo -S -p "" install -o root -g root -m 0440 "$tmp" /etc/sudoers.d/90-egame-provision; rm -f "$tmp"; sudo -n visudo -cf /etc/sudoers.d/90-egame-provision'
+      fi
+    fi
+
+    if ! ./scripts/instance-ssh "$PROFILE" -- 'sudo -n true' >/dev/null 2>&1; then
+      echo "[provision] Linux provisioning requires passwordless sudo for the SSH user." >&2
+      echo "[provision] Configure RASPBERRY_PI_USER_PASSWORD or sudo NOPASSWD for VM_USER_NAME on $PROFILE, then retry." >&2
+      exit 1
+    fi
+
+    STAGE=$(mktemp -d)
+    trap 'rm -rf "$STAGE"' EXIT
+    cp -R linux/provision/scripts "$STAGE/scripts"
+    mkdir -p "$STAGE/state"
+    # bundle_packages: one package per line for cheap grep lookup in step scripts
+    printf '%s\n' "$BUNDLE_PACKAGES" | tr ',' '\n' > "$STAGE/state/bundle_packages"
+    # Auto-detect host timezone if not explicitly set
+    _HOST_TZ="${TIMEZONE:-}"
+    if [ -z "$_HOST_TZ" ]; then
+      _LINK=$(readlink /etc/localtime 2>/dev/null || true)
+      _HOST_TZ=$(echo "$_LINK" | sed -n 's|.*/zoneinfo/||p')
+    fi
+    # env file: sourced by runner.sh so steps see OS_UI_MODE / PROFILE_NAME etc.
+    cat > "$STAGE/state/env" <<EOF
+export OS_FAMILY="$OS_FAMILY"
+export OS_UI_MODE="$OS_UI_MODE"
+export PROFILE_NAME="$PROFILE_NAME"
+export EPHEMERAL_DISPLAY_RESOLUTION="${EPHEMERAL_DISPLAY_RESOLUTION:-}"
+export PROVIDER="$PROVIDER"
+export EPHEMERAL_SUNSHINE_PASSWORD="${EPHEMERAL_SUNSHINE_PASSWORD:-}"
+export RASPBERRY_PI_HDMI_CONNECTOR="${RASPBERRY_PI_HDMI_CONNECTOR:-}"
+export RASPBERRY_PI_HDMI_MODE="${RASPBERRY_PI_HDMI_MODE:-}"
+export RUSTDESK_KEY="${RUSTDESK_KEY:-}"
+export RUSTDESK_PASSWORD="${RUSTDESK_PASSWORD:-}"
+export RUSTDESK_SERVER="${RUSTDESK_SERVER:-}"
+export SUNSHINE_MAX_BITRATE_KBPS="${SUNSHINE_MAX_BITRATE_KBPS:-}"
+export SUNSHINE_VERSION="${SUNSHINE_VERSION:-}"
+export TIMEZONE="$_HOST_TZ"
+EOF
+
+    echo "[provision] uploading linux/provision/ to remote"
+    # Remote paths are relative to $HOME (SFTP/SCP default) to avoid shell-expansion pitfalls.
+    ./scripts/instance-ssh "$PROFILE" -- 'rm -rf ~/provision/state ~/provision/scripts && mkdir -p ~/provision/state'
+    ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/scripts" 'provision/'
+    ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/state/bundle_packages" 'provision/state/'
+    ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/state/env" 'provision/state/'
+    echo "[provision] running bootstrap.sh"
+    ./scripts/instance-ssh "$PROFILE" -- 'chmod +x ~/provision/scripts/bootstrap.sh ~/provision/scripts/runner.sh ~/provision/scripts/steps/*.sh ~/provision/scripts/lib/*.sh && ~/provision/scripts/bootstrap.sh'
+    ;;
+  windows)
+    # Windows password: env var override, else terraform output (vultr only).
+    WINDOWS_PASSWORD="${EPHEMERAL_WINDOWS_PASSWORD:-}"
+    if [ -z "$WINDOWS_PASSWORD" ]; then
+      PROVIDER=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^PROVIDER=/{print $2}')
+      TAGS=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^STACK_TAGS=/{print $2}')
+      case "$PROVIDER" in
+        vultr)
+          WINDOWS_PASSWORD=$(terramate run --quiet --tags="$TAGS-services" -- terraform output -raw vultr_instance_default_password)
+          ;;
+        *)
+          echo "[provision] set EPHEMERAL_WINDOWS_PASSWORD (no terraform output available for provider=$PROVIDER)" >&2
+          exit 1
+          ;;
+      esac
+    fi
+    : "${EPHEMERAL_SUNSHINE_PASSWORD:?set EPHEMERAL_SUNSHINE_PASSWORD in .env.local}"
+
+    mkdir -p ./tmp
+    jq -n \
+      --arg wp "$WINDOWS_PASSWORD" \
+      --arg sp "$EPHEMERAL_SUNSHINE_PASSWORD" \
+      --arg dr "${EPHEMERAL_DISPLAY_RESOLUTION:-}" \
+      --arg rk "${RUSTDESK_KEY:-}" \
+      --arg rp "${RUSTDESK_PASSWORD:-}" \
+      --arg rs "${RUSTDESK_SERVER:-}" \
+      --arg sv "${SUNSHINE_VERSION:-}" \
+      '{windows_password: $wp, sunshine_password: $sp, display_resolution: $dr, rustdesk_key: $rk, rustdesk_password: $rp, rustdesk_server: $rs, sunshine_version: $sv}' \
+      > ./tmp/env.json
+
+    echo "[provision] uploading windows/provision/ to remote"
+    # Clear scripts AND state — without state reset, currentStep can outrun the
+    # available step files when new steps are added, silently skipping them.
+    ./scripts/instance-ssh "$PROFILE" -- 'New-Item -ItemType Directory -Force C:\Users\Administrator\provision | Out-Null; if (Test-Path "C:\Users\Administrator\provision\scripts") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\scripts" }; if (Test-Path "C:\Users\Administrator\provision\state") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\state" }; New-Item -ItemType Directory -Force C:\Users\Administrator\provision\state | Out-Null'
+    ./scripts/instance-ssh "$PROFILE" --scp windows/provision '/C:/Users/Administrator/'
+    ./scripts/instance-ssh "$PROFILE" --scp ./tmp/env.json '/C:/Users/Administrator/provision/state/env.json'
+    echo "[provision] running bootstrap.ps1"
+    ./scripts/instance-ssh "$PROFILE" -- '& "C:\Users\Administrator\provision\scripts\bootstrap.ps1"'
+    ;;
+  *)
+    echo "[provision] unknown os_family: $OS_FAMILY" >&2
+    exit 2
+    ;;
+esac

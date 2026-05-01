@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Stream the remote provisioning logs for a profile.
+# Usage: scripts/logs <profile>
+
+set -euo pipefail
+
+PROFILE="${1:?Usage: scripts/logs <profile>}"
+cd "$(git rev-parse --show-toplevel)"
+
+RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
+OS_FAMILY=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^OS_FAMILY=/{print $2}')
+
+case "$OS_FAMILY" in
+  ubuntu)
+    # shellcheck disable=SC2016
+    # $HOME is expanded by the remote shell, not locally.
+    exec ./scripts/instance-ssh "$PROFILE" -- 'bash $HOME/provision/scripts/logs.sh'
+    ;;
+  windows)
+    exec ./scripts/instance-ssh "$PROFILE" -- "if (Test-Path 'C:\\Users\\Administrator\\provision\\scripts\\logs.ps1') { & 'C:\\Users\\Administrator\\provision\\scripts\\logs.ps1' } else { Write-Output 'No logs script found. Run make provision first.' }"
+    ;;
+  *)
+    echo "[logs] unknown os_family: $OS_FAMILY" >&2
+    exit 2
+    ;;
+esac

@@ -47,12 +47,16 @@ gha-creds-*.json
 # node
 node_modules
 
-# VSCode? auto-generated useless package json
-modules/spanner/backup/package-lock.json
-
 # dotenv environment variable files
 .env.*.local
 .env.local
 
 # Ignore upload folder
-upload
+/upload
+
+# v2 generated local artifacts
+.generated
+
+# local catalog overrides (developer-specific, not committed)
+config/catalog.local.yaml
+.profile-selection

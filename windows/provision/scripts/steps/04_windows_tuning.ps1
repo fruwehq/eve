@@ -7,6 +7,7 @@ Write-Host "#########################################################"
 Write-Host "Applying Windows tuning..."
 
 $changed = $false
+$needsReboot = $false
 
 function Set-RegistryValueIfNeeded {
   param(
@@ -38,35 +39,31 @@ function Set-RegistryValueIfNeeded {
 
 $rebootFlag = "C:\Users\Administrator\provision\state\reboot.flag"
 $User       = "Administrator"
-$SecretsFile = "C:\Users\Administrator\provision\state\secrets.json"
+$EnvFile = "C:\Users\Administrator\provision\state\env.json"
 $Pass = $env:EPHEMERAL_WINDOWS_PASSWORD
 
-if (-not $Pass -and (Test-Path $SecretsFile)) {
+if (-not $Pass -and (Test-Path $EnvFile)) {
   try {
-    $Secrets = Get-Content $SecretsFile | ConvertFrom-Json
-    $Pass = $Secrets.windows_password
+    $EnvData = Get-Content $EnvFile | ConvertFrom-Json
+    $Pass = $EnvData.windows_password
   } catch {
-    throw "Failed to read Windows password from $SecretsFile"
+    throw "Failed to read Windows password from $EnvFile"
   }
 }
 
 if (-not $Pass) {
-  throw "Windows password not provided. Set EPHEMERAL_WINDOWS_PASSWORD or create $SecretsFile with a windows_password field."
+  throw "Windows password not provided. Set EPHEMERAL_WINDOWS_PASSWORD or create $EnvFile with a windows_password field."
 }
 
 # Prevent display sleep / system standby while on AC power
-$powerOutputBefore = @(
-  & powercfg /query SCHEME_CURRENT SUB_VIDEO VIDEOIDLE 2>$null
-  & powercfg /query SCHEME_CURRENT SUB_SLEEP STANDBYIDLE 2>$null
-) | Out-String
-powercfg -change -monitor-timeout-ac 0
-powercfg -change -standby-timeout-ac 0
-$powerOutputAfter = @(
-  & powercfg /query SCHEME_CURRENT SUB_VIDEO VIDEOIDLE 2>$null
-  & powercfg /query SCHEME_CURRENT SUB_SLEEP STANDBYIDLE 2>$null
-) | Out-String
-if ($powerOutputBefore -ne $powerOutputAfter) {
+$acMonitorTimeout = (powercfg /query SCHEME_CURRENT SUB_VIDEO VIDEOIDLE | Select-String "Current AC Power Setting Index:" | Select-Object -First 1) -replace '.*:\s*', ''
+$acStandbyTimeout = (powercfg /query SCHEME_CURRENT SUB_SLEEP STANDBYIDLE | Select-String "Current AC Power Setting Index:" | Select-Object -First 1) -replace '.*:\s*', ''
+if ($acMonitorTimeout -ne '0x00000000' -or $acStandbyTimeout -ne '0x00000000') {
+  Write-Host "Setting monitor-timeout-ac=0, standby-timeout-ac=0"
+  powercfg -change -monitor-timeout-ac 0
+  powercfg -change -standby-timeout-ac 0
   $changed = $true
+  $needsReboot = $true
 }
 
 # Disable hibernation
@@ -87,6 +84,13 @@ Set-RegistryValueIfNeeded `
 Set-RegistryValueIfNeeded `
   -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Personalization" `
   -Name NoLockScreen `
+  -Type DWord `
+  -Value 1
+
+# Disable Server Manager auto-launch at logon
+Set-RegistryValueIfNeeded `
+  -Path "HKLM:\SOFTWARE\Microsoft\ServerManager" `
+  -Name DoNotOpenServerManagerAtLogon `
   -Type DWord `
   -Value 1
 
@@ -143,6 +147,7 @@ if ($needsLanguageUpdate) {
   Set-WinUserLanguageList -LanguageList $languageList -Force -WarningAction SilentlyContinue
   Set-WinDefaultInputMethodOverride -InputTip $desiredInputTip
   $changed = $true
+  $needsReboot = $true
 }
 
 Set-RegistryValueIfNeeded `
@@ -161,9 +166,11 @@ Set-RegistryValueIfNeeded `
   -Name "Layout File" `
   -Value "kbd106.dll"
 
-if ($changed) {
+if ($needsReboot) {
   Write-Host "Windows tuning changed system settings. Requesting reboot..."
   New-Item $rebootFlag -ItemType File -Force | Out-Null
+} elseif ($changed) {
+  Write-Host "Windows tuning applied registry changes. No reboot needed."
 } else {
   Write-Host "Windows tuning already in desired state. No reboot requested."
 }

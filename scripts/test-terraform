@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# terramate generate + terraform validate across every provider services stack.
+# Uses dummy env vars — provider credentials are NOT required (validate is offline).
+
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+# Minimal env required by generate_hcl / terraform variables.
+export MY_IP="${MY_IP:-1.2.3.4}"
+
+if [ -z "${SSH_PUBLIC_KEY_FILE:-}" ] || [ ! -f "${SSH_PUBLIC_KEY_FILE:-}" ]; then
+  TMPKEY=$(mktemp)
+  printf 'ssh-rsa AAAAB3NzaC1yc2EAAAA_test_only test@test\n' > "$TMPKEY"
+  trap 'rm -f "$TMPKEY"' EXIT
+  export SSH_PUBLIC_KEY_FILE="$TMPKEY"
+fi
+
+terramate generate >/dev/null
+
+TM_FLAGS=("--disable-safeguards=git-untracked,git-uncommitted")
+
+FAIL=0
+for tags in aws-services vultr-services truenas-services; do
+  printf '  -- %s --\n' "$tags"
+  if ! terramate run "${TM_FLAGS[@]}" --tags="$tags" --quiet -- \
+      terraform init -backend=false -input=false -upgrade=false >/dev/null 2>&1; then
+    printf '  [FAIL] init: %s\n' "$tags" >&2
+    terramate run "${TM_FLAGS[@]}" --tags="$tags" --quiet -- \
+      terraform init -backend=false -input=false >&2 || true
+    FAIL=$((FAIL + 1))
+    continue
+  fi
+
+  if ! terramate run "${TM_FLAGS[@]}" --tags="$tags" --quiet -- \
+      terraform validate >/dev/null 2>&1; then
+    printf '  [FAIL] validate: %s\n' "$tags" >&2
+    terramate run "${TM_FLAGS[@]}" --tags="$tags" --quiet -- \
+      terraform validate >&2 || true
+    FAIL=$((FAIL + 1))
+    continue
+  fi
+
+  printf '  [OK] %s\n' "$tags"
+done
+
+[ "$FAIL" -eq 0 ]

@@ -1,0 +1,261 @@
+#!/usr/bin/env bash
+# Start, stop, or run apps on a remote Xpra session over SSH.
+#
+# Usage:
+#   scripts/remote-xpra <profile> start [app [args...]]
+#   scripts/remote-xpra <profile> stop
+#   scripts/remote-xpra <profile> run <app> [args...]
+#   scripts/remote-xpra <profile> attach
+#   scripts/remote-xpra <profile> desktop
+#   scripts/remote-xpra <profile> apps
+#   scripts/remote-xpra <profile> status
+#
+# Linux:    uses virtual displays (xpra start :N)
+# Windows:  uses shadow mode via Scheduled Task (interactive session) + SSH tunnel
+
+set -euo pipefail
+
+PROFILE="${1:?Usage: scripts/remote-xpra <profile> <start|stop|run|attach|apps|status> [args...]}"
+ACTION="${2:?Usage: scripts/remote-xpra <profile> <start|stop|run|attach|apps|status> [args...]}"
+shift 2
+cd "$(git rev-parse --show-toplevel)"
+
+RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
+ENGINE=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^ENGINE=/{print $2}')
+
+if [ "$ENGINE" = "vagrant" ]; then
+  SSH_USER=vagrant
+  IP=$(./scripts/instance-ip "$PROFILE")
+  SSH_PORT=$(cd ".generated/$PROFILE" && vagrant ssh-config | awk '/Port/ {print $2; exit}')
+  PRIV_KEY=$(cd ".generated/$PROFILE" && vagrant ssh-config | awk '/IdentityFile/ {print $2; exit}')
+else
+  SSH_USER=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^SSH_USER=/{print $2}')
+  IP=$(./scripts/instance-ip "$PROFILE")
+  SSH_PORT=22
+  KEY_FILE="${SSH_PUBLIC_KEY_FILE:-}"
+  if [ -n "$KEY_FILE" ] && [ "${KEY_FILE%.pub}" != "$KEY_FILE" ]; then
+    PRIV_KEY="${KEY_FILE%.pub}"
+  else
+    PRIV_KEY="${SSH_PRIVATE_KEY_FILE:-}"
+  fi
+fi
+
+[ -n "$IP" ] || { echo "remote-xpra: could not resolve IP for $PROFILE" >&2; exit 1; }
+
+SSH_OPTS=(-o StrictHostKeyChecking=no -o ServerAliveInterval=10 -o WarnWeakCrypto=no-pq-kex)
+[ -n "$PRIV_KEY" ] && SSH_OPTS+=(-i "$PRIV_KEY")
+[ "$SSH_PORT" != "22" ] && SSH_OPTS+=(-p "$SSH_PORT")
+
+DISPLAY_NUM="${XPRA_DISPLAY:-100}"
+DESKTOP_DISPLAY_NUM="${XPRA_DESKTOP_DISPLAY:-101}"
+DESKTOP_GEOMETRY="${XPRA_DESKTOP_GEOMETRY:-${EPHEMERAL_DISPLAY_RESOLUTION:-1920x1080}}"
+DESKTOP_WIDTH="${DESKTOP_GEOMETRY%x*}"
+DESKTOP_HEIGHT="${DESKTOP_GEOMETRY#*x}"
+SSH_CMD="ssh ${SSH_OPTS[*]}"
+OS_FAMILY=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^OS_FAMILY=/{print $2}')
+
+XPRA_TCP_PORT="${XPRA_TCP_PORT:-14500}"
+XPRA_SCTASK_SHADOW="XpraShadow"
+XPRA_SCTASK_RUN="XpraRunApp"
+
+if [ "$OS_FAMILY" = "windows" ]; then
+  XPRA_URI="tcp://localhost:$XPRA_TCP_PORT"
+else
+  XPRA_URI="ssh://$SSH_USER@$IP/$DISPLAY_NUM"
+fi
+
+# shellcheck disable=SC2317
+remote_ssh() {
+  ssh "${SSH_OPTS[@]}" -l "$SSH_USER" "$IP" "$@"
+}
+
+case "$ACTION" in
+  start)
+    if ! command -v xpra >/dev/null 2>&1; then
+      echo "remote-xpra: xpra not installed locally." >&2
+      echo "  macOS:  install the signed .pkg from https://xpra.org/install/ (also needs XQuartz)." >&2
+      exit 1
+    fi
+
+    if [ "$OS_FAMILY" = "windows" ]; then
+      echo "[remote-xpra] activating interactive session on Windows"
+      # shellcheck disable=SC2016
+      remote_ssh 'tscon 1 /dest:console 2>$null; $null = New-Item -ItemType Directory -Force C:\Users\Administrator\upload'
+      remote_ssh "Set-Content -Path C:\Users\Administrator\upload\start-xpra-shadow.ps1 -Value \"Start-Process -FilePath 'C:\Program Files\Xpra\Xpra_cmd.exe' -ArgumentList 'shadow','--bind-tcp=127.0.0.1:$XPRA_TCP_PORT' -WindowStyle Hidden\" -Force" 2>/dev/null
+      remote_ssh "SchTasks /Create /SC ONCE /TN $XPRA_SCTASK_SHADOW /TR \"powershell -ExecutionPolicy Bypass -File C:\Users\Administrator\upload\start-xpra-shadow.ps1\" /ST 00:00 /RU Administrator /IT /F" 2>/dev/null
+      remote_ssh "SchTasks /Run /TN $XPRA_SCTASK_SHADOW" || {
+        echo "remote-xpra: remote xpra shadow failed to start" >&2
+        echo "  Is xpra installed? Run: make provision PROFILE=$PROFILE" >&2
+        exit 1
+      }
+      echo "[remote-xpra] shadow server started in interactive session (TCP localhost:$XPRA_TCP_PORT via SSH tunnel)"
+    else
+      echo "[remote-xpra] starting server on display :$DISPLAY_NUM"
+      remote_ssh "xpra start :$DISPLAY_NUM" || {
+        echo "remote-xpra: remote 'xpra start :$DISPLAY_NUM' failed" >&2
+        echo "  Is xpra installed? Run: make provision PROFILE=$PROFILE" >&2
+        exit 1
+      }
+    fi
+
+    echo "[remote-xpra] server running. Attach with: make remote.xpra.attach PROFILE=$PROFILE"
+    ;;
+
+  stop)
+    if [ "$OS_FAMILY" = "windows" ]; then
+      echo "[remote-xpra] stopping shadow server"
+      # shellcheck disable=SC2154
+      remote_ssh "Stop-Process -Name Xpra_cmd -Force -ErrorAction SilentlyContinue; Stop-Process -Name Xpra -Force -ErrorAction SilentlyContinue; SchTasks /Delete /TN $XPRA_SCTASK_SHADOW /F 2>$null; SchTasks /Delete /TN $XPRA_SCTASK_RUN /F 2>$null" 2>/dev/null || true
+    else
+      echo "[remote-xpra] stopping session on display :$DISPLAY_NUM"
+      remote_ssh "xpra stop :$DISPLAY_NUM" 2>/dev/null || true
+    fi
+    echo "[remote-xpra] stopped"
+    ;;
+
+  status)
+    if [ "$OS_FAMILY" = "windows" ]; then
+      remote_ssh "Get-Process -Name Xpra_cmd -ErrorAction SilentlyContinue | Format-Table Id,ProcessName,SessionId -AutoSize" || {
+        echo "[remote-xpra] no shadow server running"
+        exit 1
+      }
+    else
+      remote_ssh "xpra info :$DISPLAY_NUM 2>/dev/null" | grep -E '^(state|sessions|clients)' || {
+        echo "[remote-xpra] no session on display :$DISPLAY_NUM"
+        exit 1
+      }
+    fi
+    ;;
+
+  run)
+    if [ "$#" -lt 1 ]; then
+      echo "Usage: scripts/remote-xpra <profile> run <app> [args...]" >&2
+      exit 1
+    fi
+    APP_BIN="$1"
+    START_CMD="$*"
+    echo "[remote-xpra] launching '$START_CMD'"
+    if [ "$OS_FAMILY" = "windows" ]; then
+      remote_ssh "SchTasks /Create /SC ONCE /TN $XPRA_SCTASK_RUN /TR \"$START_CMD\" /ST 00:00 /RU Administrator /IT /F 2>&1 | Out-Null; SchTasks /Run /TN $XPRA_SCTASK_RUN" 2>/dev/null
+    else
+      remote_ssh "xpra info :$DISPLAY_NUM >/dev/null 2>&1 || xpra start :$DISPLAY_NUM"
+      remote_ssh "command -v -- '$APP_BIN' >/dev/null" || {
+        echo "remote-xpra: remote command not found: $APP_BIN" >&2
+        echo "  Try: make remote.xpra.apps PROFILE=$PROFILE" >&2
+        exit 1
+      }
+      remote_ssh "log=/tmp/xpra-run-$DISPLAY_NUM.log; : > \"\$log\"; DISPLAY=:$DISPLAY_NUM setsid $START_CMD </dev/null >>\"\$log\" 2>&1 & pid=\$!; sleep 1; if ! kill -0 \"\$pid\" 2>/dev/null; then echo \"remote-xpra: '$START_CMD' exited immediately\" >&2; cat \"\$log\" >&2; exit 1; fi"
+    fi
+    ;;
+
+  attach)
+    if ! command -v xpra >/dev/null 2>&1; then
+      echo "remote-xpra: xpra not installed locally." >&2
+      echo "  macOS:  install the signed .pkg from https://xpra.org/install/ (also needs XQuartz)." >&2
+      exit 1
+    fi
+
+    if [ "$OS_FAMILY" = "windows" ]; then
+      ssh "${SSH_OPTS[@]}" -l "$SSH_USER" -N -L "${XPRA_TCP_PORT}:127.0.0.1:${XPRA_TCP_PORT}" "$IP" &
+      TUNNEL_PID=$!
+      sleep 1
+
+      # shellcheck disable=SC2329
+      cleanup() {
+        echo "[remote-xpra] detaching"
+        kill "$XPRA_PID" 2>/dev/null || true
+        pkill -P "$XPRA_PID" 2>/dev/null || true
+        kill "$TUNNEL_PID" 2>/dev/null || true
+      }
+      trap cleanup EXIT INT TERM
+
+      echo "[remote-xpra] attaching to shadow session via SSH tunnel (press Ctrl-C to detach)"
+      xpra attach "$XPRA_URI" --desktop-fullscreen=yes --clipboard=yes &
+      XPRA_PID=$!
+      wait $XPRA_PID 2>/dev/null || true
+      trap - EXIT INT TERM
+      kill "$XPRA_PID" 2>/dev/null || true
+      pkill -P "$XPRA_PID" 2>/dev/null || true
+      kill "$TUNNEL_PID" 2>/dev/null || true
+    else
+      remote_ssh "xpra info :$DISPLAY_NUM >/dev/null 2>&1 || xpra start :$DISPLAY_NUM"
+      # shellcheck disable=SC2329
+      cleanup() {
+        echo "[remote-xpra] detaching"
+        kill "$XPRA_PID" 2>/dev/null || true
+        pkill -P "$XPRA_PID" 2>/dev/null || true
+      }
+      trap cleanup EXIT INT TERM
+
+      echo "[remote-xpra] attaching to display :$DISPLAY_NUM (press Ctrl-C to detach)"
+      xpra attach "$XPRA_URI" --ssh="$SSH_CMD" --clipboard=yes &
+      XPRA_PID=$!
+      wait $XPRA_PID 2>/dev/null || true
+      trap - EXIT INT TERM
+      kill "$XPRA_PID" 2>/dev/null || true
+      pkill -P "$XPRA_PID" 2>/dev/null || true
+    fi
+    ;;
+
+  desktop)
+    if ! command -v xpra >/dev/null 2>&1; then
+      echo "remote-xpra: xpra not installed locally." >&2
+      echo "  macOS:  install the signed .pkg from https://xpra.org/install/ (also needs XQuartz)." >&2
+      exit 1
+    fi
+    if [ "$OS_FAMILY" = "windows" ]; then
+      echo "remote-xpra: desktop mode is only implemented for Linux profiles; use remote.xpra.attach for Windows shadow mode." >&2
+      exit 2
+    fi
+
+    echo "[remote-xpra] starting desktop on display :$DESKTOP_DISPLAY_NUM (${DESKTOP_GEOMETRY})"
+    remote_ssh "if xpra info :$DESKTOP_DISPLAY_NUM >/dev/null 2>&1; then
+      current=\$(xpra info :$DESKTOP_DISPLAY_NUM 2>/dev/null | awk -F= '/^windows\\.1\\.size=/{print \$2; exit}')
+      expected='($DESKTOP_WIDTH, $DESKTOP_HEIGHT)'
+      if [ \"\$current\" != \"\$expected\" ]; then
+        echo '[remote-xpra] existing desktop geometry is' \"\${current:-unknown}\" ', restarting for $DESKTOP_GEOMETRY'
+        xpra stop :$DESKTOP_DISPLAY_NUM >/dev/null 2>&1 || true
+        for _ in 1 2 3 4 5; do
+          xpra info :$DESKTOP_DISPLAY_NUM >/dev/null 2>&1 || break
+          sleep 1
+        done
+      fi
+    fi
+    xpra info :$DESKTOP_DISPLAY_NUM >/dev/null 2>&1 || xpra start-desktop :$DESKTOP_DISPLAY_NUM --resize-display=$DESKTOP_GEOMETRY --start=startxfce4"
+
+    # shellcheck disable=SC2329
+    cleanup() {
+      echo "[remote-xpra] detaching desktop"
+      kill "$XPRA_PID" 2>/dev/null || true
+      pkill -P "$XPRA_PID" 2>/dev/null || true
+    }
+    trap cleanup EXIT INT TERM
+
+    echo "[remote-xpra] attaching to desktop :$DESKTOP_DISPLAY_NUM (press Ctrl-C to detach)"
+    xpra attach "ssh://$SSH_USER@$IP/$DESKTOP_DISPLAY_NUM" --ssh="$SSH_CMD" --desktop-fullscreen=no --desktop-scaling=1 --clipboard=yes &
+    XPRA_PID=$!
+    wait $XPRA_PID 2>/dev/null || true
+    trap - EXIT INT TERM
+    kill "$XPRA_PID" 2>/dev/null || true
+    pkill -P "$XPRA_PID" 2>/dev/null || true
+    ;;
+
+  apps)
+    if [ "$OS_FAMILY" = "windows" ]; then
+      # shellcheck disable=SC2016
+      remote_ssh 'Get-ChildItem -Path "$env:ProgramData\Microsoft\Windows\Start Menu\Programs","$env:APPDATA\Microsoft\Windows\Start Menu\Programs" -Filter *.lnk -Recurse | ForEach-Object { $name=$_.BaseName; $target=(New-Object -ComObject WScript.Shell).CreateShortcut($_.FullName).TargetPath; if($target){"{0,-40} {1}" -f $name,$target}} | Sort-Object -Unique'
+    else
+      # shellcheck disable=SC2016
+      remote_ssh 'for f in /usr/share/applications/*.desktop ~/.local/share/applications/*.desktop; do
+        name=$(grep "^Name=" "$f" 2>/dev/null | head -1 | cut -d= -f2-)
+        exec=$(grep "^Exec=" "$f" 2>/dev/null | head -1 | cut -d= -f2- | cut -d" " -f1)
+        [ -n "$name" ] && [ -n "$exec" ] && printf "%-40s %s\n" "$name" "$exec"
+      done 2>/dev/null | sort -u'
+    fi
+    ;;
+
+  *)
+    echo "Unknown action: $ACTION (use start, stop, run, attach, status, or apps)" >&2
+    exit 1
+    ;;
+esac

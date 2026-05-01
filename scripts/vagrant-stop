@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Stop a running vagrant profile (suspend).
+# Usage: scripts/vagrant-stop <profile>
+
+PROFILE="${1:?Usage: scripts/vagrant-stop <profile>}"
+cd "$(git rev-parse --show-toplevel)"
+
+RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
+ENGINE=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^ENGINE=/{print $2}')
+
+if [ "$ENGINE" != "vagrant" ]; then
+  echo "[vagrant-stop] not supported for engine=$ENGINE" >&2
+  exit 1
+fi
+
+echo "[vagrant-stop] profile=$PROFILE"
+
+if [ -f ".generated/$PROFILE/Vagrantfile" ]; then
+  cd ".generated/$PROFILE"
+  vagrant halt
+else
+  echo "No generated Vagrantfile for profile $PROFILE. Nothing to stop." >&2
+  exit 1
+fi

@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PROFILE="${1:?Usage: scripts/stop <profile>}"
+cd "$(git rev-parse --show-toplevel)"
+
+RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
+ENGINE=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^ENGINE=/{print $2}')
+PROVIDER=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^PROVIDER=/{print $2}')
+
+tf_attr() {
+  local json="$1" address="$2" attr="$3"
+  printf '%s' "$json" | jq -r --arg addr "$address" --arg attr "$attr" \
+    '(.values // {} | .root_module // {} | .resources // [])
+     | map(select(.address == $addr))
+     | map(.values[$attr])
+     | first // ""' 2>/dev/null
+}
+
+case "$ENGINE" in
+  metal)
+    case "$PROVIDER" in
+      raspberry-pi)
+        echo "[stop] Requesting Raspberry Pi shutdown over SSH"
+        ./scripts/instance-ssh "$PROFILE" -- 'sudo shutdown -h now'
+        ;;
+      *)
+        echo "[stop] Unsupported metal provider: $PROVIDER" >&2
+        exit 1
+        ;;
+    esac
+    ;;
+  vagrant)
+    exec ./scripts/vagrant-stop "$PROFILE"
+    ;;
+  terraform)
+    TAGS=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^STACK_TAGS=/{print $2}')
+
+    STATE_JSON=$(terramate run --quiet --tags="$TAGS-services" -- terraform show -json 2>/dev/null) || true
+    if [ -z "$STATE_JSON" ]; then
+      echo "[stop] No instance in state." >&2
+      exit 1
+    fi
+
+    case "$PROVIDER" in
+      aws)
+        RAW=$(tf_attr "$STATE_JSON" "aws_instance.main" "instance_state")
+        if [ "$RAW" = "stopped" ]; then
+          echo "[stop] Already stopped"
+          exit 0
+        fi
+        INSTANCE_ID=$(terramate run --quiet --tags="$TAGS-services" -- terraform output -raw instance_id)
+        REGION=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^LOCATION_REGION=/{print $2}')
+        echo "[stop] Stopping AWS instance $INSTANCE_ID in $REGION"
+        aws ec2 stop-instances --instance-ids "$INSTANCE_ID" --region "$REGION" --output table
+        ;;
+      vultr)
+        RAW=$(tf_attr "$STATE_JSON" "vultr_instance.default" "power_status")
+        if [ "$RAW" = "stopped" ]; then
+          echo "[stop] Already stopped"
+          exit 0
+        fi
+        INSTANCE_ID=$(terramate run --quiet --tags="$TAGS-services" -- terraform output -raw instance_id)
+        echo "[stop] Halting Vultr instance $INSTANCE_ID"
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+          -H "Authorization: Bearer ${VULTR_API_KEY}" \
+          "https://api.vultr.com/v2/instances/$INSTANCE_ID/halt")
+        if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+          echo "[stop] Instance halt initiated (HTTP $HTTP_CODE)"
+        else
+          echo "[stop] Failed to halt instance (HTTP $HTTP_CODE)" >&2
+          exit 1
+        fi
+        ;;
+      truenas)
+        RAW=$(tf_attr "$STATE_JSON" "truenas_vm.this" "state")
+        if [ "$(printf '%s' "$RAW" | tr '[:lower:]' '[:upper:]')" = "STOPPED" ]; then
+          echo "[stop] Already stopped"
+          exit 0
+        fi
+        VM_ID=$(terramate run --quiet --tags="$TAGS-services" -- terraform output -raw truenas_vm_id)
+        VM_NAME=$(terramate run --quiet --tags="$TAGS-services" -- terraform output -raw truenas_vm_name)
+        echo "[stop] Stopping TrueNAS VM $VM_NAME (id=$VM_ID)"
+        normalize_path() {
+          local value="$1"
+          # shellcheck disable=SC2088,SC2016
+          case "$value" in
+            '$(HOME)'|'$(HOME)/'*) printf '%s' "$HOME${value#\$\(HOME\)}" ;;
+            '$HOME'|'$HOME/'*) printf '%s' "$HOME${value#\$HOME}" ;;
+            '~'|'~/'*) printf '%s' "$HOME${value#\~}" ;;
+            *) printf '%s' "$value" ;;
+          esac
+        }
+        SSH_USER="${TRUENAS_SSH_USER:-terraform}"
+        SSH_OPTS=(-o StrictHostKeyChecking=no -o IdentitiesOnly=yes)
+        if [ -n "${TRUENAS_SSH_PRIVATE_KEY_FILE:-}" ]; then
+          SSH_KEY="$(normalize_path "${TRUENAS_SSH_PRIVATE_KEY_FILE}")"
+          SSH_OPTS+=(-i "$SSH_KEY")
+        fi
+        if [ -n "${TRUENAS_SSH_PORT:-}" ] && [ "${TRUENAS_SSH_PORT}" != "22" ]; then
+          SSH_OPTS+=(-p "$TRUENAS_SSH_PORT")
+        fi
+        # shellcheck disable=SC2029
+        ssh "${SSH_OPTS[@]}" "${SSH_USER}@${TRUENAS_HOST}" "sudo midclt call vm.stop $VM_ID"
+        echo "[stop] VM stop initiated"
+        ;;
+      *)
+        echo "[stop] Unsupported provider: $PROVIDER" >&2
+        exit 1
+        ;;
+    esac
+
+    terramate run --quiet --tags="$TAGS-services" -- terraform refresh 2>/dev/null || true
+    ;;
+  *)
+    echo "[stop] Unsupported engine: $ENGINE" >&2
+    exit 1
+    ;;
+esac

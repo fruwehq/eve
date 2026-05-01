@@ -1,3 +1,6 @@
+$logFile = "C:\Windows\Temp\vultr-startup-cmd.log"
+Start-Transcript -Path $logFile -Append -Force
+
 Write-Host "Installing OpenSSH Server..."
 #
 # --- Install user's SSH public key ---
@@ -58,8 +61,9 @@ if (Test-Path $config) {
 }
 
 # Install PowerShell 7 if it is not already present. Wait for winget to become available first.
-$pwsh7Path = "C:\Program Files\PowerShell\7\pwsh.exe"
-if (-not (Test-Path $pwsh7Path)) {
+# All downstream provisioning scripts require PS7, so this is a hard requirement.
+$pwshCmd = Get-Command pwsh -ErrorAction SilentlyContinue
+if (-not $pwshCmd) {
     Write-Host "Waiting for winget to become available..."
     $wingetCmd = $null
     $maxAttempts = 30
@@ -76,37 +80,46 @@ if (-not (Test-Path $pwsh7Path)) {
     }
 
     if (-not $wingetCmd) {
-        throw "winget did not become available in time."
+        Write-Error "FATAL: winget did not become available. Cannot install PowerShell 7."
+        Stop-Transcript
+        exit 1
     }
 
     Write-Host "Installing PowerShell 7..."
     & $wingetCmd.Source install --id Microsoft.PowerShell --source winget --accept-package-agreements --accept-source-agreements
+    $pwshCmd = Get-Command pwsh -ErrorAction SilentlyContinue
 
-    if (-not (Test-Path $pwsh7Path)) {
-        throw "PowerShell 7 installation finished, but $pwsh7Path was not found."
+    if (-not $pwshCmd) {
+        Write-Error "FATAL: PowerShell 7 not found after install."
+        Stop-Transcript
+        exit 1
+    }
+
+    Write-Host "PowerShell 7 installed at $($pwshCmd.Source)"
+}
+
+$defaultShell = $pwshCmd.Source
+Write-Host "Setting OpenSSH DefaultShell to $defaultShell"
+
+# Enable CTRL-D in PowerShell profile (only if PS7 is available)
+if ($pwshCmd) {
+    $profileDir = "C:\Users\Administrator\Documents\PowerShell"
+    $profilePath = Join-Path $profileDir "Microsoft.PowerShell_profile.ps1"
+
+    if (-not (Test-Path $profileDir)) {
+        New-Item -ItemType Directory -Path $profileDir -Force | Out-Null
+    }
+
+    if (-not (Test-Path $profilePath)) {
+        New-Item -ItemType File -Path $profilePath -Force | Out-Null
+    }
+
+    $ctrlDLine = 'Set-PSReadLineKeyHandler -Key Ctrl+d -Function DeleteCharOrExit'
+    if (-not (Select-String -Path $profilePath -Pattern ([regex]::Escape($ctrlDLine)) -Quiet -ErrorAction SilentlyContinue)) {
+        Add-Content -Path $profilePath -Value $ctrlDLine
     }
 }
 
-# Enable CTRL-D
-$profileDir = "C:\Users\Administrator\Documents\PowerShell"
-$profilePath = Join-Path $profileDir "Microsoft.PowerShell_profile.ps1"
-
-if (-not (Test-Path $profileDir)) {
-    New-Item -ItemType Directory -Path $profileDir -Force | Out-Null
-}
-
-if (-not (Test-Path $profilePath)) {
-    New-Item -ItemType File -Path $profilePath -Force | Out-Null
-}
-
-$ctrlDLine = 'Set-PSReadLineKeyHandler -Key Ctrl+d -Function DeleteCharOrExit'
-if (-not (Select-String -Path $profilePath -Pattern ([regex]::Escape($ctrlDLine)) -Quiet -ErrorAction SilentlyContinue)) {
-    Add-Content -Path $profilePath -Value $ctrlDLine
-}
-
-# Configure the SSH default shell. Prefer PowerShell 7 if installed, otherwise fall back to Windows PowerShell.
-$defaultShell = "C:\Program Files\PowerShell\7\pwsh.exe"
-Write-Host "Setting OpenSSH DefaultShell to $defaultShell"
 New-ItemProperty `
   -Path "HKLM:\SOFTWARE\OpenSSH" `
   -Name DefaultShell `
@@ -122,3 +135,5 @@ Start-Service sshd
 Write-Host "SSH setup complete."
 Write-Host "You can now connect using:"
 Write-Host "ssh Administrator@<SERVER_IP>"
+
+Stop-Transcript

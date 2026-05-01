@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Wait until the Sunshine API accepts authenticated requests.
+set -euo pipefail
+
+PROFILE="${1:?Usage: scripts/remote-sunshine-wait <profile>}"
+cd "$(git rev-parse --show-toplevel)"
+
+PKGS=$(./scripts/profile-resolve --profile "$PROFILE" --emit env | awk -F= '/^BUNDLE_PACKAGES/{print $2}')
+echo "$PKGS" | tr ',' '\n' | grep -qx sunshine || { echo "sunshine not in bundle — skipping"; exit 0; }
+
+IP=$(./scripts/instance-ip "$PROFILE")
+SSH_CMD=(./scripts/instance-ssh "$PROFILE" --)
+MAX_ATTEMPTS=20
+ATTEMPT=1
+
+printf '%s\n' "Waiting for Sunshine API on $IP:47990..."
+while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
+  HTTP_CODE=$(curl -sS -k \
+    -u "sunshine:${EPHEMERAL_SUNSHINE_PASSWORD}" \
+    -o /dev/null \
+    -w "%{http_code}" \
+    "https://$IP:47990/api/config") || true
+  if printf '%s' "$HTTP_CODE" | grep -q '^2'; then
+    printf '%s\n' "Sunshine API is ready on $IP:47990"
+    exit 0
+  fi
+  if [ "$ATTEMPT" -eq 3 ]; then
+    printf '%s\n' "Sunshine not responding — starting via SSH..."
+    # shellcheck disable=SC2016
+    "${SSH_CMD[@]}" 'export XDG_RUNTIME_DIR="/run/user/$(id -u)" DISPLAY="${SUNSHINE_DISPLAY:-:0}" XAUTHORITY="${XAUTHORITY:-$HOME/.Xauthority}"; systemctl --user import-environment DISPLAY XAUTHORITY XDG_RUNTIME_DIR 2>/dev/null || true; systemctl --user start sunshine 2>/dev/null || true' || true
+  fi
+  printf '%s\n' "Sunshine API not ready yet (attempt $ATTEMPT/$MAX_ATTEMPTS, http=$HTTP_CODE). Sleeping 2 seconds..."
+  sleep 2
+  ATTEMPT=$((ATTEMPT + 1))
+done
+
+printf '%s\n' "Sunshine API did not become ready in time."
+exit 1

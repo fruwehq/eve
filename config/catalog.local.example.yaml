@@ -1,0 +1,21 @@
+# Copy this file to config/catalog.local.yaml for machine-local customizations.
+# This file is ignored by git.
+#
+# Notes:
+# - Entries merge by logical keys:
+#   machines.name, oses.id, inits.id, packages.id, bundles.id, locations.name, profiles.name
+# - Matching entries are replaced/updated.
+# - New entries are appended.
+
+locations:
+  - name: tokyo
+    aws:
+      availability_zone: ap-northeast-1c
+
+profiles:
+  - name: aws-ubuntu-dev-headless
+    lifecycle:
+      ttl_hours: 336
+      reminder_hours: [48, 24, 6, 1]
+      on_expiry: stop_then_destroy
+      grace_hours: 48

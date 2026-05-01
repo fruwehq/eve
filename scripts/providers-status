@@ -1,0 +1,148 @@
+#!/usr/bin/env bash
+# Check provider configuration and connectivity.
+#
+# Usage:
+#   scripts/providers-status                    # show all providers (table)
+#   scripts/providers-status <provider>         # check one provider (table row)
+#   scripts/providers-status <provider> <field> # print single field (configured|reachable|notes)
+set -euo pipefail
+
+PROVIDER="${1:-}"
+FIELD="${2:-}"
+
+cd "$(git rev-parse --show-toplevel)"
+
+check_aws() {
+  configured=no reachable=no notes="missing AWS_PROFILE/AWS credentials"
+
+  if [ -n "${AWS_PROFILE:-}" ] || [ -n "${AWS_ACCESS_KEY_ID:-}" ]; then
+    configured=yes
+    if ! command -v aws >/dev/null 2>&1; then
+      notes="configured, but aws cli not found"
+    elif aws sts get-caller-identity >/dev/null 2>&1; then
+      reachable=yes
+      notes="aws sts ok"
+    else
+      notes="configured, but aws sts failed - Please, run: make aws.login"
+    fi
+  fi
+}
+
+check_local_virtualbox() {
+  configured=no reachable=no notes="vagrant/virtualbox not found"
+
+  if command -v vagrant >/dev/null 2>&1 || command -v VBoxManage >/dev/null 2>&1; then
+    configured=yes
+    if command -v VBoxManage >/dev/null 2>&1; then
+      reachable=yes
+      notes="VBoxManage available"
+    else
+      notes="vagrant present, VBoxManage missing"
+    fi
+  fi
+}
+
+check_local_vmware() {
+  configured=no reachable=no notes="vagrant/vmrun not found"
+
+  if command -v vagrant >/dev/null 2>&1 || command -v vmrun >/dev/null 2>&1; then
+    configured=yes
+    if command -v vmrun >/dev/null 2>&1; then
+      reachable=yes
+      notes="vmrun available"
+    else
+      notes="vagrant present, vmrun missing"
+    fi
+  fi
+}
+
+check_truenas() {
+  local host="${TRUENAS_HOST:-}"
+  local port="${TRUENAS_SSH_PORT:-22}"
+  local user="${TRUENAS_SSH_USER:-}"
+  configured=no reachable=no notes="missing TRUENAS_HOST"
+
+  if [ -n "$host" ]; then
+    configured=yes
+    notes="host=$host"
+    if nc -z -w 2 "$host" "$port" >/dev/null 2>&1; then
+      reachable=yes
+      notes="ssh port $port reachable"
+    else
+      notes="ssh port $port unreachable"
+    fi
+    if [ -n "$user" ] && [ -n "${TRUENAS_SSH_PRIVATE_KEY_FILE:-}" ] && [ -f "${TRUENAS_SSH_PRIVATE_KEY_FILE}" ]; then
+      mkdir -p ./tmp
+      if ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new \
+        -o UserKnownHostsFile=./tmp/known_hosts \
+        -p "$port" -i "${TRUENAS_SSH_PRIVATE_KEY_FILE}" \
+        "$user@$host" \
+        'midclt call system.version >/dev/null 2>&1 && echo ok' 2>/dev/null | grep -q ok; then
+        reachable=yes
+        notes="ssh auth ok; midclt reachable"
+      else
+        notes="host reachable; ssh auth or permissions failed"
+      fi
+    fi
+    if [ -n "${TRUENAS_API_KEY:-}" ] && curl -ksS --connect-timeout 3 --max-time 8 \
+      -H "Authorization: Bearer ${TRUENAS_API_KEY}" \
+      "https://$host/api/v2.0/system/version" >/dev/null 2>&1; then
+      reachable=yes
+      notes="api key accepted"
+    fi
+  fi
+}
+
+check_vultr() {
+  configured=no reachable=no notes="missing VULTR_API_KEY"
+
+  if [ -n "${VULTR_API_KEY:-}" ]; then
+    configured=yes
+    if curl -fsS -H "Authorization: Bearer ${VULTR_API_KEY}" \
+      https://api.vultr.com/v2/account >/dev/null 2>&1; then
+      reachable=yes
+      notes="api ok"
+    else
+      notes="configured, but api call failed"
+    fi
+  fi
+}
+
+print_row() {
+  local name="$1"
+  printf '%-17s  %-10s  %-9s  %s\n' "$name" "$configured" "$reachable" "$notes"
+}
+
+PROVIDERS="aws local-virtualbox local-vmware truenas vultr"
+
+if [ -n "$PROVIDER" ]; then
+  case "$PROVIDER" in
+    aws)               check_aws ;;
+    local-virtualbox)  check_local_virtualbox ;;
+    local-vmware)      check_local_vmware ;;
+    truenas)           check_truenas ;;
+    vultr)             check_vultr ;;
+    *)                 echo "Unknown provider: $PROVIDER (valid: $PROVIDERS)" >&2; exit 1 ;;
+  esac
+
+  if [ -n "$FIELD" ]; then
+    case "$FIELD" in
+      configured) printf '%s\n' "$configured" ;;
+      reachable)  printf '%s\n' "$reachable" ;;
+      notes)      printf '%s\n' "$notes" ;;
+      *)          echo "Unknown field: $FIELD (valid: configured, reachable, notes)" >&2; exit 1 ;;
+    esac
+  else
+    printf '%s\n' 'Provider           Configured  Reachable  Notes'
+    printf '%s\n' '-----------------  ----------  ---------  -------------------------------------------'
+    print_row "$PROVIDER"
+  fi
+else
+  printf '%s\n' 'Provider           Configured  Reachable  Notes'
+  printf '%s\n' '-----------------  ----------  ---------  -------------------------------------------'
+  check_aws;               print_row "aws"
+  check_local_virtualbox;  print_row "local-virtualbox"
+  check_local_vmware;      print_row "local-vmware"
+  check_truenas;           print_row "truenas"
+  check_vultr;             print_row "vultr"
+fi

@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Open an RDP session to a Windows instance.
+set -euo pipefail
+
+PROFILE="${1:?Usage: scripts/remote-rdp <profile>}"
+cd "$(git rev-parse --show-toplevel)"
+
+IP=$(./scripts/instance-ip "$PROFILE")
+PW=$(./scripts/instance-password "$PROFILE")
+
+mkdir -p ./tmp
+printf '%s\n' \
+  "full address:s:$IP" \
+  "username:s:Administrator" \
+  "prompt for credentials on client:i:1" \
+  "administrative session:i:1" \
+  "screen mode id:i:2" \
+  "session bpp:i:32" \
+  "redirectclipboard:i:1" \
+  "audiomode:i:0" \
+  > ./tmp/windows.rdp
+
+printf '%s' "$PW" | pbcopy
+open -a "Microsoft Remote Desktop" ./tmp/windows.rdp || open ./tmp/windows.rdp
+sleep 3
+osascript -e 'tell application "System Events" to keystroke "v" using command down' -e 'tell application "System Events" to key code 36'

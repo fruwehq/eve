@@ -15,7 +15,7 @@ globals {
   # stack level
 
   # The global terraform version to use
-  terraform_version = "~> 1.14.8"
+  terraform_version = "~> 1.14.9"
 
   # THe project name
   project = "ephemeral-cloud-gaming"

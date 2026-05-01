@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Run vagrant up for a profile.
+# Usage: scripts/vagrant-up [--plan] <profile>
+#   --plan: generate Vagrantfile only, do not start the VM.
+
+PLAN=0
+if [ "${1:-}" = "--plan" ]; then
+  PLAN=1
+  shift
+fi
+
+PROFILE="${1:?Usage: scripts/vagrant-up [--plan] <profile>}"
+cd "$(git rev-parse --show-toplevel)"
+
+RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
+ENGINE=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^ENGINE=/{print $2}')
+
+if [ "$ENGINE" != "vagrant" ]; then
+  echo "[vagrant-up] not supported for engine=$ENGINE"
+  exit 1
+fi
+
+VPROV=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^PROVIDER=/{print $2}')
+VAGRANT_PROVIDER=$(echo "$VPROV" | sed 's/local-vmware/vmware_desktop/;s/local-virtualbox/virtualbox/')
+echo "[vagrant-up] profile=$PROFILE provider=$VAGRANT_PROVIDER"
+
+mkdir -p ".generated/$PROFILE"
+./scripts/profile-resolve --profile "$PROFILE" --emit vagrant \
+  --output ".generated/$PROFILE/Vagrantfile"
+
+if [ "$PLAN" -eq 1 ]; then
+  echo "[vagrant-up] Vagrantfile generated at .generated/$PROFILE/Vagrantfile (dry run)"
+  exit 0
+fi
+
+cd ".generated/$PROFILE"
+vagrant up "--provider=$VAGRANT_PROVIDER"

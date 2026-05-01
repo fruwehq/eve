@@ -1,0 +1,136 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PROFILE="${1:?Usage: scripts/status <profile>}"
+cd "$(git rev-parse --show-toplevel)"
+
+RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
+ENGINE=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^ENGINE=/{print $2}')
+PROVIDER=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^PROVIDER=/{print $2}')
+OS_FAMILY=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^OS_FAMILY=/{print $2}')
+
+printf '%-15s %s\n' "Profile:" "$PROFILE"
+printf '%-15s %s\n' "Engine:" "$ENGINE"
+printf '%-15s %s\n' "Provider:" "$PROVIDER"
+printf '%-15s %s\n' "OS:" "$OS_FAMILY"
+
+VM_STATUS="unknown"
+
+tf_attr() {
+  local json="$1" address="$2" attr="$3"
+  printf '%s' "$json" | jq -r --arg addr "$address" --arg attr "$attr" \
+    '(.values // {} | .root_module // {} | .resources // [])
+     | map(select(.address == $addr))
+     | map(.values[$attr])
+     | first // ""' 2>/dev/null
+}
+
+case "$ENGINE" in
+  metal)
+    case "$PROVIDER" in
+      raspberry-pi)
+        IP=$(./scripts/instance-ip "$PROFILE" 2>/dev/null || true)
+        if [ -n "$IP" ]; then
+          printf '%-15s %s\n' "IP:" "$IP"
+        fi
+        if ./scripts/instance-ssh "$PROFILE" -- exit 0 >/dev/null 2>&1; then
+          VM_STATUS="running"
+        else
+          VM_STATUS="unreachable"
+        fi
+        ;;
+      *)
+        VM_STATUS="unsupported provider ($PROVIDER)"
+        ;;
+    esac
+    ;;
+  vagrant)
+    GENERATED_DIR=".generated/$PROFILE"
+    if [ ! -d "$GENERATED_DIR" ]; then
+      VM_STATUS="not created"
+    else
+      case "$PROVIDER" in
+        local-vmware)
+          VMX=$(find "$GENERATED_DIR/.vagrant/machines/default" -name '*.vmx' 2>/dev/null | head -1)
+          if [ -z "$VMX" ]; then
+            VM_STATUS="not created"
+          elif vmrun list | grep -q "$VMX"; then
+            VM_STATUS="running"
+          else
+            VM_STATUS="stopped"
+          fi
+          ;;
+        local-virtualbox)
+          VAGRANT_STATE=$(cd "$GENERATED_DIR" && vagrant status --machine-readable 2>/dev/null | awk -F, '$3=="state"{print $4}')
+          case "$VAGRANT_STATE" in
+            running) VM_STATUS="running" ;;
+            stopped|poweroff) VM_STATUS="stopped" ;;
+            "") VM_STATUS="not created" ;;
+            *) VM_STATUS="$VAGRANT_STATE" ;;
+          esac
+          ;;
+        *)
+          VM_STATUS="unsupported provider ($PROVIDER)"
+          ;;
+      esac
+    fi
+    ;;
+  terraform)
+    TAGS=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^STACK_TAGS=/{print $2}')
+    STATE_JSON=$(terramate run --quiet --tags="$TAGS-services" -- terraform show -json 2>/dev/null) || true
+
+    if [ -z "$STATE_JSON" ]; then
+      VM_STATUS="not created"
+    else
+      case "$PROVIDER" in
+        aws)
+          RAW=$(tf_attr "$STATE_JSON" "aws_instance.main" "instance_state")
+          case "$RAW" in
+            "") VM_STATUS="not created" ;;
+            *) VM_STATUS="$RAW" ;;
+          esac
+          ;;
+        vultr)
+          RAW=$(tf_attr "$STATE_JSON" "vultr_instance.default" "power_status")
+          case "$RAW" in
+            running) VM_STATUS="running" ;;
+            stopped) VM_STATUS="stopped" ;;
+            "")
+              RAW2=$(tf_attr "$STATE_JSON" "vultr_instance.default" "status")
+              case "$RAW2" in
+                active) VM_STATUS="running" ;;
+                "") VM_STATUS="not created" ;;
+                *) VM_STATUS="$RAW2" ;;
+              esac
+              ;;
+            *) VM_STATUS="$RAW" ;;
+          esac
+          ;;
+        truenas)
+          RAW=$(tf_attr "$STATE_JSON" "truenas_vm.this" "state")
+          case "$RAW" in
+            [Rr][Uu][Nn][Nn][Ii][Nn][Gg]) VM_STATUS="running" ;;
+            [Ss][Tt][Oo][Pp][Pp][Ee][Dd]) VM_STATUS="stopped" ;;
+            "") VM_STATUS="not created" ;;
+            *) VM_STATUS="$RAW" ;;
+          esac
+          ;;
+        *)
+          VM_STATUS="unsupported provider ($PROVIDER)"
+          ;;
+      esac
+
+      if [ "$VM_STATUS" = "running" ]; then
+        IP=$(./scripts/instance-ip "$PROFILE" 2>/dev/null || true)
+        if [ -n "$IP" ]; then
+          printf '%-15s %s\n' "IP:" "$IP"
+        fi
+      fi
+    fi
+    ;;
+  *)
+    VM_STATUS="unsupported engine ($ENGINE)"
+    ;;
+esac
+
+printf '%-15s %s\n' "Status:" "$VM_STATUS"

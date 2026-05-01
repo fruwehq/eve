@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# Start a Moonlight stream to the instance.
+set -euo pipefail
+
+PROFILE="${1:?Usage: scripts/remote-moonlight <profile>}"
+cd "$(git rev-parse --show-toplevel)"
+
+PKGS=$(./scripts/profile-resolve --profile "$PROFILE" --emit env | awk -F= '/^BUNDLE_PACKAGES/{print $2}')
+echo "$PKGS" | tr ',' '\n' | grep -qx sunshine || { echo "sunshine not in bundle — skipping"; exit 0; }
+
+IP=$(./scripts/instance-ip "$PROFILE")
+
+EXTRA_ARGS=()
+if [ -n "${EPHEMERAL_DISPLAY_RESOLUTION:-}" ]; then
+  EXTRA_ARGS+=(--resolution "$EPHEMERAL_DISPLAY_RESOLUTION")
+fi
+if [ -n "${EPHEMERAL_DISPLAY_FPS:-}" ]; then
+  EXTRA_ARGS+=(--fps "$EPHEMERAL_DISPLAY_FPS")
+fi
+if [ -n "${EPHEMERAL_MOONLIGHT_BITRATE_KBPS:-}" ]; then
+  EXTRA_ARGS+=(--bitrate "$EPHEMERAL_MOONLIGHT_BITRATE_KBPS")
+fi
+if [ -n "${EPHEMERAL_MOONLIGHT_VIDEO_CODEC:-}" ]; then
+  case "$EPHEMERAL_MOONLIGHT_VIDEO_CODEC" in
+    auto|H.264|HEVC|AV1) ;;
+    *)
+      echo "remote-moonlight: invalid EPHEMERAL_MOONLIGHT_VIDEO_CODEC='$EPHEMERAL_MOONLIGHT_VIDEO_CODEC' (valid: auto, H.264, HEVC, AV1)" >&2
+      exit 2
+      ;;
+  esac
+  EXTRA_ARGS+=(--video-codec "$EPHEMERAL_MOONLIGHT_VIDEO_CODEC")
+fi
+if [ -n "${EPHEMERAL_MOONLIGHT_VIDEO_DECODER:-}" ]; then
+  case "$EPHEMERAL_MOONLIGHT_VIDEO_DECODER" in
+    auto|hardware|software) ;;
+    *)
+      echo "remote-moonlight: invalid EPHEMERAL_MOONLIGHT_VIDEO_DECODER='$EPHEMERAL_MOONLIGHT_VIDEO_DECODER' (valid: auto, hardware, software)" >&2
+      exit 2
+      ;;
+  esac
+  EXTRA_ARGS+=(--video-decoder "$EPHEMERAL_MOONLIGHT_VIDEO_DECODER")
+fi
+
+exec /Applications/Moonlight.app/Contents/MacOS/Moonlight stream --game-optimization "${EXTRA_ARGS[@]}" "$IP" "Desktop"
