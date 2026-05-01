@@ -15,7 +15,8 @@ mkdir -p "$GOLDEN_DIR"
 # Keep output deterministic regardless of local host configuration.
 unset TRUENAS_HOST TRUENAS_SSH_PORT TRUENAS_SSH_USER \
       TRUENAS_SSH_PRIVATE_KEY_FILE TRUENAS_SSH_HOST_KEY_FINGERPRINT \
-      TRUENAS_API_KEY TRUENAS_API_USER SSH_PUBLIC_KEY_FILE
+      TRUENAS_API_KEY TRUENAS_API_USER SSH_PUBLIC_KEY_FILE \
+      RASPBERRY_PI_HOST RASPBERRY_PI_IP VM_USER_NAME
 
 FAIL=0
 INSTANCES=$(./scripts/instance-list --registry "$FIXTURE" --json | jq -r '.instances[].name')
@@ -55,7 +56,8 @@ done
 
 tmp_registry="$(mktemp "${TMPDIR:-/tmp}/egame-instance-test.XXXXXX")"
 invalid_output="$(mktemp "${TMPDIR:-/tmp}/egame-instance-test-output.XXXXXX")"
-trap 'rm -f "$tmp_registry" "$invalid_output"' EXIT
+tmp_overlay_dir="$(mktemp -d "${TMPDIR:-/tmp}/egame-instance-overlay.XXXXXX")"
+trap 'rm -f "$tmp_registry" "$invalid_output"; rm -rf "$tmp_overlay_dir"' EXIT
 rm -f "$tmp_registry"
 
 if ./scripts/instance-create \
@@ -86,6 +88,42 @@ elif [ "$(cat "$tmp_registry")" = "$before_invalid" ]; then
   printf '  [OK] reject invalid instance without registry write\n'
 else
   printf '  [FAIL] invalid instance create changed registry\n' >&2
+  FAIL=$((FAIL + 1))
+fi
+
+overlay="$tmp_overlay_dir/dev-a.catalog.local.yaml"
+if ./scripts/instance-profile-overlay --registry "$FIXTURE" --instance dev-a --output "$overlay"; then
+  if EGAME_CATALOG_LOCAL="$overlay" ./scripts/profile-resolve --profile dev-a --validate >/dev/null; then
+    printf '  [OK] generated profile overlay validates\n'
+  else
+    printf '  [FAIL] generated profile overlay did not validate\n' >&2
+    FAIL=$((FAIL + 1))
+  fi
+else
+  printf '  [FAIL] generate profile overlay\n' >&2
+  FAIL=$((FAIL + 1))
+fi
+
+profile_env="$(EGAME_CATALOG_LOCAL="$overlay" ./scripts/profile-resolve --profile dev-a --emit env | LC_ALL=C sort)"
+if printf '%s\n' "$profile_env" | grep -qx 'PROFILE_NAME=dev-a' &&
+  printf '%s\n' "$profile_env" | grep -qx 'VM_DISK_GB=120' &&
+  printf '%s\n' "$profile_env" | grep -qx 'VM_MEMORY_MB=12288' &&
+  printf '%s\n' "$profile_env" | grep -qx 'STACK_TAGS=local-vmware'; then
+  printf '  [OK] profile overlay preserves instance overrides\n'
+else
+  printf '  [FAIL] profile overlay env mismatch\n' >&2
+  printf '%s\n' "$profile_env" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+bridge_env="$(EGAME_INSTANCE_REGISTRY="$FIXTURE" EGAME_INSTANCE_WORKDIR="$tmp_overlay_dir/run" make env INSTANCE=dev-a 2>/dev/null | LC_ALL=C sort)"
+if printf '%s\n' "$bridge_env" | grep -qx 'PROFILE_NAME=dev-a' &&
+  printf '%s\n' "$bridge_env" | grep -qx 'VM_DISK_GB=120' &&
+  printf '%s\n' "$bridge_env" | grep -qx 'VM_MEMORY_MB=12288'; then
+  printf '  [OK] make target routes INSTANCE through generated profile overlay\n'
+else
+  printf '  [FAIL] INSTANCE make bridge env mismatch\n' >&2
+  printf '%s\n' "$bridge_env" >&2
   FAIL=$((FAIL + 1))
 fi
 

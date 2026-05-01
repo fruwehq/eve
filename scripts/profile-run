@@ -10,9 +10,14 @@ set -euo pipefail
 TARGET="${1:?Usage: scripts/profile-run <make-target> [PROFILE]}"
 PROFILE="${2:-}"
 
+if [ -z "$PROFILE" ] && [ -n "${INSTANCE:-}" ]; then
+  exec ./scripts/instance-run "$TARGET" "$INSTANCE"
+fi
+
 if [ -z "$PROFILE" ]; then
   if [ ! -t 0 ] || [ ! -t 1 ]; then
     echo "Error: PROFILE is required in non-interactive mode." >&2
+    echo "       Or pass INSTANCE=<name> to run through the v3 instance bridge." >&2
     echo "Usage: make $TARGET PROFILE=<name>" >&2
     echo "" >&2
     echo "Available profiles:" >&2

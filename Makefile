@@ -24,6 +24,7 @@ PROFILE ?=
 
 # v3 concrete instance selection. Instances live in .egame/instances.yaml.
 INSTANCE ?=
+export INSTANCE
 
 # Load dotenv files
 -include .env

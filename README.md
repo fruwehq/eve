@@ -35,11 +35,17 @@ make instance.list
 make instance.info INSTANCE=dev-a
 make instance.env INSTANCE=dev-a
 make instance.validate INSTANCE=dev-a
+
+# Run existing profile-oriented targets through a generated instance overlay
+make env INSTANCE=dev-a
+make ssh INSTANCE=dev-a
 ```
 
 This first v3 slice resolves concrete instances and preserves the current
-provider execution layer. Later slices will move lifecycle commands from
-`PROFILE=` to `INSTANCE=`.
+provider execution layer. `INSTANCE=` currently works by generating a local
+profile overlay under `.generated/instances/<name>/` and reusing the existing
+profile-backed scripts. Later slices will replace the shared Terraform stack
+path with per-instance generated stacks/state.
 
 ## v2 profile workflow
 

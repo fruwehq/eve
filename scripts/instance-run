@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Run an existing profile-oriented make target through a concrete instance.
+
+set -euo pipefail
+
+ROOT="$(git rev-parse --show-toplevel)"
+cd "$ROOT"
+
+TARGET="${1:?Usage: scripts/instance-run <make-target> [instance]}"
+INSTANCE_NAME="${2:-${INSTANCE:-}}"
+
+if [ -z "$INSTANCE_NAME" ]; then
+  echo "instance-run: INSTANCE is required" >&2
+  echo "Usage: make $TARGET INSTANCE=<name>" >&2
+  exit 2
+fi
+
+INSTANCE_WORKDIR="${EGAME_INSTANCE_WORKDIR:-.generated/instances}"
+OVERLAY_DIR="$INSTANCE_WORKDIR/$INSTANCE_NAME"
+OVERLAY="$OVERLAY_DIR/catalog.local.yaml"
+
+overlay_args=(--instance "$INSTANCE_NAME" --output "$OVERLAY")
+if [ -n "${EGAME_INSTANCE_REGISTRY:-}" ]; then
+  overlay_args+=(--registry "$EGAME_INSTANCE_REGISTRY")
+fi
+
+./scripts/instance-profile-overlay "${overlay_args[@]}"
+
+echo "[instance-run] target=$TARGET instance=$INSTANCE_NAME overlay=$OVERLAY" >&2
+
+export EGAME_CATALOG_LOCAL="$OVERLAY"
+exec make "$TARGET" "PROFILE=$INSTANCE_NAME" "INSTANCE="

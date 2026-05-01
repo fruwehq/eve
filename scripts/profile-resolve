@@ -2,7 +2,7 @@
 set -eu
 
 CATALOG_PATH="config/catalog.yaml"
-LOCAL_CATALOG_PATH="config/catalog.local.yaml"
+LOCAL_CATALOG_PATH="${EGAME_CATALOG_LOCAL:-config/catalog.local.yaml}"
 PROFILE=""
 VALIDATE=0
 EMIT=""
@@ -16,6 +16,7 @@ Usage:
 Notes:
   - Base catalog: config/catalog.yaml
   - Optional local overlay: config/catalog.local.yaml (if present)
+  - EGAME_CATALOG_LOCAL can point at a generated overlay for INSTANCE workflows.
 
 Examples:
   scripts/profile-resolve --profile aws-ubuntu-dev-headless --validate
