@@ -8,6 +8,9 @@ cd "$(git rev-parse --show-toplevel)"
 PKGS=$(./scripts/profile-resolve --profile "$PROFILE" --emit env | awk -F= '/^BUNDLE_PACKAGES/{print $2}')
 echo "$PKGS" | tr ',' '\n' | grep -qx sunshine || { echo "sunshine not in bundle — skipping"; exit 0; }
 
+RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
+OS_FAMILY=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^OS_FAMILY=/{print $2}')
+
 IP=$(./scripts/instance-ip "$PROFILE")
 SSH_CMD=(./scripts/instance-ssh "$PROFILE" --)
 MAX_ATTEMPTS=20
@@ -26,8 +29,16 @@ while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
   fi
   if [ "$ATTEMPT" -eq 3 ]; then
     printf '%s\n' "Sunshine not responding — starting via SSH..."
-    # shellcheck disable=SC2016
-    "${SSH_CMD[@]}" 'export XDG_RUNTIME_DIR="/run/user/$(id -u)" DISPLAY="${SUNSHINE_DISPLAY:-:0}" XAUTHORITY="${XAUTHORITY:-$HOME/.Xauthority}"; systemctl --user import-environment DISPLAY XAUTHORITY XDG_RUNTIME_DIR 2>/dev/null || true; systemctl --user start sunshine 2>/dev/null || true' || true
+    case "$OS_FAMILY" in
+      windows)
+        # shellcheck disable=SC2016
+        "${SSH_CMD[@]}" 'Start-Process "C:\Program Files\Sunshine\Sunshine.exe" -WindowStyle Hidden' 2>/dev/null || true
+        ;;
+      *)
+        # shellcheck disable=SC2016
+        "${SSH_CMD[@]}" 'export XDG_RUNTIME_DIR="/run/user/$(id -u)" DISPLAY="${SUNSHINE_DISPLAY:-:0}" XAUTHORITY="${XAUTHORITY:-$HOME/.Xauthority}"; systemctl --user import-environment DISPLAY XAUTHORITY XDG_RUNTIME_DIR 2>/dev/null || true; systemctl --user start sunshine 2>/dev/null || true' || true
+        ;;
+    esac
   fi
   printf '%s\n' "Sunshine API not ready yet (attempt $ATTEMPT/$MAX_ATTEMPTS, http=$HTTP_CODE). Sleeping 2 seconds..."
   sleep 2
