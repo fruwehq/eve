@@ -39,6 +39,12 @@ make instance.validate INSTANCE=dev-a
 # Run existing profile-oriented targets through a generated instance overlay
 make env INSTANCE=dev-a
 make ssh INSTANCE=dev-a
+
+# Inspect plugin contracts and package lifecycle hooks
+make plugins.list
+make provider.status INSTANCE=dev-a
+make package.status INSTANCE=dev-a PACKAGE=docker
+make package.down INSTANCE=dev-a PACKAGE=docker YES=1
 ```
 
 This first v3 slice resolves concrete instances and preserves the current
@@ -46,6 +52,18 @@ provider execution layer. `INSTANCE=` currently works by generating a local
 profile overlay under `.generated/instances/<name>/` and reusing the existing
 profile-backed scripts. Later slices will replace the shared Terraform stack
 path with per-instance generated stacks/state.
+
+Providers and packages are now described by plugin manifests. Built-ins live in
+`plugins/providers/<id>/egame-plugin.yaml` and
+`plugins/packages/<id>/egame-plugin.yaml`; optional external plugins can be
+pinned in `.egame/plugin-sources.yaml` and synchronized with
+`make plugins.sync`. Package `down` and `reinstall` operations are explicit and
+destructive removals require `YES=1`.
+
+Terraform-backed `INSTANCE=` lifecycle is intentionally guarded until dedicated
+per-instance Terraform state/workdirs are implemented. Set
+`EGAME_ALLOW_SHARED_TF_INSTANCE=1` only when you explicitly want to use the
+temporary shared compatibility path.
 
 ## v2 profile workflow
 

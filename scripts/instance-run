@@ -29,4 +29,21 @@ fi
 echo "[instance-run] target=$TARGET instance=$INSTANCE_NAME overlay=$OVERLAY" >&2
 
 export EGAME_CATALOG_LOCAL="$OVERLAY"
+engine="$(./scripts/profile-resolve --profile "$INSTANCE_NAME" --emit env | awk -F= '/^ENGINE=/{print $2}')"
+
+case "$TARGET" in
+  init|plan|up|down|start|stop|status|ip|ssh)
+    exec ./scripts/provider-dispatch --instance "$INSTANCE_NAME" --command "$TARGET"
+    ;;
+  env|info|validate)
+    ;;
+  *)
+    if [ "$engine" = "terraform" ] && [ "${EGAME_ALLOW_SHARED_TF_INSTANCE:-}" != "1" ]; then
+      echo "instance-run: Terraform-backed INSTANCE target '$TARGET' is blocked until per-instance Terraform state/workdirs are implemented." >&2
+      echo "instance-run: Use the original PROFILE= workflow, or set EGAME_ALLOW_SHARED_TF_INSTANCE=1 to explicitly use the shared compatibility path." >&2
+      exit 1
+    fi
+    ;;
+esac
+
 exec make "$TARGET" "PROFILE=$INSTANCE_NAME" "INSTANCE="

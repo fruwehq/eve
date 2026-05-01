@@ -1,0 +1,11 @@
+api_version: egame.plugin/v1
+kind: package
+id: rustdesk
+display_name: RustDesk
+commands:
+  install: {exec: scripts/package-plugin, args: [rustdesk, install]}
+  status: {exec: scripts/package-plugin, args: [rustdesk, status]}
+  down: {exec: scripts/package-plugin, args: [rustdesk, down]}
+supports: {os_families: [ubuntu, windows]}
+down: {destructive: true}
+env: [RUSTDESK_SERVER, RUSTDESK_KEY, RUSTDESK_PASSWORD]

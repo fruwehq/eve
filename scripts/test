@@ -9,7 +9,7 @@ cd "$(git rev-parse --show-toplevel)"
 
 FAIL=0
 if [ "$#" -eq 0 ]; then
-  SUITES=(profiles instances terraform shellcheck)
+  SUITES=(profiles instances plugins terraform shellcheck)
 else
   SUITES=("$@")
 fi
@@ -29,6 +29,7 @@ for suite in "${SUITES[@]}"; do
   case "$suite" in
     profiles)   run "profiles"   ./scripts/test-profiles   ;;
     instances)  run "instances"  ./scripts/test-instances  ;;
+    plugins)    run "plugins"    ./scripts/test-plugins    ;;
     terraform)  run "terraform"  ./scripts/test-terraform  ;;
     shellcheck) run "shellcheck" ./scripts/test-shellcheck ;;
     *) echo "unknown suite: $suite" >&2; exit 2 ;;

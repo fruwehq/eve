@@ -259,6 +259,8 @@ begin
     "init" => init,
     "location" => location,
     "bundle_packages" => bundle_packages,
+    "provider_plugin" => provider,
+    "package_plugins" => bundle_packages.map { |package_id| { "id" => package_id, "plugin" => package_id } },
     "engine" => engine,
     "stack_tags" => "instance-#{instance["name"]}"
   }

@@ -1,0 +1,141 @@
+#!/usr/bin/env ruby
+# List and validate built-in plus local v3 plugins.
+
+require "json"
+require "yaml"
+
+ROOT = File.expand_path("..", __dir__)
+BUILTIN_ROOT = File.join(ROOT, "plugins")
+EXTERNAL_ROOT = File.join(ROOT, ".egame/plugins")
+API_VERSION = "egame.plugin/v1"
+PROVIDER_COMMANDS = %w[resolve init plan up down start stop status ip ssh].freeze
+PACKAGE_COMMANDS = %w[install status down].freeze
+
+def usage
+  warn <<~USAGE
+    Usage:
+      scripts/plugin-list [--kind provider|package] [--json] [--validate]
+  USAGE
+end
+
+def plugin_roots
+  roots = [BUILTIN_ROOT, EXTERNAL_ROOT]
+  extra = ENV.fetch("EGAME_PLUGIN_ROOTS", "")
+  roots.concat(extra.split(":").reject(&:empty?).map { |path| File.expand_path(path, Dir.pwd) })
+  roots.uniq
+end
+
+def plugin_paths
+  plugin_roots.flat_map do |root|
+    next [] unless Dir.exist?(root)
+
+    Dir.glob(File.join(root, "**/egame-plugin.yaml"))
+  end.sort
+end
+
+def load_plugin(path)
+  data = YAML.safe_load(File.read(path), permitted_classes: [], aliases: true) || {}
+  data["_path"] = path
+  data["_source"] = path.start_with?(BUILTIN_ROOT) ? "builtin" : "external"
+  data
+end
+
+def validate_plugin!(plugin)
+  required = %w[api_version kind id display_name commands supports env]
+  missing = required.reject { |key| plugin.key?(key) }
+  raise "#{plugin["_path"]}: missing required fields: #{missing.join(", ")}" unless missing.empty?
+
+  raise "#{plugin["_path"]}: api_version must be #{API_VERSION}" unless plugin["api_version"] == API_VERSION
+
+  kind = plugin["kind"]
+  unless %w[provider package].include?(kind)
+    raise "#{plugin["_path"]}: kind must be provider or package"
+  end
+
+  unless plugin["id"].to_s.match?(/\A[a-z][a-z0-9-]*\z/)
+    raise "#{plugin["_path"]}: id must match [a-z][a-z0-9-]*"
+  end
+
+  commands = plugin["commands"]
+  raise "#{plugin["_path"]}: commands must be a map" unless commands.is_a?(Hash)
+
+  required_commands = kind == "provider" ? PROVIDER_COMMANDS : PACKAGE_COMMANDS
+  missing_commands = required_commands.reject { |command| commands.key?(command) }
+  unless missing_commands.empty?
+    raise "#{plugin["_path"]}: missing #{kind} commands: #{missing_commands.join(", ")}"
+  end
+
+  commands.each do |name, spec|
+    raise "#{plugin["_path"]}: command #{name} must be a map" unless spec.is_a?(Hash)
+    raise "#{plugin["_path"]}: command #{name} missing exec" unless spec["exec"]
+    raise "#{plugin["_path"]}: command #{name} args must be a list" if spec.key?("args") && !spec["args"].is_a?(Array)
+  end
+
+  raise "#{plugin["_path"]}: supports must be a map" unless plugin["supports"].is_a?(Hash)
+  raise "#{plugin["_path"]}: env must be a list" unless plugin["env"].is_a?(Array)
+end
+
+kind = nil
+json = false
+validate_only = false
+
+args = ARGV.dup
+until args.empty?
+  case args.shift
+  when "--kind"
+    kind = args.shift
+  when "--json"
+    json = true
+  when "--validate"
+    validate_only = true
+  when "-h", "--help"
+    usage
+    exit 0
+  else
+    usage
+    exit 2
+  end
+end
+
+if kind && !%w[provider package].include?(kind)
+  warn "plugin-list: --kind must be provider or package"
+  exit 2
+end
+
+begin
+  plugins = plugin_paths.map { |path| load_plugin(path) }
+  plugins.each { |plugin| validate_plugin!(plugin) }
+
+  seen = {}
+  plugins.each do |plugin|
+    key = "#{plugin["kind"]}:#{plugin["id"]}"
+    if seen[key] && ENV["EGAME_PLUGIN_ALLOW_OVERRIDE"] != "1"
+      raise "duplicate plugin #{key}: #{seen[key]} and #{plugin["_path"]}"
+    end
+    seen[key] = plugin["_path"]
+  end
+
+  plugins = plugins.select { |plugin| plugin["kind"] == kind } if kind
+  plugins = plugins.map do |plugin|
+    plugin.merge("path" => plugin.delete("_path"), "source" => plugin.delete("_source"))
+  end
+
+  if validate_only
+    puts "Plugins validated: #{plugins.length}"
+  elsif json
+    puts JSON.pretty_generate({ "plugins" => plugins })
+  else
+    printf "%-10s %-24s %-36s %-8s\n", "KIND", "ID", "DISPLAY", "SOURCE"
+    printf "%-10s %-24s %-36s %-8s\n", "----", "--", "-------", "------"
+    plugins.each do |plugin|
+      printf "%-10s %-24s %-36s %-8s\n",
+             plugin["kind"],
+             plugin["id"],
+             plugin["display_name"],
+             plugin["source"]
+    end
+  end
+rescue StandardError => e
+  warn "plugin-list: #{e.message}"
+  exit 1
+end

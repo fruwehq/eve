@@ -1,0 +1,11 @@
+api_version: egame.plugin/v1
+kind: package
+id: steam
+display_name: Steam
+commands:
+  install: {exec: scripts/package-plugin, args: [steam, install]}
+  status: {exec: scripts/package-plugin, args: [steam, status]}
+  down: {exec: scripts/package-plugin, args: [steam, down]}
+supports: {os_families: [ubuntu, windows]}
+down: {destructive: true}
+env: []

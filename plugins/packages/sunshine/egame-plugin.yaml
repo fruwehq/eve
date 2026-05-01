@@ -1,0 +1,11 @@
+api_version: egame.plugin/v1
+kind: package
+id: sunshine
+display_name: Sunshine
+commands:
+  install: {exec: scripts/package-plugin, args: [sunshine, install]}
+  status: {exec: scripts/package-plugin, args: [sunshine, status]}
+  down: {exec: scripts/package-plugin, args: [sunshine, down]}
+supports: {os_families: [ubuntu, windows], ui_modes: [desktop]}
+down: {destructive: true}
+env: [EPHEMERAL_SUNSHINE_PASSWORD, SUNSHINE_VERSION, SUNSHINE_MAX_BITRATE_KBPS]

@@ -1,0 +1,11 @@
+api_version: egame.plugin/v1
+kind: package
+id: hermes
+display_name: Hermes
+commands:
+  install: {exec: scripts/package-plugin, args: [hermes, install]}
+  status: {exec: scripts/package-plugin, args: [hermes, status]}
+  down: {exec: scripts/package-plugin, args: [hermes, down]}
+supports: {os_families: [ubuntu]}
+down: {destructive: true}
+env: []

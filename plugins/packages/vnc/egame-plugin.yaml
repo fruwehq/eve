@@ -1,0 +1,11 @@
+api_version: egame.plugin/v1
+kind: package
+id: vnc
+display_name: TigerVNC
+commands:
+  install: {exec: scripts/package-plugin, args: [vnc, install]}
+  status: {exec: scripts/package-plugin, args: [vnc, status]}
+  down: {exec: scripts/package-plugin, args: [vnc, down]}
+supports: {os_families: [ubuntu], ui_modes: [desktop]}
+down: {destructive: true}
+env: []

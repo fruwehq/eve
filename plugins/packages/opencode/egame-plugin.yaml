@@ -1,0 +1,11 @@
+api_version: egame.plugin/v1
+kind: package
+id: opencode
+display_name: OpenCode
+commands:
+  install: {exec: scripts/package-plugin, args: [opencode, install]}
+  status: {exec: scripts/package-plugin, args: [opencode, status]}
+  down: {exec: scripts/package-plugin, args: [opencode, down]}
+supports: {os_families: [ubuntu]}
+down: {destructive: true}
+env: []

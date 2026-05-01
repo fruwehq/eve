@@ -1,0 +1,117 @@
+#!/usr/bin/env ruby
+# Read or update local v3 instance state.
+
+require "fileutils"
+require "json"
+require "time"
+
+ROOT = File.expand_path("..", __dir__)
+
+def usage
+  warn <<~USAGE
+    Usage:
+      scripts/instance-state --instance <name> --get
+      scripts/instance-state --instance <name> --operation <name> --status <status> [--provider-state <state>] [--package <id> --package-state <state>] [--error <message>]
+  USAGE
+end
+
+def state_root
+  ENV["EGAME_STATE_DIR"] || File.join(ROOT, ".egame/state")
+end
+
+def state_path(instance)
+  File.join(state_root, "instances", "#{instance}.json")
+end
+
+def read_state(instance)
+  path = state_path(instance)
+  return {} unless File.exist?(path)
+
+  JSON.parse(File.read(path))
+end
+
+def write_state(instance, state)
+  path = state_path(instance)
+  FileUtils.mkdir_p(File.dirname(path))
+  File.write(path, JSON.pretty_generate(state) + "\n")
+end
+
+instance = nil
+get = false
+operation = nil
+status = nil
+provider_state = nil
+package = nil
+package_state = nil
+error = nil
+
+args = ARGV.dup
+until args.empty?
+  case args.shift
+  when "--instance"
+    instance = args.shift
+  when "--get"
+    get = true
+  when "--operation"
+    operation = args.shift
+  when "--status"
+    status = args.shift
+  when "--provider-state"
+    provider_state = args.shift
+  when "--package"
+    package = args.shift
+  when "--package-state"
+    package_state = args.shift
+  when "--error"
+    error = args.shift
+  when "-h", "--help"
+    usage
+    exit 0
+  else
+    usage
+    exit 2
+  end
+end
+
+unless instance
+  usage
+  exit 2
+end
+
+state = read_state(instance)
+
+if get
+  puts JSON.pretty_generate(state)
+  exit 0
+end
+
+unless operation && status
+  usage
+  exit 2
+end
+
+now = Time.now.utc.iso8601
+state["instance"] ||= instance
+state["desired_state"] ||= "unknown"
+state["provider_state"] ||= "unknown"
+state["provision_state"] ||= "unknown"
+state["package_state"] ||= {}
+state["created_at"] ||= now
+state["updated_at"] = now
+state["last_operation"] = {
+  "name" => operation,
+  "status" => status,
+  "at" => now
+}
+state["last_error"] = error
+state["provider_state"] = provider_state if provider_state
+
+if package && package_state
+  state["package_state"][package] = {
+    "status" => package_state,
+    "updated_at" => now
+  }
+end
+
+write_state(instance, state)
+puts JSON.pretty_generate(state)

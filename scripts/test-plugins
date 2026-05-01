@@ -1,0 +1,135 @@
+#!/usr/bin/env bash
+# Validate v3 plugin manifests and dry-run dispatch contracts.
+
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+FIXTURE="tests/fixtures/instances.yaml"
+PLUGIN_FIXTURE="tests/fixtures/plugins/packages/dummy"
+BAD_PLUGIN_FIXTURE="tests/fixtures/plugins/packages/bad"
+FAIL=0
+
+check() {
+  local label="$1"
+  shift
+  if "$@"; then
+    printf '  [OK] %s\n' "$label"
+  else
+    printf '  [FAIL] %s\n' "$label" >&2
+    FAIL=$((FAIL + 1))
+  fi
+}
+
+aws_provider_listed() {
+  ./scripts/plugin-list --kind provider --json |
+    jq -e '.plugins[] | select(.id == "aws" and .kind == "provider")' >/dev/null
+}
+
+docker_package_listed() {
+  ./scripts/plugin-list --kind package --json |
+    jq -e '.plugins[] | select(.id == "docker" and .kind == "package")' >/dev/null
+}
+
+instance_maps_plugins() {
+  ./scripts/instance-resolve --registry "$FIXTURE" --instance dev-a --emit json |
+    jq -e '.provider_plugin == "local-vmware" and (.package_plugins[] | select(.id == "docker" and .plugin == "docker"))' >/dev/null
+}
+
+dummy_plugin_listed() {
+  EGAME_PLUGIN_ROOTS="$PLUGIN_FIXTURE" ./scripts/plugin-list --kind package --json |
+    jq -e '.plugins[] | select(.id == "dummy" and .kind == "package")' >/dev/null
+}
+
+check "built-in plugins validate" ./scripts/plugin-list --validate
+
+check "aws provider plugin listed" aws_provider_listed
+
+check "docker package plugin listed" docker_package_listed
+
+check "instance resolver maps provider and package plugins" instance_maps_plugins
+
+check "external dummy plugin listed" dummy_plugin_listed
+
+if EGAME_PLUGIN_ROOTS="$BAD_PLUGIN_FIXTURE" ./scripts/plugin-list --json >/dev/null 2>&1; then
+  printf '  [FAIL] invalid external plugin rejected\n' >&2
+  FAIL=$((FAIL + 1))
+else
+  printf '  [OK] invalid external plugin rejected\n'
+fi
+
+provider_dry_run="$(
+  EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-provider-dispatch-test" \
+    ./scripts/provider-dispatch --registry "$FIXTURE" --instance rpi-all-a --command status --dry-run
+)"
+if printf '%s\n' "$provider_dry_run" | jq -e '.provider == "raspberry-pi" and .command == "status" and .dry_run == true' >/dev/null; then
+  printf '  [OK] provider dispatch dry-run\n'
+else
+  printf '  [FAIL] provider dispatch dry-run\n' >&2
+  printf '%s\n' "$provider_dry_run" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+package_status="$(
+  EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-package-dispatch-test" \
+    ./scripts/package-dispatch --registry "$FIXTURE" --instance dev-a --package docker --command status --dry-run
+)"
+if printf '%s\n' "$package_status" | jq -e '.package == "docker" and .command == "status" and .selected == true' >/dev/null; then
+  printf '  [OK] package status dry-run\n'
+else
+  printf '  [FAIL] package status dry-run\n' >&2
+  printf '%s\n' "$package_status" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+if EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-package-dispatch-test" \
+  ./scripts/package-dispatch --registry "$FIXTURE" --instance dev-a --package docker --command down --dry-run >/dev/null 2>&1; then
+  printf '  [FAIL] destructive package down requires confirmation\n' >&2
+  FAIL=$((FAIL + 1))
+else
+  printf '  [OK] destructive package down requires confirmation\n'
+fi
+
+dummy_reinstall="$(
+  EGAME_PLUGIN_ROOTS="$PLUGIN_FIXTURE" \
+    EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-package-dispatch-test" \
+    ./scripts/package-dispatch --registry "$FIXTURE" --instance dev-a --package dummy --command reinstall --dry-run
+)"
+if printf '%s\n' "$dummy_reinstall" | jq -s -e 'map(.command) == ["down", "install"]' >/dev/null; then
+  printf '  [OK] package reinstall defaults to down then install\n'
+else
+  printf '  [FAIL] package reinstall defaults to down then install\n' >&2
+  printf '%s\n' "$dummy_reinstall" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+state_dir="$(mktemp -d "${TMPDIR:-/tmp}/egame-state-test.XXXXXX")"
+trap 'rm -rf "$state_dir"' EXIT
+state_json="$(
+  EGAME_STATE_DIR="$state_dir" ./scripts/instance-state \
+    --instance dev-a \
+    --operation package.down \
+    --status succeeded \
+    --package docker \
+    --package-state removed
+)"
+if printf '%s\n' "$state_json" | jq -e '.last_operation.name == "package.down" and .package_state.docker.status == "removed"' >/dev/null; then
+  printf '  [OK] instance state records package operation\n'
+else
+  printf '  [FAIL] instance state records package operation\n' >&2
+  printf '%s\n' "$state_json" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+EGAME_STATE_DIR="$state_dir" \
+  EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-package-dispatch-test" \
+  ./scripts/package-dispatch --registry "$FIXTURE" --instance dev-a --package docker --command status >/dev/null
+recorded_state="$(EGAME_STATE_DIR="$state_dir" ./scripts/instance-state --instance dev-a --get)"
+if printf '%s\n' "$recorded_state" | jq -e '.last_operation.name == "package.status" and .package_state.docker.status == "checked"' >/dev/null; then
+  printf '  [OK] package dispatch records state\n'
+else
+  printf '  [FAIL] package dispatch records state\n' >&2
+  printf '%s\n' "$recorded_state" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+[ "$FAIL" -eq 0 ]

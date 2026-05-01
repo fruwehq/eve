@@ -1,0 +1,148 @@
+#!/usr/bin/env ruby
+# Dispatch package lifecycle commands through package plugins.
+
+require "json"
+require "open3"
+
+ROOT = File.expand_path("..", __dir__)
+
+def usage
+  warn <<~USAGE
+    Usage:
+      scripts/package-dispatch --instance <name> --package <id> --command install|status|down|reinstall [--registry <path>] [--dry-run] [--yes]
+  USAGE
+end
+
+def run_json(*cmd)
+  out, status = Open3.capture2e(*cmd)
+  raise out unless status.success?
+
+  JSON.parse(out)
+end
+
+def command_vector(spec)
+  exec_path = spec.fetch("exec")
+  exec_path = File.join(ROOT, exec_path) unless exec_path.start_with?("/")
+  [exec_path, *(spec["args"] || [])]
+end
+
+def record_state(instance_name, operation, status, package_id, package_state = nil, error = nil)
+  return if ENV["EGAME_DISABLE_STATE"] == "1"
+
+  cmd = [
+    File.join(ROOT, "scripts/instance-state"),
+    "--instance", instance_name,
+    "--operation", operation,
+    "--status", status
+  ]
+  cmd += ["--package", package_id, "--package-state", package_state] if package_state
+  cmd += ["--error", error] if error
+  system(*cmd, out: File::NULL, err: File::NULL)
+end
+
+def run_plugin(plugin, command, resolved, dry_run)
+  spec = plugin.fetch("commands")[command]
+  raise "package plugin #{plugin["id"]} has no command: #{command}" unless spec
+
+  env = ENV.to_h.merge(
+    "EGAME_INSTANCE_NAME" => resolved.fetch("instance").fetch("name"),
+    "EGAME_PACKAGE_PLUGIN" => plugin.fetch("id")
+  )
+  env["EGAME_PLUGIN_DRY_RUN"] = "1" if dry_run
+
+  cmd = command_vector(spec)
+  Open3.popen3(env, *cmd, chdir: ROOT) do |stdin, stdout, stderr, wait_thr|
+    stdin.write(JSON.generate(resolved))
+    stdin.close
+    out = stdout.read
+    err = stderr.read
+    warn err unless err.empty?
+    print out
+    raise "package command failed: #{command}" unless wait_thr.value.success?
+  end
+end
+
+instance_name = nil
+package_id = nil
+command = nil
+registry_path = ENV["EGAME_INSTANCE_REGISTRY"] ? File.expand_path(ENV["EGAME_INSTANCE_REGISTRY"], Dir.pwd) : nil
+dry_run = false
+yes = false
+
+args = ARGV.dup
+until args.empty?
+  case args.shift
+  when "--instance"
+    instance_name = args.shift
+  when "--package"
+    package_id = args.shift
+  when "--command"
+    command = args.shift
+  when "--registry"
+    registry_path = File.expand_path(args.shift, Dir.pwd)
+  when "--dry-run"
+    dry_run = true
+  when "--yes"
+    yes = true
+  when "-h", "--help"
+    usage
+    exit 0
+  else
+    usage
+    exit 2
+  end
+end
+
+unless instance_name && package_id && command
+  usage
+  exit 2
+end
+
+unless %w[install status down reinstall].include?(command)
+  warn "package-dispatch: unsupported command: #{command}"
+  exit 2
+end
+
+begin
+  resolve_cmd = [File.join(ROOT, "scripts/instance-resolve"), "--instance", instance_name, "--emit", "json"]
+  resolve_cmd += ["--registry", registry_path] if registry_path
+  resolved = run_json(*resolve_cmd)
+
+  plugin_doc = run_json(File.join(ROOT, "scripts/plugin-list"), "--kind", "package", "--json")
+  plugin = plugin_doc.fetch("plugins").find { |entry| entry["id"] == package_id }
+  raise "package plugin not found: #{package_id}" unless plugin
+
+  destructive = plugin.dig("down", "destructive") == true
+  if %w[down reinstall].include?(command) && destructive && !yes && ENV["EGAME_CONFIRM_DESTRUCTIVE"] != "1"
+    raise "package #{package_id} down is destructive; pass --yes or EGAME_CONFIRM_DESTRUCTIVE=1"
+  end
+
+  workdir_root = ENV.fetch("EGAME_INSTANCE_WORKDIR", File.join(ROOT, ".generated/instances"))
+  overlay = File.join(workdir_root, instance_name, "catalog.local.yaml")
+  overlay_cmd = [File.join(ROOT, "scripts/instance-profile-overlay"), "--instance", instance_name, "--output", overlay]
+  overlay_cmd += ["--registry", registry_path] if registry_path
+  overlay_out, overlay_status = Open3.capture2e(*overlay_cmd)
+  raise overlay_out unless overlay_status.success?
+  ENV["EGAME_CATALOG_LOCAL"] = overlay
+
+  record_state(instance_name, "package.#{command}", "running", package_id) unless dry_run
+
+  if command == "reinstall" && !plugin.fetch("commands").key?("reinstall")
+    run_plugin(plugin, "down", resolved, dry_run)
+    run_plugin(plugin, "install", resolved, dry_run)
+  else
+    run_plugin(plugin, command, resolved, dry_run)
+  end
+
+  package_state = case command
+                  when "install" then "installed"
+                  when "down" then "removed"
+                  when "reinstall" then "reinstalled"
+                  else "checked"
+                  end
+  record_state(instance_name, "package.#{command}", "succeeded", package_id, package_state) unless dry_run
+rescue StandardError => e
+  record_state(instance_name, "package.#{command || "unknown"}", "failed", package_id || "unknown", nil, e.message) if instance_name && package_id && !dry_run
+  warn "package-dispatch: #{e.message}"
+  exit 1
+end
