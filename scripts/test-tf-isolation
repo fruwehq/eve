@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# Verify per-instance Terraform state isolation:
+#   - tf-env emits TF_WORKSPACE only when EGAME_INSTANCE_NAME is set.
+#   - tf-init schedules a `workspace select -or-create <instance>` step in
+#     instance mode and skips it in PROFILE= mode.
+#   - Two different instance names produce two different workspace names.
+# Uses tf-init's EGAME_TF_PRINT=1 mode so no real terraform/terramate runs.
+
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+# tf-env requires SSH_PUBLIC_KEY_FILE to exist for terraform-engine profiles.
+TMPKEY=$(mktemp)
+printf 'ssh-rsa AAAAB3NzaC1yc2EAAAA_test_only test@test\n' > "$TMPKEY"
+trap 'rm -f "$TMPKEY"' EXIT
+export SSH_PUBLIC_KEY_FILE="$TMPKEY"
+
+PROFILE="aws-ubuntu-dev-headless"
+FAIL=0
+
+# 1. tf-env without instance: no TF_WORKSPACE export.
+env_profile_only=$(unset EGAME_INSTANCE_NAME; ./scripts/tf-env "$PROFILE")
+if printf '%s\n' "$env_profile_only" | grep -q 'TF_WORKSPACE'; then
+  printf '  [FAIL] tf-env emitted TF_WORKSPACE in PROFILE= mode\n' >&2
+  FAIL=$((FAIL + 1))
+else
+  printf '  [OK] tf-env omits TF_WORKSPACE without EGAME_INSTANCE_NAME\n'
+fi
+
+# 2. tf-env with instance: emits TF_WORKSPACE.
+env_instance=$(EGAME_INSTANCE_NAME=aws-gpu-a ./scripts/tf-env "$PROFILE")
+if printf '%s\n' "$env_instance" | grep -qE "^export TF_WORKSPACE='aws-gpu-a';\$"; then
+  printf '  [OK] tf-env emits TF_WORKSPACE for EGAME_INSTANCE_NAME=aws-gpu-a\n'
+else
+  printf '  [FAIL] tf-env did not emit expected TF_WORKSPACE export\n' >&2
+  printf '%s\n' "$env_instance" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+# 3. tf-init in print mode without instance: no workspace step.
+init_profile=$(EGAME_TF_PRINT=1 ./scripts/tf-init "$PROFILE" 2>&1)
+if printf '%s\n' "$init_profile" | grep -q 'terraform init -reconfigure' &&
+  ! printf '%s\n' "$init_profile" | grep -q 'terraform workspace'; then
+  printf '  [OK] tf-init skips workspace step in PROFILE= mode\n'
+else
+  printf '  [FAIL] tf-init PROFILE= output unexpected\n' >&2
+  printf '%s\n' "$init_profile" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+# 4. tf-init in print mode with instance: includes workspace step naming the instance.
+init_a=$(EGAME_TF_PRINT=1 EGAME_INSTANCE_NAME=aws-gpu-a ./scripts/tf-init "$PROFILE" 2>&1)
+if printf '%s\n' "$init_a" | grep -q 'terraform init -reconfigure' &&
+  printf '%s\n' "$init_a" | grep -q "terraform workspace select -or-create aws-gpu-a"; then
+  printf '  [OK] tf-init schedules workspace select for instance aws-gpu-a\n'
+else
+  printf '  [FAIL] tf-init instance-mode output missing workspace select\n' >&2
+  printf '%s\n' "$init_a" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+# 5. Two different instances → two different workspace names.
+init_b=$(EGAME_TF_PRINT=1 EGAME_INSTANCE_NAME=aws-gpu-b ./scripts/tf-init "$PROFILE" 2>&1)
+if printf '%s\n' "$init_b" | grep -q "terraform workspace select -or-create aws-gpu-b" &&
+  ! printf '%s\n' "$init_b" | grep -q "terraform workspace select -or-create aws-gpu-a"; then
+  printf '  [OK] distinct instance names produce distinct workspace selections\n'
+else
+  printf '  [FAIL] second instance did not produce distinct workspace name\n' >&2
+  printf '%s\n' "$init_b" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+[ "$FAIL" -eq 0 ]
