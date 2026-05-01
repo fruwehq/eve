@@ -1,0 +1,112 @@
+#!/usr/bin/env ruby
+# Resolve instance-scoped filesystem paths (workdir, state, tf subdir).
+#
+# This is the single source of truth for where per-instance artifacts live.
+# It does not create any directories — that is the consumer's responsibility.
+# It honors the same env overrides the rest of the v3 scripts already use:
+#   EGAME_INSTANCE_WORKDIR — base dir for generated per-instance workdirs
+#   EGAME_STATE_DIR        — base dir for instance state JSON files
+#   EGAME_INSTANCE_REGISTRY — alternative registry path
+
+require "json"
+require "yaml"
+
+ROOT = File.expand_path("..", __dir__)
+DEFAULT_REGISTRY_PATH = File.join(ROOT, ".egame/instances.yaml")
+DEFAULT_WORKDIR_BASE = File.join(ROOT, ".generated/instances")
+DEFAULT_STATE_BASE = File.join(ROOT, ".egame/state")
+
+def usage
+  warn <<~USAGE
+    Usage:
+      scripts/instance-paths --instance <name> [--emit env|json] [--registry <path>]
+  USAGE
+end
+
+def load_registry(path)
+  return {} unless File.exist?(path)
+
+  YAML.safe_load(File.read(path), permitted_classes: [], aliases: true) || {}
+end
+
+def absolute(path)
+  File.expand_path(path, Dir.pwd)
+end
+
+def workdir_base
+  base = ENV["EGAME_INSTANCE_WORKDIR"]
+  base && !base.empty? ? absolute(base) : DEFAULT_WORKDIR_BASE
+end
+
+def state_base
+  base = ENV["EGAME_STATE_DIR"]
+  base && !base.empty? ? absolute(base) : DEFAULT_STATE_BASE
+end
+
+def emit_env(paths)
+  paths.each { |key, value| puts "#{key}=#{value}" }
+end
+
+instance_name = nil
+emit = "env"
+registry_path = ENV["EGAME_INSTANCE_REGISTRY"] && !ENV["EGAME_INSTANCE_REGISTRY"].empty? \
+                ? absolute(ENV["EGAME_INSTANCE_REGISTRY"]) \
+                : DEFAULT_REGISTRY_PATH
+
+args = ARGV.dup
+until args.empty?
+  case args.shift
+  when "--instance"
+    instance_name = args.shift
+  when "--emit"
+    emit = args.shift
+  when "--registry"
+    registry_path = absolute(args.shift)
+  when "-h", "--help"
+    usage
+    exit 0
+  else
+    usage
+    exit 2
+  end
+end
+
+unless instance_name && !instance_name.empty?
+  usage
+  exit 2
+end
+
+if instance_name !~ /\A[A-Za-z0-9][A-Za-z0-9._-]*\z/
+  warn "instance-paths: invalid instance name: #{instance_name.inspect}"
+  exit 1
+end
+
+registry = load_registry(registry_path)
+instance = (registry["instances"] || []).find { |entry| entry.is_a?(Hash) && entry["name"] == instance_name }
+unless instance
+  warn "instance-paths: instance not found: #{instance_name} (registry: #{registry_path})"
+  exit 1
+end
+
+workdir = File.join(workdir_base, instance_name)
+state_path = File.join(state_base, "instances", "#{instance_name}.json")
+tf_workdir = File.join(workdir, "tf")
+
+paths = {
+  "INSTANCE_NAME" => instance_name,
+  "INSTANCE_WORKDIR" => workdir,
+  "INSTANCE_OVERLAY_PATH" => File.join(workdir, "catalog.local.yaml"),
+  "INSTANCE_STATE_PATH" => state_path,
+  "INSTANCE_TF_WORKDIR" => tf_workdir,
+  "INSTANCE_TF_DATA_DIR" => File.join(tf_workdir, ".terraform")
+}
+
+case emit
+when "env"
+  emit_env(paths)
+when "json"
+  puts JSON.pretty_generate(paths)
+else
+  warn "instance-paths: unsupported --emit format: #{emit}"
+  exit 2
+end

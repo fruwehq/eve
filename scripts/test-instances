@@ -134,4 +134,56 @@ else
   printf '  [OK] terraform-backed INSTANCE lifecycle guard\n'
 fi
 
+paths_workdir="$(printf '%s' "$tmp_overlay_dir/paths-work" | tr -s /)"
+paths_state="$(printf '%s' "$tmp_overlay_dir/paths-state" | tr -s /)"
+paths_a="$(EGAME_INSTANCE_WORKDIR="$paths_workdir" EGAME_STATE_DIR="$paths_state" \
+  ./scripts/instance-paths --registry "$FIXTURE" --instance dev-a --emit env)"
+paths_b="$(EGAME_INSTANCE_WORKDIR="$paths_workdir" EGAME_STATE_DIR="$paths_state" \
+  ./scripts/instance-paths --registry "$FIXTURE" --instance aws-gpu-a --emit env)"
+
+extract() { printf '%s\n' "$1" | awk -F= -v key="$2" '$1 == key { print substr($0, index($0, "=") + 1) }'; }
+
+workdir_a="$(extract "$paths_a" INSTANCE_WORKDIR)"
+workdir_b="$(extract "$paths_b" INSTANCE_WORKDIR)"
+state_a="$(extract "$paths_a" INSTANCE_STATE_PATH)"
+state_b="$(extract "$paths_b" INSTANCE_STATE_PATH)"
+tf_a="$(extract "$paths_a" INSTANCE_TF_WORKDIR)"
+tf_b="$(extract "$paths_b" INSTANCE_TF_WORKDIR)"
+
+paths_failed=0
+[ -n "$workdir_a" ] && [ -n "$workdir_b" ] || paths_failed=1
+[ "$workdir_a" != "$workdir_b" ] || paths_failed=1
+[ "$state_a" != "$state_b" ] || paths_failed=1
+[ "$tf_a" != "$tf_b" ] || paths_failed=1
+[ "$workdir_a" = "$paths_workdir/dev-a" ] || paths_failed=1
+[ "$state_a" = "$paths_state/instances/dev-a.json" ] || paths_failed=1
+[ "$tf_a" = "$paths_workdir/dev-a/tf" ] || paths_failed=1
+
+if [ "$paths_failed" -eq 0 ]; then
+  printf '  [OK] instance-paths resolves distinct workdir/state per instance\n'
+else
+  printf '  [FAIL] instance-paths produced overlapping or unexpected paths\n' >&2
+  printf 'expected workdir_a: %s\n' "$paths_workdir/dev-a" >&2
+  printf 'actual workdir_a:   %s\n' "$workdir_a" >&2
+  printf 'expected state_a:   %s\n' "$paths_state/instances/dev-a.json" >&2
+  printf 'actual state_a:     %s\n' "$state_a" >&2
+  printf 'expected tf_a:      %s\n' "$paths_workdir/dev-a/tf" >&2
+  printf 'actual tf_a:        %s\n' "$tf_a" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+if ./scripts/instance-paths --registry "$FIXTURE" --instance no-such-instance --emit env >/dev/null 2>&1; then
+  printf '  [FAIL] instance-paths accepted unknown instance\n' >&2
+  FAIL=$((FAIL + 1))
+else
+  printf '  [OK] instance-paths rejects unknown instance\n'
+fi
+
+if ./scripts/instance-paths --registry "$FIXTURE" --instance '../evil' --emit env >/dev/null 2>&1; then
+  printf '  [FAIL] instance-paths accepted unsafe instance name\n' >&2
+  FAIL=$((FAIL + 1))
+else
+  printf '  [OK] instance-paths rejects unsafe instance name\n'
+fi
+
 [ "$FAIL" -eq 0 ]
