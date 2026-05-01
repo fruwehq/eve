@@ -40,15 +40,21 @@ if (-not (Test-Path $rustdeskExe)) {
   Download-File -Url $url -OutFile $file -SkipIfExists
   Unblock-File $file -ErrorAction SilentlyContinue
 
-  # Use the NSIS-standard /S flag with -Wait so the installer blocks until file
-  # copy is complete. RustDesk's own --silent-install flag returns immediately
-  # after spawning the installer, which leaves the script racing the file copy.
+  # RustDesk's NSIS /S installer spawns a child and the parent exits quickly,
+  # but Start-Process -Wait can block forever if the child inherits the handle.
+  # Launch without -Wait and poll for the exe to appear instead.
   Write-Host "Running RustDesk installer (silent)..."
-  $proc = Start-Process -FilePath $file -ArgumentList "/S" -Wait -PassThru
-  if ($proc.ExitCode -ne 0) {
-    throw "RustDesk installer failed with exit code $($proc.ExitCode)"
+  Start-Process -FilePath $file -ArgumentList "/S"
+
+  $installTimeout = 120
+  $installStart = Get-Date
+  while (((Get-Date) - $installStart).TotalSeconds -lt $installTimeout) {
+    if (Test-Path $rustdeskExe) {
+      Write-Host "RustDesk.exe appeared after $([int]((Get-Date) - $installStart).TotalSeconds)s"
+      break
+    }
+    Start-Sleep -Seconds 2
   }
-  Write-Host "RustDesk installer exit code: $($proc.ExitCode)"
 
   if (-not (Test-Path $rustdeskExe)) {
     throw "RustDesk did not install. RustDesk.exe not found at $rustdeskExe"
