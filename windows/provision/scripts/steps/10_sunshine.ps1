@@ -36,7 +36,7 @@ if (-not $alreadyInstalled) {
     $url = "https://github.com/LizardByte/Sunshine/releases/download/v$sunshineVersion/$asset"
     Write-Host "Downloading: $asset (v$sunshineVersion)"
   } else {
-    Write-Host "SUNSHINE_VERSION not set — resolving latest release via GitHub API..."
+    Write-Host "SUNSHINE_VERSION not set - resolving latest release via GitHub API..."
     try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch {}
     $apiHeaders = @{ "User-Agent" = "Mozilla/5.0"; "Accept" = "application/vnd.github+json" }
     $apiUrl = "https://api.github.com/repos/LizardByte/Sunshine/releases/latest"

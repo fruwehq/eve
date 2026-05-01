@@ -7,7 +7,7 @@ Write-Host "#########################################################"
 # Make VDD the sole active display on the desktop at the resolution configured
 # in step 21 (EPHEMERAL_DISPLAY_RESOLUTION).  NVIDIA's display output is
 # disconnected from the desktop topology so the virtual desktop equals VDD's
-# resolution alone.  The NVIDIA ADAPTER stays enabled — Sunshine still uses it
+# resolution alone.  The NVIDIA ADAPTER stays enabled - Sunshine still uses it
 # for NVENC encoding and DXGI Desktop Duplication captures the whole desktop
 # (which is now just VDD).  The Microsoft Basic Display Adapter is disabled
 # entirely.
@@ -28,7 +28,7 @@ $basicAdapters = @(Get-PnpDevice -Class Display -PresentOnly -ErrorAction Silent
     Where-Object { $_.FriendlyName -eq 'Microsoft Basic Display Adapter' })
 
 if ($basicAdapters.Count -eq 0) {
-    Write-Host "Microsoft Basic Display Adapter not present — nothing to disable."
+    Write-Host "Microsoft Basic Display Adapter not present - nothing to disable."
 }
 
 foreach ($dev in $basicAdapters) {

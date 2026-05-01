@@ -22,7 +22,7 @@ if (Test-Path -LiteralPath $envFile) {
   if ($envData.display_resolution) { $DefaultDisplayResolution = [string]$envData.display_resolution }
 }
 
-# Baseline list — 10 modes that Sunshine/Moonlight clients commonly request.
+# Baseline list - 10 modes that Sunshine/Moonlight clients commonly request.
 # Global refresh rates (30/60/120) below apply to all of them; the configured
 # default is added if it falls outside the baseline.
 $BaselineResolutions = @(
@@ -67,7 +67,7 @@ try {
   Write-Host "Could not verify existing VDD installation. Continuing..."
 }
 
-# Download the latest VDD Control ZIP regardless of install state — we need it
+# Download the latest VDD Control ZIP regardless of install state - we need it
 # both for the silent-installer (when VDD is missing) and for the desktop GUI
 # install + shortcut later in this step.
 try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch {}
