@@ -8,8 +8,9 @@ Write-Host "#########################################################"
 
 Write-Host "Installing RustDesk..."
 
-$rustdeskDir = "${env:ProgramFiles}\RustDesk"
-$rustdeskExe = Join-Path $rustdeskDir "RustDesk.exe"
+# RustDesk 1.4+ installs to %LOCALAPPDATA%\rustdesk\ rather than Program Files.
+$rustdeskDir = "${env:LOCALAPPDATA}\rustdesk"
+$rustdeskExe = Join-Path $rustdeskDir "rustdesk.exe"
 
 if (-not (Test-Path $rustdeskExe)) {
   # Resolve the latest Windows x86_64 installer asset via the GitHub API
@@ -57,7 +58,7 @@ if (-not (Test-Path $rustdeskExe)) {
   }
 
   if (-not (Test-Path $rustdeskExe)) {
-    throw "RustDesk did not install. RustDesk.exe not found at $rustdeskExe"
+    throw "RustDesk did not install. rustdesk.exe not found at $rustdeskExe"
   }
 } else {
   Write-Host "RustDesk already installed at $rustdeskDir. Skipping installer."
@@ -70,13 +71,6 @@ if ($systemPath -notlike "*$rustdeskDir*") {
   Write-Host "Adding $rustdeskDir to system PATH"
   [Environment]::SetEnvironmentVariable("Path", "$systemPath;$rustdeskDir", "Machine")
   $env:Path = "$env:Path;$rustdeskDir"
-}
-
-# Provide a stable lower-case alias on PATH; the bare `rustdesk` token resolves via
-# PATHEXT to RustDesk.exe on Windows, but some shells lowercase before lookup.
-$rustdeskShim = Join-Path $rustdeskDir "rustdesk.exe"
-if (-not (Test-Path $rustdeskShim)) {
-  Copy-Item -Path $rustdeskExe -Destination $rustdeskShim -Force
 }
 
 # Read RustDesk config delivered via env.json (see scripts/provision).
