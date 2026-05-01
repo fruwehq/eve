@@ -18,7 +18,28 @@ fi
 TAGS=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^STACK_TAGS=/{print $2}')
 echo "[tf-init] profile=$PROFILE tags=$TAGS"
 
-terramate generate
+run_step() {
+  if [ "${EGAME_TF_PRINT:-0}" = "1" ]; then
+    printf '[tf-init] would run:'
+    printf ' %q' "$@"
+    printf '\n'
+    return 0
+  fi
+  "$@"
+}
+
+if [ "${EGAME_TF_PRINT:-0}" != "1" ]; then
+  terramate generate
+fi
 
 eval "$(./scripts/tf-env "$PROFILE")"
-terramate run --tags="$TAGS" -- terraform init -reconfigure
+run_step terramate run --tags="$TAGS" -- terraform init -reconfigure
+
+# When in v3 INSTANCE= mode, ensure a dedicated workspace exists per stack so
+# subsequent plan/apply/destroy operations (which honor TF_WORKSPACE from
+# tf-env) target an isolated state file. PROFILE= callers skip this and keep
+# using the default workspace.
+if [ -n "${EGAME_INSTANCE_NAME:-}" ]; then
+  run_step terramate run --tags="$TAGS" -- \
+    terraform workspace select -or-create "$EGAME_INSTANCE_NAME"
+fi

@@ -46,6 +46,15 @@ print_kv() {
 
 PROVIDER="$(getv PROVIDER)"
 
+# Per-instance state isolation: when EGAME_INSTANCE_NAME is set the caller is
+# in v3 INSTANCE= mode. Route Terraform to a dedicated workspace so two
+# instances on the same provider do not clobber each other's state. PROFILE=
+# callers leave EGAME_INSTANCE_NAME unset and continue to use the default
+# workspace, preserving existing behavior.
+if [ -n "${EGAME_INSTANCE_NAME:-}" ]; then
+  print_kv TF_WORKSPACE "$EGAME_INSTANCE_NAME"
+fi
+
 # Common — shared by every terraform-based provider
 print_kv TF_VAR_bundle_packages "$(getv BUNDLE_PACKAGES)"
 print_kv TF_VAR_location_name "$(getv LOCATION_NAME)"
