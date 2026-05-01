@@ -19,22 +19,25 @@ $marker    = Join-Path $stateDir 'display-config-done.flag'
 $dcLog     = Join-Path $stateDir 'display-config.log'
 $rebootFlg = Join-Path $stateDir 'reboot.flag'
 
-# ---- Disable Microsoft Basic Display Adapter (by hardware ID) ----
-$basicAdapterIds = @(
-    'PCI\VEN_1234&DEV_1111&SUBSYS_11001AF4&REV_02\3&11583659&0&08'
-)
-foreach ($id in $basicAdapterIds) {
-    $dev = Get-PnpDevice -InstanceId $id -ErrorAction SilentlyContinue
-    if (-not $dev) {
-        Write-Host "Basic adapter not present (skipping): $id"
-        continue
-    }
+# ---- Disable Microsoft Basic Display Adapter ----
+# Match by FriendlyName rather than full PnP InstanceID. The QEMU/Bochs vendor
+# (1234:1111) is consistent across cloud Windows VMs, but the trailing instance
+# specifier (e.g. "3&11583659&0&08") is hardware-instance-specific and changes
+# per VM, so a hardcoded InstanceID would silently skip on every fresh box.
+$basicAdapters = @(Get-PnpDevice -Class Display -PresentOnly -ErrorAction SilentlyContinue |
+    Where-Object { $_.FriendlyName -eq 'Microsoft Basic Display Adapter' })
+
+if ($basicAdapters.Count -eq 0) {
+    Write-Host "Microsoft Basic Display Adapter not present — nothing to disable."
+}
+
+foreach ($dev in $basicAdapters) {
     if ($dev.ConfigManagerErrorCode -eq 'CM_PROB_DISABLED') {
-        Write-Host "Basic adapter already disabled: $($dev.FriendlyName)"
+        Write-Host "Basic adapter already disabled: $($dev.InstanceId)"
         continue
     }
-    Write-Host "Disabling: $($dev.FriendlyName) [$id]"
-    Disable-PnpDevice -InstanceId $id -Confirm:$false
+    Write-Host "Disabling: $($dev.FriendlyName) [$($dev.InstanceId)]"
+    Disable-PnpDevice -InstanceId $dev.InstanceId -Confirm:$false
 }
 
 # ---- C# source: display-config.exe ----
