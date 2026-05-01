@@ -127,4 +127,11 @@ else
   FAIL=$((FAIL + 1))
 fi
 
+if EGAME_INSTANCE_REGISTRY="$FIXTURE" EGAME_INSTANCE_WORKDIR="$tmp_overlay_dir/run" make status INSTANCE=aws-gpu-a >/dev/null 2>&1; then
+  printf '  [FAIL] terraform-backed INSTANCE lifecycle guard\n' >&2
+  FAIL=$((FAIL + 1))
+else
+  printf '  [OK] terraform-backed INSTANCE lifecycle guard\n'
+fi
+
 [ "$FAIL" -eq 0 ]

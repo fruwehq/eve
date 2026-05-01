@@ -1,0 +1,19 @@
+api_version: egame.plugin/v1
+kind: provider
+id: local-virtualbox
+display_name: Local VirtualBox
+commands:
+  resolve: {exec: scripts/provider-plugin, args: [local-virtualbox, resolve]}
+  init: {exec: scripts/provider-plugin, args: [local-virtualbox, init]}
+  plan: {exec: scripts/provider-plugin, args: [local-virtualbox, plan]}
+  up: {exec: scripts/provider-plugin, args: [local-virtualbox, up]}
+  down: {exec: scripts/provider-plugin, args: [local-virtualbox, down]}
+  start: {exec: scripts/provider-plugin, args: [local-virtualbox, start]}
+  stop: {exec: scripts/provider-plugin, args: [local-virtualbox, stop]}
+  status: {exec: scripts/provider-plugin, args: [local-virtualbox, status]}
+  ip: {exec: scripts/provider-plugin, args: [local-virtualbox, ip]}
+  ssh: {exec: scripts/provider-plugin, args: [local-virtualbox, ssh]}
+supports:
+  engines: [vagrant]
+  kinds: [vm]
+env: [VAGRANT_SHOW_CONSOLE]

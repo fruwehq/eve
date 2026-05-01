@@ -1,0 +1,57 @@
+#!/usr/bin/env ruby
+# Built-in provider plugin compatibility wrapper around existing profile scripts.
+
+require "json"
+
+ROOT = File.expand_path("..", __dir__)
+provider = ARGV.shift
+command = ARGV.shift
+extra_args = ARGV
+
+unless provider && command
+  warn "Usage: scripts/provider-plugin <provider> <command> [args...]"
+  exit 2
+end
+
+resolved = JSON.parse($stdin.read)
+actual_provider = resolved.fetch("machine").fetch("provider")
+profile = resolved.fetch("instance").fetch("name")
+
+if actual_provider != provider
+  warn "provider-plugin: manifest provider #{provider} does not match resolved provider #{actual_provider}"
+  exit 1
+end
+
+if ENV["EGAME_PLUGIN_DRY_RUN"] == "1" || command == "resolve"
+  puts JSON.generate({
+    "kind" => "provider",
+    "provider" => provider,
+    "command" => command,
+    "profile" => profile,
+    "engine" => resolved.fetch("engine"),
+    "dry_run" => ENV["EGAME_PLUGIN_DRY_RUN"] == "1"
+  })
+  exit 0
+end
+
+make_targets = {
+  "init" => "init",
+  "plan" => "plan",
+  "up" => "up",
+  "down" => "down",
+  "start" => "start",
+  "stop" => "stop",
+  "status" => "status"
+}
+
+case command
+when *make_targets.keys
+  exec "make", make_targets.fetch(command), "PROFILE=#{profile}", "INSTANCE="
+when "ip"
+  exec File.join(ROOT, "scripts/instance-ip"), profile
+when "ssh"
+  exec File.join(ROOT, "scripts/instance-ssh"), profile, *extra_args
+else
+  warn "provider-plugin: unsupported command: #{command}"
+  exit 2
+end

@@ -1,0 +1,11 @@
+api_version: egame.plugin/v1
+kind: package
+id: vscode
+display_name: Visual Studio Code
+commands:
+  install: {exec: scripts/package-plugin, args: [vscode, install]}
+  status: {exec: scripts/package-plugin, args: [vscode, status]}
+  down: {exec: scripts/package-plugin, args: [vscode, down]}
+supports: {os_families: [ubuntu]}
+down: {destructive: true}
+env: []

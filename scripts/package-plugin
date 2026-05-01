@@ -1,0 +1,84 @@
+#!/usr/bin/env ruby
+# Built-in package plugin compatibility wrapper.
+
+require "json"
+
+ROOT = File.expand_path("..", __dir__)
+package_id = ARGV.shift
+command = ARGV.shift
+
+unless package_id && command
+  warn "Usage: scripts/package-plugin <package> <install|status|down>"
+  exit 2
+end
+
+resolved = JSON.parse($stdin.read)
+profile = resolved.fetch("instance").fetch("name")
+selected = resolved.fetch("bundle_packages").include?(package_id)
+os_family = resolved.fetch("os").fetch("family")
+
+def shell_single_quote(value)
+  "'#{value.gsub("'", "'\"'\"'")}'"
+end
+
+linux_down = {
+  "claude" => "npm uninstall -g @anthropic-ai/claude-code || true; rm -f ~/.local/bin/claude",
+  "codex-cli" => "npm uninstall -g @openai/codex || true; rm -f ~/.local/bin/codex",
+  "dev-toolchain" => "rustup self uninstall -y || true; sudo apt-get remove -y build-essential pkg-config libssl-dev || true",
+  "docker" => "sudo systemctl disable --now docker || true; sudo apt-get remove -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin || true",
+  "goose" => "rm -f ~/.local/bin/goose",
+  "hermes" => "rm -f ~/.local/bin/hermes",
+  "opencode" => "npm uninstall -g opencode-ai || true; rm -f ~/.local/bin/opencode",
+  "rdp" => "sudo systemctl disable --now xrdp || true; sudo apt-get remove -y xrdp || true",
+  "rustdesk" => "sudo systemctl disable --now rustdesk || true; sudo apt-get remove -y rustdesk || true",
+  "ssh" => "echo 'ssh package down is intentionally a no-op'",
+  "steam" => "sudo apt-get remove -y steam steam-installer || true",
+  "sunshine" => "systemctl --user disable --now sunshine || true; sudo systemctl disable --now sunshine || true; sudo apt-get remove -y sunshine || true",
+  "vscode" => "sudo apt-get remove -y code || true",
+  "vnc" => "sudo systemctl disable --now tigervncserver@:1 || true; sudo apt-get remove -y tigervnc-standalone-server tigervnc-common || true",
+  "xpra" => "sudo systemctl disable --now xpra || true; sudo apt-get remove -y xpra || true"
+}
+
+windows_down = {
+  "rustdesk" => "winget uninstall --id RustDesk.RustDesk --silent; exit 0",
+  "steam" => "winget uninstall --id Valve.Steam --silent; exit 0",
+  "sunshine" => "winget uninstall --id LizardByte.Sunshine --silent; exit 0",
+  "xpra" => "winget uninstall --id Xpra.Xpra --silent; exit 0"
+}
+
+if ENV["EGAME_PLUGIN_DRY_RUN"] == "1"
+  puts JSON.generate({
+    "kind" => "package",
+    "package" => package_id,
+    "command" => command,
+    "profile" => profile,
+    "selected" => selected,
+    "os_family" => os_family,
+    "dry_run" => true
+  })
+  exit 0
+end
+
+case command
+when "status"
+  puts JSON.generate({
+    "kind" => "package",
+    "package" => package_id,
+    "profile" => profile,
+    "selected" => selected,
+    "status" => selected ? "selected" : "not-selected"
+  })
+when "install"
+  warn "[package-plugin] install currently delegates to full provisioning for selected package set"
+  exec "make", "provision", "PROFILE=#{profile}", "INSTANCE="
+when "down"
+  remote = if os_family == "windows"
+             windows_down[package_id] || "Write-Output 'No Windows down implementation for #{package_id}'; exit 0"
+           else
+             linux_down[package_id] || "echo 'No Linux down implementation for #{package_id}'"
+           end
+  exec File.join(ROOT, "scripts/instance-ssh"), profile, "--", remote
+else
+  warn "package-plugin: unsupported command: #{command}"
+  exit 2
+end

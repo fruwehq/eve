@@ -1,0 +1,11 @@
+api_version: egame.plugin/v1
+kind: package
+id: goose
+display_name: Goose
+commands:
+  install: {exec: scripts/package-plugin, args: [goose, install]}
+  status: {exec: scripts/package-plugin, args: [goose, status]}
+  down: {exec: scripts/package-plugin, args: [goose, down]}
+supports: {os_families: [ubuntu]}
+down: {destructive: true}
+env: []

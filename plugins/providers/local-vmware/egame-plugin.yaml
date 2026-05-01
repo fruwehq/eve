@@ -1,0 +1,19 @@
+api_version: egame.plugin/v1
+kind: provider
+id: local-vmware
+display_name: Local VMware Fusion
+commands:
+  resolve: {exec: scripts/provider-plugin, args: [local-vmware, resolve]}
+  init: {exec: scripts/provider-plugin, args: [local-vmware, init]}
+  plan: {exec: scripts/provider-plugin, args: [local-vmware, plan]}
+  up: {exec: scripts/provider-plugin, args: [local-vmware, up]}
+  down: {exec: scripts/provider-plugin, args: [local-vmware, down]}
+  start: {exec: scripts/provider-plugin, args: [local-vmware, start]}
+  stop: {exec: scripts/provider-plugin, args: [local-vmware, stop]}
+  status: {exec: scripts/provider-plugin, args: [local-vmware, status]}
+  ip: {exec: scripts/provider-plugin, args: [local-vmware, ip]}
+  ssh: {exec: scripts/provider-plugin, args: [local-vmware, ssh]}
+supports:
+  engines: [vagrant]
+  kinds: [vm]
+env: [VAGRANT_SHOW_CONSOLE]

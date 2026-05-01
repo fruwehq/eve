@@ -1,0 +1,132 @@
+#!/usr/bin/env ruby
+# Dispatch an instance provider command through the configured provider plugin.
+
+require "json"
+require "open3"
+
+ROOT = File.expand_path("..", __dir__)
+
+def usage
+  warn <<~USAGE
+    Usage:
+      scripts/provider-dispatch --instance <name> --command <command> [--registry <path>] [--dry-run] [-- <args...>]
+  USAGE
+end
+
+def run_json(*cmd)
+  out, status = Open3.capture2e(*cmd)
+  raise out unless status.success?
+
+  JSON.parse(out)
+end
+
+def command_vector(spec)
+  exec_path = spec.fetch("exec")
+  exec_path = File.join(ROOT, exec_path) unless exec_path.start_with?("/")
+  [exec_path, *(spec["args"] || [])]
+end
+
+def record_state(instance_name, operation, status, error = nil)
+  return if ENV["EGAME_DISABLE_STATE"] == "1"
+
+  cmd = [
+    File.join(ROOT, "scripts/instance-state"),
+    "--instance", instance_name,
+    "--operation", operation,
+    "--status", status
+  ]
+  cmd += ["--error", error] if error
+  system(*cmd, out: File::NULL, err: File::NULL)
+end
+
+instance_name = nil
+command = nil
+registry_path = ENV["EGAME_INSTANCE_REGISTRY"] ? File.expand_path(ENV["EGAME_INSTANCE_REGISTRY"], Dir.pwd) : nil
+dry_run = false
+extra_args = []
+
+args = ARGV.dup
+until args.empty?
+  arg = args.shift
+  case arg
+  when "--instance"
+    instance_name = args.shift
+  when "--command"
+    command = args.shift
+  when "--registry"
+    registry_path = File.expand_path(args.shift, Dir.pwd)
+  when "--dry-run"
+    dry_run = true
+  when "--"
+    extra_args = args
+    args = []
+  when "-h", "--help"
+    usage
+    exit 0
+  else
+    usage
+    exit 2
+  end
+end
+
+unless instance_name && command
+  usage
+  exit 2
+end
+
+begin
+  resolve_cmd = [File.join(ROOT, "scripts/instance-resolve"), "--instance", instance_name, "--emit", "json"]
+  resolve_cmd += ["--registry", registry_path] if registry_path
+  resolved = run_json(*resolve_cmd)
+
+  provider = resolved.fetch("machine").fetch("provider")
+  engine = resolved.fetch("engine")
+  if engine == "terraform" && !dry_run && command != "resolve" && ENV["EGAME_ALLOW_SHARED_TF_INSTANCE"] != "1"
+    raise "Terraform-backed INSTANCE provider commands are blocked until per-instance Terraform state/workdirs are implemented. Set EGAME_ALLOW_SHARED_TF_INSTANCE=1 to explicitly use the shared compatibility path."
+  end
+
+  plugin_doc = run_json(File.join(ROOT, "scripts/plugin-list"), "--kind", "provider", "--json")
+  plugin = plugin_doc.fetch("plugins").find { |entry| entry["id"] == provider }
+  raise "provider plugin not found: #{provider}" unless plugin
+
+  spec = plugin.fetch("commands")[command]
+  raise "provider plugin #{provider} has no command: #{command}" unless spec
+
+  workdir_root = ENV.fetch("EGAME_INSTANCE_WORKDIR", File.join(ROOT, ".generated/instances"))
+  overlay = File.join(workdir_root, instance_name, "catalog.local.yaml")
+  overlay_cmd = [File.join(ROOT, "scripts/instance-profile-overlay"), "--instance", instance_name, "--output", overlay]
+  overlay_cmd += ["--registry", registry_path] if registry_path
+  overlay_out, overlay_status = Open3.capture2e(*overlay_cmd)
+  raise overlay_out unless overlay_status.success?
+
+  env = ENV.to_h.merge(
+    "EGAME_CATALOG_LOCAL" => overlay,
+    "EGAME_INSTANCE_NAME" => instance_name,
+    "EGAME_PROVIDER_PLUGIN" => provider
+  )
+  env["EGAME_PLUGIN_DRY_RUN"] = "1" if dry_run
+
+  cmd = command_vector(spec) + extra_args
+  record_state(instance_name, "provider.#{command}", "running") unless dry_run
+
+  exit_status = 0
+  Open3.popen3(env, *cmd, chdir: ROOT) do |stdin, stdout, stderr, wait_thr|
+    stdin.write(JSON.generate(resolved))
+    stdin.close
+    out = stdout.read
+    err = stderr.read
+    warn err unless err.empty?
+    print out
+    exit_status = wait_thr.value.exitstatus || 1
+  end
+  if exit_status.zero?
+    record_state(instance_name, "provider.#{command}", "succeeded") unless dry_run
+  else
+    record_state(instance_name, "provider.#{command}", "failed", "exit #{exit_status}") unless dry_run
+  end
+  exit(exit_status)
+rescue StandardError => e
+  record_state(instance_name, "provider.#{command || "unknown"}", "failed", e.message) if instance_name && !dry_run
+  warn "provider-dispatch: #{e.message}"
+  exit 1
+end

@@ -3,7 +3,9 @@
 .PHONY: all aws.login clean default down env generate help info \
 				init init.all instance.create instance.env instance.info \
 				instance.list instance.validate ip lint logs plan \
-				profiles.list profiles.menu providers.status provision \
+				package.down package.install package.reinstall package.status \
+				plugins.list plugins.sync plugins.validate \
+				profiles.list profiles.menu provider.status providers.status provision \
 				recipes.list \
 				provision.clear-state provision.restart provision.wait reboot \
 				remote.console remote.moonlight remote.moonlight.pair \
@@ -13,7 +15,7 @@
 				remote.xpra.desktop remote.xpra.run remote.xpra.start remote.xpra.status \
 				remote.xpra.stop \
 				show-password ssh ssh.run ssh.truenas ssh.wait start status stop \
-				test test.instances test.profiles test.shellcheck test.terraform \
+				test test.instances test.plugins test.profiles test.shellcheck test.terraform \
 				test.update-golden up update upload validate
 
 TM_PARALLEL ?= 8
@@ -186,11 +188,44 @@ plan: ## Plan profile changes (terraform or vagrant)
 		./scripts/tf-plan $(PROFILE); \
 	fi
 
+package.down: ## Remove package from an instance (PACKAGE=<id>, YES=1 for destructive)
+	@if [ -z "$(INSTANCE)" ] || [ -z "$(PACKAGE)" ]; then echo "Usage: make package.down INSTANCE=<name> PACKAGE=<id> YES=1"; exit 2; fi; \
+	args="--instance $(INSTANCE) --package $(PACKAGE) --command down"; \
+	if [ "$(YES)" = "1" ]; then args="$$args --yes"; fi; \
+	./scripts/package-dispatch $$args
+
+package.install: ## Install selected package set for an instance (PACKAGE=<id>)
+	@if [ -z "$(INSTANCE)" ] || [ -z "$(PACKAGE)" ]; then echo "Usage: make package.install INSTANCE=<name> PACKAGE=<id>"; exit 2; fi; \
+	./scripts/package-dispatch --instance $(INSTANCE) --package $(PACKAGE) --command install
+
+package.reinstall: ## Reinstall package on an instance (PACKAGE=<id>, YES=1 for destructive)
+	@if [ -z "$(INSTANCE)" ] || [ -z "$(PACKAGE)" ]; then echo "Usage: make package.reinstall INSTANCE=<name> PACKAGE=<id> YES=1"; exit 2; fi; \
+	args="--instance $(INSTANCE) --package $(PACKAGE) --command reinstall"; \
+	if [ "$(YES)" = "1" ]; then args="$$args --yes"; fi; \
+	./scripts/package-dispatch $$args
+
+package.status: ## Show package plugin status for an instance (PACKAGE=<id>)
+	@if [ -z "$(INSTANCE)" ] || [ -z "$(PACKAGE)" ]; then echo "Usage: make package.status INSTANCE=<name> PACKAGE=<id>"; exit 2; fi; \
+	./scripts/package-dispatch --instance $(INSTANCE) --package $(PACKAGE) --command status
+
+plugins.list: ## List provider and package plugins
+	@./scripts/plugin-list
+
+plugins.sync: ## Download pinned external plugins from .egame/plugin-sources.yaml
+	@./scripts/plugins-sync
+
+plugins.validate: ## Validate provider and package plugin manifests
+	@./scripts/plugin-list --validate
+
 profiles.list: ## List available profiles with details
 	@./scripts/profiles-list --with-details
 
 profiles.menu: ## Interactive profile selector
 	@./scripts/profile-menu
+
+provider.status: ## Show provider plugin status for an instance
+	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make provider.status INSTANCE=<name>"; exit 2; fi; \
+	./scripts/provider-dispatch --instance $(INSTANCE) --command status
 
 providers.status: ## Check provider configuration and connectivity
 	@./scripts/providers-status
@@ -339,11 +374,14 @@ stop: ## Stop (power off) a running instance without destroying
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
 	./scripts/stop $(PROFILE)
 
-test: ## Run all tests (profiles, instances, terraform validate, shellcheck)
+test: ## Run all tests (profiles, instances, plugins, terraform validate, shellcheck)
 	@./scripts/test
 
 test.instances: ## Validate fixture instances and compare emitted env to golden snapshots
 	@./scripts/test-instances
+
+test.plugins: ## Validate plugin manifests and dry-run dispatch contracts
+	@./scripts/test-plugins
 
 test.profiles: ## Validate all profiles and compare emitted env to golden snapshots
 	@./scripts/test-profiles
