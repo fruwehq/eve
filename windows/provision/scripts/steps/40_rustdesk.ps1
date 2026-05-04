@@ -43,22 +43,25 @@ if (-not (Test-Path $rustdeskExe)) {
 
   # RustDesk's NSIS /S installer spawns a child and the parent exits quickly,
   # but Start-Process -Wait can block forever if the child inherits the handle.
-  # Launch without -Wait and poll for the exe to appear instead.
+  # Launch without -Wait and poll for the RustDesk service to register, which
+  # indicates the install is fully complete (exe on disk + service entry).
   Write-Host "Running RustDesk installer (silent)..."
   Start-Process -FilePath $file -ArgumentList "/S"
 
   $installTimeout = 120
   $installStart = Get-Date
   while (((Get-Date) - $installStart).TotalSeconds -lt $installTimeout) {
-    if (Test-Path $rustdeskExe) {
-      Write-Host "RustDesk.exe appeared after $([int]((Get-Date) - $installStart).TotalSeconds)s"
+    $svc = Get-Service -Name "RustDesk" -ErrorAction SilentlyContinue
+    if ($svc) {
+      Write-Host "RustDesk service registered after $([int]((Get-Date) - $installStart).TotalSeconds)s"
       break
     }
     Start-Sleep -Seconds 2
   }
 
-  if (-not (Test-Path $rustdeskExe)) {
-    throw "RustDesk did not install. rustdesk.exe not found at $rustdeskExe"
+  $svc = Get-Service -Name "RustDesk" -ErrorAction SilentlyContinue
+  if (-not $svc) {
+    throw "RustDesk did not install. RustDesk service not registered after ${installTimeout}s"
   }
 } else {
   Write-Host "RustDesk already installed at $rustdeskDir. Skipping installer."

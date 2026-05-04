@@ -96,6 +96,14 @@ tests/golden/                  # Frozen profile-resolve env snapshots
 - Profile-driven values (region, instance type, plan, OS id, AZ) are threaded through as `TF_VAR_*` from `scripts/tf-env`; do **not** hardcode them in stack globals.
 - TrueNAS is a special case: the parent `stacks/truenas/providers.tm.hcl` generates only `required_version`; the child `stacks/truenas/20-services/providers.tm.hcl` generates the full provider + variables (which the module at `modules/truenas/vm.tm.hcl` then relies on — see the note at `null_resource.cloudinit_iso` about `var.truenas_host`).
 
+## Windows SSH shell
+
+The Windows SSH server default shell is **PowerShell** (not `cmd.exe`). All scripts that send remote commands via `instance-ssh --` to a Windows host use PowerShell syntax directly — there is no `cmd.exe` fallback. When writing new SSH-invoked commands for Windows profiles, use PowerShell cmdlets and syntax.
+
+## No fallbacks
+
+This project provisions environments from scratch — we control the OS, installed packages, shell, and runtime versions. **Never add fallback logic** (e.g. "try PowerShell, fall back to cmd.exe" or "check both Program Files and AppData just in case"). Always use the single correct path for the environment we build. If the environment changes, change the script — don't layer on fallbacks that mask the real requirement.
+
 ## Catalog kinds: vm vs metal
 
 Machine entries declare a `kind:` field. Current supported kinds:

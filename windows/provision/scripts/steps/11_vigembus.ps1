@@ -31,7 +31,7 @@ $api = "https://api.github.com/repos/nefarius/ViGEmBus/releases/latest"
 $release = $null
 for ($i = 1; $i -le 5; $i++) {
   try { $release = Invoke-RestMethod -Uri $api -Headers $headers; break } catch {
-    if ($i -eq 5) { throw }
+    if ($i -eq 5) { throw "Failed to fetch ViGEmBus releases from GitHub API after 5 attempts: $_" }
     Start-Sleep -Seconds 2
   }
 }
