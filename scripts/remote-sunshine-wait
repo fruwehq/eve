@@ -17,7 +17,7 @@ ATTEMPT=1
 
 printf '%s\n' "Waiting for Sunshine API on $IP:47990..."
 while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
-  HTTP_CODE=$(curl -sS -k \
+  HTTP_CODE=$(curl -sS -k -L \
     -u "sunshine:${EPHEMERAL_SUNSHINE_PASSWORD}" \
     -o /dev/null \
     -w "%{http_code}" \
