@@ -5,7 +5,9 @@ set -euo pipefail
 PROFILE="${1:?Usage: scripts/remote-sunshine-wait <profile>}"
 cd "$(git rev-parse --show-toplevel)"
 
-PKGS=$(./scripts/profile-resolve --profile "$PROFILE" --emit env | awk -F= '/^BUNDLE_PACKAGES/{print $2}')
+RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
+OS_FAMILY=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^OS_FAMILY=/{print $2}')
+PKGS=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^BUNDLE_PACKAGES=/{print $2}')
 echo "$PKGS" | tr ',' '\n' | grep -qx sunshine || { echo "sunshine not in bundle — skipping"; exit 0; }
 
 IP=$(./scripts/instance-ip "$PROFILE")
@@ -15,7 +17,7 @@ ATTEMPT=1
 
 printf '%s\n' "Waiting for Sunshine API on $IP:47990..."
 while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
-  HTTP_CODE=$(curl -sS -k \
+  HTTP_CODE=$(curl -sS -k -L \
     -u "sunshine:${EPHEMERAL_SUNSHINE_PASSWORD}" \
     -o /dev/null \
     -w "%{http_code}" \
@@ -26,8 +28,17 @@ while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
   fi
   if [ "$ATTEMPT" -eq 3 ]; then
     printf '%s\n' "Sunshine not responding — starting via SSH..."
-    # shellcheck disable=SC2016
-    "${SSH_CMD[@]}" 'export XDG_RUNTIME_DIR="/run/user/$(id -u)" DISPLAY="${SUNSHINE_DISPLAY:-:0}" XAUTHORITY="${XAUTHORITY:-$HOME/.Xauthority}"; systemctl --user import-environment DISPLAY XAUTHORITY XDG_RUNTIME_DIR 2>/dev/null || true; systemctl --user start sunshine 2>/dev/null || true' || true
+    case "$OS_FAMILY" in
+      windows)
+        # Windows SSH default shell is PowerShell (see AGENTS.md).
+        # shellcheck disable=SC2016
+        "${SSH_CMD[@]}" 'Start-Process "C:\Program Files\Sunshine\Sunshine.exe" -WindowStyle Hidden' 2>/dev/null || true
+        ;;
+      *)
+        # shellcheck disable=SC2016
+        "${SSH_CMD[@]}" 'export XDG_RUNTIME_DIR="/run/user/$(id -u)" DISPLAY="${SUNSHINE_DISPLAY:-:0}" XAUTHORITY="${XAUTHORITY:-$HOME/.Xauthority}"; systemctl --user import-environment DISPLAY XAUTHORITY XDG_RUNTIME_DIR 2>/dev/null || true; systemctl --user start sunshine 2>/dev/null || true' || true
+        ;;
+    esac
   fi
   printf '%s\n' "Sunshine API not ready yet (attempt $ATTEMPT/$MAX_ATTEMPTS, http=$HTTP_CODE). Sleeping 2 seconds..."
   sleep 2

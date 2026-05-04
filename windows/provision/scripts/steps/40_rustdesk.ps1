@@ -8,10 +8,42 @@ Write-Host "#########################################################"
 
 Write-Host "Installing RustDesk..."
 
-$rustdeskDir = "${env:ProgramFiles}\RustDesk"
-$rustdeskExe = Join-Path $rustdeskDir "RustDesk.exe"
+# The provisioning runner executes as SYSTEM via Scheduled Task, so
+# %LOCALAPPDATA% expands to systemprofile\AppData\Local. RustDesk's NSIS
+# installer also writes to the invoking user's LOCALAPPDATA. Discover the
+# actual install path from the running process after install rather than
+# hardcoding a per-user path.
 
-if (-not (Test-Path $rustdeskExe)) {
+# Candidate install locations: SYSTEM profile (Scheduled Task context) and
+# the Administrator user profile (interactive session context).
+$candidateDirs = @(
+  "${env:LOCALAPPDATA}\rustdesk",
+  "C:\Users\Administrator\AppData\Local\rustdesk"
+)
+
+$rustdeskDir = $null
+$rustdeskExe = $null
+
+# Check if already installed in any candidate location.
+foreach ($dir in $candidateDirs) {
+  $candidate = Join-Path $dir "rustdesk.exe"
+  if (Test-Path $candidate) {
+    $rustdeskDir = $dir
+    $rustdeskExe = $candidate
+    break
+  }
+}
+
+# Also check via the running process (covers non-standard paths).
+if (-not $rustdeskExe) {
+  $proc = Get-Process rustdesk -ErrorAction SilentlyContinue | Select-Object -First 1
+  if ($proc -and $proc.Path) {
+    $rustdeskExe = $proc.Path
+    $rustdeskDir = Split-Path $rustdeskExe
+  }
+}
+
+if (-not $rustdeskExe) {
   # Resolve the latest Windows x86_64 installer asset via the GitHub API
   # (mirrors the Sunshine step's pattern in 10_sunshine.ps1).
   $headers = @{ "User-Agent"="Mozilla/5.0"; "Accept"="application/vnd.github+json" }
@@ -40,19 +72,32 @@ if (-not (Test-Path $rustdeskExe)) {
   Download-File -Url $url -OutFile $file -SkipIfExists
   Unblock-File $file -ErrorAction SilentlyContinue
 
-  # Use the NSIS-standard /S flag with -Wait so the installer blocks until file
-  # copy is complete. RustDesk's own --silent-install flag returns immediately
-  # after spawning the installer, which leaves the script racing the file copy.
+  # RustDesk's NSIS /S installer spawns a child and the parent exits quickly,
+  # but Start-Process -Wait can block forever if the child inherits the handle.
+  # Launch without -Wait and poll for the running process, which indicates the
+  # install is fully complete. RustDesk 1.4+ does not register a Windows
+  # service; it runs as a user process.
   Write-Host "Running RustDesk installer (silent)..."
-  $proc = Start-Process -FilePath $file -ArgumentList "/S" -Wait -PassThru
-  if ($proc.ExitCode -ne 0) {
-    throw "RustDesk installer failed with exit code $($proc.ExitCode)"
-  }
-  Write-Host "RustDesk installer exit code: $($proc.ExitCode)"
+  Start-Process -FilePath $file -ArgumentList "/S"
 
-  if (-not (Test-Path $rustdeskExe)) {
-    throw "RustDesk did not install. RustDesk.exe not found at $rustdeskExe"
+  $installTimeout = 120
+  $installStart = Get-Date
+  while (((Get-Date) - $installStart).TotalSeconds -lt $installTimeout) {
+    $proc = Get-Process rustdesk -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($proc -and $proc.Path) {
+      $rustdeskExe = $proc.Path
+      $rustdeskDir = Split-Path $rustdeskExe
+      Write-Host "RustDesk process running after $([int]((Get-Date) - $installStart).TotalSeconds)s"
+      break
+    }
+    Start-Sleep -Seconds 2
   }
+
+  if (-not $rustdeskExe) {
+    throw "RustDesk did not install. No rustdesk process detected after ${installTimeout}s"
+  }
+
+  Write-Host "RustDesk installed at $rustdeskDir"
 } else {
   Write-Host "RustDesk already installed at $rustdeskDir. Skipping installer."
 }
@@ -64,13 +109,6 @@ if ($systemPath -notlike "*$rustdeskDir*") {
   Write-Host "Adding $rustdeskDir to system PATH"
   [Environment]::SetEnvironmentVariable("Path", "$systemPath;$rustdeskDir", "Machine")
   $env:Path = "$env:Path;$rustdeskDir"
-}
-
-# Provide a stable lower-case alias on PATH; the bare `rustdesk` token resolves via
-# PATHEXT to RustDesk.exe on Windows, but some shells lowercase before lookup.
-$rustdeskShim = Join-Path $rustdeskDir "rustdesk.exe"
-if (-not (Test-Path $rustdeskShim)) {
-  Copy-Item -Path $rustdeskExe -Destination $rustdeskShim -Force
 }
 
 # Read RustDesk config delivered via env.json (see scripts/provision).
@@ -89,17 +127,17 @@ if (Test-Path $envFile) {
   }
 }
 
-Write-Host "Waiting for RustDesk service..."
+Write-Host "Waiting for RustDesk process..."
 for ($i = 1; $i -le 15; $i++) {
-  $svc = Get-Service -Name "RustDesk" -ErrorAction SilentlyContinue
-  if ($svc -and $svc.Status -eq "Running") { break }
+  $proc = Get-Process rustdesk -ErrorAction SilentlyContinue | Select-Object -First 1
+  if ($proc) { break }
   Start-Sleep -Seconds 2
 }
 
-# RustDesk on Windows runs as a service under LocalService (or SYSTEM in newer builds).
-# `--option` and `--password` write to the *user* config; the daemon reads its *own*
-# config dir. Write the TOML directly into every plausible service config location so
-# whichever the running daemon uses gets the right rendezvous_server/key/password.
+# RustDesk 1.4+ runs as a user process (not a Windows service). `--option`
+# and `--password` write to the *user* config; the daemon reads its *own*
+# config dir. Write the TOML directly into every plausible config location so
+# whichever the running process uses gets the right rendezvous_server/key/password.
 #
 # Idempotency note: the password+salt hash gets a fresh salt every time `--password`
 # runs, which invalidates whatever per-peer hash the local RustDesk client cached on
@@ -127,7 +165,7 @@ if ($rustdeskServer -or $rustdeskKey -or $rustdeskPassword) {
   $toml = $tomlBuilder.ToString()
 
   $configDirs = @(
-    "C:\Windows\ServiceProfiles\LocalService\AppData\Roaming\RustDesk\config",
+    "C:\Users\Administrator\AppData\Roaming\RustDesk\config",
     "C:\Windows\System32\config\systemprofile\AppData\Roaming\RustDesk\config",
     "$env:APPDATA\RustDesk\config"
   )
@@ -143,8 +181,8 @@ if ($rustdeskServer -or $rustdeskKey -or $rustdeskPassword) {
   }
 
   if ($configChanged) {
-    Write-Host "Stopping RustDesk service to rewrite config..."
-    Stop-Service -Name "RustDesk" -ErrorAction SilentlyContinue
+    Write-Host "Stopping RustDesk to rewrite config..."
+    Get-Process rustdesk -ErrorAction SilentlyContinue | Stop-Process -Force
     Start-Sleep -Seconds 2
 
     foreach ($dir in $configDirs) {
@@ -156,8 +194,8 @@ if ($rustdeskServer -or $rustdeskKey -or $rustdeskPassword) {
       Set-Content -Path $cfgPath -Value $toml -Encoding UTF8 -NoNewline
     }
 
-    Write-Host "Restarting RustDesk service..."
-    Start-Service -Name "RustDesk" -ErrorAction SilentlyContinue
+    Write-Host "Restarting RustDesk..."
+    Start-Process -FilePath $rustdeskExe -WindowStyle Hidden
     Start-Sleep -Seconds 3
 
     if ($rustdeskPassword) {

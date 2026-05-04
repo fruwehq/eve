@@ -30,15 +30,35 @@ if (-not $alreadyInstalled) {
     } catch {}
   }
 
-  if (-not $sunshineVersion) {
-    throw "SUNSHINE_VERSION must be set in .env"
+  $asset = "Sunshine-Windows-AMD64-installer.exe"
+
+  if ($sunshineVersion) {
+    $url = "https://github.com/LizardByte/Sunshine/releases/download/v$sunshineVersion/$asset"
+    Write-Host "Downloading: $asset (v$sunshineVersion)"
+  } else {
+    Write-Host "SUNSHINE_VERSION not set - resolving latest release via GitHub API..."
+    try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch {}
+    $apiHeaders = @{ "User-Agent" = "Mozilla/5.0"; "Accept" = "application/vnd.github+json" }
+    $apiUrl = "https://api.github.com/repos/LizardByte/Sunshine/releases/latest"
+    $release = $null
+    for ($i = 1; $i -le 5; $i++) {
+      try { $release = Invoke-RestMethod -Uri $apiUrl -Headers $apiHeaders; break } catch {
+        if ($i -eq 5) { throw "Failed to query GitHub API for Sunshine releases: $($_.Exception.Message)" }
+        Start-Sleep -Seconds 2
+      }
+    }
+    $releaseAsset = $release.assets | Where-Object { $_.name -eq $asset } | Select-Object -First 1
+    if (-not $releaseAsset) {
+      $releaseAsset = $release.assets | Where-Object { $_.name -match "^Sunshine-Windows-.*-installer\.exe$" } | Select-Object -First 1
+    }
+    if (-not $releaseAsset) {
+      throw "Could not find Windows installer in latest Sunshine release. Assets: $($release.assets.name -join ', ')"
+    }
+    $url = $releaseAsset.browser_download_url
+    Write-Host "Downloading: $($releaseAsset.name) (latest)"
   }
 
-  $asset = "Sunshine-Windows-AMD64-installer.exe"
-  $url = "https://github.com/LizardByte/Sunshine/releases/download/v$sunshineVersion/$asset"
   $file = "C:\Users\Administrator\provision\downloads\sunshine\$asset"
-
-  Write-Host "Downloading: $asset (v$sunshineVersion)"
   Download-File -Url $url -OutFile $file -SkipIfExists
   Unblock-File $file -ErrorAction SilentlyContinue
 
@@ -128,7 +148,46 @@ if (-not $ready) {
     Write-Warning "Sunshine API did not become ready in time. Skipping auto pairing."
   }
 } else {
-  Write-Host "Sunshine API ready. Sending pairing PIN..."
+  Write-Host "Sunshine API ready. Completing welcome setup..."
+
+  # Sunshine 2025.x shows a welcome page on first run. Complete it by posting
+  # the credentials via the password API, which finalizes the initial setup and
+  # allows authenticated API requests.
+  $welcomeBody = @{
+    currentUsername  = "sunshine"
+    currentPassword  = $sunshinePassword
+    newUsername      = "sunshine"
+    newPassword      = $sunshinePassword
+    confirmNewPassword = $sunshinePassword
+  } | ConvertTo-Json -Compress
+
+  try {
+    $welcomeBodyFile = Join-Path $env:TEMP "sunshine-welcome-request.json"
+    Set-Content -Path $welcomeBodyFile -Value $welcomeBody -NoNewline
+
+    $welcomeResponseFile = Join-Path $env:TEMP "sunshine-welcome-response.json"
+    if (Test-Path $welcomeResponseFile) {
+      Remove-Item $welcomeResponseFile -Force -ErrorAction SilentlyContinue
+    }
+
+    # Try the password endpoint (Sunshine 2025.x initial setup)
+    $httpCode = & curl.exe -sS -k `
+      -u "sunshine:$sunshinePassword" `
+      -H "Content-Type: application/json" `
+      --data-binary "@$welcomeBodyFile" `
+      -o $welcomeResponseFile `
+      -w "%{http_code}" `
+      "https://127.0.0.1:47990/api/password"
+    Write-Host "Welcome/password setup: HTTP $httpCode"
+    if (Test-Path $welcomeResponseFile) {
+      $welcomeResp = Get-Content -Path $welcomeResponseFile -Raw
+      if ($welcomeResp) { Write-Host $welcomeResp }
+    }
+  } catch {
+    Write-Warning "Welcome setup attempt failed: $($_.Exception.Message)"
+  }
+
+  Write-Host "Sending pairing PIN..."
 
   $pairBody = @{ pin = "1234"; name = "ephemeral-client" } | ConvertTo-Json -Compress
 

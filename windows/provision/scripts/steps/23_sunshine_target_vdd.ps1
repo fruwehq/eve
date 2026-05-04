@@ -6,7 +6,7 @@ Write-Host "#########################################################"
 
 # After step 22, VDD is the only active display on the desktop.  NVIDIA's
 # adapter stays present for NVENC encoding.  DXGI Desktop Duplication captures
-# the entire virtual desktop — which is now VDD's resolution alone.  We just
+# the entire virtual desktop - which is now VDD's resolution alone.  We just
 # ensure Sunshine has no stale output_name override and restart it.
 
 $confPath = 'C:\Program Files\Sunshine\config\sunshine.conf'

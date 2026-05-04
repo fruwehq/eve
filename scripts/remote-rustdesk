@@ -17,10 +17,10 @@ OS_FAMILY=$(./scripts/profile-resolve --profile "$PROFILE" --emit env | awk -F= 
 
 case "$OS_FAMILY" in
   windows)
-    # shellcheck disable=SC2016  # PowerShell $_ / $rd / $cfg are not bash expansions
-    RD_LOCATE='$rd = @("C:\Program Files\RustDesk\rustdesk.exe","C:\Program Files (x86)\RustDesk\rustdesk.exe","C:\Program Files\RustDesk\RustDesk.exe","C:\Program Files (x86)\RustDesk\RustDesk.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1'
     # shellcheck disable=SC2016
-    CFG_LOCATE='$cfg = @("C:\Windows\ServiceProfiles\LocalService\AppData\Roaming\RustDesk\config\RustDesk2.toml","C:\Windows\System32\config\systemprofile\AppData\Roaming\RustDesk\config\RustDesk2.toml","$env:APPDATA\RustDesk\config\RustDesk2.toml") | Where-Object { Test-Path $_ } | Select-Object -First 1'
+    RD_LOCATE='$rd = @("$env:LOCALAPPDATA\rustdesk\rustdesk.exe","C:\Users\Administrator\AppData\Local\rustdesk\rustdesk.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1'
+    # shellcheck disable=SC2016
+    CFG_LOCATE='$cfg = @("C:\Users\Administrator\AppData\Roaming\RustDesk\config\RustDesk2.toml","C:\Windows\System32\config\systemprofile\AppData\Roaming\RustDesk\config\RustDesk2.toml","$env:APPDATA\RustDesk\config\RustDesk2.toml") | Where-Object { Test-Path $_ } | Select-Object -First 1'
     # shellcheck disable=SC2016
     GET_ID_CMD="$RD_LOCATE; if (\$rd) { & \$rd --get-id } else { Write-Error 'rustdesk.exe not found on remote' }"
     # shellcheck disable=SC2016
