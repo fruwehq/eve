@@ -8,11 +8,42 @@ Write-Host "#########################################################"
 
 Write-Host "Installing RustDesk..."
 
-# RustDesk 1.4+ installs to %LOCALAPPDATA%\rustdesk\ rather than Program Files.
-$rustdeskDir = "${env:LOCALAPPDATA}\rustdesk"
-$rustdeskExe = Join-Path $rustdeskDir "rustdesk.exe"
+# The provisioning runner executes as SYSTEM via Scheduled Task, so
+# %LOCALAPPDATA% expands to systemprofile\AppData\Local. RustDesk's NSIS
+# installer also writes to the invoking user's LOCALAPPDATA. Discover the
+# actual install path from the running process after install rather than
+# hardcoding a per-user path.
 
-if (-not (Test-Path $rustdeskExe)) {
+# Candidate install locations: SYSTEM profile (Scheduled Task context) and
+# the Administrator user profile (interactive session context).
+$candidateDirs = @(
+  "${env:LOCALAPPDATA}\rustdesk",
+  "C:\Users\Administrator\AppData\Local\rustdesk"
+)
+
+$rustdeskDir = $null
+$rustdeskExe = $null
+
+# Check if already installed in any candidate location.
+foreach ($dir in $candidateDirs) {
+  $candidate = Join-Path $dir "rustdesk.exe"
+  if (Test-Path $candidate) {
+    $rustdeskDir = $dir
+    $rustdeskExe = $candidate
+    break
+  }
+}
+
+# Also check via the running process (covers non-standard paths).
+if (-not $rustdeskExe) {
+  $proc = Get-Process rustdesk -ErrorAction SilentlyContinue | Select-Object -First 1
+  if ($proc -and $proc.Path) {
+    $rustdeskExe = $proc.Path
+    $rustdeskDir = Split-Path $rustdeskExe
+  }
+}
+
+if (-not $rustdeskExe) {
   # Resolve the latest Windows x86_64 installer asset via the GitHub API
   # (mirrors the Sunshine step's pattern in 10_sunshine.ps1).
   $headers = @{ "User-Agent"="Mozilla/5.0"; "Accept"="application/vnd.github+json" }
@@ -62,6 +93,16 @@ if (-not (Test-Path $rustdeskExe)) {
   $svc = Get-Service -Name "RustDesk" -ErrorAction SilentlyContinue
   if (-not $svc) {
     throw "RustDesk did not install. RustDesk service not registered after ${installTimeout}s"
+  }
+
+  # Resolve the actual install path from the running process.
+  $proc = Get-Process rustdesk -ErrorAction SilentlyContinue | Select-Object -First 1
+  if ($proc -and $proc.Path) {
+    $rustdeskExe = $proc.Path
+    $rustdeskDir = Split-Path $rustdeskExe
+    Write-Host "RustDesk installed at $rustdeskDir"
+  } else {
+    throw "RustDesk service registered but could not locate exe via process"
   }
 } else {
   Write-Host "RustDesk already installed at $rustdeskDir. Skipping installer."
