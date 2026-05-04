@@ -11,7 +11,7 @@ def usage
   warn <<~USAGE
     Usage:
       scripts/instance-state --instance <name> --get
-      scripts/instance-state --instance <name> --operation <name> --status <status> [--provider-state <state>] [--package <id> --package-state <state>] [--error <message>]
+      scripts/instance-state --instance <name> --operation <name> --status <status> [--desired-state <state>] [--provider-state <state>] [--provision-state <state>] [--package <id> --package-state <state>] [--error <message>]
   USAGE
 end
 
@@ -40,7 +40,9 @@ instance = nil
 get = false
 operation = nil
 status = nil
+desired_state = nil
 provider_state = nil
+provision_state = nil
 package = nil
 package_state = nil
 error = nil
@@ -56,8 +58,12 @@ until args.empty?
     operation = args.shift
   when "--status"
     status = args.shift
+  when "--desired-state"
+    desired_state = args.shift
   when "--provider-state"
     provider_state = args.shift
+  when "--provision-state"
+    provision_state = args.shift
   when "--package"
     package = args.shift
   when "--package-state"
@@ -104,7 +110,9 @@ state["last_operation"] = {
   "at" => now
 }
 state["last_error"] = error
+state["desired_state"] = desired_state if desired_state
 state["provider_state"] = provider_state if provider_state
+state["provision_state"] = provision_state if provision_state
 
 if package && package_state
   state["package_state"][package] = {

@@ -87,6 +87,7 @@ EOF
       TAGS=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^STACK_TAGS=/{print $2}')
       case "$PROVIDER" in
         vultr)
+          eval "$(./scripts/tf-env "$PROFILE")"
           WINDOWS_PASSWORD=$(terramate run --quiet --tags="$TAGS-services" -- terraform output -raw vultr_instance_default_password)
           ;;
         *)

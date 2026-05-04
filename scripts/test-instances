@@ -127,11 +127,44 @@ else
   FAIL=$((FAIL + 1))
 fi
 
-if EGAME_INSTANCE_REGISTRY="$FIXTURE" EGAME_INSTANCE_WORKDIR="$tmp_overlay_dir/run" make status INSTANCE=aws-gpu-a >/dev/null 2>&1; then
-  printf '  [FAIL] terraform-backed INSTANCE lifecycle guard\n' >&2
-  FAIL=$((FAIL + 1))
+extract() { printf '%s\n' "$1" | awk -F= -v key="$2" '$1 == key { print substr($0, index($0, "=") + 1) }'; }
+
+paths_target="$(EGAME_INSTANCE_REGISTRY="$FIXTURE" EGAME_INSTANCE_WORKDIR="$tmp_overlay_dir/run" \
+  make instance.paths INSTANCE=dev-a 2>/dev/null)"
+paths_target_workdir="$(extract "$paths_target" INSTANCE_WORKDIR)"
+paths_target_tf_state="$(extract "$paths_target" INSTANCE_TF_STATE_BASE)"
+expected_paths_target_workdir="$(printf '%s' "$tmp_overlay_dir/run/dev-a" | tr -s /)"
+expected_paths_target_tf_state="$(printf '%s' "$tmp_overlay_dir/run/dev-a/tf/state" | tr -s /)"
+if [ "$paths_target_workdir" = "$expected_paths_target_workdir" ] &&
+  [ "$paths_target_tf_state" = "$expected_paths_target_tf_state" ]; then
+  printf '  [OK] make target exposes instance artifact paths\n'
 else
-  printf '  [OK] terraform-backed INSTANCE lifecycle guard\n'
+  printf '  [FAIL] instance.paths make target output mismatch\n' >&2
+  printf 'expected workdir:  %s\n' "$expected_paths_target_workdir" >&2
+  printf 'actual workdir:    %s\n' "$paths_target_workdir" >&2
+  printf 'expected tf state: %s\n' "$expected_paths_target_tf_state" >&2
+  printf 'actual tf state:   %s\n' "$paths_target_tf_state" >&2
+  printf '%s\n' "$paths_target" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+if EGAME_INSTANCE_REGISTRY="$FIXTURE" EGAME_INSTANCE_WORKDIR="$tmp_overlay_dir/run" EGAME_STATE_DIR="$tmp_overlay_dir/state" \
+  make status INSTANCE=aws-gpu-a >/dev/null 2>&1; then
+  printf '  [OK] terraform-backed INSTANCE status uses isolated execution path\n'
+else
+  printf '  [FAIL] terraform-backed INSTANCE status should no longer be blocked\n' >&2
+  EGAME_INSTANCE_REGISTRY="$FIXTURE" EGAME_INSTANCE_WORKDIR="$tmp_overlay_dir/run" EGAME_STATE_DIR="$tmp_overlay_dir/state" \
+    make status INSTANCE=aws-gpu-a >&2 || true
+  FAIL=$((FAIL + 1))
+fi
+
+state_target="$(EGAME_STATE_DIR="$tmp_overlay_dir/state" make instance.state INSTANCE=aws-gpu-a 2>/dev/null)"
+if printf '%s\n' "$state_target" | jq -e '.last_operation.name == "provider.status"' >/dev/null; then
+  printf '  [OK] make target exposes local instance state\n'
+else
+  printf '  [FAIL] instance.state make target output mismatch\n' >&2
+  printf '%s\n' "$state_target" >&2
+  FAIL=$((FAIL + 1))
 fi
 
 paths_workdir="$(printf '%s' "$tmp_overlay_dir/paths-work" | tr -s /)"
@@ -141,23 +174,29 @@ paths_a="$(EGAME_INSTANCE_WORKDIR="$paths_workdir" EGAME_STATE_DIR="$paths_state
 paths_b="$(EGAME_INSTANCE_WORKDIR="$paths_workdir" EGAME_STATE_DIR="$paths_state" \
   ./scripts/instance-paths --registry "$FIXTURE" --instance aws-gpu-a --emit env)"
 
-extract() { printf '%s\n' "$1" | awk -F= -v key="$2" '$1 == key { print substr($0, index($0, "=") + 1) }'; }
-
 workdir_a="$(extract "$paths_a" INSTANCE_WORKDIR)"
 workdir_b="$(extract "$paths_b" INSTANCE_WORKDIR)"
 state_a="$(extract "$paths_a" INSTANCE_STATE_PATH)"
 state_b="$(extract "$paths_b" INSTANCE_STATE_PATH)"
 tf_a="$(extract "$paths_a" INSTANCE_TF_WORKDIR)"
 tf_b="$(extract "$paths_b" INSTANCE_TF_WORKDIR)"
+tf_state_a="$(extract "$paths_a" INSTANCE_TF_STATE_BASE)"
+tf_state_b="$(extract "$paths_b" INSTANCE_TF_STATE_BASE)"
+tf_data_a="$(extract "$paths_a" INSTANCE_TF_DATA_BASE)"
+tf_data_b="$(extract "$paths_b" INSTANCE_TF_DATA_BASE)"
 
 paths_failed=0
 [ -n "$workdir_a" ] && [ -n "$workdir_b" ] || paths_failed=1
 [ "$workdir_a" != "$workdir_b" ] || paths_failed=1
 [ "$state_a" != "$state_b" ] || paths_failed=1
 [ "$tf_a" != "$tf_b" ] || paths_failed=1
+[ "$tf_state_a" != "$tf_state_b" ] || paths_failed=1
+[ "$tf_data_a" != "$tf_data_b" ] || paths_failed=1
 [ "$workdir_a" = "$paths_workdir/dev-a" ] || paths_failed=1
 [ "$state_a" = "$paths_state/instances/dev-a.json" ] || paths_failed=1
 [ "$tf_a" = "$paths_workdir/dev-a/tf" ] || paths_failed=1
+[ "$tf_state_a" = "$paths_workdir/dev-a/tf/state" ] || paths_failed=1
+[ "$tf_data_a" = "$paths_workdir/dev-a/tf/data" ] || paths_failed=1
 
 if [ "$paths_failed" -eq 0 ]; then
   printf '  [OK] instance-paths resolves distinct workdir/state per instance\n'
@@ -169,6 +208,10 @@ else
   printf 'actual state_a:     %s\n' "$state_a" >&2
   printf 'expected tf_a:      %s\n' "$paths_workdir/dev-a/tf" >&2
   printf 'actual tf_a:        %s\n' "$tf_a" >&2
+  printf 'expected tf_state_a:%s\n' "$paths_workdir/dev-a/tf/state" >&2
+  printf 'actual tf_state_a:  %s\n' "$tf_state_a" >&2
+  printf 'expected tf_data_a: %s\n' "$paths_workdir/dev-a/tf/data" >&2
+  printf 'actual tf_data_a:   %s\n' "$tf_data_a" >&2
   FAIL=$((FAIL + 1))
 fi
 

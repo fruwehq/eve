@@ -19,6 +19,10 @@ ENGINE=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^ENGINE=/{print $2}')
 PROVIDER=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^PROVIDER=/{print $2}')
 TAGS=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^STACK_TAGS=/{print $2}')
 
+if [ "$ENGINE" = "terraform" ]; then
+  eval "$(./scripts/tf-env "$PROFILE")"
+fi
+
 resolve_host_ip() {
   local host="$1"
   local ip

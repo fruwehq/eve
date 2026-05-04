@@ -117,13 +117,16 @@ begin
     raise "package #{package_id} down is destructive; pass --yes or EGAME_CONFIRM_DESTRUCTIVE=1"
   end
 
-  workdir_root = ENV.fetch("EGAME_INSTANCE_WORKDIR", File.join(ROOT, ".generated/instances"))
-  overlay = File.join(workdir_root, instance_name, "catalog.local.yaml")
+  paths_cmd = [File.join(ROOT, "scripts/instance-paths"), "--instance", instance_name, "--emit", "json"]
+  paths_cmd += ["--registry", registry_path] if registry_path
+  paths = run_json(*paths_cmd)
+  overlay = paths.fetch("INSTANCE_OVERLAY_PATH")
   overlay_cmd = [File.join(ROOT, "scripts/instance-profile-overlay"), "--instance", instance_name, "--output", overlay]
   overlay_cmd += ["--registry", registry_path] if registry_path
   overlay_out, overlay_status = Open3.capture2e(*overlay_cmd)
   raise overlay_out unless overlay_status.success?
   ENV["EGAME_CATALOG_LOCAL"] = overlay
+  ENV["EGAME_INSTANCE_REGISTRY"] = registry_path if registry_path
 
   record_state(instance_name, "package.#{command}", "running", package_id) unless dry_run
 

@@ -15,9 +15,15 @@ if [ -z "$INSTANCE_NAME" ]; then
   exit 2
 fi
 
-INSTANCE_WORKDIR="${EGAME_INSTANCE_WORKDIR:-.generated/instances}"
-OVERLAY_DIR="$INSTANCE_WORKDIR/$INSTANCE_NAME"
-OVERLAY="$OVERLAY_DIR/catalog.local.yaml"
+path_args=(--instance "$INSTANCE_NAME" --emit env)
+if [ -n "${EGAME_INSTANCE_REGISTRY:-}" ]; then
+  path_args+=(--registry "$EGAME_INSTANCE_REGISTRY")
+fi
+INSTANCE_PATHS="$(./scripts/instance-paths "${path_args[@]}")"
+extract_path() {
+  printf '%s\n' "$INSTANCE_PATHS" | awk -F= -v key="$1" '$1 == key { print substr($0, index($0, "=") + 1) }'
+}
+OVERLAY="$(extract_path INSTANCE_OVERLAY_PATH)"
 
 overlay_args=(--instance "$INSTANCE_NAME" --output "$OVERLAY")
 if [ -n "${EGAME_INSTANCE_REGISTRY:-}" ]; then
@@ -29,20 +35,13 @@ fi
 echo "[instance-run] target=$TARGET instance=$INSTANCE_NAME overlay=$OVERLAY" >&2
 
 export EGAME_CATALOG_LOCAL="$OVERLAY"
-engine="$(./scripts/profile-resolve --profile "$INSTANCE_NAME" --emit env | awk -F= '/^ENGINE=/{print $2}')"
+export EGAME_INSTANCE_NAME="$INSTANCE_NAME"
 
 case "$TARGET" in
   init|plan|up|down|start|stop|status|ip|ssh)
     exec ./scripts/provider-dispatch --instance "$INSTANCE_NAME" --command "$TARGET"
     ;;
   env|info|validate)
-    ;;
-  *)
-    if [ "$engine" = "terraform" ] && [ "${EGAME_ALLOW_SHARED_TF_INSTANCE:-}" != "1" ]; then
-      echo "instance-run: Terraform-backed INSTANCE target '$TARGET' is blocked until per-instance Terraform state/workdirs are implemented." >&2
-      echo "instance-run: Use the original PROFILE= workflow, or set EGAME_ALLOW_SHARED_TF_INSTANCE=1 to explicitly use the shared compatibility path." >&2
-      exit 1
-    fi
     ;;
 esac
 

@@ -38,6 +38,7 @@ case "$ENGINE" in
     exec ./scripts/vagrant-up "$PROFILE"
     ;;
   terraform)
+    eval "$(./scripts/tf-env "$PROFILE")"
     TAGS=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^STACK_TAGS=/{print $2}')
 
     STATE_JSON=$(terramate run --quiet --tags="$TAGS-services" -- terraform show -json 2>/dev/null) || true

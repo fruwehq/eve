@@ -91,6 +91,8 @@ end
 workdir = File.join(workdir_base, instance_name)
 state_path = File.join(state_base, "instances", "#{instance_name}.json")
 tf_workdir = File.join(workdir, "tf")
+tf_state_base = File.join(tf_workdir, "state")
+tf_data_base = File.join(tf_workdir, "data")
 
 paths = {
   "INSTANCE_NAME" => instance_name,
@@ -98,7 +100,9 @@ paths = {
   "INSTANCE_OVERLAY_PATH" => File.join(workdir, "catalog.local.yaml"),
   "INSTANCE_STATE_PATH" => state_path,
   "INSTANCE_TF_WORKDIR" => tf_workdir,
-  "INSTANCE_TF_DATA_DIR" => File.join(tf_workdir, ".terraform")
+  "INSTANCE_TF_STATE_BASE" => tf_state_base,
+  "INSTANCE_TF_DATA_BASE" => tf_data_base,
+  "INSTANCE_TF_DATA_DIR" => File.join(tf_data_base, "default")
 }
 
 case emit

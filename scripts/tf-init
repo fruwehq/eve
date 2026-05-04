@@ -33,12 +33,29 @@ if [ "${EGAME_TF_PRINT:-0}" != "1" ]; then
 fi
 
 eval "$(./scripts/tf-env "$PROFILE")"
-run_step terramate run --tags="$TAGS" -- terraform init -reconfigure
+
+init_args=(terraform init -reconfigure)
+tm_args=(--tags="$TAGS")
 
 # When in v3 INSTANCE= mode, ensure a dedicated workspace exists per stack so
-# subsequent plan/apply/destroy operations (which honor TF_WORKSPACE from
-# tf-env) target an isolated state file. PROFILE= callers skip this and keep
-# using the default workspace.
+# subsequent plan/apply/destroy/output operations (which honor TF_WORKSPACE and
+# EGAME_TF_DATA_BASE from tf-env) target isolated backend and data paths.
+# PROFILE= callers skip this and keep using the default compatibility paths.
+if [ -n "${EGAME_INSTANCE_NAME:-}" ]; then
+  : "${EGAME_TF_STATE_BASE:?tf-env did not set EGAME_TF_STATE_BASE}"
+  : "${EGAME_TF_DATA_BASE:?tf-env did not set EGAME_TF_DATA_BASE}"
+  if [ "${EGAME_TF_PRINT:-0}" != "1" ]; then
+    mkdir -p "$EGAME_TF_STATE_BASE" "$EGAME_TF_DATA_BASE"
+  fi
+  tm_args+=(--eval)
+  init_args+=(
+    "-backend-config=path=${EGAME_TF_STATE_BASE}/\${terramate.stack.path.relative}/default.tfstate"
+    "-backend-config=workspace_dir=${EGAME_TF_STATE_BASE}/\${terramate.stack.path.relative}/workspaces"
+  )
+fi
+
+run_step terramate run "${tm_args[@]}" -- "${init_args[@]}"
+
 if [ -n "${EGAME_INSTANCE_NAME:-}" ]; then
   run_step terramate run --tags="$TAGS" -- \
     terraform workspace select -or-create "$EGAME_INSTANCE_NAME"

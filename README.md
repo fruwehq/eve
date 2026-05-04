@@ -34,9 +34,12 @@ make instance.create NAME=dev-a RECIPE=local-vmware-ubuntu-dev-gui DISK_GB=120 M
 make instance.list
 make instance.info INSTANCE=dev-a
 make instance.env INSTANCE=dev-a
+make instance.paths INSTANCE=dev-a
+make instance.state INSTANCE=dev-a
 make instance.validate INSTANCE=dev-a
 
 # Run existing profile-oriented targets through a generated instance overlay
+make init INSTANCE=dev-a
 make env INSTANCE=dev-a
 make ssh INSTANCE=dev-a
 
@@ -47,11 +50,13 @@ make package.status INSTANCE=dev-a PACKAGE=docker
 make package.down INSTANCE=dev-a PACKAGE=docker YES=1
 ```
 
-This first v3 slice resolves concrete instances and preserves the current
-provider execution layer. `INSTANCE=` currently works by generating a local
-profile overlay under `.generated/instances/<name>/` and reusing the existing
-profile-backed scripts. Later slices will replace the shared Terraform stack
-path with per-instance generated stacks/state.
+The current v3 slice resolves concrete instances while preserving the existing
+provider execution layer. `INSTANCE=` works by generating a local profile
+overlay under `.generated/instances/<name>/` and reusing the profile-backed
+scripts through provider plugins. Terraform-backed instances now get
+instance-scoped backend roots and `TF_DATA_DIR` paths under
+`.generated/instances/<name>/tf/`, so multiple concrete instances on the same
+provider do not share local Terraform state.
 
 Providers and packages are now described by plugin manifests. Built-ins live in
 `plugins/providers/<id>/egame-plugin.yaml` and
@@ -60,10 +65,8 @@ pinned in `.egame/plugin-sources.yaml` and synchronized with
 `make plugins.sync`. Package `down` and `reinstall` operations are explicit and
 destructive removals require `YES=1`.
 
-Terraform-backed `INSTANCE=` lifecycle is intentionally guarded until dedicated
-per-instance Terraform state/workdirs are implemented. Set
-`EGAME_ALLOW_SHARED_TF_INSTANCE=1` only when you explicitly want to use the
-temporary shared compatibility path.
+`make instance.paths INSTANCE=<name>` shows the generated overlay path,
+instance state file path, and Terraform artifact roots used by the bridge.
 
 ## v2 profile workflow
 

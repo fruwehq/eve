@@ -109,10 +109,12 @@ state_json="$(
     --instance dev-a \
     --operation package.down \
     --status succeeded \
+    --desired-state running \
+    --provider-state running \
     --package docker \
     --package-state removed
 )"
-if printf '%s\n' "$state_json" | jq -e '.last_operation.name == "package.down" and .package_state.docker.status == "removed"' >/dev/null; then
+if printf '%s\n' "$state_json" | jq -e '.last_operation.name == "package.down" and .desired_state == "running" and .provider_state == "running" and .package_state.docker.status == "removed"' >/dev/null; then
   printf '  [OK] instance state records package operation\n'
 else
   printf '  [FAIL] instance state records package operation\n' >&2

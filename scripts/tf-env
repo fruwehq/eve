@@ -47,12 +47,23 @@ print_kv() {
 PROVIDER="$(getv PROVIDER)"
 
 # Per-instance state isolation: when EGAME_INSTANCE_NAME is set the caller is
-# in v3 INSTANCE= mode. Route Terraform to a dedicated workspace so two
-# instances on the same provider do not clobber each other's state. PROFILE=
-# callers leave EGAME_INSTANCE_NAME unset and continue to use the default
-# workspace, preserving existing behavior.
+# in v3 INSTANCE= mode. Route Terraform to a dedicated workspace plus
+# per-instance data/backend roots so two instances on the same provider do not
+# clobber each other's state. PROFILE= callers leave EGAME_INSTANCE_NAME unset
+# and continue to use the default compatibility paths.
 if [ -n "${EGAME_INSTANCE_NAME:-}" ]; then
+  if [ -n "${EGAME_INSTANCE_REGISTRY:-}" ]; then
+    INSTANCE_PATHS="$(./scripts/instance-paths --instance "$EGAME_INSTANCE_NAME" --emit env --registry "$EGAME_INSTANCE_REGISTRY")"
+  else
+    INSTANCE_PATHS="$(./scripts/instance-paths --instance "$EGAME_INSTANCE_NAME" --emit env)"
+  fi
+  getp() {
+    printf '%s\n' "$INSTANCE_PATHS" | awk -F= -v key="$1" '$1 == key { print substr($0, index($0, "=") + 1) }'
+  }
+
   print_kv TF_WORKSPACE "$EGAME_INSTANCE_NAME"
+  print_kv EGAME_TF_DATA_BASE "$(getp INSTANCE_TF_DATA_BASE)"
+  print_kv EGAME_TF_STATE_BASE "$(getp INSTANCE_TF_STATE_BASE)"
 fi
 
 # Common — shared by every terraform-based provider

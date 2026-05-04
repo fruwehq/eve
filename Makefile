@@ -2,7 +2,7 @@
 .DEFAULT_GOAL := default
 .PHONY: all aws.login clean default down env generate help info \
 				init init.all instance.create instance.env instance.info \
-				instance.list instance.validate ip lint logs plan \
+				instance.list instance.paths instance.state instance.validate ip lint logs plan \
 				package.down package.install package.reinstall package.status \
 				plugins.list plugins.sync plugins.validate \
 				profiles.list profiles.menu provider.status providers.status provision \
@@ -27,6 +27,9 @@ PROFILE ?=
 # v3 concrete instance selection. Instances live in .egame/instances.yaml.
 INSTANCE ?=
 export INSTANCE
+
+# Output format for small inspection helpers.
+EMIT ?= env
 
 # Load dotenv files
 -include .env
@@ -159,6 +162,14 @@ instance.info: ## Print resolved concrete instance data as JSON
 
 instance.list: ## List local concrete instances
 	@./scripts/instance-list
+
+instance.paths: ## Print resolved local artifact paths for an instance (EMIT=env|json)
+	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make instance.paths INSTANCE=<name> [EMIT=env|json]"; exit 2; fi; \
+	./scripts/instance-paths --instance $(INSTANCE) --emit $(EMIT)
+
+instance.state: ## Print local orchestration state for an instance
+	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make instance.state INSTANCE=<name>"; exit 2; fi; \
+	./scripts/instance-state --instance $(INSTANCE) --get | jq .
 
 instance.validate: ## Validate a concrete instance from .egame/instances.yaml
 	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make instance.validate INSTANCE=<name>"; exit 2; fi; \

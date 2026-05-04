@@ -26,7 +26,30 @@ def command_vector(spec)
   [exec_path, *(spec["args"] || [])]
 end
 
-def record_state(instance_name, operation, status, error = nil)
+def desired_state_for(command)
+  {
+    "up" => "running",
+    "start" => "running",
+    "stop" => "stopped",
+    "down" => "absent"
+  }[command]
+end
+
+def provider_state_for(command, status)
+  return "changing" if status == "running" && %w[up down start stop].include?(command)
+  return nil unless status == "succeeded"
+
+  {
+    "init" => "initialized",
+    "plan" => "planned",
+    "up" => "running",
+    "start" => "running",
+    "stop" => "stopped",
+    "down" => "absent"
+  }[command]
+end
+
+def record_state(instance_name, operation, status, error = nil, desired_state = nil, provider_state = nil)
   return if ENV["EGAME_DISABLE_STATE"] == "1"
 
   cmd = [
@@ -35,6 +58,8 @@ def record_state(instance_name, operation, status, error = nil)
     "--operation", operation,
     "--status", status
   ]
+  cmd += ["--desired-state", desired_state] if desired_state
+  cmd += ["--provider-state", provider_state] if provider_state
   cmd += ["--error", error] if error
   system(*cmd, out: File::NULL, err: File::NULL)
 end
@@ -80,11 +105,6 @@ begin
   resolved = run_json(*resolve_cmd)
 
   provider = resolved.fetch("machine").fetch("provider")
-  engine = resolved.fetch("engine")
-  if engine == "terraform" && !dry_run && command != "resolve" && ENV["EGAME_ALLOW_SHARED_TF_INSTANCE"] != "1"
-    raise "Terraform-backed INSTANCE provider commands are blocked until per-instance Terraform state/workdirs are implemented. Set EGAME_ALLOW_SHARED_TF_INSTANCE=1 to explicitly use the shared compatibility path."
-  end
-
   plugin_doc = run_json(File.join(ROOT, "scripts/plugin-list"), "--kind", "provider", "--json")
   plugin = plugin_doc.fetch("plugins").find { |entry| entry["id"] == provider }
   raise "provider plugin not found: #{provider}" unless plugin
@@ -92,8 +112,10 @@ begin
   spec = plugin.fetch("commands")[command]
   raise "provider plugin #{provider} has no command: #{command}" unless spec
 
-  workdir_root = ENV.fetch("EGAME_INSTANCE_WORKDIR", File.join(ROOT, ".generated/instances"))
-  overlay = File.join(workdir_root, instance_name, "catalog.local.yaml")
+  paths_cmd = [File.join(ROOT, "scripts/instance-paths"), "--instance", instance_name, "--emit", "json"]
+  paths_cmd += ["--registry", registry_path] if registry_path
+  paths = run_json(*paths_cmd)
+  overlay = paths.fetch("INSTANCE_OVERLAY_PATH")
   overlay_cmd = [File.join(ROOT, "scripts/instance-profile-overlay"), "--instance", instance_name, "--output", overlay]
   overlay_cmd += ["--registry", registry_path] if registry_path
   overlay_out, overlay_status = Open3.capture2e(*overlay_cmd)
@@ -104,10 +126,19 @@ begin
     "EGAME_INSTANCE_NAME" => instance_name,
     "EGAME_PROVIDER_PLUGIN" => provider
   )
+  env["EGAME_INSTANCE_REGISTRY"] = registry_path if registry_path
   env["EGAME_PLUGIN_DRY_RUN"] = "1" if dry_run
 
   cmd = command_vector(spec) + extra_args
-  record_state(instance_name, "provider.#{command}", "running") unless dry_run
+  desired_state = desired_state_for(command)
+  record_state(
+    instance_name,
+    "provider.#{command}",
+    "running",
+    nil,
+    desired_state,
+    provider_state_for(command, "running")
+  ) unless dry_run
 
   exit_status = 0
   Open3.popen3(env, *cmd, chdir: ROOT) do |stdin, stdout, stderr, wait_thr|
@@ -120,7 +151,14 @@ begin
     exit_status = wait_thr.value.exitstatus || 1
   end
   if exit_status.zero?
-    record_state(instance_name, "provider.#{command}", "succeeded") unless dry_run
+    record_state(
+      instance_name,
+      "provider.#{command}",
+      "succeeded",
+      nil,
+      desired_state,
+      provider_state_for(command, "succeeded")
+    ) unless dry_run
   else
     record_state(instance_name, "provider.#{command}", "failed", "exit #{exit_status}") unless dry_run
   end
