@@ -23,9 +23,24 @@ def state_path(instance)
   File.join(state_root, "instances", "#{instance}.json")
 end
 
+def default_state(instance, now = nil)
+  state = {
+    "instance" => instance,
+    "desired_state" => "unknown",
+    "provider_state" => "unknown",
+    "provision_state" => "unknown",
+    "package_state" => {},
+    "last_operation" => nil,
+    "last_error" => nil
+  }
+  state["created_at"] = now if now
+  state["updated_at"] = now if now
+  state
+end
+
 def read_state(instance)
   path = state_path(instance)
-  return {} unless File.exist?(path)
+  return default_state(instance) unless File.exist?(path)
 
   JSON.parse(File.read(path))
 end
@@ -97,10 +112,7 @@ unless operation && status
 end
 
 now = Time.now.utc.iso8601
-state["instance"] ||= instance
-state["desired_state"] ||= "unknown"
-state["provider_state"] ||= "unknown"
-state["provision_state"] ||= "unknown"
+state = default_state(instance, now).merge(state)
 state["package_state"] ||= {}
 state["created_at"] ||= now
 state["updated_at"] = now

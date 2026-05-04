@@ -104,6 +104,15 @@ fi
 
 state_dir="$(mktemp -d "${TMPDIR:-/tmp}/egame-state-test.XXXXXX")"
 trap 'rm -rf "$state_dir"' EXIT
+empty_state="$(EGAME_STATE_DIR="$state_dir" ./scripts/instance-state --instance fresh-a --get)"
+if printf '%s\n' "$empty_state" | jq -e '.instance == "fresh-a" and .desired_state == "unknown" and .provider_state == "unknown" and .provision_state == "unknown" and .package_state == {}' >/dev/null; then
+  printf '  [OK] instance state get returns default state shape\n'
+else
+  printf '  [FAIL] instance state default shape mismatch\n' >&2
+  printf '%s\n' "$empty_state" >&2
+  FAIL=$((FAIL + 1))
+fi
+
 state_json="$(
   EGAME_STATE_DIR="$state_dir" ./scripts/instance-state \
     --instance dev-a \
