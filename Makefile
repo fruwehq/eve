@@ -16,7 +16,7 @@
 				remote.xpra.stop \
 				show-password ssh ssh.run ssh.truenas ssh.wait start status stop \
 				test test.instances test.plugins test.profiles test.shellcheck test.terraform \
-				test.update-golden up update upload validate
+				test.tf-isolation test.update-golden up update upload validate
 
 TM_PARALLEL ?= 8
 
@@ -391,6 +391,9 @@ test.shellcheck: ## Run shellcheck over scripts/ and linux/provision/
 
 test.terraform: ## terramate generate + terraform validate across provider stacks
 	@./scripts/test-terraform
+
+test.tf-isolation: ## Verify per-instance Terraform workspace isolation in tf-* scripts
+	@./scripts/test-tf-isolation
 
 test.update-golden: ## Regenerate tests/golden/*.env from current profile-resolve output
 	@UPDATE_GOLDEN=1 ./scripts/test-profiles
