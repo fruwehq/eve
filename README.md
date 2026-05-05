@@ -87,6 +87,8 @@ Manual and AI-assisted live test flow is documented in
 [docs/integration-testing.md](docs/integration-testing.md). Start with
 `make integration.plan INSTANCES=<linux>,<windows>`; live runs require
 `YES=1 make integration.test INSTANCES=<linux>,<windows>`.
+Optional host-side AI agent sandboxing is documented in
+[docs/ai-sandboxes.md](docs/ai-sandboxes.md).
 
 The optional `make tui` target opens a Textual instance manager for browsing
 instances, combined state, package state, and safe provider/package actions.
