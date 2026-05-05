@@ -101,7 +101,11 @@ when "status"
     "status" => selected ? "selected" : "not-selected"
   })
 when "install"
-  warn "[package-plugin] install currently delegates to full provisioning for selected package set"
+  if os_family == "ubuntu"
+    exec File.join(ROOT, "scripts/package-provision"), "--profile", profile, "--package", package_id
+  end
+
+  warn "[package-plugin] install currently delegates to full provisioning for #{os_family}"
   exec "make", "provision", "PROFILE=#{profile}", "INSTANCE="
 when "down"
   remote = if os_family == "windows"
