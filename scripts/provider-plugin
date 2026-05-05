@@ -13,7 +13,12 @@ unless provider && command
   exit 2
 end
 
-resolved = JSON.parse($stdin.read)
+json_source = ENV["EGAME_RESOLVED_JSON"]
+resolved = if json_source
+             JSON.parse(json_source)
+           else
+             JSON.parse($stdin.read)
+           end
 actual_provider = resolved.fetch("machine").fetch("provider")
 profile = resolved.fetch("instance").fetch("name")
 

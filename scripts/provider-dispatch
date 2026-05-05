@@ -103,6 +103,8 @@ unless instance_name && command
   exit 2
 end
 
+INTERACTIVE_COMMANDS = %w[ssh].freeze
+
 begin
   resolve_cmd = [File.join(ROOT, "scripts/instance-resolve"), "--instance", instance_name, "--emit", "json"]
   resolve_cmd += ["--registry", registry_path] if registry_path
@@ -135,6 +137,12 @@ begin
 
   cmd = command_vector(plugin, spec) + extra_args
   desired_state = desired_state_for(command)
+
+  if INTERACTIVE_COMMANDS.include?(command) && !dry_run
+    env["EGAME_RESOLVED_JSON"] = JSON.generate(resolved)
+    exec(env, *cmd, chdir: ROOT)
+  end
+
   record_state(
     instance_name,
     "provider.#{command}",
@@ -148,10 +156,10 @@ begin
   Open3.popen3(env, *cmd, chdir: ROOT) do |stdin, stdout, stderr, wait_thr|
     stdin.write(JSON.generate(resolved))
     stdin.close
-    out = stdout.read
-    err = stderr.read
-    warn err unless err.empty?
-    print out
+    out_t = Thread.new { IO.copy_stream(stdout, $stdout) }
+    err_t = Thread.new { IO.copy_stream(stderr, $stderr) }
+    out_t.join
+    err_t.join
     exit_status = wait_thr.value.exitstatus || 1
   end
   if exit_status.zero?
