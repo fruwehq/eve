@@ -21,6 +21,7 @@ def usage
       --init <init-id>
       --location <location>
       --bundles <bundle-a,bundle-b>
+      --packages <package-a,package-b>
       --disk-gb <gb>
       --memory-mb <mb>
       --cpu-cores <n>
@@ -56,6 +57,8 @@ until args.empty?
     fields["location"] = args.shift
   when "--bundles"
     fields["bundles"] = args.shift.to_s.split(",").map(&:strip).reject(&:empty?)
+  when "--packages"
+    fields["packages"] = args.shift.to_s.split(",").map(&:strip).reject(&:empty?)
   when "--disk-gb"
     overrides["disk_gb"] = Integer(args.shift)
   when "--memory-mb"

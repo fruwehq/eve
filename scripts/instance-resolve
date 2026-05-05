@@ -238,7 +238,7 @@ begin
     "defaults" => deep_merge(machine&.fetch("defaults", nil) || {}, instance["overrides"] || {})
   })
 
-  bundle_packages = resolve_bundle_packages(catalog, composition["bundles"] || [])
+  bundle_packages = (resolve_bundle_packages(catalog, composition["bundles"] || []) + (composition["packages"] || [])).uniq.sort
   validate!(catalog, composition, machine, os, init, location, bundle_packages)
 
   provider = machine["provider"]

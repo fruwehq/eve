@@ -64,9 +64,12 @@ if ./scripts/instance-create \
   --registry "$tmp_registry" \
   --name test-dev \
   --recipe local-vmware-ubuntu-dev-gui \
+  --packages xpra \
   --disk-gb 90 \
   --memory-mb 8192 >/dev/null; then
-  if ./scripts/instance-resolve --registry "$tmp_registry" --instance test-dev --validate >/dev/null; then
+  if ./scripts/instance-resolve --registry "$tmp_registry" --instance test-dev --validate >/dev/null &&
+    ./scripts/instance-resolve --registry "$tmp_registry" --instance test-dev --emit json |
+      jq -e '.composition.packages == ["xpra"] and (.bundle_packages | index("xpra"))' >/dev/null; then
     printf '  [OK] create valid instance\n'
   else
     printf '  [FAIL] created instance did not validate\n' >&2

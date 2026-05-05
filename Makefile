@@ -136,13 +136,14 @@ init.all: generate ## Init all stacks in parallel (set TM_PARALLEL=N)
 	terramate run --parallel=$(TM_PARALLEL) --continue-on-error -- terraform init -upgrade
 
 instance.create: ## Create a local instance registry entry (NAME=<name> RECIPE=<recipe>)
-	@if [ -z "$(NAME)" ] || [ -z "$(RECIPE)" ]; then echo "Usage: make instance.create NAME=<name> RECIPE=<recipe> [BUNDLES=a,b] [DISK_GB=n] [MEMORY_MB=n]"; exit 2; fi; \
+	@if [ -z "$(NAME)" ] || [ -z "$(RECIPE)" ]; then echo "Usage: make instance.create NAME=<name> RECIPE=<recipe> [BUNDLES=a,b] [PACKAGES=a,b] [DISK_GB=n] [MEMORY_MB=n]"; exit 2; fi; \
 	args="--name $(NAME) --recipe $(RECIPE)"; \
 	if [ -n "$(MACHINE)" ]; then args="$$args --machine $(MACHINE)"; fi; \
 	if [ -n "$(OS)" ]; then args="$$args --os $(OS)"; fi; \
 	if [ -n "$(INIT)" ]; then args="$$args --init $(INIT)"; fi; \
 	if [ -n "$(LOCATION)" ]; then args="$$args --location $(LOCATION)"; fi; \
 	if [ -n "$(BUNDLES)" ]; then args="$$args --bundles $(BUNDLES)"; fi; \
+	if [ -n "$(PACKAGES)" ]; then args="$$args --packages $(PACKAGES)"; fi; \
 	if [ -n "$(DISK_GB)" ]; then args="$$args --disk-gb $(DISK_GB)"; fi; \
 	if [ -n "$(MEMORY_MB)" ]; then args="$$args --memory-mb $(MEMORY_MB)"; fi; \
 	if [ -n "$(CPU_CORES)" ]; then args="$$args --cpu-cores $(CPU_CORES)"; fi; \
