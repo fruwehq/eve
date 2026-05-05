@@ -149,6 +149,40 @@ else
 fi
 
 cat >"$tmp_local_catalog" <<'YAML'
+profiles:
+  - name: local-vmware-ubuntu-dev-gui
+    packages: [xpra]
+YAML
+if EGAME_CATALOG_LOCAL="$tmp_local_catalog" \
+  ./scripts/instance-resolve --registry "$FIXTURE" --instance dev-a --validate 2>"$invalid_output"; then
+  printf '  [FAIL] instance resolver accepted unsupported ubuntu package version\n' >&2
+  FAIL=$((FAIL + 1))
+elif grep -q 'Package plugin xpra does not support ubuntu version 26.04' "$invalid_output"; then
+  printf '  [OK] instance resolver enforces package ubuntu version support\n'
+else
+  printf '  [FAIL] instance resolver package ubuntu version support mismatch\n' >&2
+  cat "$invalid_output" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+cat >"$tmp_local_catalog" <<'YAML'
+profiles:
+  - name: local-qemu-ubuntu-dev-gui
+    packages: [goose]
+YAML
+if EGAME_CATALOG_LOCAL="$tmp_local_catalog" \
+  ./scripts/instance-resolve --registry "$FIXTURE" --instance qemu-a --validate 2>"$invalid_output"; then
+  printf '  [FAIL] instance resolver accepted unsupported package architecture\n' >&2
+  FAIL=$((FAIL + 1))
+elif grep -q 'Package plugin goose does not support architecture arm64' "$invalid_output"; then
+  printf '  [OK] instance resolver enforces package architecture support\n'
+else
+  printf '  [FAIL] instance resolver package architecture support mismatch\n' >&2
+  cat "$invalid_output" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+cat >"$tmp_local_catalog" <<'YAML'
 machines:
   - name: acme-small
     provider: acme

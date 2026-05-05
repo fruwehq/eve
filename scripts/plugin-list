@@ -13,6 +13,8 @@ PACKAGE_COMMANDS = %w[install status down].freeze
 PROVIDER_ENGINES = %w[terraform vagrant metal].freeze
 PROVIDER_KINDS = %w[vm metal].freeze
 PACKAGE_OS_FAMILIES = %w[ubuntu windows].freeze
+PACKAGE_UI_MODES = %w[headless desktop].freeze
+PACKAGE_ARCHES = %w[amd64 arm64].freeze
 
 def usage
   warn <<~USAGE
@@ -135,11 +137,30 @@ def validate_package_supports!(plugin)
   supports = plugin["supports"]
   path = plugin["_path"]
 
-  return unless supports.key?("os_families")
+  if supports.key?("os_families")
+    os_families = supports["os_families"]
+    require_string_list!(os_families, path, "supports.os_families")
+    require_allowed_entries!(os_families, PACKAGE_OS_FAMILIES, path, "supports.os_families")
+  end
 
-  os_families = supports["os_families"]
-  require_string_list!(os_families, path, "supports.os_families")
-  require_allowed_entries!(os_families, PACKAGE_OS_FAMILIES, path, "supports.os_families")
+  if supports.key?("ui_modes")
+    ui_modes = supports["ui_modes"]
+    require_string_list!(ui_modes, path, "supports.ui_modes")
+    require_allowed_entries!(ui_modes, PACKAGE_UI_MODES, path, "supports.ui_modes")
+  end
+
+  if supports.key?("arches")
+    arches = supports["arches"]
+    require_string_list!(arches, path, "supports.arches")
+    require_allowed_entries!(arches, PACKAGE_ARCHES, path, "supports.arches")
+  end
+
+  require_string_list!(supports["os_ids"], path, "supports.os_ids") if supports.key?("os_ids")
+  require_string_list!(supports["os_versions"], path, "supports.os_versions") if supports.key?("os_versions")
+  PACKAGE_OS_FAMILIES.each do |family|
+    key = "#{family}_versions"
+    require_string_list!(supports[key], path, "supports.#{key}") if supports.key?(key)
+  end
 end
 
 def validate_package_install!(plugin)

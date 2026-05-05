@@ -89,6 +89,25 @@ def package_status_from_output(output)
   nil
 end
 
+def validate_support_value!(package_id, supports, value, field, label)
+  allowed = supports[field] || []
+  return if allowed.empty? || allowed.include?(value.to_s)
+
+  raise "package plugin #{package_id} does not support #{label} #{value}"
+end
+
+def validate_package_support!(package_id, plugin, resolved)
+  supports = plugin.fetch("supports", {})
+  os = resolved.fetch("os")
+  os_family = os.fetch("family")
+  validate_support_value!(package_id, supports, os_family, "os_families", "os family")
+  validate_support_value!(package_id, supports, os.fetch("ui_mode", "headless"), "ui_modes", "UI mode")
+  validate_support_value!(package_id, supports, os.fetch("arch", ""), "arches", "architecture")
+  validate_support_value!(package_id, supports, os.fetch("id"), "os_ids", "OS")
+  validate_support_value!(package_id, supports, os.fetch("version", ""), "os_versions", "OS version")
+  validate_support_value!(package_id, supports, os.fetch("version", ""), "#{os_family}_versions", "#{os_family} version")
+end
+
 instance_name = nil
 package_id = nil
 command = nil
@@ -139,11 +158,7 @@ begin
   plugin = plugin_doc.fetch("plugins").find { |entry| entry["id"] == package_id }
   raise "package plugin not found: #{package_id}" unless plugin
 
-  os_family = resolved.fetch("os").fetch("family")
-  supported_families = plugin.dig("supports", "os_families") || []
-  unless supported_families.empty? || supported_families.include?(os_family)
-    raise "package plugin #{package_id} does not support os family #{os_family}"
-  end
+  validate_package_support!(package_id, plugin, resolved)
 
   destructive = plugin.dig("down", "destructive") == true
   if %w[down reinstall].include?(command) && destructive && !yes && ENV["EGAME_CONFIRM_DESTRUCTIVE"] != "1"

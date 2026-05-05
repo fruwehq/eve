@@ -88,6 +88,11 @@ def provider_plugins
   plugin_doc.fetch("plugins")
 end
 
+def package_plugins
+  plugin_doc = run_json(File.join(ROOT, "scripts/plugin-list"), "--kind", "package", "--json")
+  plugin_doc.fetch("plugins")
+end
+
 def env_or(name, fallback)
   value = ENV[name]
   value && !value.empty? ? value : fallback
@@ -182,6 +187,30 @@ def validate_provider_plugin!(machine, engine)
   supported_kinds = supports.fetch("kinds", [])
   unless supported_kinds.empty? || supported_kinds.include?(machine_kind)
     raise "Provider plugin #{provider} does not support machine kind #{machine_kind}"
+  end
+end
+
+def validate_package_support_value!(plugin_id, supports, value, field, label)
+  allowed = supports[field] || []
+  return if allowed.empty? || allowed.include?(value.to_s)
+
+  raise "Package plugin #{plugin_id} does not support #{label} #{value}"
+end
+
+def validate_package_plugins!(bundle_packages, os)
+  plugins = package_plugins
+  bundle_packages.each do |package_id|
+    plugin = plugins.find { |entry| entry.fetch("id") == package_id }
+    raise "Package plugin not found: #{package_id}" unless plugin
+
+    supports = plugin.fetch("supports", {})
+    os_family = os.fetch("family")
+    validate_package_support_value!(package_id, supports, os_family, "os_families", "os family")
+    validate_package_support_value!(package_id, supports, os.fetch("ui_mode", "headless"), "ui_modes", "UI mode")
+    validate_package_support_value!(package_id, supports, os.fetch("arch", ""), "arches", "architecture")
+    validate_package_support_value!(package_id, supports, os.fetch("id"), "os_ids", "OS")
+    validate_package_support_value!(package_id, supports, os.fetch("version", ""), "os_versions", "OS version")
+    validate_package_support_value!(package_id, supports, os.fetch("version", ""), "#{os_family}_versions", "#{os_family} version")
   end
 end
 
@@ -303,6 +332,7 @@ begin
   provider = machine["provider"]
   engine = engine_for(machine)
   validate_provider_plugin!(machine, engine)
+  validate_package_plugins!(bundle_packages, os)
   resolved = {
     "instance" => instance,
     "recipe_name" => recipe_name,
