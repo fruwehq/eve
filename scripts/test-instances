@@ -55,10 +55,11 @@ for instance in $INSTANCES; do
 done
 
 tmp_registry="$(mktemp "${TMPDIR:-/tmp}/egame-instance-test.XXXXXX")"
+tmp_external_registry="$(mktemp "${TMPDIR:-/tmp}/egame-instance-external.XXXXXX")"
 invalid_output="$(mktemp "${TMPDIR:-/tmp}/egame-instance-test-output.XXXXXX")"
 tmp_local_catalog="$(mktemp "${TMPDIR:-/tmp}/egame-instance-catalog.XXXXXX.yaml")"
 tmp_overlay_dir="$(mktemp -d "${TMPDIR:-/tmp}/egame-instance-overlay.XXXXXX")"
-trap 'rm -f "$tmp_registry" "$invalid_output" "$tmp_local_catalog"; rm -rf "$tmp_overlay_dir"' EXIT
+trap 'rm -f "$tmp_registry" "$tmp_external_registry" "$invalid_output" "$tmp_local_catalog"; rm -rf "$tmp_overlay_dir"' EXIT
 rm -f "$tmp_registry"
 
 if ./scripts/instance-create \
@@ -113,6 +114,56 @@ if EGAME_CATALOG_LOCAL="$tmp_local_catalog" ./scripts/instance-resolve --registr
   printf '  [OK] instance resolver honors EGAME_CATALOG_LOCAL\n'
 else
   printf '  [FAIL] instance resolver honors EGAME_CATALOG_LOCAL\n' >&2
+  FAIL=$((FAIL + 1))
+fi
+
+cat >"$tmp_local_catalog" <<'YAML'
+machines:
+  - name: acme-small
+    provider: acme
+    kind: vm
+    defaults:
+      disk_gb: 30
+      memory_mb: 4096
+profiles:
+  - name: acme-test
+    machine: acme-small
+    os: ubuntu-26.04-amd64
+    init: ssh-ubuntu-cloud-init
+    bundles: [access-headless]
+    location: tokyo
+locations:
+  - name: tokyo
+    acme:
+      region: test-region
+YAML
+cat >"$tmp_external_registry" <<'YAML'
+version: 1
+instances:
+  - name: acme-a
+    recipe: acme-test
+YAML
+
+if EGAME_CATALOG_LOCAL="$tmp_local_catalog" \
+  ./scripts/instance-resolve --registry "$tmp_external_registry" --instance acme-a --validate 2>"$invalid_output"; then
+  printf '  [FAIL] instance resolver accepted provider without plugin\n' >&2
+  FAIL=$((FAIL + 1))
+elif grep -q 'Provider plugin not found: acme' "$invalid_output"; then
+  printf '  [OK] instance resolver rejects provider without plugin\n'
+else
+  printf '  [FAIL] instance resolver rejects provider without plugin\n' >&2
+  cat "$invalid_output" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+if EGAME_PLUGIN_ROOTS="tests/fixtures/plugins/providers/acme" EGAME_CATALOG_LOCAL="$tmp_local_catalog" \
+  ./scripts/instance-resolve --registry "$tmp_external_registry" --instance acme-a --emit json |
+  jq -e '.provider_plugin == "acme" and .machine.provider == "acme"' >/dev/null; then
+  printf '  [OK] instance resolver accepts external provider plugin\n'
+else
+  printf '  [FAIL] instance resolver accepts external provider plugin\n' >&2
+  EGAME_PLUGIN_ROOTS="tests/fixtures/plugins/providers/acme" EGAME_CATALOG_LOCAL="$tmp_local_catalog" \
+    ./scripts/instance-resolve --registry "$tmp_external_registry" --instance acme-a --emit json >&2 || true
   FAIL=$((FAIL + 1))
 fi
 

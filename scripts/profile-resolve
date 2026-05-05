@@ -194,10 +194,6 @@ else
     error("Compatibility: goose requires dev-toolchain in bundles")
   else . end |
 
-  if ((["aws","local-virtualbox","local-vmware","raspberry-pi","truenas","vultr"] | index($m.provider)) == null) then
-    error("Unsupported provider in machine catalog: \($m.provider)")
-  else . end |
-
   if ($l[($m.provider // "")] == null) then
     error("Location \($l.name) has no mapping for provider \($m.provider)")
   else . end |

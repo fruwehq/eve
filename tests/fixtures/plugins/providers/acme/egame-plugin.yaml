@@ -1,0 +1,19 @@
+api_version: egame.plugin/v1
+kind: provider
+id: acme
+display_name: ACME Test Provider
+commands:
+  resolve: {exec: scripts/provider-plugin, args: [acme, resolve]}
+  init: {exec: scripts/provider-plugin, args: [acme, init]}
+  plan: {exec: scripts/provider-plugin, args: [acme, plan]}
+  up: {exec: scripts/provider-plugin, args: [acme, up]}
+  down: {exec: scripts/provider-plugin, args: [acme, down]}
+  start: {exec: scripts/provider-plugin, args: [acme, start]}
+  stop: {exec: scripts/provider-plugin, args: [acme, stop]}
+  status: {exec: scripts/provider-plugin, args: [acme, status]}
+  ip: {exec: scripts/provider-plugin, args: [acme, ip]}
+  ssh: {exec: scripts/provider-plugin, args: [acme, ssh]}
+supports:
+  engines: [terraform]
+  kinds: [vm]
+env: []

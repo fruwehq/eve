@@ -2,6 +2,7 @@
 # Resolve a concrete local VM instance from the instance registry plus catalog.
 
 require "json"
+require "open3"
 require "yaml"
 
 ROOT = File.expand_path("..", __dir__)
@@ -75,6 +76,18 @@ def by_key(root, section, key, value)
   (root[section] || []).find { |entry| entry.is_a?(Hash) && entry[key] == value }
 end
 
+def run_json(*cmd)
+  out, status = Open3.capture2e(*cmd)
+  raise out unless status.success?
+
+  JSON.parse(out)
+end
+
+def provider_plugin_ids
+  plugin_doc = run_json(File.join(ROOT, "scripts/plugin-list"), "--kind", "provider", "--json")
+  plugin_doc.fetch("plugins").map { |plugin| plugin.fetch("id") }
+end
+
 def env_or(name, fallback)
   value = ENV[name]
   value && !value.empty? ? value : fallback
@@ -139,9 +152,8 @@ def validate!(catalog, composition, machine, os, init, location, bundle_packages
     raise "Compatibility: goose requires dev-toolchain in bundles"
   end
 
-  supported = %w[aws local-virtualbox local-vmware raspberry-pi truenas vultr]
   provider = machine["provider"]
-  raise "Unsupported provider in machine catalog: #{provider}" unless supported.include?(provider)
+  raise "Provider plugin not found: #{provider}" unless provider_plugin_ids.include?(provider)
   raise "Location #{location["name"]} has no mapping for provider #{provider}" unless location[provider]
 end
 
