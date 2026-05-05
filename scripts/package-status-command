@@ -16,7 +16,8 @@ exit_status=$?
 set -e
 
 if [ "$exit_status" -eq 0 ]; then
-  status="$(printf '%s\n' "$output" | sed -n '1p' | tr -d '\r')"
+  status="$(printf '%s\n' "$output" | tr -d '\r' | awk '/^(installed|missing|unknown)$/ { print; exit }')"
+  status="${status:-unknown}"
   case "$status" in
     installed|missing|unknown) ;;
     *) status="unknown" ;;

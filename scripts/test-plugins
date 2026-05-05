@@ -490,6 +490,7 @@ cat >"$fake_capture_ssh" <<'SH'
 #!/usr/bin/env sh
 set -eu
 printf '%s\n' "$*" >"${EGAME_FAKE_SSH_ARGS:?}"
+printf '#< CLIXML\n'
 printf 'installed\n'
 SH
 chmod +x "$fake_capture_ssh"
