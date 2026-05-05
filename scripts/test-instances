@@ -126,6 +126,30 @@ else
   printf '  [OK] delete non-existent instance fails\n'
 fi
 
+purge_workdir="$tmp_overlay_dir/delete-work"
+purge_state="$tmp_overlay_dir/delete-state"
+if ./scripts/instance-create \
+  --registry "$tmp_registry" \
+  --instance purge-dev \
+  --recipe local-vmware-ubuntu-dev-gui >/dev/null; then
+  mkdir -p "$purge_workdir/purge-dev" "$purge_state/instances"
+  printf '{}\n' > "$purge_state/instances/purge-dev.json"
+  if EGAME_INSTANCE_REGISTRY="$tmp_registry" EGAME_INSTANCE_WORKDIR="$purge_workdir" EGAME_STATE_DIR="$purge_state" \
+    make package.select INSTANCE=purge-dev PACKAGE=steam >/dev/null &&
+    EGAME_INSTANCE_REGISTRY="$tmp_registry" EGAME_INSTANCE_WORKDIR="$purge_workdir" EGAME_STATE_DIR="$purge_state" \
+      make instance.delete INSTANCE=purge-dev PURGE=1 >/dev/null &&
+    [ ! -e "$purge_workdir/purge-dev" ] &&
+    [ ! -e "$purge_state/instances/purge-dev.json" ]; then
+    printf '  [OK] delete purge honors env registry/workdir/state paths\n'
+  else
+    printf '  [FAIL] delete purge honors env registry/workdir/state paths\n' >&2
+    FAIL=$((FAIL + 1))
+  fi
+else
+  printf '  [FAIL] create purge test instance\n' >&2
+  FAIL=$((FAIL + 1))
+fi
+
 overlay="$tmp_overlay_dir/dev-a.catalog.local.yaml"
 if ./scripts/instance-profile-overlay --registry "$FIXTURE" --instance dev-a --output "$overlay"; then
   if EGAME_CATALOG_LOCAL="$overlay" ./scripts/profile-resolve --profile dev-a --validate >/dev/null; then

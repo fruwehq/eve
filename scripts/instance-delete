@@ -3,12 +3,12 @@
 # Optionally removes the generated workdir and state files.
 
 require "fileutils"
+require "json"
+require "open3"
 require "yaml"
 
 ROOT = File.expand_path("..", __dir__)
 DEFAULT_REGISTRY_PATH = File.join(ROOT, ".egame/instances.yaml")
-DEFAULT_WORKDIR_BASE = File.join(ROOT, ".generated/instances")
-DEFAULT_STATE_BASE = File.join(ROOT, ".egame/state")
 
 def usage
   warn <<~USAGE
@@ -22,7 +22,9 @@ def usage
 end
 
 instance_name = nil
-registry_path = DEFAULT_REGISTRY_PATH
+registry_path = ENV["EGAME_INSTANCE_REGISTRY"] && !ENV["EGAME_INSTANCE_REGISTRY"].empty? \
+                ? File.expand_path(ENV["EGAME_INSTANCE_REGISTRY"], Dir.pwd) \
+                : DEFAULT_REGISTRY_PATH
 purge = false
 
 args = ARGV.dup
@@ -48,6 +50,11 @@ unless instance_name && !instance_name.empty?
   exit 2
 end
 
+if instance_name !~ /\A[A-Za-z0-9][A-Za-z0-9._-]*\z/
+  warn "instance-delete: invalid instance name: #{instance_name.inspect}"
+  exit 2
+end
+
 unless File.exist?(registry_path)
   warn "instance-delete: registry not found: #{registry_path}"
   exit 1
@@ -62,6 +69,21 @@ unless index
   exit 1
 end
 
+paths = nil
+if purge
+  out, status = Open3.capture2e(
+    File.join(ROOT, "scripts/instance-paths"),
+    "--registry", registry_path,
+    "--instance", instance_name,
+    "--emit", "json"
+  )
+  unless status.success?
+    warn out
+    exit 1
+  end
+  paths = JSON.parse(out)
+end
+
 registry["instances"].delete_at(index)
 
 if registry["instances"].empty?
@@ -74,8 +96,8 @@ puts "Deleted instance: #{instance_name}"
 puts "Registry: #{registry_path}"
 
 if purge
-  workdir = File.join(DEFAULT_WORKDIR_BASE, instance_name)
-  state = File.join(DEFAULT_STATE_BASE, "instances", "#{instance_name}.json")
+  workdir = paths.fetch("INSTANCE_WORKDIR")
+  state = paths.fetch("INSTANCE_STATE_PATH")
 
   if File.exist?(workdir)
     FileUtils.rm_rf(workdir)
