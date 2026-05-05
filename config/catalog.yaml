@@ -161,8 +161,10 @@ packages:
   - id: codex-cli
   - id: dev-toolchain
   - id: docker
+  - id: gnome-desktop
   - id: goose
   - id: hermes
+  - id: macos-desktop-theme
   - id: opencode
   - id: rdp
   - id: rustdesk
@@ -182,6 +184,12 @@ bundles:
 
   - id: access-gui-safe
     includes: [ssh, rustdesk, vnc]
+
+  - id: access-gui-gnome
+    includes: [ssh, gnome-desktop, rustdesk]
+
+  - id: access-gui-gnome-mac
+    includes: [ssh, gnome-desktop, macos-desktop-theme, rustdesk]
 
   - id: access-gui-vnc
     includes: [ssh, vnc]
