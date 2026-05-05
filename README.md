@@ -198,7 +198,7 @@ Add the `remote-apps` bundle to the profile in `config/catalog.yaml` (or your `c
 profiles:
   - name: aws-ubuntu-dev-headless
     machine: aws-cheap-x86
-    os: ubuntu-24.04-server-amd64
+    os: ubuntu-26.04-server-amd64
     init: ssh-ubuntu-cloud-init
     bundles: [access-headless, dev-sandbox-core, remote-apps]
     location: tokyo
@@ -312,7 +312,7 @@ These are validated at runtime by [scripts/env-require](scripts/env-require) —
 
 #### Initial SD card image (first boot)
 
-Flash **Ubuntu Server 24.04 LTS (64-bit)** with the official [Raspberry Pi Imager](https://www.raspberrypi.com/software/). Use Server (not Desktop) so the install stays reproducible — provisioning installs the GUI / Sunshine / etc. afterward, matching the Vagrant flow.
+Flash **Ubuntu Server 26.04 LTS (64-bit)** with the official [Raspberry Pi Imager](https://www.raspberrypi.com/software/). Use Server (not Desktop) so the install stays reproducible — provisioning installs the GUI / Sunshine / etc. afterward, matching the Vagrant flow.
 
 In Imager's advanced options (gear icon), preseed:
 

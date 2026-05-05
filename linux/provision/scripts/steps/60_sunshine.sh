@@ -17,8 +17,10 @@ if ! command -v sunshine >/dev/null 2>&1; then
   # shellcheck disable=SC1091
   codename=$(. /etc/os-release && echo "$VERSION_CODENAME")
   case "$arch-$codename" in
-    amd64-noble|amd64-resolute)    asset="sunshine-ubuntu-24.04-amd64.deb" ;;
-    arm64-noble|arm64-resolute)    asset="sunshine-ubuntu-24.04-arm64.deb" ;;
+    amd64-noble)                   asset="sunshine-ubuntu-24.04-amd64.deb" ;;
+    arm64-noble)                   asset="sunshine-ubuntu-24.04-arm64.deb" ;;
+    amd64-resolute)                asset="sunshine-ubuntu-24.04-amd64.deb" ;;
+    arm64-resolute)                asset="sunshine-ubuntu-24.04-arm64.deb" ;;
     amd64-jammy)                   asset="sunshine-ubuntu-22.04-amd64.deb" ;;
     arm64-jammy)                   asset="sunshine-ubuntu-22.04-arm64.deb" ;;
     *) log "no known Sunshine package for $arch/$codename"; exit 1 ;;
@@ -31,7 +33,7 @@ if ! command -v sunshine >/dev/null 2>&1; then
   download "$url" "$deb"
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "$deb"
 
-  # The noble deb is built against Ubuntu 24.04 libs. On newer releases the
+  # The noble deb is built against Ubuntu 24.04 libs. On 26.04 (resolute) the
   # sonames have bumped — create compatibility symlinks so the binary can load.
   # shellcheck disable=SC1091
   codename=$(. /etc/os-release && echo "$VERSION_CODENAME")

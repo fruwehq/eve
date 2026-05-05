@@ -285,7 +285,7 @@ emit_vagrant() {
   echo "$RESOLVED_JSON" | jq -r '
     . as $r |
     (if $r.machine.provider == "local-vmware" then "vmware_desktop" else "virtualbox" end) as $provider |
-    ($r.os.vagrant_box // "bento/ubuntu-24.04") as $box |
+    ($r.os.vagrant_box // "cloud-image/ubuntu-26.04") as $box |
     $r.profile.name as $name |
     (($r.machine.defaults.cpus // 2) | tostring) as $cpus |
     (($r.machine.defaults.memory_mb // 4096) | tostring) as $memory |

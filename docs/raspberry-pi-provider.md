@@ -49,9 +49,9 @@ machines:
       connection_mode: ssh
 
 oses:
-  - id: ubuntu-24.04-server-arm64
+  - id: ubuntu-26.04-server-arm64
     family: ubuntu
-    version: "24.04"
+    version: "26.04"
     arch: arm64
     ui_mode: headless
 
@@ -71,7 +71,7 @@ locations:
 profiles:
   - name: rpi-ubuntu-dev-headless
     machine: raspberry-pi-5-dev
-    os: ubuntu-24.04-server-arm64
+    os: ubuntu-26.04-server-arm64
     init: ssh-ubuntu-metal
     bundles: [access-headless, dev-sandbox-core]
     location: home-lan

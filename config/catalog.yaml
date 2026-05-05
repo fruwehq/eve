@@ -96,34 +96,27 @@ machines:
 # OS catalog (explicit image/version/flavor)
 # -----------------------------------------------------------------------------
 oses:
-  - id: ubuntu-24.04-server-amd64
+  - id: ubuntu-26.04-server-amd64
     family: ubuntu
-    version: "24.04"
+    version: "26.04"
     arch: amd64
     ui_mode: headless
-    vagrant_box: bento/ubuntu-24.04
-    # Vultr OS ID (from `vultr-cli os list`). Override in catalog.local.yaml if stale.
-    vultr_os_id: 2284 # Ubuntu 24.04 LTS x64
-    cloud_image_url: https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.img
+    vagrant_box: cloud-image/ubuntu-26.04 # Vultr OS ID (from `vultr-cli os list`).
+    cloud_image_url: https://cloud-images.ubuntu.com/releases/26.04/release/ubuntu-26.04-server-cloudimg-amd64.img
 
-  - id: ubuntu-24.04-desktop-amd64
+  - id: ubuntu-26.04-desktop-amd64
     family: ubuntu
-    version: "24.04"
+    version: "26.04"
     arch: amd64
     ui_mode: desktop
-    vagrant_box: bento/ubuntu-24.04
-    vultr_os_id: 2284 # Ubuntu 24.04 LTS x64
-    cloud_image_url: https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.img
+    vagrant_box: cloud-image/ubuntu-26.04 # Vultr OS ID (from `vultr-cli os list`).
+    cloud_image_url: https://cloud-images.ubuntu.com/releases/26.04/release/ubuntu-26.04-server-cloudimg-amd64.img
 
-  - id: ubuntu-24.04-desktop-arm64
+  - id: ubuntu-26.04-desktop-arm64
     family: ubuntu
-    version: "24.04"
+    version: "26.04"
     arch: arm64
     ui_mode: desktop
-    # No cloud_image_url: arm64 metal targets (e.g. Raspberry Pi) are flashed
-    # by hand via Raspberry Pi Imager. Provisioning installs the GUI/streaming
-    # stack on top of a server install — same pattern as the *-desktop-amd64
-    # entries that point at the server cloud image.
 
   - id: windows-server-2025
     family: windows
@@ -231,7 +224,7 @@ locations:
 profiles:
   - name: aws-ubuntu-dev-headless
     machine: aws-cheap-x86
-    os: ubuntu-24.04-server-amd64
+    os: ubuntu-26.04-server-amd64
     init: ssh-ubuntu-cloud-init
     bundles: [access-headless, dev-sandbox-core]
     location: tokyo
@@ -239,7 +232,7 @@ profiles:
 
   - name: aws-ubuntu-dev-gui
     machine: aws-cheap-x86
-    os: ubuntu-24.04-desktop-amd64
+    os: ubuntu-26.04-desktop-amd64
     init: ssh-ubuntu-cloud-init
     bundles: [access-gui-safe, dev-sandbox-core]
     location: tokyo
@@ -253,35 +246,35 @@ profiles:
 
   - name: local-vbox-ubuntu-dev
     machine: local-virtualbox-medium
-    os: ubuntu-24.04-server-amd64
+    os: ubuntu-26.04-server-amd64
     init: ssh-ubuntu-cloud-init
     bundles: [access-headless, dev-sandbox-core]
     location: tokyo
 
   - name: local-vbox-ubuntu-all
     machine: local-virtualbox-medium
-    os: ubuntu-24.04-desktop-amd64
+    os: ubuntu-26.04-desktop-amd64
     init: ssh-ubuntu-cloud-init
     bundles: [access-gui-streaming, access-gui-safe, dev-sandbox-core, gaming-core, remote-apps]
     location: tokyo
 
   - name: local-vmware-ubuntu-dev-gui
     machine: local-vmware-medium
-    os: ubuntu-24.04-desktop-amd64
+    os: ubuntu-26.04-desktop-amd64
     init: ssh-ubuntu-cloud-init
     bundles: [access-gui-safe, dev-sandbox-core, remote-apps]
     location: tokyo
 
   - name: local-vmware-ubuntu-all
     machine: local-vmware-medium
-    os: ubuntu-24.04-desktop-amd64
+    os: ubuntu-26.04-desktop-amd64
     init: ssh-ubuntu-cloud-init
     bundles: [access-gui-streaming, access-gui-safe, dev-sandbox-core, gaming-core, remote-apps]
     location: tokyo
 
   - name: truenas-ubuntu-dev-headless
     machine: truenas-scale-medium
-    os: ubuntu-24.04-server-amd64
+    os: ubuntu-26.04-server-amd64
     init: ssh-ubuntu-cloud-init
     bundles: [access-headless, dev-sandbox-core]
     location: tokyo
@@ -289,7 +282,7 @@ profiles:
 
   - name: truenas-ubuntu-all
     machine: truenas-scale-medium
-    os: ubuntu-24.04-desktop-amd64
+    os: ubuntu-26.04-desktop-amd64
     init: ssh-ubuntu-cloud-init
     bundles: [access-gui-streaming, access-gui-safe, dev-sandbox-core, gaming-core, remote-apps]
     location: tokyo
@@ -297,7 +290,7 @@ profiles:
 
   - name: rpi-ubuntu-all
     machine: raspberry-pi-5
-    os: ubuntu-24.04-desktop-arm64
+    os: ubuntu-26.04-desktop-arm64
     init: ssh-ubuntu-metal
     bundles: [access-gui-streaming, access-gui-safe, dev-sandbox-core, gaming-core, remote-apps]
     location: tokyo

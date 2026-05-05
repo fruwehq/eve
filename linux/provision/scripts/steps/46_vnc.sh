@@ -45,7 +45,7 @@ fi
 mkdir -p "$VNC_HOME"
 
 # Suppress the colord polkit prompt that appears on every XFCE/VNC session.
-# Ubuntu 24.04 (polkit 124) silently ignores the legacy .pkla format — use the
+# Ubuntu 26.04 (polkit 124+) silently ignores the legacy .pkla format — use the
 # JavaScript rule format under /etc/polkit-1/rules.d/ instead.
 POLKIT_RULE=/etc/polkit-1/rules.d/45-allow-colord.rules
 if ! sudo test -f "$POLKIT_RULE"; then

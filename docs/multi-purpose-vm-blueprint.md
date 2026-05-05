@@ -19,7 +19,7 @@ Every environment should be composed from 4 explicit layers:
 
 2. **OS layer**
    - Concrete OS image/version (not generic “linux”).
-   - Example: `ubuntu-24.04-server-amd64`, `ubuntu-24.04-desktop-amd64`, `windows-server-2025`.
+   - Example: `ubuntu-26.04-server-amd64`, `ubuntu-26.04-desktop-amd64`, `windows-server-2025`.
 
 3. **Init layer**
    - First-boot bootstrap to establish secure access and baseline hardening.
@@ -57,14 +57,14 @@ Use explicit OS catalog IDs (version + flavor + arch). Avoid generic `linux` in 
 
 Recommended starter OSes:
 
-1. `ubuntu-24.04-server-amd64` (default for headless dev/sandbox)
-2. `ubuntu-24.04-desktop-amd64` (for GUI dev/remote desktop use cases)
+1. `ubuntu-26.04-server-amd64` (default for headless dev/sandbox)
+2. `ubuntu-26.04-desktop-amd64` (for GUI dev/remote desktop use cases)
 3. `windows-server-2025` (for Windows-native/gaming workflows)
 
 Optional later:
 
 - `debian-12-server-amd64` (stable/minimal alternative)
-- `ubuntu-24.04-server-arm64` (for ARM hosts, e.g., some cloud/RPi flows)
+- `ubuntu-26.04-server-arm64` (for ARM hosts, e.g., some cloud/RPi flows)
 
 ### GUI vs non-graphical Unix
 
@@ -74,8 +74,8 @@ Add OS capability metadata:
 
 Examples:
 
-- `ubuntu-24.04-server-amd64` → `headless`
-- `ubuntu-24.04-desktop-amd64` → `desktop`
+- `ubuntu-26.04-server-amd64` → `headless`
+- `ubuntu-26.04-desktop-amd64` → `desktop`
 
 This lets one workload catalog run on both, with compatibility checks.
 
@@ -156,15 +156,15 @@ machines:
       disk_gb: 100
 
 oses:
-  - id: ubuntu-24.04-server-amd64
+  - id: ubuntu-26.04-server-amd64
     family: ubuntu
-    version: "24.04"
+    version: "26.04"
     arch: amd64
     ui_mode: headless
 
-  - id: ubuntu-24.04-desktop-amd64
+  - id: ubuntu-26.04-desktop-amd64
     family: ubuntu
-    version: "24.04"
+    version: "26.04"
     arch: amd64
     ui_mode: desktop
 
@@ -228,7 +228,7 @@ locations:
 profiles:
   - name: aws-ubuntu-dev-headless
     machine: aws-cheap-x86
-    os: ubuntu-24.04-server-amd64
+    os: ubuntu-26.04-server-amd64
     init: ssh-ubuntu-cloud-init
     bundles: [access-headless, dev-sandbox-core]
     location: tokyo
@@ -240,7 +240,7 @@ profiles:
 
   - name: aws-ubuntu-dev-gui
     machine: aws-cheap-x86
-    os: ubuntu-24.04-desktop-amd64
+    os: ubuntu-26.04-desktop-amd64
     init: ssh-ubuntu-cloud-init
     bundles: [access-gui-safe, dev-sandbox-core]
     location: tokyo
@@ -449,7 +449,7 @@ profile.destroy:
 For your immediate safe sandbox need:
 
 - Start with profile: `aws-ubuntu-dev-headless`
-- OS: `ubuntu-24.04-server-amd64`
+- OS: `ubuntu-26.04-server-amd64`
 - Access bundle: `ssh` only
 - Workloads: `goose + codex-cli + docker + dev-toolchain`
 - Lifecycle: 7-day TTL with reminders and stop→grace→destroy flow
@@ -457,7 +457,7 @@ For your immediate safe sandbox need:
 For GUI-required workflows, add:
 
 - profile: `aws-ubuntu-dev-gui`
-- OS: `ubuntu-24.04-desktop-amd64`
+- OS: `ubuntu-26.04-desktop-amd64`
 - Access bundle: `sunshine + rustdesk + ssh`
 
 This gives a clean layered system while preserving your existing cloud gaming workflows.
