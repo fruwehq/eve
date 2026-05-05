@@ -45,7 +45,11 @@ make tui
 # Run existing profile-oriented targets through a generated instance overlay
 make init INSTANCE=dev-a
 make env INSTANCE=dev-a
+make provision INSTANCE=dev-a
 make ssh INSTANCE=dev-a
+
+# Provisioning is stateful in v3; FORCE=1 clears remote provision state first
+make instance.provision INSTANCE=dev-a FORCE=1
 
 # Inspect plugin contracts and package lifecycle hooks
 make plugins.list
@@ -74,6 +78,11 @@ destructive removals require `YES=1`.
 
 Plugin contracts and example external plugin layouts are documented in
 [docs/plugins.md](docs/plugins.md).
+
+Manual and AI-assisted live test flow is documented in
+[docs/integration-testing.md](docs/integration-testing.md). Start with
+`make integration.plan INSTANCES=<linux>,<windows>`; live runs require
+`YES=1 make integration.test INSTANCES=<linux>,<windows>`.
 
 The optional `make tui` target opens a Textual instance manager for browsing
 instances, combined state, package state, and safe provider/package actions.

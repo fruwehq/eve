@@ -1,7 +1,7 @@
 # Makefile
 .DEFAULT_GOAL := default
-.PHONY: all aws.login clean default down env generate help info \
-				init init.all instance.create instance.delete instance.env instance.info \
+.PHONY: all aws.login clean default down env generate help info integration.plan integration.test \
+				init init.all instance.create instance.delete instance.env instance.info instance.provision \
 				instance.list instance.paths instance.state instance.status instance.validate ip lint logs plan \
 				package.down package.install package.list package.reinstall package.select \
 				package.status package.unselect \
@@ -123,6 +123,18 @@ info: ## Print resolved profile data as JSON
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
 	./scripts/profile-resolve --profile $(PROFILE) --emit json
 
+integration.plan: ## Print integration test plan (INSTANCES=a,b)
+	@if [ -z "$(INSTANCES)" ]; then echo "Usage: make integration.plan INSTANCES=<linux>,<windows>"; exit 2; fi; \
+	args=""; \
+	for instance in $$(printf '%s' "$(INSTANCES)" | tr ',' ' '); do args="$$args --instance $$instance"; done; \
+	./scripts/integration-test $$args
+
+integration.test: ## Run live integration test (INSTANCES=a,b YES=1)
+	@if [ -z "$(INSTANCES)" ]; then echo "Usage: make integration.test INSTANCES=<linux>,<windows> YES=1"; exit 2; fi; \
+	args=""; \
+	for instance in $$(printf '%s' "$(INSTANCES)" | tr ',' ' '); do args="$$args --instance $$instance"; done; \
+	./scripts/integration-test --live $$args
+
 init: ## Initialize profile backend/providers (terraform only)
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
 	./scripts/profile-resolve --profile $(PROFILE) --validate; \
@@ -174,6 +186,12 @@ instance.list: ## List local concrete instances
 instance.paths: ## Print resolved local artifact paths for an instance (EMIT=env|json)
 	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make instance.paths INSTANCE=<name> [EMIT=env|json]"; exit 2; fi; \
 	./scripts/instance-paths --instance $(INSTANCE) --emit $(EMIT)
+
+instance.provision: ## Converge provisioning for an instance (FORCE=1 clears remote provision state first)
+	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make instance.provision INSTANCE=<name> [FORCE=1]"; exit 2; fi; \
+	args="--instance $(INSTANCE)"; \
+	if [ "$(FORCE)" = "1" ]; then args="$$args --force"; fi; \
+	./scripts/instance-provision $$args
 
 instance.state: ## Print local orchestration state for an instance
 	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make instance.state INSTANCE=<name>"; exit 2; fi; \

@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+# Converge provisioning for a concrete v3 instance through the generated
+# profile overlay, while recording v3 provision state.
+
+set -euo pipefail
+
+ROOT="$(git rev-parse --show-toplevel)"
+cd "$ROOT"
+
+usage() {
+  cat >&2 <<'USAGE'
+Usage: scripts/instance-provision --instance <name> [--registry <path>] [--force] [--dry-run]
+USAGE
+}
+
+INSTANCE_NAME=""
+REGISTRY_PATH="${EGAME_INSTANCE_REGISTRY:-}"
+FORCE=0
+DRY_RUN="${EGAME_PROVISION_DRY_RUN:-0}"
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --instance)
+      INSTANCE_NAME="${2:-}"
+      shift 2
+      ;;
+    --registry)
+      REGISTRY_PATH="${2:-}"
+      shift 2
+      ;;
+    --force)
+      FORCE=1
+      shift
+      ;;
+    --dry-run)
+      DRY_RUN=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      usage
+      exit 2
+      ;;
+  esac
+done
+
+if [ -z "$INSTANCE_NAME" ]; then
+  usage
+  exit 2
+fi
+
+path_args=(--instance "$INSTANCE_NAME" --emit env)
+if [ -n "$REGISTRY_PATH" ]; then
+  path_args+=(--registry "$REGISTRY_PATH")
+fi
+INSTANCE_PATHS="$(./scripts/instance-paths "${path_args[@]}")"
+
+extract_path() {
+  printf '%s\n' "$INSTANCE_PATHS" | awk -F= -v key="$1" '$1 == key { print substr($0, index($0, "=") + 1) }'
+}
+
+OVERLAY="$(extract_path INSTANCE_OVERLAY_PATH)"
+
+overlay_args=(--instance "$INSTANCE_NAME" --output "$OVERLAY")
+if [ -n "$REGISTRY_PATH" ]; then
+  overlay_args+=(--registry "$REGISTRY_PATH")
+fi
+./scripts/instance-profile-overlay "${overlay_args[@]}"
+
+export EGAME_CATALOG_LOCAL="$OVERLAY"
+export EGAME_INSTANCE_NAME="$INSTANCE_NAME"
+if [ -n "$REGISTRY_PATH" ]; then
+  export EGAME_INSTANCE_REGISTRY="$REGISTRY_PATH"
+fi
+
+record_state() {
+  local status="$1"
+  local provision_state="$2"
+  local error="${3:-}"
+
+  if [ "${EGAME_DISABLE_STATE:-0}" = "1" ] || [ "$DRY_RUN" = "1" ]; then
+    return
+  fi
+
+  cmd=(./scripts/instance-state
+    --instance "$INSTANCE_NAME"
+    --operation provision
+    --status "$status"
+    --provision-state "$provision_state")
+  if [ -n "$error" ]; then
+    cmd+=(--error "$error")
+  fi
+  "${cmd[@]}" >/dev/null
+}
+
+if [ "$DRY_RUN" = "1" ]; then
+  force_bool=false
+  if [ "$FORCE" = "1" ]; then
+    force_bool=true
+  fi
+  jq -n \
+    --arg instance "$INSTANCE_NAME" \
+    --arg overlay "$OVERLAY" \
+    --argjson force "$force_bool" \
+    '{instance: $instance, command: "provision", overlay: $overlay, force: $force, dry_run: true}'
+  exit 0
+fi
+
+record_state "running" "provisioning"
+
+if [ "$FORCE" = "1" ]; then
+  if ! make --no-print-directory provision.clear-state PROFILE="$INSTANCE_NAME" INSTANCE=; then
+    record_state "failed" "error" "provision.clear-state failed"
+    exit 1
+  fi
+fi
+
+provision_script="${EGAME_PROVISION_SCRIPT:-./scripts/provision}"
+exit_code=0
+"$provision_script" "$INSTANCE_NAME" || exit_code=$?
+if [ "$exit_code" -ne 0 ]; then
+  record_state "failed" "error" "exit $exit_code"
+  exit "$exit_code"
+fi
+
+record_state "succeeded" "provisioned"

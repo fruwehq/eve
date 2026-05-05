@@ -41,6 +41,9 @@ case "$TARGET" in
   init|plan|up|down|start|stop|status|ip|ssh)
     exec ./scripts/provider-dispatch --instance "$INSTANCE_NAME" --command "$TARGET"
     ;;
+  provision)
+    exec ./scripts/instance-provision --instance "$INSTANCE_NAME"
+    ;;
   env|info|validate)
     ;;
 esac
