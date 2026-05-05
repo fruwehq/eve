@@ -1,0 +1,7 @@
+#!/usr/bin/env sh
+set -eu
+
+profile="${EGAME_INSTANCE_NAME:?EGAME_INSTANCE_NAME is required}"
+
+./scripts/instance-ssh "$profile" -- \
+  'sudo systemctl disable --now xpra || true; sudo apt-get remove -y xpra || true'

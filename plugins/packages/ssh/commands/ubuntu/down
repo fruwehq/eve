@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+set -eu
+
+printf 'ssh package down is intentionally a no-op\n'

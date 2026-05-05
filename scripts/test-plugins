@@ -116,10 +116,29 @@ else
   FAIL=$((FAIL + 1))
 fi
 
-if [ -x plugins/packages/docker/commands/ubuntu/down ]; then
-  printf '  [OK] built-in docker package has ubuntu down hook\n'
+ubuntu_down_missing=0
+for package in claude codex-cli dev-toolchain docker goose hermes opencode rdp rustdesk ssh steam sunshine vnc vscode xpra; do
+  if [ ! -x "plugins/packages/$package/commands/ubuntu/down" ]; then
+    printf '  [FAIL] built-in package missing ubuntu down hook: %s\n' "$package" >&2
+    ubuntu_down_missing=$((ubuntu_down_missing + 1))
+  fi
+done
+if [ "$ubuntu_down_missing" -eq 0 ]; then
+  printf '  [OK] built-in ubuntu packages have down hooks\n'
 else
-  printf '  [FAIL] built-in docker package down hook missing or not executable\n' >&2
+  FAIL=$((FAIL + 1))
+fi
+
+windows_down_missing=0
+for package in rustdesk steam sunshine xpra; do
+  if [ ! -x "plugins/packages/$package/commands/windows/down" ]; then
+    printf '  [FAIL] built-in package missing windows down hook: %s\n' "$package" >&2
+    windows_down_missing=$((windows_down_missing + 1))
+  fi
+done
+if [ "$windows_down_missing" -eq 0 ]; then
+  printf '  [OK] built-in windows packages have down hooks\n'
+else
   FAIL=$((FAIL + 1))
 fi
 

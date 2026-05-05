@@ -1,0 +1,7 @@
+#!/usr/bin/env sh
+set -eu
+
+profile="${EGAME_INSTANCE_NAME:?EGAME_INSTANCE_NAME is required}"
+
+./scripts/instance-ssh "$profile" -- \
+  'winget uninstall --id LizardByte.Sunshine --silent; exit 0'
