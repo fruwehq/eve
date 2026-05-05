@@ -23,7 +23,15 @@ if [ "$ENGINE" != "vagrant" ]; then
 fi
 
 VPROV=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^PROVIDER=/{print $2}')
-VAGRANT_PROVIDER=$(echo "$VPROV" | sed 's/local-vmware/vmware_desktop/;s/local-virtualbox/virtualbox/')
+case "$VPROV" in
+  local-qemu) VAGRANT_PROVIDER=qemu ;;
+  local-vmware) VAGRANT_PROVIDER=vmware_desktop ;;
+  local-virtualbox) VAGRANT_PROVIDER=virtualbox ;;
+  *)
+    echo "[vagrant-up] unsupported local provider=$VPROV" >&2
+    exit 2
+    ;;
+esac
 echo "[vagrant-up] profile=$PROFILE provider=$VAGRANT_PROVIDER"
 
 mkdir -p ".generated/$PROFILE"

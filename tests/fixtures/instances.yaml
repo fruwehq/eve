@@ -6,6 +6,9 @@ instances:
       disk_gb: 120
       memory_mb: 12288
 
+  - name: qemu-a
+    recipe: local-qemu-ubuntu-dev-gui
+
   - name: aws-gpu-a
     recipe: aws-ubuntu-dev-headless
     machine: aws-gpu-g5

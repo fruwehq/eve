@@ -4,6 +4,7 @@
 #
 # VMware Fusion: opens the VMX in the Fusion GUI
 # VirtualBox: opens the VirtualBox GUI
+# QEMU: not implemented; use VNC/RustDesk/Xpra inside the guest.
 
 set -euo pipefail
 
@@ -48,6 +49,10 @@ case "$PROVIDER" in
       echo "[remote.console] VM is stopped, starting with GUI"
       VBoxManage startvm "$VM_ID" --type gui
     fi
+    ;;
+  local-qemu)
+    echo "remote.console is not implemented for local-qemu. Use SSH or provision a remote GUI package." >&2
+    exit 2
     ;;
   *)
     echo "remote.console: unsupported local provider: $PROVIDER" >&2

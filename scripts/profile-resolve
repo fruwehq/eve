@@ -282,11 +282,18 @@ emit_vagrant() {
   fi
   echo "$RESOLVED_JSON" | jq -r '
     . as $r |
-    (if $r.machine.provider == "local-vmware" then "vmware_desktop" else "virtualbox" end) as $provider |
+    (if $r.machine.provider == "local-vmware" then "vmware_desktop"
+     elif $r.machine.provider == "local-qemu" then "qemu"
+     else "virtualbox"
+     end) as $provider |
     ($r.os.vagrant_box // "cloud-image/ubuntu-26.04") as $box |
+    ($r.os.arch // "amd64") as $arch |
+    (if ($r.os.arch // "amd64") == "arm64" then "aarch64" else "x86_64" end) as $qemu_arch |
     $r.profile.name as $name |
     (($r.machine.defaults.cpus // 2) | tostring) as $cpus |
-    (($r.machine.defaults.memory_mb // 4096) | tostring) as $memory |
+    (($r.machine.defaults.memory_mb // 4096)) as $memory_mb |
+    ($memory_mb | tostring) as $memory |
+    (((($memory_mb / 1024) | floor) | tostring) + "G") as $qemu_memory |
     ($r.bundle_packages | join(" ")) as $pkg_list |
 
     { docker: ($r.bundle_packages | index("docker") != null), dev: ($r.bundle_packages | index("dev-toolchain") != null) } as $flags |
@@ -336,14 +343,23 @@ emit_vagrant() {
 
     "Vagrant.configure(\"2\") do |config|\n" +
     "  config.vm.box = \"" + $box + "\"\n" +
+    "  config.vm.box_architecture = \"" + $arch + "\"\n" +
     "  config.vm.hostname = \"" + $name + "\"\n" +
     "\n" +
-    "  config.vm.provider \"" + $provider + "\" do |v|\n" +
-    "    v.cpus = " + $cpus + "\n" +
-    "    v.memory = " + $memory + "\n" +
-    "    # Set VAGRANT_SHOW_CONSOLE=1 to open the hypervisor console window.\n" +
-    "    v.gui = ENV[\"VAGRANT_SHOW_CONSOLE\"] == \"1\"\n" +
-    "  end\n" +
+    (if $provider == "qemu" then
+      "  config.vm.provider \"qemu\" do |qe|\n" +
+      "    qe.arch = \"" + $qemu_arch + "\"\n" +
+      "    qe.smp = \"" + $cpus + "\"\n" +
+      "    qe.memory = \"" + $qemu_memory + "\"\n" +
+      "  end\n"
+    else
+      "  config.vm.provider \"" + $provider + "\" do |v|\n" +
+      "    v.cpus = " + $cpus + "\n" +
+      "    v.memory = " + $memory + "\n" +
+      "    # Set VAGRANT_SHOW_CONSOLE=1 to open the hypervisor console window.\n" +
+      "    v.gui = ENV[\"VAGRANT_SHOW_CONSOLE\"] == \"1\"\n" +
+      "  end\n"
+    end) +
     "\n" +
     $port_forwards +
     (if $port_forwards != "" then "\n" else "" end) +

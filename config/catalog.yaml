@@ -65,6 +65,11 @@ machines:
     kind: vm
     defaults: *local_medium
 
+  - name: local-qemu-medium
+    provider: local-qemu
+    kind: vm
+    defaults: *local_medium
+
   - name: local-vmware-medium
     provider: local-vmware
     kind: vm
@@ -107,6 +112,7 @@ oses:
     family: ubuntu
     version: "26.04"
     arch: arm64
+    vagrant_box: cloud-image/ubuntu-26.04
 
   - id: windows-server-2025
     family: windows
@@ -193,6 +199,8 @@ locations:
       region: nrt
     local-virtualbox:
       host: local
+    local-qemu:
+      host: local
     local-vmware:
       host: local
     raspberry-pi:
@@ -245,6 +253,22 @@ profiles:
   - name: local-vbox-ubuntu-all
     machine: local-virtualbox-medium
     os: ubuntu-26.04-amd64
+    ui_mode: desktop
+    init: ssh-ubuntu-cloud-init
+    bundles: [access-gui-streaming, access-gui-safe, dev-sandbox-core, gaming-core, remote-apps]
+    location: tokyo
+
+  - name: local-qemu-ubuntu-dev-gui
+    machine: local-qemu-medium
+    os: ubuntu-26.04-arm64
+    ui_mode: desktop
+    init: ssh-ubuntu-cloud-init
+    bundles: [access-gui-safe, dev-sandbox-core, remote-apps]
+    location: tokyo
+
+  - name: local-qemu-ubuntu-all
+    machine: local-qemu-medium
+    os: ubuntu-26.04-arm64
     ui_mode: desktop
     init: ssh-ubuntu-cloud-init
     bundles: [access-gui-streaming, access-gui-safe, dev-sandbox-core, gaming-core, remote-apps]

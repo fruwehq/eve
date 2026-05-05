@@ -56,6 +56,20 @@ check_local_vmware() {
   fi
 }
 
+check_local_qemu() {
+  configured=no reachable=no notes="vagrant/qemu not found"
+
+  if command -v vagrant >/dev/null 2>&1 || command -v qemu-system-aarch64 >/dev/null 2>&1 || command -v qemu-system-x86_64 >/dev/null 2>&1; then
+    configured=yes
+    if command -v qemu-system-aarch64 >/dev/null 2>&1 || command -v qemu-system-x86_64 >/dev/null 2>&1; then
+      reachable=yes
+      notes="qemu available"
+    else
+      notes="vagrant present, qemu missing"
+    fi
+  fi
+}
+
 check_truenas() {
   local host="${TRUENAS_HOST:-}"
   local port="${TRUENAS_SSH_PORT:-22}"
@@ -113,11 +127,12 @@ print_row() {
   printf '%-17s  %-10s  %-9s  %s\n' "$name" "$configured" "$reachable" "$notes"
 }
 
-PROVIDERS="aws local-virtualbox local-vmware truenas vultr"
+PROVIDERS="aws local-qemu local-virtualbox local-vmware truenas vultr"
 
 if [ -n "$PROVIDER" ]; then
   case "$PROVIDER" in
     aws)               check_aws ;;
+    local-qemu)        check_local_qemu ;;
     local-virtualbox)  check_local_virtualbox ;;
     local-vmware)      check_local_vmware ;;
     truenas)           check_truenas ;;
@@ -141,6 +156,7 @@ else
   printf '%s\n' 'Provider           Configured  Reachable  Notes'
   printf '%s\n' '-----------------  ----------  ---------  -------------------------------------------'
   check_aws;               print_row "aws"
+  check_local_qemu;         print_row "local-qemu"
   check_local_virtualbox;  print_row "local-virtualbox"
   check_local_vmware;      print_row "local-vmware"
   check_truenas;           print_row "truenas"

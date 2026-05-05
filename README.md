@@ -28,7 +28,7 @@ git-ignored local registry at `.egame/instances.yaml`.
 make recipes.list
 
 # Create a concrete instance entry
-make instance.create INSTANCE=dev-a RECIPE=local-vmware-ubuntu-dev-gui DISK_GB=120 MEMORY_MB=12288 PACKAGES=xpra
+make instance.create INSTANCE=dev-a RECIPE=local-qemu-ubuntu-dev-gui DISK_GB=120 MEMORY_MB=12288 PACKAGES=xpra
 
 # List and inspect concrete instances
 make instance.list
@@ -292,15 +292,30 @@ The target starts an Xpra server on the VM, launches the requested app, and atta
     Adjust path to `/bin/dd` if using TrueNAS CORE (FreeBSD).
  8. **Disk image setup** — `make up` downloads the cloud image directly to the NAS, writes it to a zvol, and resizes the partition. No manual `dd` needed.
 
-### VirtualBox (local, Apple Silicon ⚠️)
+### QEMU (local, Apple Silicon ✅)
 
-> **Note**: VirtualBox on Apple Silicon (M1/M2/M3/M4) has limited ARM64 VM support and may fail to boot. VMware Fusion is recommended instead.
+QEMU is the preferred local Linux provider on Apple Silicon. It uses the public
+`cloud-image/ubuntu-26.04` Vagrant box with the `qemu` provider artifact.
+
+1. **QEMU** — `brew install qemu`
+2. **Vagrant** — `brew install hashicorp/tap/vagrant`
+3. **Vagrant QEMU plugin** — `vagrant plugin install vagrant-qemu`
+4. No cloud credentials needed
+
+### VirtualBox (local, Intel macOS/Linux)
+
+> **Note**: VirtualBox is kept as a legacy/local option. It can use
+> `cloud-image/ubuntu-26.04`, but is not the recommended path on Apple Silicon.
 
 1. **VirtualBox** — [install](https://www.virtualbox.org/wiki/Downloads) (version 7.1+)
 2. **Vagrant** — `brew install hashicorp/tap/vagrant`
 3. No cloud credentials needed
 
-### VMware Fusion (local, Apple Silicon ✅)
+### VMware Fusion (local, legacy)
+
+> **Note**: `cloud-image/ubuntu-26.04` does not publish a VMware Vagrant
+> artifact, so VMware is not recommended for Ubuntu 26.04 unless you provide a
+> compatible custom box.
 
 1. **VMware Fusion** — [install](https://www.vmware.com/products/desktop-hypervisor/workstation-and-fusion) (free for personal use)
 2. **Vagrant** — `brew install hashicorp/tap/vagrant`
