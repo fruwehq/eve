@@ -9,6 +9,22 @@ require "yaml"
 ROOT = File.expand_path("..", __dir__)
 DEFAULT_REGISTRY_PATH = File.join(ROOT, ".egame/instances.yaml")
 
+def with_registry_lock(registry_path)
+  FileUtils.mkdir_p(File.dirname(registry_path))
+  File.open("#{registry_path}.lock", File::RDWR | File::CREAT, 0o600) do |lock|
+    lock.flock(File::LOCK_EX)
+    yield
+  end
+end
+
+def write_registry!(registry_path, registry)
+  Tempfile.create(["egame-registry-", ".yaml"], File.dirname(registry_path)) do |tmp|
+    tmp.write(registry.to_yaml)
+    tmp.close
+    FileUtils.mv(tmp.path, registry_path)
+  end
+end
+
 def usage
   warn <<~USAGE
     Usage:
@@ -34,7 +50,9 @@ end
 
 name = nil
 recipe = nil
-registry_path = DEFAULT_REGISTRY_PATH
+registry_path = ENV["EGAME_INSTANCE_REGISTRY"] && !ENV["EGAME_INSTANCE_REGISTRY"].empty? \
+                ? File.expand_path(ENV["EGAME_INSTANCE_REGISTRY"], Dir.pwd) \
+                : DEFAULT_REGISTRY_PATH
 fields = {}
 overrides = {}
 
@@ -92,49 +110,50 @@ unless name.match?(/\A[a-z][a-z0-9-]*\z/)
   exit 2
 end
 
-registry = if File.exist?(registry_path)
-             YAML.safe_load(File.read(registry_path), permitted_classes: [], aliases: true) || {}
-           else
-             { "version" => 1, "instances" => [] }
-           end
-registry["version"] ||= 1
-registry["instances"] ||= []
+with_registry_lock(registry_path) do
+  registry = if File.exist?(registry_path)
+               YAML.safe_load(File.read(registry_path), permitted_classes: [], aliases: true) || {}
+             else
+               { "version" => 1, "instances" => [] }
+             end
+  registry["version"] ||= 1
+  registry["instances"] ||= []
 
-if registry["instances"].any? { |instance| instance["name"] == name }
-  warn "instance-create: instance already exists: #{name}"
-  exit 1
-end
-
-now = Time.now.utc.iso8601
-entry = {
-  "name" => name,
-  "recipe" => recipe,
-  "created_at" => now,
-  "updated_at" => now
-}.merge(fields)
-entry["overrides"] = overrides unless overrides.empty?
-
-registry["instances"] << entry
-
-Tempfile.create(["egame-instance-", ".yaml"]) do |tmp|
-  tmp.write(registry.to_yaml)
-  tmp.close
-
-  ok = system(
-    File.join(ROOT, "scripts/instance-resolve"),
-    "--registry", tmp.path,
-    "--instance", name,
-    "--validate",
-    out: File::NULL
-  )
-  unless ok
-    warn "instance-create: resolved instance did not validate; registry was not changed"
+  if registry["instances"].any? { |instance| instance["name"] == name }
+    warn "instance-create: instance already exists: #{name}"
     exit 1
   end
-end
 
-FileUtils.mkdir_p(File.dirname(registry_path))
-File.write(registry_path, registry.to_yaml)
+  now = Time.now.utc.iso8601
+  entry = {
+    "name" => name,
+    "recipe" => recipe,
+    "created_at" => now,
+    "updated_at" => now
+  }.merge(fields)
+  entry["overrides"] = overrides unless overrides.empty?
+
+  registry["instances"] << entry
+
+  Tempfile.create(["egame-instance-", ".yaml"]) do |tmp|
+    tmp.write(registry.to_yaml)
+    tmp.close
+
+    ok = system(
+      File.join(ROOT, "scripts/instance-resolve"),
+      "--registry", tmp.path,
+      "--instance", name,
+      "--validate",
+      out: File::NULL
+    )
+    unless ok
+      warn "instance-create: resolved instance did not validate; registry was not changed"
+      exit 1
+    end
+  end
+
+  write_registry!(registry_path, registry)
+end
 
 puts "Created instance: #{name}"
 puts "Registry: #{registry_path}"

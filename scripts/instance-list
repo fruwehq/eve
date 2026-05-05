@@ -17,7 +17,9 @@ def load_any(path)
 end
 
 json = false
-registry_path = DEFAULT_REGISTRY_PATH
+registry_path = ENV["EGAME_INSTANCE_REGISTRY"] && !ENV["EGAME_INSTANCE_REGISTRY"].empty? \
+                ? File.expand_path(ENV["EGAME_INSTANCE_REGISTRY"], Dir.pwd) \
+                : DEFAULT_REGISTRY_PATH
 
 args = ARGV.dup
 until args.empty?

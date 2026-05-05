@@ -16,7 +16,9 @@ def usage
 end
 
 instance_name = nil
-registry_path = nil
+registry_path = ENV["EGAME_INSTANCE_REGISTRY"] && !ENV["EGAME_INSTANCE_REGISTRY"].empty? \
+                ? File.expand_path(ENV["EGAME_INSTANCE_REGISTRY"], Dir.pwd) \
+                : nil
 output_path = nil
 
 args = ARGV.dup

@@ -55,12 +55,13 @@ for instance in $INSTANCES; do
 done
 
 tmp_registry="$(mktemp "${TMPDIR:-/tmp}/egame-instance-test.XXXXXX")"
+tmp_concurrent_registry="$(mktemp "${TMPDIR:-/tmp}/egame-instance-concurrent.XXXXXX")"
 tmp_external_registry="$(mktemp "${TMPDIR:-/tmp}/egame-instance-external.XXXXXX")"
 invalid_output="$(mktemp "${TMPDIR:-/tmp}/egame-instance-test-output.XXXXXX")"
 tmp_local_catalog="$(mktemp "${TMPDIR:-/tmp}/egame-instance-catalog.XXXXXX.yaml")"
 tmp_overlay_dir="$(mktemp -d "${TMPDIR:-/tmp}/egame-instance-overlay.XXXXXX")"
-trap 'rm -f "$tmp_registry" "$tmp_external_registry" "$invalid_output" "$tmp_local_catalog"; rm -rf "$tmp_overlay_dir"' EXIT
-rm -f "$tmp_registry"
+trap 'rm -f "$tmp_registry" "$tmp_registry.lock" "$tmp_concurrent_registry" "$tmp_concurrent_registry.lock" "$tmp_external_registry" "$invalid_output" "$tmp_local_catalog"; rm -rf "$tmp_overlay_dir"' EXIT
+rm -f "$tmp_registry" "$tmp_concurrent_registry"
 
 if ./scripts/instance-create \
   --registry "$tmp_registry" \
@@ -79,6 +80,36 @@ if ./scripts/instance-create \
   fi
 else
   printf '  [FAIL] create valid instance\n' >&2
+  FAIL=$((FAIL + 1))
+fi
+
+if EGAME_INSTANCE_REGISTRY="$tmp_registry" make --no-print-directory instance.validate INSTANCE=test-dev >/dev/null &&
+  EGAME_INSTANCE_REGISTRY="$tmp_registry" make --no-print-directory instance.list |
+    grep -q '^test-dev'; then
+  printf '  [OK] make instance targets honor EGAME_INSTANCE_REGISTRY\n'
+else
+  printf '  [FAIL] make instance targets honor EGAME_INSTANCE_REGISTRY\n' >&2
+  EGAME_INSTANCE_REGISTRY="$tmp_registry" make --no-print-directory instance.validate INSTANCE=test-dev >&2 || true
+  FAIL=$((FAIL + 1))
+fi
+
+./scripts/instance-create \
+  --registry "$tmp_concurrent_registry" \
+  --instance concurrent-a \
+  --recipe local-vmware-ubuntu-dev-gui >/dev/null &
+create_a_pid=$!
+./scripts/instance-create \
+  --registry "$tmp_concurrent_registry" \
+  --instance concurrent-b \
+  --recipe local-vmware-ubuntu-dev-gui >/dev/null &
+create_b_pid=$!
+if wait "$create_a_pid" && wait "$create_b_pid" &&
+  ./scripts/instance-list --registry "$tmp_concurrent_registry" --json |
+    jq -e '.instances | length == 2 and any(.[]; .name == "concurrent-a") and any(.[]; .name == "concurrent-b")' >/dev/null; then
+  printf '  [OK] concurrent instance creates preserve registry\n'
+else
+  printf '  [FAIL] concurrent instance creates preserve registry\n' >&2
+  cat "$tmp_concurrent_registry" >&2 || true
   FAIL=$((FAIL + 1))
 fi
 

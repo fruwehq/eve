@@ -9,6 +9,22 @@ require "yaml"
 ROOT = File.expand_path("..", __dir__)
 DEFAULT_REGISTRY_PATH = File.join(ROOT, ".egame/instances.yaml")
 
+def with_registry_lock(registry_path)
+  FileUtils.mkdir_p(File.dirname(registry_path))
+  File.open("#{registry_path}.lock", File::RDWR | File::CREAT, 0o600) do |lock|
+    lock.flock(File::LOCK_EX)
+    yield
+  end
+end
+
+def write_registry!(registry_path, registry)
+  Tempfile.create(["egame-registry-", ".yaml"], File.dirname(registry_path)) do |tmp|
+    tmp.write(registry.to_yaml)
+    tmp.close
+    FileUtils.mv(tmp.path, registry_path)
+  end
+end
+
 def usage
   warn <<~USAGE
     Usage:
@@ -51,54 +67,55 @@ unless instance_name && package_id && action
   exit 2
 end
 
-unless File.exist?(registry_path)
-  warn "package-selection: registry not found: #{registry_path}"
-  exit 1
-end
-
-registry = YAML.safe_load(File.read(registry_path), permitted_classes: [], aliases: true) || {}
-instances = registry["instances"] || []
-instance = instances.find { |entry| entry.is_a?(Hash) && entry["name"] == instance_name }
-unless instance
-  warn "package-selection: instance not found: #{instance_name}"
-  exit 1
-end
-
-packages = (instance["packages"] || []).dup
-case action
-when "add"
-  packages << package_id
-when "remove"
-  packages.delete(package_id)
-end
-packages = packages.uniq.sort
-
-if packages.empty?
-  instance.delete("packages")
-else
-  instance["packages"] = packages
-end
-instance["updated_at"] = Time.now.utc.iso8601
-
-Tempfile.create(["egame-package-selection-", ".yaml"]) do |tmp|
-  tmp.write(registry.to_yaml)
-  tmp.close
-
-  ok = system(
-    File.join(ROOT, "scripts/instance-resolve"),
-    "--registry", tmp.path,
-    "--instance", instance_name,
-    "--validate",
-    out: File::NULL
-  )
-  unless ok
-    warn "package-selection: updated instance did not validate; registry was not changed"
+with_registry_lock(registry_path) do
+  unless File.exist?(registry_path)
+    warn "package-selection: registry not found: #{registry_path}"
     exit 1
   end
-end
 
-FileUtils.mkdir_p(File.dirname(registry_path))
-File.write(registry_path, registry.to_yaml)
+  registry = YAML.safe_load(File.read(registry_path), permitted_classes: [], aliases: true) || {}
+  instances = registry["instances"] || []
+  instance = instances.find { |entry| entry.is_a?(Hash) && entry["name"] == instance_name }
+  unless instance
+    warn "package-selection: instance not found: #{instance_name}"
+    exit 1
+  end
+
+  packages = (instance["packages"] || []).dup
+  case action
+  when "add"
+    packages << package_id
+  when "remove"
+    packages.delete(package_id)
+  end
+  packages = packages.uniq.sort
+
+  if packages.empty?
+    instance.delete("packages")
+  else
+    instance["packages"] = packages
+  end
+  instance["updated_at"] = Time.now.utc.iso8601
+
+  Tempfile.create(["egame-package-selection-", ".yaml"]) do |tmp|
+    tmp.write(registry.to_yaml)
+    tmp.close
+
+    ok = system(
+      File.join(ROOT, "scripts/instance-resolve"),
+      "--registry", tmp.path,
+      "--instance", instance_name,
+      "--validate",
+      out: File::NULL
+    )
+    unless ok
+      warn "package-selection: updated instance did not validate; registry was not changed"
+      exit 1
+    end
+  end
+
+  write_registry!(registry_path, registry)
+end
 
 puts "#{action == "add" ? "Selected" : "Unselected"} package: #{package_id}"
 puts "Instance: #{instance_name}"

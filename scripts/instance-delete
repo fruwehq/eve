@@ -5,10 +5,27 @@
 require "fileutils"
 require "json"
 require "open3"
+require "tempfile"
 require "yaml"
 
 ROOT = File.expand_path("..", __dir__)
 DEFAULT_REGISTRY_PATH = File.join(ROOT, ".egame/instances.yaml")
+
+def with_registry_lock(registry_path)
+  FileUtils.mkdir_p(File.dirname(registry_path))
+  File.open("#{registry_path}.lock", File::RDWR | File::CREAT, 0o600) do |lock|
+    lock.flock(File::LOCK_EX)
+    yield
+  end
+end
+
+def write_registry!(registry_path, registry)
+  Tempfile.create(["egame-registry-", ".yaml"], File.dirname(registry_path)) do |tmp|
+    tmp.write(registry.to_yaml)
+    tmp.close
+    FileUtils.mv(tmp.path, registry_path)
+  end
+end
 
 def usage
   warn <<~USAGE
@@ -55,41 +72,44 @@ if instance_name !~ /\A[A-Za-z0-9][A-Za-z0-9._-]*\z/
   exit 2
 end
 
-unless File.exist?(registry_path)
-  warn "instance-delete: registry not found: #{registry_path}"
-  exit 1
-end
-
-registry = YAML.safe_load(File.read(registry_path), permitted_classes: [], aliases: true) || {}
-registry["instances"] ||= []
-
-index = registry["instances"].index { |e| e.is_a?(Hash) && e["name"] == instance_name }
-unless index
-  warn "instance-delete: instance not found: #{instance_name}"
-  exit 1
-end
-
 paths = nil
-if purge
-  out, status = Open3.capture2e(
-    File.join(ROOT, "scripts/instance-paths"),
-    "--registry", registry_path,
-    "--instance", instance_name,
-    "--emit", "json"
-  )
-  unless status.success?
-    warn out
+
+with_registry_lock(registry_path) do
+  unless File.exist?(registry_path)
+    warn "instance-delete: registry not found: #{registry_path}"
     exit 1
   end
-  paths = JSON.parse(out)
-end
 
-registry["instances"].delete_at(index)
+  registry = YAML.safe_load(File.read(registry_path), permitted_classes: [], aliases: true) || {}
+  registry["instances"] ||= []
 
-if registry["instances"].empty?
-  FileUtils.rm_f(registry_path)
-else
-  File.write(registry_path, registry.to_yaml)
+  index = registry["instances"].index { |e| e.is_a?(Hash) && e["name"] == instance_name }
+  unless index
+    warn "instance-delete: instance not found: #{instance_name}"
+    exit 1
+  end
+
+  if purge
+    out, status = Open3.capture2e(
+      File.join(ROOT, "scripts/instance-paths"),
+      "--registry", registry_path,
+      "--instance", instance_name,
+      "--emit", "json"
+    )
+    unless status.success?
+      warn out
+      exit 1
+    end
+    paths = JSON.parse(out)
+  end
+
+  registry["instances"].delete_at(index)
+
+  if registry["instances"].empty?
+    FileUtils.rm_f(registry_path)
+  else
+    write_registry!(registry_path, registry)
+  end
 end
 
 puts "Deleted instance: #{instance_name}"
