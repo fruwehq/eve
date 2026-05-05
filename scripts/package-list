@@ -1,0 +1,109 @@
+#!/usr/bin/env ruby
+# List package catalog entries with plugin/support selection for an instance.
+
+require "json"
+require "open3"
+
+ROOT = File.expand_path("..", __dir__)
+
+def usage
+  warn <<~USAGE
+    Usage:
+      scripts/package-list --instance <name> [--registry <path>] [--json]
+  USAGE
+end
+
+def run_json(*cmd)
+  out, status = Open3.capture2e(*cmd)
+  raise out unless status.success?
+
+  JSON.parse(out)
+end
+
+instance_name = nil
+registry_path = ENV["EGAME_INSTANCE_REGISTRY"] ? File.expand_path(ENV["EGAME_INSTANCE_REGISTRY"], Dir.pwd) : nil
+json = false
+
+args = ARGV.dup
+until args.empty?
+  case args.shift
+  when "--instance"
+    instance_name = args.shift
+  when "--registry"
+    registry_path = File.expand_path(args.shift, Dir.pwd)
+  when "--json"
+    json = true
+  when "-h", "--help"
+    usage
+    exit 0
+  else
+    usage
+    exit 2
+  end
+end
+
+unless instance_name
+  usage
+  exit 2
+end
+
+begin
+  resolve_cmd = [File.join(ROOT, "scripts/instance-resolve"), "--instance", instance_name, "--emit", "json"]
+  resolve_cmd += ["--registry", registry_path] if registry_path
+  resolved = run_json(*resolve_cmd)
+
+  plugin_doc = run_json(File.join(ROOT, "scripts/plugin-list"), "--kind", "package", "--json")
+  plugins = plugin_doc.fetch("plugins")
+  plugin_by_id = plugins.to_h { |plugin| [plugin.fetch("id"), plugin] }
+  selected_ids = resolved.fetch("bundle_packages")
+  os_family = resolved.fetch("os").fetch("family")
+
+  packages = plugins.map do |plugin|
+    supported_families = plugin.dig("supports", "os_families") || []
+    {
+      "id" => plugin.fetch("id"),
+      "display_name" => plugin.fetch("display_name"),
+      "plugin" => plugin.fetch("id"),
+      "selected" => selected_ids.include?(plugin.fetch("id")),
+      "supported" => supported_families.empty? || supported_families.include?(os_family),
+      "source" => plugin.fetch("source"),
+      "path" => plugin.fetch("path")
+    }
+  end.sort_by { |package| package["id"] }
+
+  # Keep selected catalog package ids visible even when the plugin is missing.
+  missing_selected = selected_ids.reject { |id| plugin_by_id.key?(id) }.map do |id|
+    {
+      "id" => id,
+      "display_name" => id,
+      "plugin" => nil,
+      "selected" => true,
+      "supported" => false,
+      "source" => "missing",
+      "path" => nil
+    }
+  end
+  packages.concat(missing_selected)
+
+  if json
+    puts JSON.pretty_generate({
+      "instance" => instance_name,
+      "os_family" => os_family,
+      "packages" => packages
+    })
+  else
+    printf "%-24s %-8s %-9s %-10s %s\n", "PACKAGE", "SELECTED", "SUPPORTED", "SOURCE", "DISPLAY"
+    printf "%-24s %-8s %-9s %-10s %s\n", "-------", "--------", "---------", "------", "-------"
+    packages.each do |package|
+      printf "%-24s %-8s %-9s %-10s %s\n",
+             package["id"],
+             package["selected"] ? "yes" : "no",
+             package["supported"] ? "yes" : "no",
+             package["source"],
+             package["display_name"]
+    end
+  end
+rescue StandardError => e
+  warn "package-list: #{e.message}"
+  exit 1
+end

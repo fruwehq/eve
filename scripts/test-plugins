@@ -97,6 +97,17 @@ else
   FAIL=$((FAIL + 1))
 fi
 
+package_list="$(
+  EGAME_INSTANCE_REGISTRY="$FIXTURE" make package.list INSTANCE=dev-a EMIT=json
+)"
+if printf '%s\n' "$package_list" | jq -e '.instance == "dev-a" and (.packages[] | select(.id == "docker" and .selected == true and .supported == true and .plugin == "docker")) and (.packages[] | select(.id == "steam" and .selected == false))' >/dev/null; then
+  printf '  [OK] package list shows selected and available packages\n'
+else
+  printf '  [FAIL] package list shows selected and available packages\n' >&2
+  printf '%s\n' "$package_list" >&2
+  FAIL=$((FAIL + 1))
+fi
+
 if EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-package-dispatch-test" \
   ./scripts/package-dispatch --registry "$FIXTURE" --instance dev-a --package docker --command down --dry-run >/dev/null 2>&1; then
   printf '  [FAIL] destructive package down requires confirmation\n' >&2

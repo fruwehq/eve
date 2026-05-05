@@ -3,7 +3,7 @@
 .PHONY: all aws.login clean default down env generate help info \
 				init init.all instance.create instance.env instance.info \
 				instance.list instance.paths instance.state instance.validate ip lint logs plan \
-				package.down package.install package.reinstall package.status \
+				package.down package.install package.list package.reinstall package.status \
 				plugins.list plugins.sync plugins.validate \
 				profiles.list profiles.menu provider.status providers.status provision \
 				recipes.list \
@@ -208,6 +208,12 @@ package.down: ## Remove package from an instance (PACKAGE=<id>, YES=1 for destru
 package.install: ## Install selected package set for an instance (PACKAGE=<id>)
 	@if [ -z "$(INSTANCE)" ] || [ -z "$(PACKAGE)" ]; then echo "Usage: make package.install INSTANCE=<name> PACKAGE=<id>"; exit 2; fi; \
 	./scripts/package-dispatch --instance $(INSTANCE) --package $(PACKAGE) --command install
+
+package.list: ## List package plugins for an instance with selection/support
+	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make package.list INSTANCE=<name> [EMIT=json]"; exit 2; fi; \
+	args="--instance $(INSTANCE)"; \
+	if [ "$(EMIT)" = "json" ]; then args="$$args --json"; fi; \
+	./scripts/package-list $$args
 
 package.reinstall: ## Reinstall package on an instance (PACKAGE=<id>, YES=1 for destructive)
 	@if [ -z "$(INSTANCE)" ] || [ -z "$(PACKAGE)" ]; then echo "Usage: make package.reinstall INSTANCE=<name> PACKAGE=<id> YES=1"; exit 2; fi; \

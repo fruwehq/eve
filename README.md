@@ -46,6 +46,7 @@ make ssh INSTANCE=dev-a
 # Inspect plugin contracts and package lifecycle hooks
 make plugins.list
 make provider.status INSTANCE=dev-a
+make package.list INSTANCE=dev-a
 make package.status INSTANCE=dev-a PACKAGE=docker
 make package.down INSTANCE=dev-a PACKAGE=docker YES=1
 ```
