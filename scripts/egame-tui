@@ -83,6 +83,26 @@ def dispatch_package(instance: str, package: str, command: str) -> tuple[int, st
     )
 
 
+def provision_instance(instance: str, *, force: bool = False) -> tuple[int, str, str]:
+    args = [str(ROOT / "scripts/instance-provision"), "--instance", instance]
+    if force:
+        args.append("--force")
+    return run_command(args)
+
+
+def update_package_selection(instance: str, package: str, *, selected: bool) -> tuple[int, str, str]:
+    return run_command(
+        [
+            str(ROOT / "scripts/package-selection"),
+            "--instance",
+            instance,
+            "--package",
+            package,
+            "--add" if selected else "--remove",
+        ]
+    )
+
+
 def render_instance_details(status: dict[str, Any] | None) -> str:
     if not status:
         return "Select an instance to inspect state."
@@ -199,6 +219,7 @@ def run_tui() -> int:
         BINDINGS: ClassVar[list[Binding | tuple[str, str] | tuple[str, str, str]]] = [
             ("r", "refresh", "Refresh"),
             ("s", "provider_action('status')", "Provider status"),
+            ("p", "provision", "Provision"),
             ("q", "quit", "Quit"),
         ]
 
@@ -225,11 +246,18 @@ def run_tui() -> int:
                             yield Button("Plan", id="provider-plan")
                             yield Button("Start", id="provider-start", variant="success")
                             yield Button("Stop", id="provider-stop", variant="warning")
+                            yield Button("Provision", id="instance-provision", variant="primary")
+                            yield Button("Force Prov", id="instance-force-provision", variant="warning")
+                            yield Button("New Cmd", id="instance-new-command")
+                            yield Button("Delete Cmd", id="instance-delete-command", variant="error")
                         yield Static("Packages", classes="panel-title")
                         yield DataTable(id="packages")
                         with Horizontal(id="package-actions"):
                             yield Button("Pkg Status", id="package-status")
+                            yield Button("Select", id="package-select")
+                            yield Button("Unselect", id="package-unselect")
                             yield Button("Install", id="package-install", variant="success")
+                            yield Button("Down Cmd", id="package-down-command", variant="warning")
                             yield Button("SSH Cmd", id="ssh-command")
                 yield RichLog(id="logs", markup=True, wrap=True)
             yield Footer()
@@ -244,6 +272,7 @@ def run_tui() -> int:
             packages.add_columns("Package", "Selected", "State", "Supported", "Display")
 
             await self.refresh_instances()
+            self.update_action_state()
 
         def write_log(self, message: str) -> None:
             self.query_one("#logs", RichLog).write(message)
@@ -279,6 +308,7 @@ def run_tui() -> int:
                 self.current_status = None
                 self.query_one("#details", Static).update("No instances found. Create one with make instance.create.")
                 self.query_one("#packages", DataTable).clear()
+            self.update_action_state()
 
         async def refresh_current_status(self) -> None:
             if not self.current_instance:
@@ -294,6 +324,7 @@ def run_tui() -> int:
             self.current_status = status
             self.query_one("#details", Static).update(render_instance_details(status))
             self.render_packages(status)
+            self.update_action_state()
 
         def render_packages(self, status: dict[str, Any]) -> None:
             packages = status.get("packages", {}).get("all", [])
@@ -315,6 +346,7 @@ def run_tui() -> int:
                     str(package.get("display_name") or package_id),
                     key=package_id,
                 )
+            self.update_action_state()
 
         async def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
             table_id = event.data_table.id
@@ -325,6 +357,7 @@ def run_tui() -> int:
             elif table_id == "packages":
                 self.current_package = row_key
                 self.write_log(f"Selected package [b]{row_key}[/b]")
+                self.update_action_state()
 
         async def on_button_pressed(self, event: Button.Pressed) -> None:
             button_id = event.button.id
@@ -334,13 +367,37 @@ def run_tui() -> int:
                 await self.action_provider_action(button_id.replace("provider-", "", 1))
             elif button_id == "package-status":
                 await self.package_action("status")
+            elif button_id == "package-select":
+                await self.package_selection(True)
+            elif button_id == "package-unselect":
+                await self.package_selection(False)
             elif button_id == "package-install":
                 await self.package_action("install")
+            elif button_id == "package-down-command":
+                self.show_package_down_command()
+            elif button_id == "instance-provision":
+                await self.action_provision(force=False)
+            elif button_id == "instance-force-provision":
+                await self.action_provision(force=True)
+            elif button_id == "instance-new-command":
+                self.show_new_instance_command()
+            elif button_id == "instance-delete-command":
+                self.show_delete_instance_command()
             elif button_id == "ssh-command":
                 self.show_ssh_command()
 
         async def action_refresh(self) -> None:
             await self.refresh_instances()
+
+        async def action_provision(self, *, force: bool) -> None:
+            if not self.current_instance:
+                self.write_log("[yellow]Select an instance first.[/yellow]")
+                return
+            label = "instance.provision --force" if force else "instance.provision"
+            self.write_log(f"[b blue]{label} {self.current_instance}[/b blue]")
+            code, out, err = await asyncio.to_thread(provision_instance, self.current_instance, force=force)
+            self.write_command_result(code, out, err)
+            await self.refresh_current_status()
 
         async def action_provider_action(self, command: str) -> None:
             if not self.current_instance:
@@ -348,6 +405,24 @@ def run_tui() -> int:
                 return
             self.write_log(f"[b blue]provider.{command} {self.current_instance}[/b blue]")
             code, out, err = await asyncio.to_thread(dispatch_provider, self.current_instance, command)
+            self.write_command_result(code, out, err)
+            await self.refresh_current_status()
+
+        async def package_selection(self, selected: bool) -> None:
+            if not self.current_instance:
+                self.write_log("[yellow]Select an instance first.[/yellow]")
+                return
+            if not self.current_package:
+                self.write_log("[yellow]Select a package first.[/yellow]")
+                return
+            verb = "select" if selected else "unselect"
+            self.write_log(f"[b blue]package.{verb} {self.current_package} on {self.current_instance}[/b blue]")
+            code, out, err = await asyncio.to_thread(
+                update_package_selection,
+                self.current_instance,
+                self.current_package,
+                selected=selected,
+            )
             self.write_command_result(code, out, err)
             await self.refresh_current_status()
 
@@ -383,6 +458,78 @@ def run_tui() -> int:
                 self.write_log("[yellow]Select an instance first.[/yellow]")
                 return
             self.write_log(f"[b]SSH:[/b] make ssh INSTANCE={self.current_instance}")
+
+        def show_new_instance_command(self) -> None:
+            self.write_log(
+                "[b]Create:[/b] make instance.create INSTANCE=<name> RECIPE=<recipe> "
+                "[MACHINE=<id>] [OS=<id>] [PACKAGES=a,b]"
+            )
+
+        def show_delete_instance_command(self) -> None:
+            if not self.current_instance:
+                self.write_log("[yellow]Select an instance first.[/yellow]")
+                return
+            self.write_log(f"[b red]Delete:[/b red] make instance.delete INSTANCE={self.current_instance} PURGE=1")
+
+        def show_package_down_command(self) -> None:
+            if not self.current_instance:
+                self.write_log("[yellow]Select an instance first.[/yellow]")
+                return
+            if not self.current_package:
+                self.write_log("[yellow]Select a package first.[/yellow]")
+                return
+            self.write_log(
+                f"[b yellow]Package down:[/b yellow] make package.down "
+                f"INSTANCE={self.current_instance} PACKAGE={self.current_package} YES=1"
+            )
+
+        def package_entry(self) -> dict[str, Any] | None:
+            if not self.current_status or not self.current_package:
+                return None
+            packages = self.current_status.get("packages", {}).get("all", [])
+            for package in packages:
+                if isinstance(package, dict) and package.get("id") == self.current_package:
+                    return package
+            return None
+
+        def set_button(self, button_id: str, *, disabled: bool) -> None:
+            self.query_one(f"#{button_id}", Button).disabled = disabled
+
+        def update_action_state(self) -> None:
+            has_instance = self.current_instance is not None
+            state = self.current_status.get("state", {}) if self.current_status else {}
+            provider_state = str(state.get("provider_state", "unknown"))
+            provision_state = str(state.get("provision_state", "unknown"))
+            provider_busy = provider_state == "changing"
+            provider_absent = provider_state == "absent"
+
+            self.set_button("provider-status", disabled=not has_instance)
+            self.set_button("provider-plan", disabled=not has_instance or provider_busy)
+            self.set_button("provider-start", disabled=not has_instance or provider_busy or provider_state == "running")
+            self.set_button(
+                "provider-stop",
+                disabled=not has_instance or provider_busy or provider_state in {"unknown", "stopped", "absent"},
+            )
+            self.set_button("instance-provision", disabled=not has_instance or provider_busy or provider_absent)
+            self.set_button(
+                "instance-force-provision",
+                disabled=not has_instance or provider_busy or provider_absent or provision_state == "provisioning",
+            )
+            self.set_button("instance-delete-command", disabled=not has_instance)
+            self.set_button("ssh-command", disabled=not has_instance)
+
+            package = self.package_entry()
+            has_package = package is not None
+            supported = bool(package.get("supported")) if package else False
+            selected = bool(package.get("selected")) if package else False
+            selected_by = package.get("selected_by", []) if package else []
+            directly_selected = isinstance(selected_by, list) and "direct" in selected_by
+
+            self.set_button("package-status", disabled=not has_instance or not has_package or not supported)
+            self.set_button("package-select", disabled=not has_instance or not has_package or not supported or selected)
+            self.set_button("package-unselect", disabled=not has_instance or not has_package or not directly_selected)
+            self.set_button("package-install", disabled=not has_instance or not has_package or not supported)
+            self.set_button("package-down-command", disabled=not has_instance or not has_package or not supported)
 
     EGameTui().run()
     return 0
