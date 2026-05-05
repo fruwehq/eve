@@ -17,7 +17,7 @@ fi
 
 terramate generate >/dev/null
 
-TM_FLAGS=("--disable-safeguards=git-untracked,git-uncommitted")
+TM_FLAGS=("--disable-safeguards=git-untracked,git-uncommitted,git-out-of-sync,outdated-code")
 
 FAIL=0
 for tags in aws-services vultr-services truenas-services; do

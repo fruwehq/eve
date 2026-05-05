@@ -17,7 +17,7 @@
 				remote.xpra.stop \
 				show-password ssh ssh.run ssh.truenas ssh.wait start status stop \
 				test test.instances test.plugins test.plugins-sync test.profiles test.shellcheck test.terraform \
-				test.tf-isolation test.update-golden up update upload validate
+				test.tf-isolation test.tui test.update-golden tui up update upload validate
 
 TM_PARALLEL ?= 8
 
@@ -437,9 +437,15 @@ test.terraform: ## terramate generate + terraform validate across provider stack
 test.tf-isolation: ## Verify per-instance Terraform workspace isolation in tf-* scripts
 	@./scripts/test-tf-isolation
 
+test.tui: ## Validate optional Textual TUI entrypoint
+	@./scripts/test-tui
+
 test.update-golden: ## Regenerate tests/golden/*.env from current profile-resolve output
 	@UPDATE_GOLDEN=1 ./scripts/test-profiles
 	@UPDATE_GOLDEN=1 ./scripts/test-instances
+
+tui: ## Open the v3 Textual instance manager
+	@./scripts/egame-tui
 
 up: ## Create and start profile resources (terraform or vagrant)
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \

@@ -39,6 +39,9 @@ make instance.state INSTANCE=dev-a
 make instance.status INSTANCE=dev-a EMIT=json
 make instance.validate INSTANCE=dev-a
 
+# Browse and operate instances from the optional Textual TUI
+make tui
+
 # Run existing profile-oriented targets through a generated instance overlay
 make init INSTANCE=dev-a
 make env INSTANCE=dev-a
@@ -71,6 +74,11 @@ destructive removals require `YES=1`.
 
 Plugin contracts and example external plugin layouts are documented in
 [docs/plugins.md](docs/plugins.md).
+
+The optional `make tui` target opens a Textual instance manager for browsing
+instances, combined state, package state, and safe provider/package actions.
+Install Textual with `python3 -m pip install textual` when you want the TUI;
+the rest of the v3 command surface has no Python package dependency.
 
 Package plugins may provide host-side command hooks at
 `commands/<os_family>/<install|status|down>` or
