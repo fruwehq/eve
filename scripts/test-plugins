@@ -422,6 +422,19 @@ else
   FAIL=$((FAIL + 1))
 fi
 
+windows_status_missing=0
+for package in rustdesk steam sunshine xpra; do
+  if [ ! -x "plugins/packages/$package/commands/windows/status" ]; then
+    printf '  [FAIL] built-in package missing windows status hook: %s\n' "$package" >&2
+    windows_status_missing=$((windows_status_missing + 1))
+  fi
+done
+if [ "$windows_status_missing" -eq 0 ]; then
+  printf '  [OK] built-in windows packages have status hooks\n'
+else
+  FAIL=$((FAIL + 1))
+fi
+
 hardcoded_down_refs="$(grep -nE '"(claude|codex-cli|dev-toolchain|docker|goose|hermes|opencode|rdp|rustdesk|ssh|steam|sunshine|vscode|vnc|xpra)"[[:space:]]*=>' scripts/package-plugin || true)"
 if [ -n "$hardcoded_down_refs" ]; then
   printf '  [FAIL] package-plugin still contains hardcoded package down mappings\n' >&2
@@ -450,6 +463,18 @@ if printf '%s\n' "$status_contract" | jq -e '.kind == "package-status" and .pack
 else
   printf '  [FAIL] package status helper contract mismatch\n' >&2
   printf '%s\n' "$status_contract" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+windows_status_contract="$(
+  EGAME_PACKAGE_STATUS_SSH="$fake_ssh" EGAME_INSTANCE_NAME=win-a \
+    ./scripts/package-status-windows steam 'C:\Program Files (x86)\Steam\steam.exe'
+)"
+if printf '%s\n' "$windows_status_contract" | jq -e '.kind == "package-status" and .package == "steam" and .instance == "win-a" and .os_family == "windows" and .status == "installed"' >/dev/null; then
+  printf '  [OK] windows package status helper emits status contract\n'
+else
+  printf '  [FAIL] windows package status helper contract mismatch\n' >&2
+  printf '%s\n' "$windows_status_contract" >&2
   FAIL=$((FAIL + 1))
 fi
 

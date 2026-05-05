@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Emit package status by checking common Windows install paths.
+
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+PACKAGE="${1:?Usage: scripts/package-status-windows <package> <path> [path...]}"
+shift
+
+if [ "$#" -eq 0 ]; then
+  echo "package-status-windows: at least one path is required" >&2
+  exit 2
+fi
+
+ps_paths=""
+for path in "$@"; do
+  if [ -n "$ps_paths" ]; then
+    ps_paths="$ps_paths,"
+  fi
+  ps_paths="${ps_paths}'${path}'"
+done
+
+remote_command="powershell -NoProfile -ExecutionPolicy Bypass -Command \"\$paths = @($ps_paths); if (\$paths | Where-Object { Test-Path \$_ }) { 'installed' } else { 'missing' }\""
+
+EGAME_PACKAGE_OS_FAMILY=windows exec ./scripts/package-status-command "$PACKAGE" "$remote_command"

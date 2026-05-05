@@ -1,0 +1,6 @@
+#!/usr/bin/env sh
+set -eu
+
+exec ./scripts/package-status-windows rustdesk \
+  'C:\Program Files\RustDesk\rustdesk.exe' \
+  'C:\Program Files (x86)\RustDesk\rustdesk.exe'
