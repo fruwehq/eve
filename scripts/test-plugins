@@ -11,6 +11,7 @@ OVERRIDE_PLUGIN_FIXTURE="tests/fixtures/plugins/packages/docker-override"
 BAD_PLUGIN_FIXTURE="tests/fixtures/plugins/packages/bad"
 BAD_INSTALL_UBUNTU_FIXTURE="tests/fixtures/plugins/packages/bad-install-ubuntu"
 BAD_INSTALL_WINDOWS_STATE_FIXTURE="tests/fixtures/plugins/packages/bad-install-windows-state"
+BAD_INSTALL_NON_STRING_FIXTURE="tests/fixtures/plugins/packages/bad-install-non-string"
 FAIL=0
 
 check() {
@@ -100,6 +101,15 @@ if printf '%s' "$bad_install_windows_err" | grep -q "install.windows.state_files
 else
   printf '  [FAIL] plugin with unsupported install.windows.state_files rejected\n' >&2
   printf '%s\n' "$bad_install_windows_err" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+bad_install_non_string_err="$(EGAME_PLUGIN_ROOTS="$BAD_INSTALL_NON_STRING_FIXTURE" ./scripts/plugin-list --validate 2>&1 || true)"
+if printf '%s' "$bad_install_non_string_err" | grep -q "install.ubuntu.steps must be a list of strings"; then
+  printf '  [OK] plugin with non-string install.ubuntu.steps entry rejected\n'
+else
+  printf '  [FAIL] plugin with non-string install.ubuntu.steps entry rejected\n' >&2
+  printf '%s\n' "$bad_install_non_string_err" >&2
   FAIL=$((FAIL + 1))
 fi
 
