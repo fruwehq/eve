@@ -8,6 +8,8 @@ FIXTURE="tests/fixtures/instances.yaml"
 PLUGIN_FIXTURE="tests/fixtures/plugins/packages/dummy"
 LOCAL_EXEC_PLUGIN_FIXTURE="tests/fixtures/plugins/packages/local-exec"
 OVERRIDE_PLUGIN_FIXTURE="tests/fixtures/plugins/packages/docker-override"
+EXAMPLE_PACKAGE_PLUGIN="examples/plugins/packages/hello-package"
+EXAMPLE_PROVIDER_PLUGIN="examples/plugins/providers/echo-provider"
 BAD_PLUGIN_FIXTURE="tests/fixtures/plugins/packages/bad"
 BAD_INSTALL_UBUNTU_FIXTURE="tests/fixtures/plugins/packages/bad-install-ubuntu"
 BAD_INSTALL_WINDOWS_STATE_FIXTURE="tests/fixtures/plugins/packages/bad-install-windows-state"
@@ -71,6 +73,14 @@ check "external dummy plugin listed" dummy_plugin_listed
 check "external plugin-local exec listed" local_exec_plugin_listed
 
 check "external plugin override replaces built-in" override_plugin_replaces_builtin
+
+if EGAME_PLUGIN_ROOTS="$EXAMPLE_PACKAGE_PLUGIN:$EXAMPLE_PROVIDER_PLUGIN" ./scripts/plugin-list --validate >/dev/null; then
+  printf '  [OK] documented example plugins validate\n'
+else
+  printf '  [FAIL] documented example plugins validate\n' >&2
+  EGAME_PLUGIN_ROOTS="$EXAMPLE_PACKAGE_PLUGIN:$EXAMPLE_PROVIDER_PLUGIN" ./scripts/plugin-list --validate >&2 || true
+  FAIL=$((FAIL + 1))
+fi
 
 if EGAME_PLUGIN_ROOTS="$BAD_PLUGIN_FIXTURE" ./scripts/plugin-list --json >/dev/null 2>&1; then
   printf '  [FAIL] invalid external plugin rejected\n' >&2

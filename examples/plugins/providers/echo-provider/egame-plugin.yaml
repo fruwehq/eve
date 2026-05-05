@@ -1,0 +1,19 @@
+api_version: egame.plugin/v1
+kind: provider
+id: echo-provider
+display_name: Echo Provider Example
+commands:
+  resolve: {exec: bin/provider-command, args: [resolve]}
+  init: {exec: bin/provider-command, args: [init]}
+  plan: {exec: bin/provider-command, args: [plan]}
+  up: {exec: bin/provider-command, args: [up]}
+  down: {exec: bin/provider-command, args: [down]}
+  start: {exec: bin/provider-command, args: [start]}
+  stop: {exec: bin/provider-command, args: [stop]}
+  status: {exec: bin/provider-command, args: [status]}
+  ip: {exec: bin/provider-command, args: [ip]}
+  ssh: {exec: bin/provider-command, args: [ssh]}
+supports:
+  engines: [terraform]
+  kinds: [vm]
+env: []

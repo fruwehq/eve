@@ -69,6 +69,9 @@ pinned in `.egame/plugin-sources.yaml` and synchronized with
 `make plugins.sync`. Package `down` and `reinstall` operations are explicit and
 destructive removals require `YES=1`.
 
+Plugin contracts and example external plugin layouts are documented in
+[docs/plugins.md](docs/plugins.md).
+
 Package plugins may provide host-side command hooks at
 `commands/<os_family>/<install|status|down>` or
 `commands/common/<install|status|down>`. The built-in compatibility wrapper
