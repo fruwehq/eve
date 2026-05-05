@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+set -eu
+
+exec ./scripts/package-status-command codex-cli 'if command -v codex >/dev/null 2>&1 || [ -x "$HOME/.local/bin/codex" ]; then echo installed; else echo missing; fi'

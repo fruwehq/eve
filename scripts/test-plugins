@@ -396,6 +396,19 @@ else
   FAIL=$((FAIL + 1))
 fi
 
+ubuntu_status_missing=0
+for package in claude codex-cli dev-toolchain docker goose hermes opencode rdp rustdesk ssh steam sunshine vnc vscode xpra; do
+  if [ ! -x "plugins/packages/$package/commands/ubuntu/status" ]; then
+    printf '  [FAIL] built-in package missing ubuntu status hook: %s\n' "$package" >&2
+    ubuntu_status_missing=$((ubuntu_status_missing + 1))
+  fi
+done
+if [ "$ubuntu_status_missing" -eq 0 ]; then
+  printf '  [OK] built-in ubuntu packages have status hooks\n'
+else
+  FAIL=$((FAIL + 1))
+fi
+
 windows_down_missing=0
 for package in rustdesk steam sunshine xpra; do
   if [ ! -x "plugins/packages/$package/commands/windows/down" ]; then
@@ -420,6 +433,26 @@ fi
 
 state_dir="$(mktemp -d "${TMPDIR:-/tmp}/egame-state-test.XXXXXX")"
 trap 'rm -rf "$state_dir"' EXIT
+fake_ssh="$state_dir/fake-instance-ssh"
+cat >"$fake_ssh" <<'SH'
+#!/usr/bin/env sh
+set -eu
+printf 'installed\n'
+SH
+chmod +x "$fake_ssh"
+
+status_contract="$(
+  EGAME_PACKAGE_STATUS_SSH="$fake_ssh" EGAME_INSTANCE_NAME=dev-a \
+    ./scripts/package-status-command docker 'ignored remote command'
+)"
+if printf '%s\n' "$status_contract" | jq -e '.kind == "package-status" and .package == "docker" and .instance == "dev-a" and .os_family == "ubuntu" and .status == "installed"' >/dev/null; then
+  printf '  [OK] package status helper emits status contract\n'
+else
+  printf '  [FAIL] package status helper contract mismatch\n' >&2
+  printf '%s\n' "$status_contract" >&2
+  FAIL=$((FAIL + 1))
+fi
+
 empty_state="$(EGAME_STATE_DIR="$state_dir" ./scripts/instance-state --instance fresh-a --get)"
 if printf '%s\n' "$empty_state" | jq -e '.instance == "fresh-a" and .desired_state == "unknown" and .provider_state == "unknown" and .provision_state == "unknown" and .package_state == {} and .operation_history == []' >/dev/null; then
   printf '  [OK] instance state get returns default state shape\n'
