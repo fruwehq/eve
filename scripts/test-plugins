@@ -472,6 +472,7 @@ state_dir="$(mktemp -d "${TMPDIR:-/tmp}/egame-state-test.XXXXXX")"
 trap 'rm -rf "$state_dir"' EXIT
 tmp_err="$state_dir/error.txt"
 fake_ssh="$state_dir/fake-instance-ssh"
+fake_capture_ssh="$state_dir/fake-capture-instance-ssh"
 fake_down_ssh="$state_dir/fake-instance-down-ssh"
 cat >"$fake_ssh" <<'SH'
 #!/usr/bin/env sh
@@ -485,6 +486,13 @@ set -eu
 exit 0
 SH
 chmod +x "$fake_down_ssh"
+cat >"$fake_capture_ssh" <<'SH'
+#!/usr/bin/env sh
+set -eu
+printf '%s\n' "$*" >"${EGAME_FAKE_SSH_ARGS:?}"
+printf 'installed\n'
+SH
+chmod +x "$fake_capture_ssh"
 
 status_contract="$(
   EGAME_PACKAGE_STATUS_SSH="$fake_ssh" EGAME_INSTANCE_NAME=dev-a \
@@ -499,7 +507,7 @@ else
 fi
 
 windows_status_contract="$(
-  EGAME_PACKAGE_STATUS_SSH="$fake_ssh" EGAME_INSTANCE_NAME=win-a \
+  EGAME_PACKAGE_STATUS_SSH="$fake_capture_ssh" EGAME_FAKE_SSH_ARGS="$state_dir/fake-ssh-args.txt" EGAME_INSTANCE_NAME=win-a \
     ./scripts/package-status-windows steam 'C:\Program Files (x86)\Steam\steam.exe'
 )"
 if printf '%s\n' "$windows_status_contract" | jq -e '.kind == "package-status" and .package == "steam" and .instance == "win-a" and .os_family == "windows" and .status == "installed"' >/dev/null; then
@@ -507,6 +515,14 @@ if printf '%s\n' "$windows_status_contract" | jq -e '.kind == "package-status" a
 else
   printf '  [FAIL] windows package status helper contract mismatch\n' >&2
   printf '%s\n' "$windows_status_contract" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+if grep -q -- "-EncodedCommand" "$state_dir/fake-ssh-args.txt" && ! grep -F -q -- "\$paths" "$state_dir/fake-ssh-args.txt"; then
+  printf '  [OK] windows package status helper protects powershell variables from ssh shell expansion\n'
+else
+  printf '  [FAIL] windows package status helper should use encoded powershell command\n' >&2
+  cat "$state_dir/fake-ssh-args.txt" >&2
   FAIL=$((FAIL + 1))
 fi
 

@@ -12,14 +12,21 @@ if [ "$#" -eq 0 ]; then
   exit 2
 fi
 
+quote_ps_string() {
+  # PowerShell single-quoted strings escape a literal single quote by doubling it.
+  printf "'%s'" "$(printf '%s' "$1" | sed "s/'/''/g")"
+}
+
 ps_paths=""
 for path in "$@"; do
   if [ -n "$ps_paths" ]; then
     ps_paths="$ps_paths,"
   fi
-  ps_paths="${ps_paths}'${path}'"
+  ps_paths="${ps_paths}$(quote_ps_string "$path")"
 done
 
-remote_command="powershell -NoProfile -ExecutionPolicy Bypass -Command \"\$paths = @($ps_paths); if (\$paths | Where-Object { Test-Path \$_ }) { 'installed' } else { 'missing' }\""
+ps_script="\$paths = @($ps_paths); if (\$paths | Where-Object { Test-Path \$_ }) { 'installed' } else { 'missing' }"
+encoded_command="$(printf '%s' "$ps_script" | iconv -f UTF-8 -t UTF-16LE | base64 | tr -d '\n')"
+remote_command="powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand $encoded_command"
 
 EGAME_PACKAGE_OS_FAMILY=windows exec ./scripts/package-status-command "$PACKAGE" "$remote_command"
