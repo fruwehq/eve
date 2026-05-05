@@ -69,7 +69,7 @@ if ./scripts/instance-create \
   --memory-mb 8192 >/dev/null; then
   if ./scripts/instance-resolve --registry "$tmp_registry" --instance test-dev --validate >/dev/null &&
     ./scripts/instance-resolve --registry "$tmp_registry" --instance test-dev --emit json |
-      jq -e '.composition.packages == ["steam"] and (.bundle_packages | index("steam"))' >/dev/null; then
+      jq -e '.composition.packages == ["steam"] and (.bundle_packages | index("steam")) and .package_sources.steam == ["direct"]' >/dev/null; then
     printf '  [OK] create valid instance\n'
   else
     printf '  [FAIL] created instance did not validate\n' >&2
@@ -85,7 +85,7 @@ if EGAME_INSTANCE_REGISTRY="$tmp_registry" make package.unselect INSTANCE=test-d
     jq -e '.bundle_packages | index("steam")' >/dev/null &&
   EGAME_INSTANCE_REGISTRY="$tmp_registry" make package.select INSTANCE=test-dev PACKAGE=steam >/dev/null &&
   ./scripts/instance-resolve --registry "$tmp_registry" --instance test-dev --emit json |
-    jq -e '.composition.packages == ["steam"] and (.bundle_packages | index("steam"))' >/dev/null; then
+    jq -e '.composition.packages == ["steam"] and (.bundle_packages | index("steam")) and .package_sources.steam == ["direct"]' >/dev/null; then
   printf '  [OK] package selection updates direct instance packages\n'
 else
   printf '  [FAIL] package selection updates direct instance packages\n' >&2

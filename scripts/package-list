@@ -56,6 +56,7 @@ begin
   plugins = plugin_doc.fetch("plugins")
   plugin_by_id = plugins.to_h { |plugin| [plugin.fetch("id"), plugin] }
   selected_ids = resolved.fetch("bundle_packages")
+  package_sources = resolved.fetch("package_sources", {})
   os_family = resolved.fetch("os").fetch("family")
 
   packages = plugins.map do |plugin|
@@ -65,6 +66,7 @@ begin
       "display_name" => plugin.fetch("display_name"),
       "plugin" => plugin.fetch("id"),
       "selected" => selected_ids.include?(plugin.fetch("id")),
+      "selected_by" => package_sources.fetch(plugin.fetch("id"), []),
       "supported" => supported_families.empty? || supported_families.include?(os_family),
       "source" => plugin.fetch("source"),
       "path" => plugin.fetch("path")
@@ -78,6 +80,7 @@ begin
       "display_name" => id,
       "plugin" => nil,
       "selected" => true,
+      "selected_by" => package_sources.fetch(id, []),
       "supported" => false,
       "source" => "missing",
       "path" => nil
@@ -92,12 +95,13 @@ begin
       "packages" => packages
     })
   else
-    printf "%-24s %-8s %-9s %-10s %s\n", "PACKAGE", "SELECTED", "SUPPORTED", "SOURCE", "DISPLAY"
-    printf "%-24s %-8s %-9s %-10s %s\n", "-------", "--------", "---------", "------", "-------"
+    printf "%-24s %-8s %-22s %-9s %-10s %s\n", "PACKAGE", "SELECTED", "SELECTED_BY", "SUPPORTED", "SOURCE", "DISPLAY"
+    printf "%-24s %-8s %-22s %-9s %-10s %s\n", "-------", "--------", "-----------", "---------", "------", "-------"
     packages.each do |package|
-      printf "%-24s %-8s %-9s %-10s %s\n",
+      printf "%-24s %-8s %-22s %-9s %-10s %s\n",
              package["id"],
              package["selected"] ? "yes" : "no",
+             package["selected_by"].join(","),
              package["supported"] ? "yes" : "no",
              package["source"],
              package["display_name"]

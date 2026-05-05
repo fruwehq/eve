@@ -91,6 +91,18 @@ def resolve_bundle_packages(catalog, bundle_ids)
   end.uniq.sort
 end
 
+def resolve_package_sources(catalog, bundle_ids, direct_packages)
+  sources = Hash.new { |hash, key| hash[key] = [] }
+  bundle_ids.each do |bundle_id|
+    bundle = by_key(catalog, "bundles", "id", bundle_id)
+    raise "Bundle not found: #{bundle_id}" unless bundle
+
+    (bundle["includes"] || []).each { |package_id| sources[package_id] << "bundle:#{bundle_id}" }
+  end
+  direct_packages.each { |package_id| sources[package_id] << "direct" }
+  sources.transform_values(&:uniq)
+end
+
 def validate!(catalog, composition, machine, os, init, location, bundle_packages)
   raise "Machine not found: #{composition["machine"]}" unless machine
   raise "OS not found: #{composition["os"]}" unless os
@@ -239,7 +251,9 @@ begin
     "defaults" => deep_merge(machine&.fetch("defaults", nil) || {}, instance["overrides"] || {})
   })
 
-  bundle_packages = (resolve_bundle_packages(catalog, composition["bundles"] || []) + (composition["packages"] || [])).uniq.sort
+  direct_packages = composition["packages"] || []
+  package_sources = resolve_package_sources(catalog, composition["bundles"] || [], direct_packages)
+  bundle_packages = (resolve_bundle_packages(catalog, composition["bundles"] || []) + direct_packages).uniq.sort
   validate!(catalog, composition, machine, os, init, location, bundle_packages)
 
   provider = machine["provider"]
@@ -260,6 +274,7 @@ begin
     "init" => init,
     "location" => location,
     "bundle_packages" => bundle_packages,
+    "package_sources" => package_sources,
     "provider_plugin" => provider,
     "package_plugins" => bundle_packages.map { |package_id| { "id" => package_id, "plugin" => package_id } },
     "engine" => engine,
