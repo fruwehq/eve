@@ -89,16 +89,22 @@ esac
 if [ "$DRY_RUN" -eq 1 ]; then
   if [ "${#steps[@]}" -eq 0 ]; then
     steps_json='[]'
+    state_files_json='[]'
   else
     steps_json="$(printf '%s\n' "${steps[@]}" | jq -R . | jq -s .)"
+    # Granular installs reuse the same env.json shape as full provisioning so
+    # steps like 40_rustdesk.ps1 still pick up rendezvous_server / key /
+    # password (RustDesk would otherwise install but skip configuration).
+    state_files_json='["env.json"]'
   fi
   jq -n \
     --arg profile "$PROFILE" \
     --arg package "$PACKAGE" \
     --arg os_family "$OS_FAMILY" \
     --argjson steps "$steps_json" \
+    --argjson state_files "$state_files_json" \
     --argjson fallback "$fallback" \
-    '{kind: "package-provision-windows", profile: $profile, package: $package, os_family: $os_family, steps: $steps, fallback: ($fallback == 1), dry_run: true}'
+    '{kind: "package-provision-windows", profile: $profile, package: $package, os_family: $os_family, steps: $steps, state_files: $state_files, fallback: ($fallback == 1), dry_run: true}'
   exit 0
 fi
 
@@ -114,7 +120,7 @@ fi
 # Scheduled Task runner is never tempted to walk past it.
 STAGE=$(mktemp -d)
 trap 'rm -rf "$STAGE"' EXIT
-mkdir -p "$STAGE/scripts/steps"
+mkdir -p "$STAGE/scripts/steps" "$STAGE/state"
 cp -R windows/provision/scripts/lib "$STAGE/scripts/lib"
 if [ -d windows/provision/scripts/templates ]; then
   cp -R windows/provision/scripts/templates "$STAGE/scripts/templates"
@@ -123,12 +129,30 @@ for step in "${steps[@]}"; do
   cp "windows/provision/scripts/steps/$step" "$STAGE/scripts/steps/$step"
 done
 
+# Mirror scripts/provision's env.json shape so granular Windows steps see the
+# same configuration surface (rustdesk_*, sunshine_*, display_resolution,
+# windows_password).  WINDOWS_PASSWORD is not consumed by today's granular
+# steps but is included for parity with full provisioning; we only honor an
+# explicit env override here so granular installs don't depend on terraform
+# outputs.
+jq -n \
+  --arg wp "${EPHEMERAL_WINDOWS_PASSWORD:-}" \
+  --arg sp "${EPHEMERAL_SUNSHINE_PASSWORD:-}" \
+  --arg dr "${EPHEMERAL_DISPLAY_RESOLUTION:-}" \
+  --arg rk "${RUSTDESK_KEY:-}" \
+  --arg rp "${RUSTDESK_PASSWORD:-}" \
+  --arg rs "${RUSTDESK_SERVER:-}" \
+  --arg sv "${SUNSHINE_VERSION:-}" \
+  '{windows_password: $wp, sunshine_password: $sp, display_resolution: $dr, rustdesk_key: $rk, rustdesk_password: $rp, rustdesk_server: $rs, sunshine_version: $sv}' \
+  > "$STAGE/state/env.json"
+
 echo "[package-provision-windows] uploading windows step files for package=$PACKAGE"
 remote_step_dir='C:\Users\Administrator\provision\scripts-package'
 remote_lib_dir="$remote_step_dir\\lib"
 remote_steps_dir="$remote_step_dir\\steps"
+remote_state_dir='C:\Users\Administrator\provision\state'
 
-./scripts/instance-ssh "$PROFILE" -- "if (Test-Path '$remote_step_dir') { Remove-Item -Recurse -Force '$remote_step_dir' } ; New-Item -ItemType Directory -Force '$remote_lib_dir' | Out-Null ; New-Item -ItemType Directory -Force '$remote_steps_dir' | Out-Null"
+./scripts/instance-ssh "$PROFILE" -- "if (Test-Path '$remote_step_dir') { Remove-Item -Recurse -Force '$remote_step_dir' } ; New-Item -ItemType Directory -Force '$remote_lib_dir' | Out-Null ; New-Item -ItemType Directory -Force '$remote_steps_dir' | Out-Null ; New-Item -ItemType Directory -Force '$remote_state_dir' | Out-Null"
 ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/scripts/lib" "/C:/Users/Administrator/provision/scripts-package/"
 if [ -d "$STAGE/scripts/templates" ]; then
   ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/scripts/templates" "/C:/Users/Administrator/provision/scripts-package/"
@@ -136,6 +160,7 @@ fi
 for step in "${steps[@]}"; do
   ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/scripts/steps/$step" "/C:/Users/Administrator/provision/scripts-package/steps/$step"
 done
+./scripts/instance-ssh "$PROFILE" --scp "$STAGE/state/env.json" "/C:/Users/Administrator/provision/state/env.json"
 
 for step in "${steps[@]}"; do
   echo "[package-provision-windows] running step=$step package=$PACKAGE"
