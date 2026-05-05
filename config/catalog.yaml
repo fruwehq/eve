@@ -36,11 +36,29 @@ machines:
       instance_type: g5.2xlarge
       disk_gb: 200
 
-  - name: vultr-vcg-a40
+  - name: vultr-vcg-a40-1c # 1 vCPU, 5 GB RAM, 90 GB NVMe, 3 TB/mo, $0.075/hr, 1/24 NVIDIA A40 (2 GB VRAM)
+    provider: vultr
+    kind: vm
+    defaults:
+      plan: vcg-a40-1c-5g-2vram
+
+  - name: vultr-vcg-a40-2c # 2 vCPUs, 10 GB RAM, 180 GB NVMe, 4 TB/mo, $0.144/hr, 1/12 NVIDIA A40 (4 GB VRAM)
     provider: vultr
     kind: vm
     defaults:
       plan: vcg-a40-2c-10g-4vram
+
+  - name: vultr-vcg-a40-4c # 4 vCPUs, 20 GB RAM, 360 GB NVMe, 5 TB/mo, $0.288/hr, 1/6 NVIDIA A40 (8 GB VRAM)
+    provider: vultr
+    kind: vm
+    defaults:
+      plan: vcg-a40-4c-20g-8vram
+
+  - name: vultr-vcg-a40-6c # 6 vCPUs, 30 GB RAM, 550 GB NVMe, 6 TB/mo, $0.432/hr, 1/4 NVIDIA A40 (12 GB VRAM)
+    provider: vultr
+    kind: vm
+    defaults:
+      plan: vcg-a40-6c-30g-12vram
 
   - name: local-virtualbox-medium
     provider: local-virtualbox
@@ -85,7 +103,7 @@ oses:
     ui_mode: headless
     vagrant_box: bento/ubuntu-24.04
     # Vultr OS ID (from `vultr-cli os list`). Override in catalog.local.yaml if stale.
-    vultr_os_id: 2284  # Ubuntu 24.04 LTS x64
+    vultr_os_id: 2284 # Ubuntu 24.04 LTS x64
     cloud_image_url: https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.img
 
   - id: ubuntu-24.04-desktop-amd64
@@ -94,7 +112,7 @@ oses:
     arch: amd64
     ui_mode: desktop
     vagrant_box: bento/ubuntu-24.04
-    vultr_os_id: 2284  # Ubuntu 24.04 LTS x64
+    vultr_os_id: 2284 # Ubuntu 24.04 LTS x64
     cloud_image_url: https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.img
 
   - id: ubuntu-24.04-desktop-arm64
@@ -112,7 +130,7 @@ oses:
     version: "2025"
     arch: amd64
     ui_mode: desktop
-    vultr_os_id: 2514  # Windows 2025 Standard x64
+    vultr_os_id: 2514 # Windows 2025 Standard x64
 
 # -----------------------------------------------------------------------------
 # Init catalog (first-boot access + baseline hardening)
@@ -227,7 +245,7 @@ profiles:
     location: tokyo
 
   - name: vultr-windows-gaming
-    machine: vultr-vcg-a40
+    machine: vultr-vcg-a40-2c
     os: windows-server-2025
     init: ssh-windows-powershell7
     bundles: [access-gui-streaming, gaming-core]

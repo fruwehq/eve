@@ -62,15 +62,18 @@ Recommended starter OSes:
 3. `windows-server-2025` (for Windows-native/gaming workflows)
 
 Optional later:
+
 - `debian-12-server-amd64` (stable/minimal alternative)
 - `ubuntu-24.04-server-arm64` (for ARM hosts, e.g., some cloud/RPi flows)
 
 ### GUI vs non-graphical Unix
 
 Add OS capability metadata:
+
 - `ui_mode: headless | desktop`
 
 Examples:
+
 - `ubuntu-24.04-server-amd64` → `headless`
 - `ubuntu-24.04-desktop-amd64` → `desktop`
 
@@ -112,11 +115,29 @@ machines:
       instance_type: g5.2xlarge
       disk_gb: 200
 
-  - name: vultr-vcg-a40
+  - name: vultr-vcg-a40-1c # 1 vCPU, 5 GB RAM, 90 GB NVMe, 3 TB/mo, $0.075/hr, 1/24 NVIDIA A40 (2 GB VRAM)
+    provider: vultr
+    kind: vm
+    defaults:
+      plan: vcg-a40-1c-5g-2vram
+
+  - name: vultr-vcg-a40-2c # 2 vCPUs, 10 GB RAM, 180 GB NVMe, 4 TB/mo, $0.144/hr, 1/12 NVIDIA A40 (4 GB VRAM)
     provider: vultr
     kind: vm
     defaults:
       plan: vcg-a40-2c-10g-4vram
+
+  - name: vultr-vcg-a40-4c # 4 vCPUs, 20 GB RAM, 360 GB NVMe, 5 TB/mo, $0.288/hr, 1/6 NVIDIA A40 (8 GB VRAM)
+    provider: vultr
+    kind: vm
+    defaults:
+      plan: vcg-a40-4c-20g-8vram
+
+  - name: vultr-vcg-a40-6c # 6 vCPUs, 30 GB RAM, 550 GB NVMe, 6 TB/mo, $0.432/hr, 1/4 NVIDIA A40 (12 GB VRAM)
+    provider: vultr
+    kind: vm
+    defaults:
+      plan: vcg-a40-6c-30g-12vram
 
   - name: local-virtualbox-medium
     provider: local-virtualbox
@@ -225,7 +246,7 @@ profiles:
     location: tokyo
 
   - name: vultr-windows-gaming
-    machine: vultr-vcg-a40
+    machine: vultr-vcg-a40-2c
     os: windows-server-2025
     init: ssh-windows-powershell7
     bundles: [access-gui-streaming, gaming-core]
@@ -261,24 +282,29 @@ Given your current Terramate/Terraform layout:
 ### Suggested incremental implementation
 
 ## Phase 1: Manifest + resolver (no behavior break)
+
 - Add `config/catalog.yaml` with machine/os/init/package/location/profile catalogs.
 - Add a small resolver script to produce Terramate globals for selected profile.
 - Keep current gaming stack as a legacy profile equivalent.
 
 ## Phase 2: New profile target
+
 - Implement `aws-ubuntu-dev-headless` end-to-end.
 - Add `make profile.plan PROFILE=aws-ubuntu-dev-headless` etc.
 
 ## Phase 3: GUI and remote access bundles
+
 - Add `access-gui-safe` (RustDesk) and `access-gui-streaming` (Sunshine+RustDesk).
 - Add desktop Ubuntu profile.
 
 ## Phase 4: Local providers (Vagrant-first)
+
 - Implement `local-virtualbox` and `local-vmware` using **Vagrant** as the primary local orchestration layer.
 - Use Vagrant provider plugins (VirtualBox / VMware) to avoid re-implementing VM lifecycle plumbing.
 - Keep `VBoxManage`/`vmrun` wrappers only as fallback for edge cases or environments where Vagrant is unavailable.
 
 ## Phase 5: Additional runtimes
+
 - TrueNAS-hosted VM mapping.
   - Catalog scaffold is in place (`provider: truenas` + sample profile).
   - Terramate stack/module implementation is in place (`stacks/truenas/*`, `modules/truenas/*`) with `deevus/truenas` provider and `truenas_vm` resource wiring.
@@ -297,10 +323,12 @@ For local providers, prefer existing ecosystem tooling first.
 ### Primary: Vagrant orchestration
 
 Use Vagrant as the local runtime abstraction for:
+
 - `local-virtualbox` (VirtualBox provider)
 - `local-vmware` (VMware provider)
 
 Benefits:
+
 - standard `up/halt/destroy/provision` lifecycle
 - mature box/template workflows
 - easier SSH metadata discovery and provisioning handoff
@@ -309,6 +337,7 @@ Benefits:
 ### Fallback: direct hypervisor CLI wrappers
 
 Use `VBoxManage` / `vmrun` wrappers only when:
+
 - Vagrant provider support is insufficient for a required feature
 - host constraints prevent Vagrant usage
 - specialized snapshot/network behavior is needed
@@ -330,6 +359,7 @@ A GUI is a great fit for this project, especially once profile resolution and en
 ### Goal
 
 Provide a simple control plane that uses the same backend profile engine (no separate logic):
+
 - choose profile
 - validate
 - plan/apply/destroy
@@ -354,6 +384,7 @@ Provide a simple control plane that uses the same backend profile engine (no sep
 - `POST /api/profiles/{name}/ttl/extend` (e.g., add hours)
 
 Use job IDs for long-running actions (`plan/apply/destroy`) and expose:
+
 - `GET /api/jobs/{id}`
 - stream logs/events for progress UI
 
@@ -382,6 +413,7 @@ Use job IDs for long-running actions (`plan/apply/destroy`) and expose:
 ### New phase suggestion
 
 ## Phase 6: Control plane UI
+
 - add lightweight API wrapper over `profile-resolve` + `make profile.*`
 - add web GUI for profile lifecycle and observability
 - keep CLI parity (GUI is additive, not replacement)
@@ -423,6 +455,7 @@ For your immediate safe sandbox need:
 - Lifecycle: 7-day TTL with reminders and stop→grace→destroy flow
 
 For GUI-required workflows, add:
+
 - profile: `aws-ubuntu-dev-gui`
 - OS: `ubuntu-24.04-desktop-amd64`
 - Access bundle: `sunshine + rustdesk + ssh`
