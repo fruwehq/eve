@@ -9,3 +9,6 @@ commands:
 supports: {os_families: [ubuntu]}
 down: {destructive: true}
 env: []
+install:
+  ubuntu:
+    steps: [00_base.sh, 05_timezone.sh, 22_opencode.sh]

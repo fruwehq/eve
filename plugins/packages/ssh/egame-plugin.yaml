@@ -9,3 +9,6 @@ commands:
 supports: {os_families: [ubuntu, windows]}
 down: {destructive: false}
 env: [SSH_PUBLIC_KEY_FILE]
+install:
+  ubuntu:
+    steps: [00_base.sh, 05_timezone.sh]

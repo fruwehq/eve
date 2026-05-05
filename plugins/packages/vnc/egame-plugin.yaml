@@ -9,3 +9,6 @@ commands:
 supports: {os_families: [ubuntu], ui_modes: [desktop]}
 down: {destructive: true}
 env: []
+install:
+  ubuntu:
+    steps: [00_base.sh, 05_timezone.sh, 46_vnc.sh]

@@ -61,33 +61,30 @@ if [ "$OS_FAMILY" != "ubuntu" ]; then
   exit 2
 fi
 
-case "$PACKAGE" in
-  ssh) steps=(00_base.sh 05_timezone.sh) ;;
-  docker) steps=(00_base.sh 05_timezone.sh 10_docker.sh) ;;
-  dev-toolchain) steps=(00_base.sh 05_timezone.sh 20_dev-toolchain.sh) ;;
-  claude) steps=(00_base.sh 05_timezone.sh 21_claude.sh) ;;
-  opencode) steps=(00_base.sh 05_timezone.sh 22_opencode.sh) ;;
-  hermes) steps=(00_base.sh 05_timezone.sh 23_hermes.sh) ;;
-  vscode) steps=(00_base.sh 05_timezone.sh 24_vscode.sh) ;;
-  codex-cli) steps=(00_base.sh 05_timezone.sh 20_dev-toolchain.sh 30_codex-cli.sh) ;;
-  goose) steps=(00_base.sh 05_timezone.sh 40_goose.sh) ;;
-  xpra) steps=(00_base.sh 05_timezone.sh 45_xpra.sh) ;;
-  vnc) steps=(00_base.sh 05_timezone.sh 46_vnc.sh) ;;
-  rustdesk) steps=(00_base.sh 05_timezone.sh 50_rustdesk.sh) ;;
-  sunshine) steps=(00_base.sh 05_timezone.sh 60_sunshine.sh) ;;
-  steam) steps=(00_base.sh 05_timezone.sh 70_steam.sh) ;;
-  *)
-    echo "package-provision: no ubuntu install step mapping for package: $PACKAGE" >&2
-    exit 2
-    ;;
-esac
+# Read install metadata from the package plugin manifest so adding a new
+# package only requires touching its plugins/packages/<id>/egame-plugin.yaml.
+PLUGIN_DOC=$(./scripts/plugin-list --kind package --json)
+PLUGIN_INSTALL=$(printf '%s' "$PLUGIN_DOC" | jq --arg id "$PACKAGE" '.plugins[] | select(.id == $id) | .install.ubuntu // null')
 
-package_markers=("$PACKAGE")
-case "$PACKAGE" in
-  codex-cli)
-    package_markers=(dev-toolchain codex-cli)
-    ;;
-esac
+if [ -z "$PLUGIN_INSTALL" ] || [ "$PLUGIN_INSTALL" = "null" ]; then
+  echo "package-provision: no ubuntu install step mapping for package: $PACKAGE" >&2
+  exit 2
+fi
+
+steps=()
+while IFS= read -r step; do
+  steps+=("$step")
+done < <(printf '%s' "$PLUGIN_INSTALL" | jq -r '.steps // [] | .[]')
+if [ "${#steps[@]}" -eq 0 ]; then
+  echo "package-provision: ubuntu install steps for $PACKAGE are empty in plugin manifest" >&2
+  exit 2
+fi
+
+# package_markers default to [PACKAGE] when the manifest does not override it.
+package_markers=()
+while IFS= read -r marker; do
+  package_markers+=("$marker")
+done < <(printf '%s' "$PLUGIN_INSTALL" | jq -r --arg id "$PACKAGE" '(.package_markers // [$id]) | .[]')
 
 if [ "$DRY_RUN" -eq 1 ]; then
   jq -n \

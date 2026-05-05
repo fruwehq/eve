@@ -9,3 +9,10 @@ commands:
 supports: {os_families: [ubuntu, windows]}
 down: {destructive: true}
 env: [RUSTDESK_SERVER, RUSTDESK_KEY, RUSTDESK_PASSWORD]
+install:
+  ubuntu:
+    steps: [00_base.sh, 05_timezone.sh, 50_rustdesk.sh]
+  windows:
+    steps: [40_rustdesk.ps1]
+    state_files: [env.json]
+    fallback: false

@@ -183,6 +183,40 @@ else
   FAIL=$((FAIL + 1))
 fi
 
+manifest_steam_steps="$(
+  ./scripts/plugin-list --kind package --json | \
+    jq -r '.plugins[] | select(.id == "steam") | .install.ubuntu.steps | join(",")'
+)"
+if [ "$manifest_steam_steps" = "00_base.sh,05_timezone.sh,70_steam.sh" ]; then
+  printf '  [OK] steam plugin manifest declares ubuntu install steps\n'
+else
+  printf '  [FAIL] steam plugin manifest declares ubuntu install steps (got: %s)\n' "$manifest_steam_steps" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+# shellcheck disable=SC2016 # The single-quoted strings below are literal
+# patterns/messages -- $PACKAGE refers to the variable name in the scripts
+# under test, not in this shell.
+hardcoded_hits="$(grep -nE 'case[[:space:]]+"?\$PACKAGE"?' scripts/package-provision scripts/package-provision-windows || true)"
+if [ -n "$hardcoded_hits" ]; then
+  # shellcheck disable=SC2016
+  printf '  [FAIL] package install scripts still contain a case "$PACKAGE" mapping\n' >&2
+  printf '%s\n' "$hardcoded_hits" >&2
+  FAIL=$((FAIL + 1))
+else
+  # shellcheck disable=SC2016
+  printf '  [OK] package install scripts have no hardcoded case "$PACKAGE" mapping\n'
+fi
+
+hardcoded_step_refs="$(grep -nE '\b(00_base\.sh|05_timezone\.sh|10_docker\.sh|20_dev-toolchain\.sh|30_codex-cli\.sh|40_goose\.sh|45_xpra\.sh|46_vnc\.sh|50_rustdesk\.sh|60_sunshine\.sh|70_steam\.sh|10_sunshine\.ps1|30_steam\.ps1|35_xpra\.ps1|40_rustdesk\.ps1)\b' scripts/package-provision scripts/package-provision-windows || true)"
+if [ -n "$hardcoded_step_refs" ]; then
+  printf '  [FAIL] package install scripts still reference step files directly\n' >&2
+  printf '%s\n' "$hardcoded_step_refs" >&2
+  FAIL=$((FAIL + 1))
+else
+  printf '  [OK] package install scripts read step files from plugin manifests only\n'
+fi
+
 package_list="$(
   EGAME_INSTANCE_REGISTRY="$FIXTURE" make --no-print-directory package.list INSTANCE=dev-a EMIT=json
 )"

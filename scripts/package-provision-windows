@@ -64,35 +64,38 @@ if [ "$OS_FAMILY" != "windows" ]; then
   exit 2
 fi
 
-# Mapping table.  Packages with self-contained install steps are granular; the
-# rest fall back to full provisioning so reboot/driver coupling stays in the
-# runner state machine.
+# Read install metadata from the package plugin manifest.  Packages whose
+# manifest declares install.windows.fallback: true (or omits install.windows
+# entirely) fall back to full provisioning -- that keeps reboot/driver
+# coupling (ViGEmBus, GPU driver, VDD) in the runner state machine.
 #
-# needs_env=1 only for packages whose step actually reads
-# C:\Users\Administrator\provision\state\env.json -- otherwise we'd risk
-# overwriting a populated remote env.json with locally-blank values.
+# state_files lists files under provision/state that the script must upload
+# (e.g. env.json for rustdesk's rendezvous_server / key / password).  Steps
+# that don't consume state get an empty list so we never overwrite a populated
+# remote env.json with locally-blank values.
+PLUGIN_DOC=$(./scripts/plugin-list --kind package --json)
+PLUGIN_INSTALL=$(printf '%s' "$PLUGIN_DOC" | jq --arg id "$PACKAGE" '.plugins[] | select(.id == $id) | .install.windows // null')
+
+steps=()
+state_files=()
 fallback=0
-needs_env=0
-case "$PACKAGE" in
-  rustdesk)
-    steps=(40_rustdesk.ps1)
-    needs_env=1
-    ;;
-  steam) steps=(30_steam.ps1) ;;
-  xpra)  steps=(35_xpra.ps1) ;;
-  sunshine)
-    # Sunshine works without ViGEmBus, but gamepad input from Moonlight only
-    # routes through a kernel-mode driver that requests a reboot.  Keep the
-    # full path here so a "package install" actually delivers a usable
-    # Sunshine.
-    steps=()
+if [ -z "$PLUGIN_INSTALL" ] || [ "$PLUGIN_INSTALL" = "null" ]; then
+  fallback=1
+else
+  if [ "$(printf '%s' "$PLUGIN_INSTALL" | jq -r '.fallback // false')" = "true" ]; then
     fallback=1
-    ;;
-  *)
-    steps=()
-    fallback=1
-    ;;
-esac
+  fi
+  while IFS= read -r step; do
+    [ -n "$step" ] && steps+=("$step")
+  done < <(printf '%s' "$PLUGIN_INSTALL" | jq -r '.steps // [] | .[]')
+  while IFS= read -r state_file; do
+    [ -n "$state_file" ] && state_files+=("$state_file")
+  done < <(printf '%s' "$PLUGIN_INSTALL" | jq -r '.state_files // [] | .[]')
+fi
+if [ "$fallback" -eq 1 ]; then
+  steps=()
+  state_files=()
+fi
 
 if [ "$DRY_RUN" -eq 1 ]; then
   if [ "${#steps[@]}" -eq 0 ]; then
@@ -100,14 +103,10 @@ if [ "$DRY_RUN" -eq 1 ]; then
   else
     steps_json="$(printf '%s\n' "${steps[@]}" | jq -R . | jq -s .)"
   fi
-  if [ "$needs_env" -eq 1 ]; then
-    # Only packages whose step actually reads env.json (e.g. rustdesk's
-    # rendezvous_server / key / password) declare it as a state file -- writing
-    # an empty env.json over a populated remote one would silently strip
-    # configuration set by a previous full provision.
-    state_files_json='["env.json"]'
-  else
+  if [ "${#state_files[@]}" -eq 0 ]; then
     state_files_json='[]'
+  else
+    state_files_json="$(printf '%s\n' "${state_files[@]}" | jq -R . | jq -s .)"
   fi
   jq -n \
     --arg profile "$PROFILE" \
@@ -146,12 +145,31 @@ remote_lib_dir="$remote_step_dir\\lib"
 remote_steps_dir="$remote_step_dir\\steps"
 remote_state_dir='C:\Users\Administrator\provision\state'
 
+# state_files in the manifest is authoritative for what gets uploaded.  Today
+# only env.json is consumed -- mirror scripts/provision's shape there.
+needs_env=0
+for state_file in "${state_files[@]}"; do
+  if [ "$state_file" = "env.json" ]; then
+    needs_env=1
+  fi
+done
+unsupported_state_files=()
+for state_file in "${state_files[@]}"; do
+  if [ "$state_file" != "env.json" ]; then
+    unsupported_state_files+=("$state_file")
+  fi
+done
+if [ "${#unsupported_state_files[@]}" -gt 0 ]; then
+  echo "package-provision-windows: unsupported state_files for package=$PACKAGE: ${unsupported_state_files[*]}" >&2
+  exit 2
+fi
+
 if [ "$needs_env" -eq 1 ]; then
-  # Mirror scripts/provision's env.json shape so steps that consume it
-  # (e.g. 40_rustdesk.ps1) see the same configuration surface as full
-  # provisioning.  WINDOWS_PASSWORD only ever comes from an explicit env
-  # override here -- we deliberately skip the terraform fallback used in
-  # scripts/provision so granular installs don't drag in terraform state.
+  # Mirror scripts/provision's env.json shape so steps that consume it see
+  # the same configuration surface as full provisioning.  WINDOWS_PASSWORD
+  # only ever comes from an explicit env override here -- we deliberately
+  # skip the terraform fallback used in scripts/provision so granular
+  # installs don't drag in terraform state.
   mkdir -p "$STAGE/state"
   jq -n \
     --arg wp "${EPHEMERAL_WINDOWS_PASSWORD:-}" \
