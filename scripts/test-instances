@@ -56,8 +56,9 @@ done
 
 tmp_registry="$(mktemp "${TMPDIR:-/tmp}/egame-instance-test.XXXXXX")"
 invalid_output="$(mktemp "${TMPDIR:-/tmp}/egame-instance-test-output.XXXXXX")"
+tmp_local_catalog="$(mktemp "${TMPDIR:-/tmp}/egame-instance-catalog.XXXXXX.yaml")"
 tmp_overlay_dir="$(mktemp -d "${TMPDIR:-/tmp}/egame-instance-overlay.XXXXXX")"
-trap 'rm -f "$tmp_registry" "$invalid_output"; rm -rf "$tmp_overlay_dir"' EXIT
+trap 'rm -f "$tmp_registry" "$invalid_output" "$tmp_local_catalog"; rm -rf "$tmp_overlay_dir"' EXIT
 rm -f "$tmp_registry"
 
 if ./scripts/instance-create \
@@ -99,6 +100,19 @@ if EGAME_INSTANCE_REGISTRY="$tmp_registry" EGAME_INSTANCE_WORKDIR="$tmp_overlay_
   printf '  [OK] profile overlay exposes direct instance packages\n'
 else
   printf '  [FAIL] profile overlay exposes direct instance packages\n' >&2
+  FAIL=$((FAIL + 1))
+fi
+
+cat >"$tmp_local_catalog" <<'YAML'
+profiles:
+  - name: local-vmware-ubuntu-dev-gui
+    packages: [steam]
+YAML
+if EGAME_CATALOG_LOCAL="$tmp_local_catalog" ./scripts/instance-resolve --registry "$FIXTURE" --instance dev-a --emit json |
+  jq -e '(.bundle_packages | index("steam")) and .package_sources.steam == ["direct"]' >/dev/null; then
+  printf '  [OK] instance resolver honors EGAME_CATALOG_LOCAL\n'
+else
+  printf '  [FAIL] instance resolver honors EGAME_CATALOG_LOCAL\n' >&2
   FAIL=$((FAIL + 1))
 fi
 

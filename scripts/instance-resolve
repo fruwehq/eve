@@ -6,7 +6,9 @@ require "yaml"
 
 ROOT = File.expand_path("..", __dir__)
 CATALOG_PATH = File.join(ROOT, "config/catalog.yaml")
-LOCAL_CATALOG_PATH = File.join(ROOT, "config/catalog.local.yaml")
+LOCAL_CATALOG_PATH = ENV["EGAME_CATALOG_LOCAL"] && !ENV["EGAME_CATALOG_LOCAL"].empty? \
+                     ? File.expand_path(ENV["EGAME_CATALOG_LOCAL"], Dir.pwd) \
+                     : File.join(ROOT, "config/catalog.local.yaml")
 DEFAULT_REGISTRY_PATH = File.join(ROOT, ".egame/instances.yaml")
 
 def usage
