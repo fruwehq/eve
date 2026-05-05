@@ -116,14 +116,16 @@ begin
   plugins = plugin_paths.map { |path| load_plugin(path) }
   plugins.each { |plugin| validate_plugin!(plugin) }
 
-  seen = {}
+  plugins_by_key = {}
   plugins.each do |plugin|
     key = "#{plugin["kind"]}:#{plugin["id"]}"
-    if seen[key] && ENV["EGAME_PLUGIN_ALLOW_OVERRIDE"] != "1"
-      raise "duplicate plugin #{key}: #{seen[key]} and #{plugin["_path"]}"
+    if plugins_by_key[key] && ENV["EGAME_PLUGIN_ALLOW_OVERRIDE"] != "1"
+      raise "duplicate plugin #{key}: #{plugins_by_key[key]["_path"]} and #{plugin["_path"]}"
     end
-    seen[key] = plugin["_path"]
+    plugins_by_key.delete(key) if plugins_by_key[key]
+    plugins_by_key[key] = plugin
   end
+  plugins = plugins_by_key.values
 
   plugins = plugins.select { |plugin| plugin["kind"] == kind } if kind
   plugins = plugins.map do |plugin|

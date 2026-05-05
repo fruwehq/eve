@@ -7,6 +7,7 @@ cd "$(git rev-parse --show-toplevel)"
 FIXTURE="tests/fixtures/instances.yaml"
 PLUGIN_FIXTURE="tests/fixtures/plugins/packages/dummy"
 LOCAL_EXEC_PLUGIN_FIXTURE="tests/fixtures/plugins/packages/local-exec"
+OVERRIDE_PLUGIN_FIXTURE="tests/fixtures/plugins/packages/docker-override"
 BAD_PLUGIN_FIXTURE="tests/fixtures/plugins/packages/bad"
 FAIL=0
 
@@ -46,6 +47,11 @@ local_exec_plugin_listed() {
     jq -e '.plugins[] | select(.id == "local-exec" and .kind == "package")' >/dev/null
 }
 
+override_plugin_replaces_builtin() {
+  EGAME_PLUGIN_ALLOW_OVERRIDE=1 EGAME_PLUGIN_ROOTS="$OVERRIDE_PLUGIN_FIXTURE" ./scripts/plugin-list --kind package --json |
+    jq -e '[.plugins[] | select(.id == "docker")] | length == 1 and .[0].display_name == "Docker Override Test Package"' >/dev/null
+}
+
 check "built-in plugins validate" ./scripts/plugin-list --validate
 
 check "aws provider plugin listed" aws_provider_listed
@@ -57,6 +63,8 @@ check "instance resolver maps provider and package plugins" instance_maps_plugin
 check "external dummy plugin listed" dummy_plugin_listed
 
 check "external plugin-local exec listed" local_exec_plugin_listed
+
+check "external plugin override replaces built-in" override_plugin_replaces_builtin
 
 if EGAME_PLUGIN_ROOTS="$BAD_PLUGIN_FIXTURE" ./scripts/plugin-list --json >/dev/null 2>&1; then
   printf '  [FAIL] invalid external plugin rejected\n' >&2
@@ -135,6 +143,21 @@ if printf '%s\n' "$local_exec_output" | jq -e '.kind == "package-local-exec" and
 else
   printf '  [FAIL] external plugin-local exec dispatch runs\n' >&2
   printf '%s\n' "$local_exec_output" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+override_output="$(
+  EGAME_PLUGIN_ALLOW_OVERRIDE=1 \
+    EGAME_PLUGIN_ROOTS="$OVERRIDE_PLUGIN_FIXTURE" \
+    EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-package-dispatch-test" \
+    EGAME_DISABLE_STATE=1 \
+    ./scripts/package-dispatch --registry "$FIXTURE" --instance dev-a --package docker --command status
+)"
+if printf '%s\n' "$override_output" | jq -e '.kind == "package-override" and .package == "docker" and .instance == "dev-a" and .command == "status"' >/dev/null; then
+  printf '  [OK] external plugin override dispatch runs\n'
+else
+  printf '  [FAIL] external plugin override dispatch runs\n' >&2
+  printf '%s\n' "$override_output" >&2
   FAIL=$((FAIL + 1))
 fi
 
