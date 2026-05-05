@@ -167,6 +167,38 @@ else
   FAIL=$((FAIL + 1))
 fi
 
+cat >"$tmp_local_catalog" <<'YAML'
+machines:
+  - name: acme-metal
+    provider: acme
+    kind: metal
+    defaults:
+      disk_gb: 30
+      memory_mb: 4096
+profiles:
+  - name: acme-test
+    machine: acme-metal
+    os: ubuntu-26.04-amd64
+    init: ssh-ubuntu-cloud-init
+    bundles: [access-headless]
+    location: tokyo
+locations:
+  - name: tokyo
+    acme:
+      region: test-region
+YAML
+if EGAME_PLUGIN_ROOTS="tests/fixtures/plugins/providers/acme" EGAME_CATALOG_LOCAL="$tmp_local_catalog" \
+  ./scripts/instance-resolve --registry "$tmp_external_registry" --instance acme-a --validate 2>"$invalid_output"; then
+  printf '  [FAIL] instance resolver accepted unsupported provider plugin metadata\n' >&2
+  FAIL=$((FAIL + 1))
+elif grep -q 'Provider plugin acme does not support engine metal' "$invalid_output"; then
+  printf '  [OK] instance resolver enforces provider plugin supports\n'
+else
+  printf '  [FAIL] instance resolver enforces provider plugin supports\n' >&2
+  cat "$invalid_output" >&2
+  FAIL=$((FAIL + 1))
+fi
+
 before_invalid="$(cat "$tmp_registry")"
 if ./scripts/instance-create \
   --registry "$tmp_registry" \

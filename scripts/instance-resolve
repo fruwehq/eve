@@ -83,9 +83,9 @@ def run_json(*cmd)
   JSON.parse(out)
 end
 
-def provider_plugin_ids
+def provider_plugins
   plugin_doc = run_json(File.join(ROOT, "scripts/plugin-list"), "--kind", "provider", "--json")
-  plugin_doc.fetch("plugins").map { |plugin| plugin.fetch("id") }
+  plugin_doc.fetch("plugins")
 end
 
 def env_or(name, fallback)
@@ -153,8 +153,36 @@ def validate!(catalog, composition, machine, os, init, location, bundle_packages
   end
 
   provider = machine["provider"]
-  raise "Provider plugin not found: #{provider}" unless provider_plugin_ids.include?(provider)
   raise "Location #{location["name"]} has no mapping for provider #{provider}" unless location[provider]
+end
+
+def engine_for(machine)
+  provider = machine["provider"]
+  if machine["kind"] == "metal"
+    "metal"
+  elsif provider.start_with?("local-")
+    "vagrant"
+  else
+    "terraform"
+  end
+end
+
+def validate_provider_plugin!(machine, engine)
+  provider = machine["provider"]
+  plugin = provider_plugins.find { |entry| entry.fetch("id") == provider }
+  raise "Provider plugin not found: #{provider}" unless plugin
+
+  supports = plugin.fetch("supports", {})
+  supported_engines = supports.fetch("engines", [])
+  unless supported_engines.empty? || supported_engines.include?(engine)
+    raise "Provider plugin #{provider} does not support engine #{engine}"
+  end
+
+  machine_kind = machine["kind"] || "vm"
+  supported_kinds = supports.fetch("kinds", [])
+  unless supported_kinds.empty? || supported_kinds.include?(machine_kind)
+    raise "Provider plugin #{provider} does not support machine kind #{machine_kind}"
+  end
 end
 
 def emit_env(resolved)
@@ -271,13 +299,8 @@ begin
   validate!(catalog, composition, machine, os, init, location, bundle_packages)
 
   provider = machine["provider"]
-  engine = if machine["kind"] == "metal"
-             "metal"
-           elsif provider.start_with?("local-")
-             "vagrant"
-           else
-             "terraform"
-           end
+  engine = engine_for(machine)
+  validate_provider_plugin!(machine, engine)
   resolved = {
     "instance" => instance,
     "recipe_name" => recipe_name,
