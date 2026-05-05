@@ -8,14 +8,18 @@ Write-Host "#########################################################"
 . "$PSScriptRoot\..\lib\sunshine.ps1"
 
 # Sunshine needs a virtual audio sink to stream audio from a headless
-# Windows VM. Sunshine's default is "Steam Streaming Speakers" but that
-# .inf only ships inside a fully-bootstrapped Steam install, which couples
-# audio to Steam being present and updated.
+# Windows VM. Sunshine's default sink is "Steam Streaming Speakers", whose
+# .inf only ships inside a fully-bootstrapped Steam install. We use
+# VB-CABLE instead: signed by VB-Audio (no test signing), ~1 MB, and Steam-
+# independent.
 #
-# We use VB-CABLE instead: signed by VB-Audio (no test signing needed),
-# small (~1 MB), and independent of Steam. After installing the driver we
-# set Sunshine's virtual_sink to the VB-CABLE playback device and disable
-# Sunshine's Steam-driver auto-install path.
+# Install pattern (same as Easy-GPU-PV / gcloudrig / cloudy-gamer): pre-add
+# VB-Audio's signing certificate to TrustedPublisher so Windows accepts the
+# driver without UAC, then run the bundled VBCABLE_Setup_x64.exe with
+# `-i -h` (install, hidden). Hand-rolled SetupAPI device creation hits
+# SPAPI_E_NO_ASSOCIATED_SERVICE because the VB-CABLE INF binds its service
+# to the Media class with a prefixed hardware ID; let the vendor installer
+# handle that.
 
 $cableZipUrl   = 'https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack45.zip'
 $downloadDir   = 'C:\Users\Administrator\provision\downloads\vb-cable'
@@ -27,7 +31,7 @@ $cableSinkName = 'CABLE Input (VB-Audio Virtual Cable)'
 
 function Find-CableDevice {
   Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue |
-    Where-Object { $_.FriendlyName -eq 'CABLE Input (VB-Audio Virtual Cable)' } |
+    Where-Object { $_.FriendlyName -match 'VB-Audio Virtual Cable|CABLE Input' } |
     Select-Object -First 1
 }
 
@@ -68,30 +72,52 @@ if ($device) {
   }
   Expand-Archive -Path $cableZipPath -DestinationPath $cableExtract -Force
 
-  $infs = Get-ChildItem -Path $cableExtract -Recurse -Filter '*.inf'
-  if ($infs.Count -eq 0) {
-    throw "Could not find VB-CABLE INF in extracted archive at $cableExtract."
+  $catFile = Get-ChildItem -Path $cableExtract -Filter '*.cat' |
+    Select-Object -First 1 -ExpandProperty FullName
+  if (-not $catFile) {
+    throw "Could not find VB-CABLE .cat file in $cableExtract"
   }
-  # Pack may ship multiple INFs (x86 / x64 / ARM64). These Windows VMs are
-  # AMD64; prefer the 64-bit INF, fall back to the only one if single-arch.
-  $inf = ($infs | Where-Object { $_.Name -match '64' } | Select-Object -First 1).FullName
-  if (-not $inf) { $inf = $infs[0].FullName }
 
-  Write-Host "Installing VB-CABLE driver from $inf..."
-  $proc = Start-Process -FilePath 'pnputil.exe' `
-    -ArgumentList '/add-driver', "`"$inf`"", '/install' `
-    -Wait -PassThru -NoNewWindow
+  $installerPath = Get-ChildItem -Path $cableExtract -Filter 'VBCABLE_Setup_x64.exe' |
+    Select-Object -First 1 -ExpandProperty FullName
+  if (-not $installerPath) {
+    throw "Could not find VBCABLE_Setup_x64.exe in $cableExtract"
+  }
+
+  $cert = (Get-AuthenticodeSignature -FilePath $catFile).SignerCertificate
+  if (-not $cert) {
+    throw "Could not read signing certificate from $catFile"
+  }
+
+  $alreadyTrusted = Get-ChildItem Cert:\LocalMachine\TrustedPublisher |
+    Where-Object { $_.Thumbprint -eq $cert.Thumbprint }
+  if ($alreadyTrusted) {
+    Write-Host "VB-Audio signing certificate already trusted."
+  } else {
+    Write-Host "Adding VB-Audio signing cert to TrustedPublisher: $($cert.Subject)"
+    $certPath = Join-Path $cableExtract 'VBCert.cer'
+    [System.IO.File]::WriteAllBytes(
+      $certPath,
+      $cert.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert))
+    & certutil.exe -Enterprise -AddStore 'TrustedPublisher' $certPath | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+      throw "certutil failed to add VB-Audio cert to TrustedPublisher (exit $LASTEXITCODE)"
+    }
+  }
+
+  Write-Host "Running VB-CABLE installer ($installerPath -i -h)..."
+  $proc = Start-Process -FilePath $installerPath -ArgumentList '-i', '-h' -Wait -PassThru
   if ($proc.ExitCode -ne 0) {
-    throw "pnputil /add-driver failed with exit code $($proc.ExitCode)"
+    throw "VBCABLE_Setup_x64.exe failed with exit code $($proc.ExitCode)"
   }
 
-  $deadline = (Get-Date).AddSeconds(30)
+  $deadline = (Get-Date).AddSeconds(60)
   while ((Get-Date) -lt $deadline -and -not $device) {
     Start-Sleep -Seconds 2
     $device = Find-CableDevice
   }
   if (-not $device) {
-    throw "VB-CABLE device did not appear in Device Manager after install."
+    throw "VB-CABLE device did not appear in Device Manager within 60s of running the installer."
   }
   Write-Host "VB-CABLE installed: $($device.InstanceId)"
   $installedDriver = $true
