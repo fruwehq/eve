@@ -67,6 +67,8 @@ overlay_profile = {
   "bundles" => composition.fetch("bundles", []),
   "location" => composition.fetch("location")
 }
+overlay_profile["packages"] = composition["packages"] if composition.key?("packages")
+overlay_profile["ui_mode"] = composition["ui_mode"] if composition.key?("ui_mode")
 overlay_profile["lifecycle"] = composition["lifecycle"] if composition.key?("lifecycle")
 
 overlay = {

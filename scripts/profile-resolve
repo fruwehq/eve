@@ -163,10 +163,11 @@ else
     error("One or more bundles not found in profile: \($p.name)")
   else . end |
 
-  ($bundle_objs | map(.includes // []) | flatten | unique) as $bundle_packages |
+  (($p.packages // []) | unique) as $direct_packages |
+  ($bundle_objs | map(.includes // []) | flatten | . + $direct_packages | unique) as $bundle_packages |
   ($root.packages // [] | map(.id)) as $package_catalog |
   if ($bundle_packages | all(. as $pkg | $package_catalog | index($pkg) != null) | not) then
-    error("Bundle references unknown package id")
+    error("Profile references unknown package id")
   else . end |
 
   if (($i.os_family // "") != "" and ($i.os_family != ($o.family // ""))) then

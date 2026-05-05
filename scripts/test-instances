@@ -93,6 +93,15 @@ else
   FAIL=$((FAIL + 1))
 fi
 
+if EGAME_INSTANCE_REGISTRY="$tmp_registry" EGAME_INSTANCE_WORKDIR="$tmp_overlay_dir/direct" \
+  make --no-print-directory env INSTANCE=test-dev |
+  grep -q '^BUNDLE_PACKAGES=.*steam'; then
+  printf '  [OK] profile overlay exposes direct instance packages\n'
+else
+  printf '  [FAIL] profile overlay exposes direct instance packages\n' >&2
+  FAIL=$((FAIL + 1))
+fi
+
 before_invalid="$(cat "$tmp_registry")"
 if ./scripts/instance-create \
   --registry "$tmp_registry" \
