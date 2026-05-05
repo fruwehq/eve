@@ -1,0 +1,143 @@
+#!/usr/bin/env bash
+# Upload Windows provisioning scripts and run the step subset for one package.
+#
+# Some Windows provisioning steps trigger reboot flags or depend on the runner
+# state machine restarting after a reboot (e.g. ViGEmBus, GPU driver, VDD).
+# Those packages stay on the explicit `make provision` fallback so the granular
+# install path never has to reason about a half-applied driver state. The
+# remaining packages map to a single self-contained step file.
+
+set -euo pipefail
+
+usage() {
+  cat >&2 <<'USAGE'
+Usage:
+  scripts/package-provision-windows --profile <profile> --package <id> [--dry-run]
+USAGE
+}
+
+PROFILE=""
+PACKAGE=""
+DRY_RUN=0
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --profile)
+      PROFILE="${2:-}"
+      shift 2
+      ;;
+    --package)
+      PACKAGE="${2:-}"
+      shift 2
+      ;;
+    --dry-run)
+      DRY_RUN=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      usage
+      exit 2
+      ;;
+  esac
+done
+
+if [ -z "$PROFILE" ] || [ -z "$PACKAGE" ]; then
+  usage
+  exit 2
+fi
+
+cd "$(git rev-parse --show-toplevel)"
+
+RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
+env_value() {
+  printf '%s\n' "$RESOLVED_ENV" | awk -F= -v key="$1" '$1 == key { print substr($0, index($0, "=") + 1) }'
+}
+
+OS_FAMILY=$(env_value OS_FAMILY)
+
+if [ "$OS_FAMILY" != "windows" ]; then
+  echo "package-provision-windows: granular package install is only implemented for windows, got $OS_FAMILY" >&2
+  exit 2
+fi
+
+# Mapping table.  Packages with self-contained install steps are granular; the
+# rest fall back to full provisioning so reboot/driver coupling stays in the
+# runner state machine.
+fallback=0
+case "$PACKAGE" in
+  rustdesk) steps=(40_rustdesk.ps1) ;;
+  steam)    steps=(30_steam.ps1) ;;
+  xpra)     steps=(35_xpra.ps1) ;;
+  sunshine)
+    # Sunshine works without ViGEmBus, but gamepad input from Moonlight only
+    # routes through a kernel-mode driver that requests a reboot.  Keep the
+    # full path here so a "package install" actually delivers a usable
+    # Sunshine.
+    steps=()
+    fallback=1
+    ;;
+  *)
+    steps=()
+    fallback=1
+    ;;
+esac
+
+if [ "$DRY_RUN" -eq 1 ]; then
+  if [ "${#steps[@]}" -eq 0 ]; then
+    steps_json='[]'
+  else
+    steps_json="$(printf '%s\n' "${steps[@]}" | jq -R . | jq -s .)"
+  fi
+  jq -n \
+    --arg profile "$PROFILE" \
+    --arg package "$PACKAGE" \
+    --arg os_family "$OS_FAMILY" \
+    --argjson steps "$steps_json" \
+    --argjson fallback "$fallback" \
+    '{kind: "package-provision-windows", profile: $profile, package: $package, os_family: $os_family, steps: $steps, fallback: ($fallback == 1), dry_run: true}'
+  exit 0
+fi
+
+if [ "$fallback" -eq 1 ]; then
+  echo "[package-provision-windows] no granular mapping for package=$PACKAGE; falling back to full provisioning"
+  exec make provision PROFILE="$PROFILE" INSTANCE=
+fi
+
+./scripts/ssh-wait "$PROFILE"
+
+# Stage scripts: keep lib/ and templates/ available because most Windows steps
+# dot-source helpers from lib/.  Upload only the requested step file so the
+# Scheduled Task runner is never tempted to walk past it.
+STAGE=$(mktemp -d)
+trap 'rm -rf "$STAGE"' EXIT
+mkdir -p "$STAGE/scripts/steps"
+cp -R windows/provision/scripts/lib "$STAGE/scripts/lib"
+if [ -d windows/provision/scripts/templates ]; then
+  cp -R windows/provision/scripts/templates "$STAGE/scripts/templates"
+fi
+for step in "${steps[@]}"; do
+  cp "windows/provision/scripts/steps/$step" "$STAGE/scripts/steps/$step"
+done
+
+echo "[package-provision-windows] uploading windows step files for package=$PACKAGE"
+remote_step_dir='C:\Users\Administrator\provision\scripts-package'
+remote_lib_dir="$remote_step_dir\\lib"
+remote_steps_dir="$remote_step_dir\\steps"
+
+./scripts/instance-ssh "$PROFILE" -- "if (Test-Path '$remote_step_dir') { Remove-Item -Recurse -Force '$remote_step_dir' } ; New-Item -ItemType Directory -Force '$remote_lib_dir' | Out-Null ; New-Item -ItemType Directory -Force '$remote_steps_dir' | Out-Null"
+./scripts/instance-ssh "$PROFILE" --scp "$STAGE/scripts/lib" "/C:/Users/Administrator/provision/scripts-package/"
+if [ -d "$STAGE/scripts/templates" ]; then
+  ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/scripts/templates" "/C:/Users/Administrator/provision/scripts-package/"
+fi
+for step in "${steps[@]}"; do
+  ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/scripts/steps/$step" "/C:/Users/Administrator/provision/scripts-package/steps/$step"
+done
+
+for step in "${steps[@]}"; do
+  echo "[package-provision-windows] running step=$step package=$PACKAGE"
+  ./scripts/instance-ssh "$PROFILE" -- "& 'C:\\Users\\Administrator\\provision\\scripts-package\\steps\\$step'"
+done

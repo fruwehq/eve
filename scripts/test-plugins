@@ -120,6 +120,61 @@ else
   FAIL=$((FAIL + 1))
 fi
 
+windows_steam_install="$(
+  ./scripts/package-provision-windows --profile vultr-windows-gaming --package steam --dry-run
+)"
+if printf '%s\n' "$windows_steam_install" | jq -e '.kind == "package-provision-windows" and .package == "steam" and .os_family == "windows" and .steps == ["30_steam.ps1"] and .fallback == false and .dry_run == true' >/dev/null; then
+  printf '  [OK] windows steam install maps to steam step\n'
+else
+  printf '  [FAIL] windows steam install maps to steam step\n' >&2
+  printf '%s\n' "$windows_steam_install" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+windows_rustdesk_install="$(
+  ./scripts/package-provision-windows --profile vultr-windows-gaming --package rustdesk --dry-run
+)"
+if printf '%s\n' "$windows_rustdesk_install" | jq -e '.package == "rustdesk" and .steps == ["40_rustdesk.ps1"] and .fallback == false' >/dev/null; then
+  printf '  [OK] windows rustdesk install maps to rustdesk step\n'
+else
+  printf '  [FAIL] windows rustdesk install maps to rustdesk step\n' >&2
+  printf '%s\n' "$windows_rustdesk_install" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+windows_xpra_install="$(
+  ./scripts/package-provision-windows --profile vultr-windows-gaming --package xpra --dry-run
+)"
+if printf '%s\n' "$windows_xpra_install" | jq -e '.package == "xpra" and .steps == ["35_xpra.ps1"] and .fallback == false' >/dev/null; then
+  printf '  [OK] windows xpra install maps to xpra step\n'
+else
+  printf '  [FAIL] windows xpra install maps to xpra step\n' >&2
+  printf '%s\n' "$windows_xpra_install" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+windows_sunshine_install="$(
+  ./scripts/package-provision-windows --profile vultr-windows-gaming --package sunshine --dry-run
+)"
+if printf '%s\n' "$windows_sunshine_install" | jq -e '.package == "sunshine" and .steps == [] and .fallback == true' >/dev/null; then
+  printf '  [OK] windows sunshine install falls back to full provisioning\n'
+else
+  printf '  [FAIL] windows sunshine install falls back to full provisioning\n' >&2
+  printf '%s\n' "$windows_sunshine_install" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+windows_unmapped_install="$(
+  ./scripts/package-provision-windows --profile vultr-windows-gaming --package docker --dry-run
+)"
+if printf '%s\n' "$windows_unmapped_install" | jq -e '.package == "docker" and .steps == [] and .fallback == true' >/dev/null; then
+  printf '  [OK] windows package without granular mapping falls back\n'
+else
+  printf '  [FAIL] windows package without granular mapping falls back\n' >&2
+  printf '%s\n' "$windows_unmapped_install" >&2
+  FAIL=$((FAIL + 1))
+fi
+
 package_list="$(
   EGAME_INSTANCE_REGISTRY="$FIXTURE" make --no-print-directory package.list INSTANCE=dev-a EMIT=json
 )"
