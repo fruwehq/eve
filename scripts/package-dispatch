@@ -20,9 +20,13 @@ def run_json(*cmd)
   JSON.parse(out)
 end
 
-def command_vector(spec)
+def command_vector(plugin, spec)
   exec_path = spec.fetch("exec")
-  exec_path = File.join(ROOT, exec_path) unless exec_path.start_with?("/")
+  unless exec_path.start_with?("/")
+    plugin_exec = File.join(File.dirname(plugin.fetch("path")), exec_path)
+    root_exec = File.join(ROOT, exec_path)
+    exec_path = File.exist?(plugin_exec) ? plugin_exec : root_exec
+  end
   [exec_path, *(spec["args"] || [])]
 end
 
@@ -51,7 +55,7 @@ def run_plugin(plugin, command, resolved, dry_run)
   )
   env["EGAME_PLUGIN_DRY_RUN"] = "1" if dry_run
 
-  cmd = command_vector(spec)
+  cmd = command_vector(plugin, spec)
   Open3.popen3(env, *cmd, chdir: ROOT) do |stdin, stdout, stderr, wait_thr|
     stdin.write(JSON.generate(resolved))
     stdin.close

@@ -6,6 +6,7 @@ cd "$(git rev-parse --show-toplevel)"
 
 FIXTURE="tests/fixtures/instances.yaml"
 PLUGIN_FIXTURE="tests/fixtures/plugins/packages/dummy"
+LOCAL_EXEC_PLUGIN_FIXTURE="tests/fixtures/plugins/packages/local-exec"
 BAD_PLUGIN_FIXTURE="tests/fixtures/plugins/packages/bad"
 FAIL=0
 
@@ -40,6 +41,11 @@ dummy_plugin_listed() {
     jq -e '.plugins[] | select(.id == "dummy" and .kind == "package")' >/dev/null
 }
 
+local_exec_plugin_listed() {
+  EGAME_PLUGIN_ROOTS="$LOCAL_EXEC_PLUGIN_FIXTURE" ./scripts/plugin-list --kind package --json |
+    jq -e '.plugins[] | select(.id == "local-exec" and .kind == "package")' >/dev/null
+}
+
 check "built-in plugins validate" ./scripts/plugin-list --validate
 
 check "aws provider plugin listed" aws_provider_listed
@@ -49,6 +55,8 @@ check "docker package plugin listed" docker_package_listed
 check "instance resolver maps provider and package plugins" instance_maps_plugins
 
 check "external dummy plugin listed" dummy_plugin_listed
+
+check "external plugin-local exec listed" local_exec_plugin_listed
 
 if EGAME_PLUGIN_ROOTS="$BAD_PLUGIN_FIXTURE" ./scripts/plugin-list --json >/dev/null 2>&1; then
   printf '  [FAIL] invalid external plugin rejected\n' >&2
@@ -113,6 +121,20 @@ if printf '%s\n' "$dummy_hook" | jq -e '.kind == "package-hook" and .package == 
 else
   printf '  [FAIL] package plugin command folder hook runs\n' >&2
   printf '%s\n' "$dummy_hook" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+local_exec_output="$(
+  EGAME_PLUGIN_ROOTS="$LOCAL_EXEC_PLUGIN_FIXTURE" \
+    EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-package-dispatch-test" \
+    EGAME_DISABLE_STATE=1 \
+    ./scripts/package-dispatch --registry "$FIXTURE" --instance dev-a --package local-exec --command status
+)"
+if printf '%s\n' "$local_exec_output" | jq -e '.kind == "package-local-exec" and .package == "local-exec" and .instance == "dev-a" and .command == "status"' >/dev/null; then
+  printf '  [OK] external plugin-local exec dispatch runs\n'
+else
+  printf '  [FAIL] external plugin-local exec dispatch runs\n' >&2
+  printf '%s\n' "$local_exec_output" >&2
   FAIL=$((FAIL + 1))
 fi
 

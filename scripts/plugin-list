@@ -69,6 +69,16 @@ def validate_plugin!(plugin)
     raise "#{plugin["_path"]}: command #{name} must be a map" unless spec.is_a?(Hash)
     raise "#{plugin["_path"]}: command #{name} missing exec" unless spec["exec"]
     raise "#{plugin["_path"]}: command #{name} args must be a list" if spec.key?("args") && !spec["args"].is_a?(Array)
+
+    exec_path = spec["exec"].to_s
+    resolved_exec = if exec_path.start_with?("/")
+                      exec_path
+                    else
+                      plugin_exec = File.join(File.dirname(plugin["_path"]), exec_path)
+                      root_exec = File.join(ROOT, exec_path)
+                      File.exist?(plugin_exec) ? plugin_exec : root_exec
+                    end
+    raise "#{plugin["_path"]}: command #{name} exec not found: #{exec_path}" unless File.file?(resolved_exec)
   end
 
   raise "#{plugin["_path"]}: supports must be a map" unless plugin["supports"].is_a?(Hash)
