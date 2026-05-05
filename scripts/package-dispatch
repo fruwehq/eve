@@ -156,7 +156,14 @@ begin
                   end
   record_state(instance_name, "package.#{command}", "succeeded", package_id, package_state) unless dry_run
 rescue StandardError => e
-  record_state(instance_name, "package.#{command || "unknown"}", "failed", package_id || "unknown", nil, e.message) if instance_name && package_id && !dry_run
+  record_state(
+    instance_name,
+    "package.#{command || "unknown"}",
+    "failed",
+    package_id || "unknown",
+    "failed",
+    e.message
+  ) if instance_name && package_id && !dry_run
   warn "package-dispatch: #{e.message}"
   exit 1
 end

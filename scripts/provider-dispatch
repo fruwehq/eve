@@ -41,6 +41,7 @@ end
 
 def provider_state_for(command, status)
   return "changing" if status == "running" && %w[up down start stop].include?(command)
+  return "error" if status == "failed"
   return nil unless status == "succeeded"
 
   {
@@ -172,11 +173,25 @@ begin
       provider_state_for(command, "succeeded")
     ) unless dry_run
   else
-    record_state(instance_name, "provider.#{command}", "failed", "exit #{exit_status}") unless dry_run
+    record_state(
+      instance_name,
+      "provider.#{command}",
+      "failed",
+      "exit #{exit_status}",
+      desired_state,
+      provider_state_for(command, "failed")
+    ) unless dry_run
   end
   exit(exit_status)
 rescue StandardError => e
-  record_state(instance_name, "provider.#{command || "unknown"}", "failed", e.message) if instance_name && !dry_run
+  record_state(
+    instance_name,
+    "provider.#{command || "unknown"}",
+    "failed",
+    e.message,
+    desired_state_for(command),
+    provider_state_for(command, "failed")
+  ) if instance_name && !dry_run
   warn "provider-dispatch: #{e.message}"
   exit 1
 end

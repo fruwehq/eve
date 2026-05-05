@@ -30,6 +30,7 @@ def default_state(instance, now = nil)
     "provider_state" => "unknown",
     "provision_state" => "unknown",
     "package_state" => {},
+    "operation_history" => [],
     "last_operation" => nil,
     "last_error" => nil
   }
@@ -114,13 +115,17 @@ end
 now = Time.now.utc.iso8601
 state = default_state(instance, now).merge(state)
 state["package_state"] ||= {}
+state["operation_history"] ||= []
 state["created_at"] ||= now
 state["updated_at"] = now
-state["last_operation"] = {
+operation_entry = {
   "name" => operation,
   "status" => status,
   "at" => now
 }
+state["last_operation"] = operation_entry
+state["operation_history"] << operation_entry.merge("error" => error).compact
+state["operation_history"] = state["operation_history"].last(50)
 state["last_error"] = error
 state["desired_state"] = desired_state if desired_state
 state["provider_state"] = provider_state if provider_state

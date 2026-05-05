@@ -36,6 +36,7 @@ make instance.info INSTANCE=dev-a
 make instance.env INSTANCE=dev-a
 make instance.paths INSTANCE=dev-a
 make instance.state INSTANCE=dev-a
+make instance.status INSTANCE=dev-a EMIT=json
 make instance.validate INSTANCE=dev-a
 
 # Run existing profile-oriented targets through a generated instance overlay

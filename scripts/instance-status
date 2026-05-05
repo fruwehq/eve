@@ -1,0 +1,104 @@
+#!/usr/bin/env ruby
+# Emit a combined local status view for a concrete v3 instance.
+
+require "json"
+require "open3"
+
+ROOT = File.expand_path("..", __dir__)
+
+def usage
+  warn <<~USAGE
+    Usage:
+      scripts/instance-status --instance <name> [--registry <path>] [--json]
+  USAGE
+end
+
+def run_json(*cmd)
+  out, status = Open3.capture2e(*cmd)
+  raise out unless status.success?
+
+  JSON.parse(out)
+end
+
+instance_name = nil
+registry_path = ENV["EGAME_INSTANCE_REGISTRY"] ? File.expand_path(ENV["EGAME_INSTANCE_REGISTRY"], Dir.pwd) : nil
+json = false
+
+args = ARGV.dup
+until args.empty?
+  case args.shift
+  when "--instance"
+    instance_name = args.shift
+  when "--registry"
+    registry_path = File.expand_path(args.shift, Dir.pwd)
+  when "--json"
+    json = true
+  when "-h", "--help"
+    usage
+    exit 0
+  else
+    usage
+    exit 2
+  end
+end
+
+unless instance_name
+  usage
+  exit 2
+end
+
+begin
+  resolve_cmd = [File.join(ROOT, "scripts/instance-resolve"), "--instance", instance_name, "--emit", "json"]
+  paths_cmd = [File.join(ROOT, "scripts/instance-paths"), "--instance", instance_name, "--emit", "json"]
+  package_cmd = [File.join(ROOT, "scripts/package-list"), "--instance", instance_name, "--json"]
+  if registry_path
+    resolve_cmd += ["--registry", registry_path]
+    paths_cmd += ["--registry", registry_path]
+    package_cmd += ["--registry", registry_path]
+  end
+
+  resolved = run_json(*resolve_cmd)
+  paths = run_json(*paths_cmd)
+  state = run_json(File.join(ROOT, "scripts/instance-state"), "--instance", instance_name, "--get")
+  packages = run_json(*package_cmd).fetch("packages")
+  selected_packages = packages.select { |package| package["selected"] }
+
+  status = {
+    "instance" => {
+      "name" => instance_name,
+      "recipe" => resolved["recipe_name"],
+      "provider" => resolved.dig("machine", "provider"),
+      "provider_plugin" => resolved["provider_plugin"],
+      "engine" => resolved["engine"],
+      "machine" => resolved.dig("composition", "machine"),
+      "os" => resolved.dig("os", "id"),
+      "os_family" => resolved.dig("os", "family"),
+      "location" => resolved.dig("location", "name")
+    },
+    "state" => state,
+    "packages" => {
+      "selected" => selected_packages,
+      "all" => packages
+    },
+    "paths" => paths
+  }
+
+  if json
+    puts JSON.pretty_generate(status)
+  else
+    instance = status.fetch("instance")
+    printf "Instance: %s\n", instance.fetch("name")
+    printf "Provider: %s (%s, %s)\n", instance.fetch("provider"), instance.fetch("provider_plugin"), instance.fetch("engine")
+    printf "OS: %s (%s)\n", instance.fetch("os"), instance.fetch("os_family")
+    printf "State: desired=%s provider=%s provision=%s\n",
+           state.fetch("desired_state"),
+           state.fetch("provider_state"),
+           state.fetch("provision_state")
+    printf "Last operation: %s\n", state["last_operation"] ? "#{state.dig("last_operation", "name")} #{state.dig("last_operation", "status")}" : "none"
+    printf "Last error: %s\n", state["last_error"] || "none"
+    printf "Selected packages: %s\n", selected_packages.map { |package| package.fetch("id") }.join(",")
+  end
+rescue StandardError => e
+  warn "instance-status: #{e.message}"
+  exit 1
+end

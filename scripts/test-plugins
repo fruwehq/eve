@@ -421,7 +421,7 @@ fi
 state_dir="$(mktemp -d "${TMPDIR:-/tmp}/egame-state-test.XXXXXX")"
 trap 'rm -rf "$state_dir"' EXIT
 empty_state="$(EGAME_STATE_DIR="$state_dir" ./scripts/instance-state --instance fresh-a --get)"
-if printf '%s\n' "$empty_state" | jq -e '.instance == "fresh-a" and .desired_state == "unknown" and .provider_state == "unknown" and .provision_state == "unknown" and .package_state == {}' >/dev/null; then
+if printf '%s\n' "$empty_state" | jq -e '.instance == "fresh-a" and .desired_state == "unknown" and .provider_state == "unknown" and .provision_state == "unknown" and .package_state == {} and .operation_history == []' >/dev/null; then
   printf '  [OK] instance state get returns default state shape\n'
 else
   printf '  [FAIL] instance state default shape mismatch\n' >&2
@@ -439,7 +439,7 @@ state_json="$(
     --package docker \
     --package-state removed
 )"
-if printf '%s\n' "$state_json" | jq -e '.last_operation.name == "package.down" and .desired_state == "running" and .provider_state == "running" and .package_state.docker.status == "removed"' >/dev/null; then
+if printf '%s\n' "$state_json" | jq -e '.last_operation.name == "package.down" and .desired_state == "running" and .provider_state == "running" and .package_state.docker.status == "removed" and (.operation_history | length == 1)' >/dev/null; then
   printf '  [OK] instance state records package operation\n'
 else
   printf '  [FAIL] instance state records package operation\n' >&2
@@ -451,11 +451,35 @@ EGAME_STATE_DIR="$state_dir" \
   EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-package-dispatch-test" \
   ./scripts/package-dispatch --registry "$FIXTURE" --instance dev-a --package docker --command status >/dev/null
 recorded_state="$(EGAME_STATE_DIR="$state_dir" ./scripts/instance-state --instance dev-a --get)"
-if printf '%s\n' "$recorded_state" | jq -e '.last_operation.name == "package.status" and .package_state.docker.status == "checked"' >/dev/null; then
+if printf '%s\n' "$recorded_state" | jq -e '.last_operation.name == "package.status" and .last_operation.status == "succeeded" and .package_state.docker.status == "checked" and ([.operation_history[-2].status, .operation_history[-1].status] == ["running", "succeeded"])' >/dev/null; then
   printf '  [OK] package dispatch records state\n'
 else
   printf '  [FAIL] package dispatch records state\n' >&2
   printf '%s\n' "$recorded_state" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+EGAME_STATE_DIR="$state_dir" \
+  EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-package-dispatch-test" \
+  ./scripts/package-dispatch --registry "$FIXTURE" --instance dev-a --package missing-package --command status >/dev/null 2>&1 || true
+failed_package_state="$(EGAME_STATE_DIR="$state_dir" ./scripts/instance-state --instance dev-a --get)"
+if printf '%s\n' "$failed_package_state" | jq -e '.last_operation.name == "package.status" and .last_operation.status == "failed" and .last_error and .package_state["missing-package"].status == "failed"' >/dev/null; then
+  printf '  [OK] package dispatch records failed package state\n'
+else
+  printf '  [FAIL] package dispatch failed state mismatch\n' >&2
+  printf '%s\n' "$failed_package_state" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+EGAME_STATE_DIR="$state_dir" \
+  EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-provider-dispatch-test" \
+  ./scripts/provider-dispatch --registry "$FIXTURE" --instance dev-a --command bogus >/dev/null 2>&1 || true
+failed_provider_state="$(EGAME_STATE_DIR="$state_dir" ./scripts/instance-state --instance dev-a --get)"
+if printf '%s\n' "$failed_provider_state" | jq -e '.last_operation.name == "provider.bogus" and .last_operation.status == "failed" and .provider_state == "error" and .last_error' >/dev/null; then
+  printf '  [OK] provider dispatch records failed provider state\n'
+else
+  printf '  [FAIL] provider dispatch failed state mismatch\n' >&2
+  printf '%s\n' "$failed_provider_state" >&2
   FAIL=$((FAIL + 1))
 fi
 

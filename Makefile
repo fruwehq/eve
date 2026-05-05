@@ -2,7 +2,7 @@
 .DEFAULT_GOAL := default
 .PHONY: all aws.login clean default down env generate help info \
 				init init.all instance.create instance.delete instance.env instance.info \
-				instance.list instance.paths instance.state instance.validate ip lint logs plan \
+				instance.list instance.paths instance.state instance.status instance.validate ip lint logs plan \
 				package.down package.install package.list package.reinstall package.select \
 				package.status package.unselect \
 				plugins.list plugins.sync plugins.validate \
@@ -178,6 +178,12 @@ instance.paths: ## Print resolved local artifact paths for an instance (EMIT=env
 instance.state: ## Print local orchestration state for an instance
 	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make instance.state INSTANCE=<name>"; exit 2; fi; \
 	./scripts/instance-state --instance $(INSTANCE) --get | jq .
+
+instance.status: ## Print combined resolved metadata, local state, packages, and paths
+	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make instance.status INSTANCE=<name> [EMIT=json]"; exit 2; fi; \
+	args="--instance $(INSTANCE)"; \
+	if [ "$(EMIT)" = "json" ]; then args="$$args --json"; fi; \
+	./scripts/instance-status $$args
 
 instance.validate: ## Validate a concrete instance from .egame/instances.yaml
 	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make instance.validate INSTANCE=<name>"; exit 2; fi; \
