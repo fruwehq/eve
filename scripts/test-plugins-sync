@@ -11,8 +11,10 @@ source_repo="$tmp_root/source-repo"
 dest_root="$tmp_root/plugins"
 sources_file="$tmp_root/plugin-sources.yaml"
 unpinned_sources_file="$tmp_root/plugin-sources-unpinned.yaml"
+bad_sources_file="$tmp_root/plugin-sources-bad.yaml"
 sync_err="$tmp_root/sync.err"
 unpinned_err="$tmp_root/unpinned.err"
+bad_err="$tmp_root/bad.err"
 
 mkdir -p "$source_repo/packages/sample"
 cat >"$source_repo/packages/sample/egame-plugin.yaml" <<'YAML'
@@ -65,4 +67,19 @@ elif [ -e "$tmp_root/unpinned-dest/unpinned" ]; then
   exit 1
 else
   printf '  [OK] plugins-sync rejects unpinned source before mutation\n'
+fi
+
+cat >"$bad_sources_file" <<'YAML'
+sources: not-a-list
+YAML
+
+if ./scripts/plugins-sync --sources "$bad_sources_file" --dest "$tmp_root/bad-dest" >/dev/null 2>"$bad_err"; then
+  printf '  [FAIL] plugins-sync accepted malformed sources list\n' >&2
+  exit 1
+elif grep -q "sources must be a list" "$bad_err" && [ ! -e "$tmp_root/bad-dest" ]; then
+  printf '  [OK] plugins-sync rejects malformed source file before mutation\n'
+else
+  printf '  [FAIL] plugins-sync rejects malformed source file before mutation\n' >&2
+  cat "$bad_err" >&2
+  exit 1
 fi

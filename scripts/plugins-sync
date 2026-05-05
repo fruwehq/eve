@@ -46,15 +46,35 @@ unless File.exist?(sources_path)
 end
 
 doc = YAML.safe_load(File.read(sources_path), permitted_classes: [], aliases: true) || {}
-sources = doc["sources"] || []
+unless doc.is_a?(Hash)
+  warn "plugins-sync: sources file must be a map"
+  exit 2
+end
 
-sources.each do |source|
-  id = source["id"].to_s
-  url = source["url"].to_s
-  ref = source["ref"].to_s
+sources = doc["sources"] || []
+unless sources.is_a?(Array)
+  warn "plugins-sync: sources must be a list"
+  exit 2
+end
+
+normalized_sources = sources.each_with_index.map do |source, index|
+  unless source.is_a?(Hash)
+    warn "plugins-sync: source #{index + 1} must be a map"
+    exit 2
+  end
+
+  id = source["id"]
+  url = source["url"]
+  ref = source["ref"]
+  ref = "" if ref.nil?
+
+  unless id.is_a?(String) && url.is_a?(String) && ref.is_a?(String)
+    warn "plugins-sync: source #{index + 1} id, url, and ref must be strings"
+    exit 2
+  end
 
   unless id.match?(/\A[a-z][a-z0-9-]*\z/) && !url.empty?
-    warn "plugins-sync: each source needs id and url"
+    warn "plugins-sync: source #{index + 1} needs id matching [a-z][a-z0-9-]* and non-empty url"
     exit 2
   end
 
@@ -63,6 +83,13 @@ sources.each do |source|
     exit 1
   end
 
+  { "id" => id, "url" => url, "ref" => ref }
+end
+
+normalized_sources.each do |source|
+  id = source.fetch("id")
+  url = source.fetch("url")
+  ref = source.fetch("ref")
   dest = File.join(dest_root, id)
   FileUtils.mkdir_p(dest_root)
 
@@ -75,4 +102,4 @@ sources.each do |source|
   system("git", "-C", dest, "checkout", ref) || exit(1) unless ref.empty?
 end
 
-puts "Plugin sources synchronized: #{sources.length}"
+puts "Plugin sources synchronized: #{normalized_sources.length}"
