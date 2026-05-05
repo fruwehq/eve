@@ -98,7 +98,7 @@ else
 fi
 
 package_list="$(
-  EGAME_INSTANCE_REGISTRY="$FIXTURE" make package.list INSTANCE=dev-a EMIT=json
+  EGAME_INSTANCE_REGISTRY="$FIXTURE" make --no-print-directory package.list INSTANCE=dev-a EMIT=json
 )"
 if printf '%s\n' "$package_list" | jq -e '.instance == "dev-a" and (.packages[] | select(.id == "docker" and .selected == true and .supported == true and .plugin == "docker")) and (.packages[] | select(.id == "steam" and .selected == false))' >/dev/null; then
   printf '  [OK] package list shows selected and available packages\n'

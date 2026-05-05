@@ -174,7 +174,7 @@ else
   FAIL=$((FAIL + 1))
 fi
 
-state_target="$(EGAME_STATE_DIR="$tmp_overlay_dir/state" make instance.state INSTANCE=aws-gpu-a 2>/dev/null)"
+state_target="$(EGAME_STATE_DIR="$tmp_overlay_dir/state" make --no-print-directory instance.state INSTANCE=aws-gpu-a 2>/dev/null)"
 if printf '%s\n' "$state_target" | jq -e '.last_operation.name == "provider.status"' >/dev/null; then
   printf '  [OK] make target exposes local instance state\n'
 else
