@@ -1,0 +1,11 @@
+api_version: egame.plugin/v1
+kind: package
+id: win-only
+display_name: Windows Only Test Package
+commands:
+  install: {exec: scripts/package-plugin, args: [win-only, install]}
+  status: {exec: scripts/package-plugin, args: [win-only, status]}
+  down: {exec: scripts/package-plugin, args: [win-only, down]}
+supports: {os_families: [windows]}
+down: {destructive: false}
+env: []

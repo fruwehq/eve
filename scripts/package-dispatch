@@ -117,6 +117,12 @@ begin
   plugin = plugin_doc.fetch("plugins").find { |entry| entry["id"] == package_id }
   raise "package plugin not found: #{package_id}" unless plugin
 
+  os_family = resolved.fetch("os").fetch("family")
+  supported_families = plugin.dig("supports", "os_families") || []
+  unless supported_families.empty? || supported_families.include?(os_family)
+    raise "package plugin #{package_id} does not support os family #{os_family}"
+  end
+
   destructive = plugin.dig("down", "destructive") == true
   if %w[down reinstall].include?(command) && destructive && !yes && ENV["EGAME_CONFIRM_DESTRUCTIVE"] != "1"
     raise "package #{package_id} down is destructive; pass --yes or EGAME_CONFIRM_DESTRUCTIVE=1"

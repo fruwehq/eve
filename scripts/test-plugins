@@ -12,7 +12,9 @@ BAD_PLUGIN_FIXTURE="tests/fixtures/plugins/packages/bad"
 BAD_INSTALL_UBUNTU_FIXTURE="tests/fixtures/plugins/packages/bad-install-ubuntu"
 BAD_INSTALL_WINDOWS_STATE_FIXTURE="tests/fixtures/plugins/packages/bad-install-windows-state"
 BAD_INSTALL_NON_STRING_FIXTURE="tests/fixtures/plugins/packages/bad-install-non-string"
+BAD_PACKAGE_SUPPORTS_FIXTURE="tests/fixtures/plugins/packages/bad-supports"
 BAD_PROVIDER_SUPPORTS_FIXTURE="tests/fixtures/plugins/providers/bad-supports"
+WIN_ONLY_PLUGIN_FIXTURE="tests/fixtures/plugins/packages/win-only"
 FAIL=0
 
 check() {
@@ -123,6 +125,15 @@ else
   FAIL=$((FAIL + 1))
 fi
 
+bad_package_supports_err="$(EGAME_PLUGIN_ROOTS="$BAD_PACKAGE_SUPPORTS_FIXTURE" ./scripts/plugin-list --validate 2>&1 || true)"
+if printf '%s' "$bad_package_supports_err" | grep -q "supports.os_families must be a list"; then
+  printf '  [OK] package plugin with malformed supports.os_families rejected\n'
+else
+  printf '  [FAIL] package plugin with malformed supports.os_families rejected\n' >&2
+  printf '%s\n' "$bad_package_supports_err" >&2
+  FAIL=$((FAIL + 1))
+fi
+
 provider_dry_run="$(
   EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-provider-dispatch-test" \
     ./scripts/provider-dispatch --registry "$FIXTURE" --instance rpi-all-a --command status --dry-run
@@ -144,6 +155,19 @@ if printf '%s\n' "$package_status" | jq -e '.package == "docker" and .command ==
 else
   printf '  [FAIL] package status dry-run\n' >&2
   printf '%s\n' "$package_status" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+unsupported_package_err="$(
+  EGAME_PLUGIN_ROOTS="$WIN_ONLY_PLUGIN_FIXTURE" \
+    EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-package-dispatch-test" \
+    ./scripts/package-dispatch --registry "$FIXTURE" --instance dev-a --package win-only --command status --dry-run 2>&1 >/dev/null || true
+)"
+if printf '%s\n' "$unsupported_package_err" | grep -q "package plugin win-only does not support os family ubuntu"; then
+  printf '  [OK] package dispatch rejects unsupported os family\n'
+else
+  printf '  [FAIL] package dispatch rejects unsupported os family\n' >&2
+  printf '%s\n' "$unsupported_package_err" >&2
   FAIL=$((FAIL + 1))
 fi
 

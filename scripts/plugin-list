@@ -12,6 +12,7 @@ PROVIDER_COMMANDS = %w[resolve init plan up down start stop status ip ssh].freez
 PACKAGE_COMMANDS = %w[install status down].freeze
 PROVIDER_ENGINES = %w[terraform vagrant metal].freeze
 PROVIDER_KINDS = %w[vm metal].freeze
+PACKAGE_OS_FAMILIES = %w[ubuntu windows].freeze
 
 def usage
   warn <<~USAGE
@@ -70,7 +71,7 @@ def validate_plugin!(plugin)
   commands.each do |name, spec|
     raise "#{plugin["_path"]}: command #{name} must be a map" unless spec.is_a?(Hash)
     raise "#{plugin["_path"]}: command #{name} missing exec" unless spec["exec"]
-    raise "#{plugin["_path"]}: command #{name} args must be a list" if spec.key?("args") && !spec["args"].is_a?(Array)
+    require_string_list!(spec["args"], plugin["_path"], "command #{name} args") if spec.key?("args")
 
     exec_path = spec["exec"].to_s
     resolved_exec = if exec_path.start_with?("/")
@@ -85,7 +86,8 @@ def validate_plugin!(plugin)
 
   raise "#{plugin["_path"]}: supports must be a map" unless plugin["supports"].is_a?(Hash)
   validate_provider_supports!(plugin) if kind == "provider"
-  raise "#{plugin["_path"]}: env must be a list" unless plugin["env"].is_a?(Array)
+  validate_package_supports!(plugin) if kind == "package"
+  require_string_list!(plugin["env"], plugin["_path"], "env")
 
   validate_package_install!(plugin) if kind == "package" && plugin.key?("install")
 end
@@ -127,6 +129,17 @@ def validate_provider_supports!(plugin)
     require_string_list!(kinds, path, "supports.kinds")
     require_allowed_entries!(kinds, PROVIDER_KINDS, path, "supports.kinds")
   end
+end
+
+def validate_package_supports!(plugin)
+  supports = plugin["supports"]
+  path = plugin["_path"]
+
+  return unless supports.key?("os_families")
+
+  os_families = supports["os_families"]
+  require_string_list!(os_families, path, "supports.os_families")
+  require_allowed_entries!(os_families, PACKAGE_OS_FAMILIES, path, "supports.os_families")
 end
 
 def validate_package_install!(plugin)
