@@ -47,8 +47,10 @@ make ssh INSTANCE=dev-a
 make plugins.list
 make provider.status INSTANCE=dev-a
 make package.list INSTANCE=dev-a
+make package.select INSTANCE=dev-a PACKAGE=xpra
 make package.status INSTANCE=dev-a PACKAGE=docker
 make package.down INSTANCE=dev-a PACKAGE=docker YES=1
+make package.unselect INSTANCE=dev-a PACKAGE=xpra
 ```
 
 The current v3 slice resolves concrete instances while preserving the existing

@@ -3,7 +3,8 @@
 .PHONY: all aws.login clean default down env generate help info \
 				init init.all instance.create instance.env instance.info \
 				instance.list instance.paths instance.state instance.validate ip lint logs plan \
-				package.down package.install package.list package.reinstall package.status \
+				package.down package.install package.list package.reinstall package.select \
+				package.status package.unselect \
 				plugins.list plugins.sync plugins.validate \
 				profiles.list profiles.menu provider.status providers.status provision \
 				recipes.list \
@@ -222,9 +223,17 @@ package.reinstall: ## Reinstall package on an instance (PACKAGE=<id>, YES=1 for 
 	if [ "$(YES)" = "1" ]; then args="$$args --yes"; fi; \
 	./scripts/package-dispatch $$args
 
+package.select: ## Add a package to an instance's desired package list
+	@if [ -z "$(INSTANCE)" ] || [ -z "$(PACKAGE)" ]; then echo "Usage: make package.select INSTANCE=<name> PACKAGE=<id>"; exit 2; fi; \
+	./scripts/package-selection --instance $(INSTANCE) --package $(PACKAGE) --add
+
 package.status: ## Show package plugin status for an instance (PACKAGE=<id>)
 	@if [ -z "$(INSTANCE)" ] || [ -z "$(PACKAGE)" ]; then echo "Usage: make package.status INSTANCE=<name> PACKAGE=<id>"; exit 2; fi; \
 	./scripts/package-dispatch --instance $(INSTANCE) --package $(PACKAGE) --command status
+
+package.unselect: ## Remove a package from an instance's desired direct package list
+	@if [ -z "$(INSTANCE)" ] || [ -z "$(PACKAGE)" ]; then echo "Usage: make package.unselect INSTANCE=<name> PACKAGE=<id>"; exit 2; fi; \
+	./scripts/package-selection --instance $(INSTANCE) --package $(PACKAGE) --remove
 
 plugins.list: ## List provider and package plugins
 	@./scripts/plugin-list
