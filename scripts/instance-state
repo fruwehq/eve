@@ -6,6 +6,12 @@ require "json"
 require "time"
 
 ROOT = File.expand_path("..", __dir__)
+OPERATION_STATUSES = %w[running succeeded failed skipped].freeze
+DESIRED_STATES = %w[unknown running stopped absent].freeze
+PROVIDER_STATES = %w[unknown initializing initialized planned changing running stopped absent error].freeze
+PROVISION_STATES = %w[unknown provisioning provisioned error].freeze
+PACKAGE_STATES = %w[unknown installed missing failed removed reinstalled].freeze
+DEFAULT_HISTORY_LIMIT = 50
 
 def usage
   warn <<~USAGE
@@ -50,6 +56,24 @@ def write_state(instance, state)
   path = state_path(instance)
   FileUtils.mkdir_p(File.dirname(path))
   File.write(path, JSON.pretty_generate(state) + "\n")
+end
+
+def require_value!(value, allowed, label)
+  return unless value
+  return if allowed.include?(value)
+
+  raise "#{label} must be one of: #{allowed.join(", ")}"
+end
+
+def operation_type(operation)
+  operation.split(".", 2).first
+end
+
+def history_limit
+  raw = ENV.fetch("EGAME_STATE_HISTORY_LIMIT", DEFAULT_HISTORY_LIMIT.to_s)
+  Integer(raw).clamp(1, 500)
+rescue ArgumentError
+  DEFAULT_HISTORY_LIMIT
 end
 
 instance = nil
@@ -112,6 +136,18 @@ unless operation && status
   exit 2
 end
 
+begin
+  require_value!(status, OPERATION_STATUSES, "status")
+  require_value!(desired_state, DESIRED_STATES, "desired_state")
+  require_value!(provider_state, PROVIDER_STATES, "provider_state")
+  require_value!(provision_state, PROVISION_STATES, "provision_state")
+  require_value!(package_state, PACKAGE_STATES, "package_state")
+  raise "package and package_state must be provided together" if package.nil? != package_state.nil?
+rescue StandardError => e
+  warn "instance-state: #{e.message}"
+  exit 2
+end
+
 now = Time.now.utc.iso8601
 state = default_state(instance, now).merge(state)
 state["package_state"] ||= {}
@@ -119,13 +155,15 @@ state["operation_history"] ||= []
 state["created_at"] ||= now
 state["updated_at"] = now
 operation_entry = {
+  "id" => state["operation_history"].length + 1,
   "name" => operation,
+  "type" => operation_type(operation),
   "status" => status,
   "at" => now
 }
 state["last_operation"] = operation_entry
 state["operation_history"] << operation_entry.merge("error" => error).compact
-state["operation_history"] = state["operation_history"].last(50)
+state["operation_history"] = state["operation_history"].last(history_limit)
 state["last_error"] = error
 state["desired_state"] = desired_state if desired_state
 state["provider_state"] = provider_state if provider_state

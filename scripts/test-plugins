@@ -456,6 +456,7 @@ fi
 
 state_dir="$(mktemp -d "${TMPDIR:-/tmp}/egame-state-test.XXXXXX")"
 trap 'rm -rf "$state_dir"' EXIT
+tmp_err="$state_dir/error.txt"
 fake_ssh="$state_dir/fake-instance-ssh"
 cat >"$fake_ssh" <<'SH'
 #!/usr/bin/env sh
@@ -507,11 +508,57 @@ state_json="$(
     --package docker \
     --package-state removed
 )"
-if printf '%s\n' "$state_json" | jq -e '.last_operation.name == "package.down" and .desired_state == "running" and .provider_state == "running" and .package_state.docker.status == "removed" and (.operation_history | length == 1)' >/dev/null; then
+if printf '%s\n' "$state_json" | jq -e '.last_operation.name == "package.down" and .last_operation.type == "package" and .last_operation.id == 1 and .desired_state == "running" and .provider_state == "running" and .package_state.docker.status == "removed" and (.operation_history | length == 1)' >/dev/null; then
   printf '  [OK] instance state records package operation\n'
 else
   printf '  [FAIL] instance state records package operation\n' >&2
   printf '%s\n' "$state_json" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+if EGAME_STATE_DIR="$state_dir" ./scripts/instance-state \
+  --instance dev-a \
+  --operation provider.status \
+  --status succeeded \
+  --provider-state nonsense >/dev/null 2>"$tmp_err"; then
+  printf '  [FAIL] instance state accepted invalid provider_state\n' >&2
+  FAIL=$((FAIL + 1))
+elif grep -q 'provider_state must be one of:' "$tmp_err"; then
+  printf '  [OK] instance state rejects invalid provider_state\n'
+else
+  printf '  [FAIL] instance state invalid provider_state error mismatch\n' >&2
+  cat "$tmp_err" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+if EGAME_STATE_DIR="$state_dir" ./scripts/instance-state \
+  --instance dev-a \
+  --operation package.status \
+  --status succeeded \
+  --package docker \
+  --package-state bogus >/dev/null 2>"$tmp_err"; then
+  printf '  [FAIL] instance state accepted invalid package_state\n' >&2
+  FAIL=$((FAIL + 1))
+elif grep -q 'package_state must be one of:' "$tmp_err"; then
+  printf '  [OK] instance state rejects invalid package_state\n'
+else
+  printf '  [FAIL] instance state invalid package_state error mismatch\n' >&2
+  cat "$tmp_err" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+if EGAME_STATE_DIR="$state_dir" ./scripts/instance-state \
+  --instance dev-a \
+  --operation package.status \
+  --status succeeded \
+  --package docker >/dev/null 2>"$tmp_err"; then
+  printf '  [FAIL] instance state accepted package without package_state\n' >&2
+  FAIL=$((FAIL + 1))
+elif grep -q 'package and package_state must be provided together' "$tmp_err"; then
+  printf '  [OK] instance state rejects incomplete package update\n'
+else
+  printf '  [FAIL] instance state incomplete package update error mismatch\n' >&2
+  cat "$tmp_err" >&2
   FAIL=$((FAIL + 1))
 fi
 

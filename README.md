@@ -79,6 +79,8 @@ destructive removals require `YES=1`.
 Plugin contracts and example external plugin layouts are documented in
 [docs/plugins.md](docs/plugins.md).
 
+Instance state contracts are documented in [docs/state.md](docs/state.md).
+
 Manual and AI-assisted live test flow is documented in
 [docs/integration-testing.md](docs/integration-testing.md). Start with
 `make integration.plan INSTANCES=<linux>,<windows>`; live runs require
