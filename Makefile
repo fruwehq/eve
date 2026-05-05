@@ -9,7 +9,7 @@
 				provider.status providers.status provision recipes.list \
 				provision.clear-state provision.restart provision.wait reboot \
 				remote.console remote.moonlight remote.moonlight.pair \
-				remote.rdp remote.rustdesk remote.rustdesk.info \
+				remote.rdp remote.rustdesk remote.rustdesk.info remote.waypipe \
 				remote.sunshine remote.sunshine.wait \
 				remote.vnc remote.xpra remote.xpra.apps remote.xpra.attach \
 				remote.xpra.desktop remote.xpra.run remote.xpra.start remote.xpra.status \
@@ -322,6 +322,10 @@ remote.sunshine.wait: ## Wait until the Sunshine API accepts authenticated reque
 remote.vnc: ## Open VNC viewer to the VM (requires vnc package in profile)
 	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make remote.vnc INSTANCE=<name>"; exit 2; fi; \
 	./scripts/instance-run remote.vnc $(INSTANCE)
+
+remote.waypipe: ## Run a remote Wayland app through waypipe (APP='foot' by default)
+	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make remote.waypipe INSTANCE=<name> [APP=<command>]"; exit 2; fi; \
+	./scripts/instance-run remote.waypipe $(INSTANCE)
 
 remote.xpra: ## Start server, launch app, and attach (requires APP=<cmd>)
 	@if [ -z "$(INSTANCE)" ] || [ -z "$(APP)" ]; then echo "Usage: make remote.xpra INSTANCE=<name> APP=<command>"; exit 2; fi; \

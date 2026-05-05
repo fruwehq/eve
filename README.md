@@ -67,7 +67,27 @@ created from those recipes. Provider and package plugins receive resolved
 instance JSON, and legacy profile-shaped overlays are generated only as an
 internal compatibility detail for lower-level provider scripts. Terraform-backed
 instances now get
-instance-scoped backend roots and `TF_DATA_DIR` paths under
+
+The built-in Linux Docker package installs Docker in rootless mode. The daemon
+runs as the VM user through `systemd --user`, and `DOCKER_HOST` points at the
+user socket under `/run/user/<uid>/docker.sock`.
+
+Experimental Wayland app forwarding is available through the `waypipe` package
+and `remote-wayland` bundle:
+
+```bash
+make package.select INSTANCE=dev-a PACKAGE=waypipe
+make package.install INSTANCE=dev-a PACKAGE=waypipe
+make remote.waypipe INSTANCE=dev-a APP=foot
+```
+
+On macOS, install a local Wayland-capable client side first. Current experiments
+to try are [waypipe-darwin](https://github.com/J-x-Z/waypipe-darwin),
+[Wawona](https://github.com/Wawona/Wawona), or
+[wprs](https://github.com/wayland-transpositor/wprs). Treat this as a trial
+path, not a stable replacement for Xpra yet.
+
+Terraform-backed instances get instance-scoped backend roots and `TF_DATA_DIR` paths under
 `.generated/instances/<name>/tf/`, so multiple concrete instances on the same
 provider do not share local Terraform state.
 

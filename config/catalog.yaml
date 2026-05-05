@@ -173,6 +173,7 @@ packages:
   - id: sunshine
   - id: vscode
   - id: vnc
+  - id: waypipe
   - id: xpra
 
 # -----------------------------------------------------------------------------
@@ -199,6 +200,9 @@ bundles:
 
   - id: remote-apps
     includes: [ssh, xpra]
+
+  - id: remote-wayland
+    includes: [ssh, waypipe]
 
   - id: dev-sandbox-core
     includes: [docker, dev-toolchain, goose, claude, codex-cli, hermes, opencode, vscode]
