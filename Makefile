@@ -136,9 +136,9 @@ init: ## Initialize profile backend/providers (terraform only)
 init.all: generate ## Init all stacks in parallel (set TM_PARALLEL=N)
 	terramate run --parallel=$(TM_PARALLEL) --continue-on-error -- terraform init -upgrade
 
-instance.create: ## Create a local instance registry entry (NAME=<name> RECIPE=<recipe>)
-	@if [ -z "$(NAME)" ] || [ -z "$(RECIPE)" ]; then echo "Usage: make instance.create NAME=<name> RECIPE=<recipe> [BUNDLES=a,b] [PACKAGES=a,b] [DISK_GB=n] [MEMORY_MB=n]"; exit 2; fi; \
-	args="--name $(NAME) --recipe $(RECIPE)"; \
+instance.create: ## Create a local instance registry entry (INSTANCE=<name> RECIPE=<recipe>)
+	@if [ -z "$(INSTANCE)" ] || [ -z "$(RECIPE)" ]; then echo "Usage: make instance.create INSTANCE=<name> RECIPE=<recipe> [BUNDLES=a,b] [PACKAGES=a,b] [DISK_GB=n] [MEMORY_MB=n]"; exit 2; fi; \
+	args="--instance $(INSTANCE) --recipe $(RECIPE)"; \
 	if [ -n "$(MACHINE)" ]; then args="$$args --machine $(MACHINE)"; fi; \
 	if [ -n "$(OS)" ]; then args="$$args --os $(OS)"; fi; \
 	if [ -n "$(INIT)" ]; then args="$$args --init $(INIT)"; fi; \

@@ -44,7 +44,7 @@ if json
 end
 
 if instances.empty?
-  puts "No instances found. Create one with: make instance.create NAME=<name> RECIPE=<recipe>"
+  puts "No instances found. Create one with: make instance.create INSTANCE=<name> RECIPE=<recipe>"
   exit 0
 end
 

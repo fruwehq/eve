@@ -12,7 +12,7 @@ DEFAULT_REGISTRY_PATH = File.join(ROOT, ".egame/instances.yaml")
 def usage
   warn <<~USAGE
     Usage:
-      scripts/instance-create --name <name> --recipe <recipe> [options]
+      scripts/instance-create --instance <name> --recipe <recipe> [options]
 
     Options:
       --registry <path>
@@ -41,7 +41,7 @@ overrides = {}
 args = ARGV.dup
 until args.empty?
   case args.shift
-  when "--name"
+  when "--instance"
     name = args.shift
   when "--recipe"
     recipe = args.shift

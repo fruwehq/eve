@@ -28,7 +28,7 @@ git-ignored local registry at `.egame/instances.yaml`.
 make recipes.list
 
 # Create a concrete instance entry
-make instance.create NAME=dev-a RECIPE=local-vmware-ubuntu-dev-gui DISK_GB=120 MEMORY_MB=12288 PACKAGES=xpra
+make instance.create INSTANCE=dev-a RECIPE=local-vmware-ubuntu-dev-gui DISK_GB=120 MEMORY_MB=12288 PACKAGES=xpra
 
 # List and inspect concrete instances
 make instance.list

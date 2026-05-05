@@ -62,7 +62,7 @@ rm -f "$tmp_registry"
 
 if ./scripts/instance-create \
   --registry "$tmp_registry" \
-  --name test-dev \
+  --instance test-dev \
   --recipe local-vmware-ubuntu-dev-gui \
   --packages steam \
   --disk-gb 90 \
@@ -96,7 +96,7 @@ fi
 before_invalid="$(cat "$tmp_registry")"
 if ./scripts/instance-create \
   --registry "$tmp_registry" \
-  --name bad-a \
+  --instance bad-a \
   --recipe no-such-recipe >"$invalid_output" 2>&1; then
   printf '  [FAIL] invalid instance create succeeded\n' >&2
   FAIL=$((FAIL + 1))
