@@ -231,6 +231,7 @@ begin
 
   machine = by_key(catalog, "machines", "name", composition["machine"])
   os = by_key(catalog, "oses", "id", composition["os"])
+  os = os.merge("ui_mode" => composition["ui_mode"] || os["ui_mode"] || "headless") if os
   init = by_key(catalog, "inits", "id", composition["init"])
   location = by_key(catalog, "locations", "name", composition["location"])
 

@@ -150,6 +150,7 @@ else
   if $m == null then error("Machine not found: \($p.machine)") else . end |
   by_name($root.oses; "id"; $p.os) as $o |
   if $o == null then error("OS not found: \($p.os)") else . end |
+  ($o + {ui_mode: ($p.ui_mode // $o.ui_mode // "headless")}) as $o |
   by_name($root.inits; "id"; $p.init) as $i |
   if $i == null then error("Init not found: \($p.init)") else . end |
   by_name($root.locations; "name"; $p.location) as $l |
