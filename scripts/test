@@ -9,7 +9,7 @@ cd "$(git rev-parse --show-toplevel)"
 
 FAIL=0
 if [ "$#" -eq 0 ]; then
-  SUITES=(profiles instances plugins plugins-sync terraform tf-isolation tui shellcheck)
+  SUITES=(profiles instances plugins plugins-sync terraform tf-isolation tui python shellcheck)
 else
   SUITES=("$@")
 fi
@@ -34,6 +34,7 @@ for suite in "${SUITES[@]}"; do
     terraform)  run "terraform"  ./scripts/test-terraform  ;;
     tf-isolation) run "tf-isolation" ./scripts/test-tf-isolation ;;
     tui) run "tui" ./scripts/test-tui ;;
+    python) run "python" ./scripts/test-python ;;
     shellcheck) run "shellcheck" ./scripts/test-shellcheck ;;
     *) echo "unknown suite: $suite" >&2; exit 2 ;;
   esac

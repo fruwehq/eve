@@ -7,7 +7,7 @@ cd "$(git rev-parse --show-toplevel)"
 cache_dir="$(mktemp -d "${TMPDIR:-/tmp}/egame-tui-pycache.XXXXXX")"
 trap 'rm -rf "$cache_dir"' EXIT
 
-PYTHONPYCACHEPREFIX="$cache_dir" python3 -m py_compile scripts/egame-tui
-./scripts/egame-tui --check
+PYTHONPYCACHEPREFIX="$cache_dir" poetry run python -m py_compile scripts/egame-tui
+poetry run python ./scripts/egame-tui --check
 
 printf '  [OK] egame-tui compiles without importing optional Textual dependency\n'

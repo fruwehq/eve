@@ -16,7 +16,7 @@
 				remote.xpra.desktop remote.xpra.run remote.xpra.start remote.xpra.status \
 				remote.xpra.stop \
 				show-password ssh ssh.run ssh.truenas ssh.wait start status stop \
-				test test.instances test.plugins test.plugins-sync test.profiles test.shellcheck test.terraform \
+				test test.instances test.plugins test.plugins-sync test.profiles test.python test.shellcheck test.terraform \
 				test.tf-isolation test.tui test.update-golden tui up update upload validate
 
 TM_PARALLEL ?= 8
@@ -445,6 +445,9 @@ test.plugins-sync: ## Validate external plugin synchronization
 
 test.profiles: ## Validate all profiles and compare emitted env to golden snapshots
 	@./scripts/test-profiles
+
+test.python: ## Run Python lint and type checks
+	@./scripts/test-python
 
 test.shellcheck: ## Run shellcheck over scripts/ and linux/provision/
 	@./scripts/test-shellcheck

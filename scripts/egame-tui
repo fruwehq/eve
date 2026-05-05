@@ -10,8 +10,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
-
+from typing import Any, ClassVar, cast
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -33,8 +32,7 @@ def run_command(args: list[str], *, env: dict[str, str] | None = None) -> tuple[
         cwd=ROOT,
         env={**os.environ, **(env or {})},
         text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         check=False,
     )
     return proc.returncode, proc.stdout, proc.stderr
@@ -44,7 +42,10 @@ def load_json(args: list[str]) -> dict[str, Any]:
     code, out, err = run_command(args)
     if code != 0:
         raise RuntimeError(err.strip() or out.strip() or f"{args[0]} exited {code}")
-    return json.loads(out)
+    parsed = json.loads(out)
+    if not isinstance(parsed, dict):
+        raise RuntimeError(f"{args[0]} did not return a JSON object")
+    return cast(dict[str, Any], parsed)
 
 
 def instance_rows() -> list[dict[str, Any]]:
@@ -113,6 +114,7 @@ def render_instance_details(status: dict[str, Any] | None) -> str:
 def run_tui() -> int:
     try:
         from textual.app import App, ComposeResult
+        from textual.binding import Binding
         from textual.containers import Container, Horizontal, Vertical
         from textual.widgets import Button, DataTable, Footer, Header, RichLog, Static
     except ModuleNotFoundError:
@@ -194,7 +196,7 @@ def run_tui() -> int:
         }
         """
 
-        BINDINGS = [
+        BINDINGS: ClassVar[list[Binding | tuple[str, str] | tuple[str, str, str]]] = [
             ("r", "refresh", "Refresh"),
             ("s", "provider_action('status')", "Provider status"),
             ("q", "quit", "Quit"),
@@ -250,7 +252,7 @@ def run_tui() -> int:
             self.write_log("[b blue]Refreshing instances[/b blue]")
             try:
                 rows = await asyncio.to_thread(instance_rows)
-            except Exception as exc:  # noqa: BLE001 - surfaced to the TUI log.
+            except Exception as exc:
                 self.write_log(f"[red]instance-list failed:[/red] {exc}")
                 return
 
@@ -285,7 +287,7 @@ def run_tui() -> int:
             self.write_log(f"[b blue]Loading {self.current_instance}[/b blue]")
             try:
                 status = await asyncio.to_thread(instance_status, self.current_instance)
-            except Exception as exc:  # noqa: BLE001 - surfaced to the TUI log.
+            except Exception as exc:
                 self.write_log(f"[red]instance-status failed:[/red] {exc}")
                 return
 
