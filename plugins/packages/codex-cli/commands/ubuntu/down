@@ -1,7 +1,4 @@
 #!/usr/bin/env sh
 set -eu
 
-profile="${EGAME_INSTANCE_NAME:?EGAME_INSTANCE_NAME is required}"
-
-./scripts/instance-ssh "$profile" -- \
-  'npm uninstall -g @openai/codex || true; rm -f ~/.local/bin/codex'
+exec ./scripts/package-down-command codex-cli 'npm uninstall -g @openai/codex || true; rm -f ~/.local/bin/codex'

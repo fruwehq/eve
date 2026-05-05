@@ -445,6 +445,19 @@ else
   FAIL=$((FAIL + 1))
 fi
 
+builtin_docker_down_dry_run="$(
+  EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-package-dispatch-test" \
+    ./scripts/package-dispatch --registry "$FIXTURE" --instance dev-a --package docker --command down --dry-run --yes
+)"
+if printf '%s\n' "$builtin_docker_down_dry_run" |
+  jq -e '.kind == "package-down" and .package == "docker" and .instance == "dev-a" and .os_family == "ubuntu" and .dry_run == true and (.command | test("docker-ce"))' >/dev/null; then
+  printf '  [OK] built-in package down dry-run exposes removal command\n'
+else
+  printf '  [FAIL] built-in package down dry-run contract mismatch\n' >&2
+  printf '%s\n' "$builtin_docker_down_dry_run" >&2
+  FAIL=$((FAIL + 1))
+fi
+
 hardcoded_down_refs="$(grep -nE '"(claude|codex-cli|dev-toolchain|docker|goose|hermes|opencode|rdp|rustdesk|ssh|steam|sunshine|vscode|vnc|xpra)"[[:space:]]*=>' scripts/package-plugin || true)"
 if [ -n "$hardcoded_down_refs" ]; then
   printf '  [FAIL] package-plugin still contains hardcoded package down mappings\n' >&2
@@ -458,12 +471,19 @@ state_dir="$(mktemp -d "${TMPDIR:-/tmp}/egame-state-test.XXXXXX")"
 trap 'rm -rf "$state_dir"' EXIT
 tmp_err="$state_dir/error.txt"
 fake_ssh="$state_dir/fake-instance-ssh"
+fake_down_ssh="$state_dir/fake-instance-down-ssh"
 cat >"$fake_ssh" <<'SH'
 #!/usr/bin/env sh
 set -eu
 printf 'installed\n'
 SH
 chmod +x "$fake_ssh"
+cat >"$fake_down_ssh" <<'SH'
+#!/usr/bin/env sh
+set -eu
+exit 0
+SH
+chmod +x "$fake_down_ssh"
 
 status_contract="$(
   EGAME_PACKAGE_STATUS_SSH="$fake_ssh" EGAME_INSTANCE_NAME=dev-a \
@@ -486,6 +506,30 @@ if printf '%s\n' "$windows_status_contract" | jq -e '.kind == "package-status" a
 else
   printf '  [FAIL] windows package status helper contract mismatch\n' >&2
   printf '%s\n' "$windows_status_contract" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+down_contract="$(
+  EGAME_PACKAGE_DOWN_SSH="$fake_down_ssh" EGAME_INSTANCE_NAME=dev-a \
+    ./scripts/package-down-command docker 'sudo apt-get remove -y docker-ce || true'
+)"
+if printf '%s\n' "$down_contract" | jq -e '.kind == "package-down" and .package == "docker" and .instance == "dev-a" and .os_family == "ubuntu" and .status == "removed"' >/dev/null; then
+  printf '  [OK] package down helper emits removal contract\n'
+else
+  printf '  [FAIL] package down helper contract mismatch\n' >&2
+  printf '%s\n' "$down_contract" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+windows_down_contract="$(
+  EGAME_PACKAGE_DOWN_SSH="$fake_down_ssh" EGAME_INSTANCE_NAME=win-a \
+    ./scripts/package-down-windows steam 'winget uninstall --id Valve.Steam --silent; exit 0'
+)"
+if printf '%s\n' "$windows_down_contract" | jq -e '.kind == "package-down" and .package == "steam" and .instance == "win-a" and .os_family == "windows" and .status == "removed"' >/dev/null; then
+  printf '  [OK] windows package down helper emits removal contract\n'
+else
+  printf '  [FAIL] windows package down helper contract mismatch\n' >&2
+  printf '%s\n' "$windows_down_contract" >&2
   FAIL=$((FAIL + 1))
 fi
 

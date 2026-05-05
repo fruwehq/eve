@@ -1,7 +1,4 @@
 #!/usr/bin/env sh
 set -eu
 
-profile="${EGAME_INSTANCE_NAME:?EGAME_INSTANCE_NAME is required}"
-
-./scripts/instance-ssh "$profile" -- \
-  'sudo systemctl disable --now rustdesk || true; sudo apt-get remove -y rustdesk || true'
+exec ./scripts/package-down-command rustdesk 'sudo systemctl disable --now rustdesk || true; sudo apt-get remove -y rustdesk || true'

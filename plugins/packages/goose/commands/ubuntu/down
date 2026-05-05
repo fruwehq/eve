@@ -1,7 +1,4 @@
 #!/usr/bin/env sh
 set -eu
 
-profile="${EGAME_INSTANCE_NAME:?EGAME_INSTANCE_NAME is required}"
-
-./scripts/instance-ssh "$profile" -- \
-  'rm -f ~/.local/bin/goose'
+exec ./scripts/package-down-command goose 'rm -f ~/.local/bin/goose'

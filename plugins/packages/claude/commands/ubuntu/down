@@ -1,7 +1,4 @@
 #!/usr/bin/env sh
 set -eu
 
-profile="${EGAME_INSTANCE_NAME:?EGAME_INSTANCE_NAME is required}"
-
-./scripts/instance-ssh "$profile" -- \
-  'npm uninstall -g @anthropic-ai/claude-code || true; rm -f ~/.local/bin/claude'
+exec ./scripts/package-down-command claude 'npm uninstall -g @anthropic-ai/claude-code || true; rm -f ~/.local/bin/claude'

@@ -1,0 +1,24 @@
+#!/usr/bin/env sh
+# Run or describe a Linux package removal command for a package plugin.
+
+set -eu
+
+package="${1:?Usage: package-down-command <package> <remote-command>}"
+remote_command="${2:?Usage: package-down-command <package> <remote-command>}"
+profile="${EGAME_INSTANCE_NAME:?EGAME_INSTANCE_NAME is required}"
+ssh_cmd="${EGAME_PACKAGE_DOWN_SSH:-./scripts/instance-ssh}"
+
+if [ "${EGAME_PLUGIN_DRY_RUN:-0}" = "1" ]; then
+  jq -n \
+    --arg package "$package" \
+    --arg instance "$profile" \
+    --arg command "$remote_command" \
+    '{kind: "package-down", package: $package, instance: $instance, os_family: "ubuntu", command: $command, dry_run: true}'
+  exit 0
+fi
+
+"$ssh_cmd" "$profile" -- "$remote_command"
+jq -n \
+  --arg package "$package" \
+  --arg instance "$profile" \
+  '{kind: "package-down", package: $package, instance: $instance, os_family: "ubuntu", status: "removed"}'

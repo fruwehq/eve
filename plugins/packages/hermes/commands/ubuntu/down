@@ -1,7 +1,4 @@
 #!/usr/bin/env sh
 set -eu
 
-profile="${EGAME_INSTANCE_NAME:?EGAME_INSTANCE_NAME is required}"
-
-./scripts/instance-ssh "$profile" -- \
-  'rm -f ~/.local/bin/hermes'
+exec ./scripts/package-down-command hermes 'rm -f ~/.local/bin/hermes'
