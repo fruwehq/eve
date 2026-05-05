@@ -16,7 +16,7 @@
 				remote.xpra.desktop remote.xpra.run remote.xpra.start remote.xpra.status \
 				remote.xpra.stop \
 				show-password ssh ssh.run ssh.truenas ssh.wait start status stop \
-				test test.instances test.plugins test.profiles test.shellcheck test.terraform \
+				test test.instances test.plugins test.plugins-sync test.profiles test.shellcheck test.terraform \
 				test.tf-isolation test.update-golden up update upload validate
 
 TM_PARALLEL ?= 8
@@ -415,6 +415,9 @@ test.instances: ## Validate fixture instances and compare emitted env to golden 
 
 test.plugins: ## Validate plugin manifests and dry-run dispatch contracts
 	@./scripts/test-plugins
+
+test.plugins-sync: ## Validate external plugin synchronization
+	@./scripts/test-plugins-sync
 
 test.profiles: ## Validate all profiles and compare emitted env to golden snapshots
 	@./scripts/test-profiles
