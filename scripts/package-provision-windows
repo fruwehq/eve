@@ -67,11 +67,19 @@ fi
 # Mapping table.  Packages with self-contained install steps are granular; the
 # rest fall back to full provisioning so reboot/driver coupling stays in the
 # runner state machine.
+#
+# needs_env=1 only for packages whose step actually reads
+# C:\Users\Administrator\provision\state\env.json -- otherwise we'd risk
+# overwriting a populated remote env.json with locally-blank values.
 fallback=0
+needs_env=0
 case "$PACKAGE" in
-  rustdesk) steps=(40_rustdesk.ps1) ;;
-  steam)    steps=(30_steam.ps1) ;;
-  xpra)     steps=(35_xpra.ps1) ;;
+  rustdesk)
+    steps=(40_rustdesk.ps1)
+    needs_env=1
+    ;;
+  steam) steps=(30_steam.ps1) ;;
+  xpra)  steps=(35_xpra.ps1) ;;
   sunshine)
     # Sunshine works without ViGEmBus, but gamepad input from Moonlight only
     # routes through a kernel-mode driver that requests a reboot.  Keep the
@@ -89,13 +97,17 @@ esac
 if [ "$DRY_RUN" -eq 1 ]; then
   if [ "${#steps[@]}" -eq 0 ]; then
     steps_json='[]'
-    state_files_json='[]'
   else
     steps_json="$(printf '%s\n' "${steps[@]}" | jq -R . | jq -s .)"
-    # Granular installs reuse the same env.json shape as full provisioning so
-    # steps like 40_rustdesk.ps1 still pick up rendezvous_server / key /
-    # password (RustDesk would otherwise install but skip configuration).
+  fi
+  if [ "$needs_env" -eq 1 ]; then
+    # Only packages whose step actually reads env.json (e.g. rustdesk's
+    # rendezvous_server / key / password) declare it as a state file -- writing
+    # an empty env.json over a populated remote one would silently strip
+    # configuration set by a previous full provision.
     state_files_json='["env.json"]'
+  else
+    state_files_json='[]'
   fi
   jq -n \
     --arg profile "$PROFILE" \
@@ -120,7 +132,7 @@ fi
 # Scheduled Task runner is never tempted to walk past it.
 STAGE=$(mktemp -d)
 trap 'rm -rf "$STAGE"' EXIT
-mkdir -p "$STAGE/scripts/steps" "$STAGE/state"
+mkdir -p "$STAGE/scripts/steps"
 cp -R windows/provision/scripts/lib "$STAGE/scripts/lib"
 if [ -d windows/provision/scripts/templates ]; then
   cp -R windows/provision/scripts/templates "$STAGE/scripts/templates"
@@ -129,30 +141,37 @@ for step in "${steps[@]}"; do
   cp "windows/provision/scripts/steps/$step" "$STAGE/scripts/steps/$step"
 done
 
-# Mirror scripts/provision's env.json shape so granular Windows steps see the
-# same configuration surface (rustdesk_*, sunshine_*, display_resolution,
-# windows_password).  WINDOWS_PASSWORD is not consumed by today's granular
-# steps but is included for parity with full provisioning; we only honor an
-# explicit env override here so granular installs don't depend on terraform
-# outputs.
-jq -n \
-  --arg wp "${EPHEMERAL_WINDOWS_PASSWORD:-}" \
-  --arg sp "${EPHEMERAL_SUNSHINE_PASSWORD:-}" \
-  --arg dr "${EPHEMERAL_DISPLAY_RESOLUTION:-}" \
-  --arg rk "${RUSTDESK_KEY:-}" \
-  --arg rp "${RUSTDESK_PASSWORD:-}" \
-  --arg rs "${RUSTDESK_SERVER:-}" \
-  --arg sv "${SUNSHINE_VERSION:-}" \
-  '{windows_password: $wp, sunshine_password: $sp, display_resolution: $dr, rustdesk_key: $rk, rustdesk_password: $rp, rustdesk_server: $rs, sunshine_version: $sv}' \
-  > "$STAGE/state/env.json"
-
-echo "[package-provision-windows] uploading windows step files for package=$PACKAGE"
 remote_step_dir='C:\Users\Administrator\provision\scripts-package'
 remote_lib_dir="$remote_step_dir\\lib"
 remote_steps_dir="$remote_step_dir\\steps"
 remote_state_dir='C:\Users\Administrator\provision\state'
 
-./scripts/instance-ssh "$PROFILE" -- "if (Test-Path '$remote_step_dir') { Remove-Item -Recurse -Force '$remote_step_dir' } ; New-Item -ItemType Directory -Force '$remote_lib_dir' | Out-Null ; New-Item -ItemType Directory -Force '$remote_steps_dir' | Out-Null ; New-Item -ItemType Directory -Force '$remote_state_dir' | Out-Null"
+if [ "$needs_env" -eq 1 ]; then
+  # Mirror scripts/provision's env.json shape so steps that consume it
+  # (e.g. 40_rustdesk.ps1) see the same configuration surface as full
+  # provisioning.  WINDOWS_PASSWORD only ever comes from an explicit env
+  # override here -- we deliberately skip the terraform fallback used in
+  # scripts/provision so granular installs don't drag in terraform state.
+  mkdir -p "$STAGE/state"
+  jq -n \
+    --arg wp "${EPHEMERAL_WINDOWS_PASSWORD:-}" \
+    --arg sp "${EPHEMERAL_SUNSHINE_PASSWORD:-}" \
+    --arg dr "${EPHEMERAL_DISPLAY_RESOLUTION:-}" \
+    --arg rk "${RUSTDESK_KEY:-}" \
+    --arg rp "${RUSTDESK_PASSWORD:-}" \
+    --arg rs "${RUSTDESK_SERVER:-}" \
+    --arg sv "${SUNSHINE_VERSION:-}" \
+    '{windows_password: $wp, sunshine_password: $sp, display_resolution: $dr, rustdesk_key: $rk, rustdesk_password: $rp, rustdesk_server: $rs, sunshine_version: $sv}' \
+    > "$STAGE/state/env.json"
+fi
+
+echo "[package-provision-windows] uploading windows step files for package=$PACKAGE"
+
+reset_cmd="if (Test-Path '$remote_step_dir') { Remove-Item -Recurse -Force '$remote_step_dir' } ; New-Item -ItemType Directory -Force '$remote_lib_dir' | Out-Null ; New-Item -ItemType Directory -Force '$remote_steps_dir' | Out-Null"
+if [ "$needs_env" -eq 1 ]; then
+  reset_cmd="$reset_cmd ; New-Item -ItemType Directory -Force '$remote_state_dir' | Out-Null"
+fi
+./scripts/instance-ssh "$PROFILE" -- "$reset_cmd"
 ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/scripts/lib" "/C:/Users/Administrator/provision/scripts-package/"
 if [ -d "$STAGE/scripts/templates" ]; then
   ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/scripts/templates" "/C:/Users/Administrator/provision/scripts-package/"
@@ -160,7 +179,9 @@ fi
 for step in "${steps[@]}"; do
   ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/scripts/steps/$step" "/C:/Users/Administrator/provision/scripts-package/steps/$step"
 done
-./scripts/instance-ssh "$PROFILE" --scp "$STAGE/state/env.json" "/C:/Users/Administrator/provision/state/env.json"
+if [ "$needs_env" -eq 1 ]; then
+  ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/state/env.json" "/C:/Users/Administrator/provision/state/env.json"
+fi
 
 for step in "${steps[@]}"; do
   echo "[package-provision-windows] running step=$step package=$PACKAGE"

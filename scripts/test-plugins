@@ -123,7 +123,7 @@ fi
 windows_steam_install="$(
   ./scripts/package-provision-windows --profile vultr-windows-gaming --package steam --dry-run
 )"
-if printf '%s\n' "$windows_steam_install" | jq -e '.kind == "package-provision-windows" and .package == "steam" and .os_family == "windows" and .steps == ["30_steam.ps1"] and .state_files == ["env.json"] and .fallback == false and .dry_run == true' >/dev/null; then
+if printf '%s\n' "$windows_steam_install" | jq -e '.kind == "package-provision-windows" and .package == "steam" and .os_family == "windows" and .steps == ["30_steam.ps1"] and .state_files == [] and .fallback == false and .dry_run == true' >/dev/null; then
   printf '  [OK] windows steam install maps to steam step\n'
 else
   printf '  [FAIL] windows steam install maps to steam step\n' >&2
@@ -153,7 +153,7 @@ fi
 windows_xpra_install="$(
   ./scripts/package-provision-windows --profile vultr-windows-gaming --package xpra --dry-run
 )"
-if printf '%s\n' "$windows_xpra_install" | jq -e '.package == "xpra" and .steps == ["35_xpra.ps1"] and .state_files == ["env.json"] and .fallback == false' >/dev/null; then
+if printf '%s\n' "$windows_xpra_install" | jq -e '.package == "xpra" and .steps == ["35_xpra.ps1"] and .state_files == [] and .fallback == false' >/dev/null; then
   printf '  [OK] windows xpra install maps to xpra step\n'
 else
   printf '  [FAIL] windows xpra install maps to xpra step\n' >&2
