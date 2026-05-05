@@ -450,12 +450,18 @@ cat >"$tmp_bin/make" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
 target=""
+package=""
 for arg in "$@"; do
   case "$arg" in
     --no-print-directory) ;;
+    PACKAGE=*) package="${arg#PACKAGE=}" ;;
     *) target="$arg"; break ;;
   esac
 done
+if [ "$target" = "package.status" ]; then
+  printf '{"kind":"package-status","package":"%s","command":"status","instance":"dev-a","os_family":"ubuntu","status":"installed","details":"installed"}\n' "$package"
+  exit 0
+fi
 printf 'stub live step: %s\n' "$target"
 SH
 chmod +x "$tmp_bin/make"
@@ -473,6 +479,45 @@ else
   printf '  [FAIL] integration-test live mode streams and records step output\n' >&2
   printf '%s\n' "$integration_live_out" >&2
   [ -f "$integration_report" ] && cat "$integration_report" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+tmp_bin_missing="$(mktemp -d "${TMPDIR:-/tmp}/egame-integration-bin-missing.XXXXXX")"
+cat >"$tmp_bin_missing/make" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+target=""
+package=""
+for arg in "$@"; do
+  case "$arg" in
+    --no-print-directory) ;;
+    PACKAGE=*) package="${arg#PACKAGE=}" ;;
+    *) target="$arg"; break ;;
+  esac
+done
+if [ "$target" = "package.status" ]; then
+  printf '{"kind":"package-status","package":"%s","command":"status","instance":"dev-a","os_family":"ubuntu","status":"missing","details":"missing"}\n' "$package"
+  exit 0
+fi
+printf 'stub live step: %s\n' "$target"
+SH
+chmod +x "$tmp_bin_missing/make"
+integration_missing_report="$tmp_overlay_dir/integration-live-missing-report.json"
+set +e
+integration_missing_out="$(
+  YES=1 PATH="$tmp_bin_missing:$PATH" EGAME_INSTANCE_REGISTRY="$FIXTURE" \
+    ./scripts/integration-test --live --instance dev-a --report "$integration_missing_report" 2>&1
+)"
+integration_missing_status=$?
+set -e
+if [ "$integration_missing_status" -ne 0 ] &&
+  [ -f "$integration_missing_report" ] &&
+  jq -e '.instances[0].status == "failed" and (.instances[0].steps[] | select(.name | startswith("package.status.")) | .status == "failed" and .package_status == "missing" and (.failure_reason | test("expected package status installed")))' "$integration_missing_report" >/dev/null; then
+  printf '  [OK] integration-test live mode fails on missing selected package\n'
+else
+  printf '  [FAIL] integration-test live mode missing package handling mismatch\n' >&2
+  printf '%s\n' "$integration_missing_out" >&2
+  [ -f "$integration_missing_report" ] && cat "$integration_missing_report" >&2
   FAIL=$((FAIL + 1))
 fi
 

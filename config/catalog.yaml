@@ -11,6 +11,14 @@ x-local-medium: &local_medium
   memory_mb: 8192
   disk_gb: 100
 
+x-local-qemu-medium: &local_qemu_medium
+  cpus: 2
+  memory_mb: 4096
+  # QEMU/cloud-image boxes start with a small root disk. The full local dev
+  # desktop smoke stack needs more room than the default image provides, but
+  # should stay modest enough not to starve the host.
+  disk_gb: 64
+
 x-ttl-default: &ttl_default
   ttl_hours: 168
   reminder_hours: [24, 6, 1]
@@ -68,7 +76,7 @@ machines:
   - name: local-qemu-medium
     provider: local-qemu
     kind: vm
-    defaults: *local_medium
+    defaults: *local_qemu_medium
 
   - name: local-vmware-medium
     provider: local-vmware
@@ -187,6 +195,12 @@ bundles:
   - id: dev-sandbox-core
     includes: [docker, dev-toolchain, goose, claude, codex-cli, hermes, opencode, vscode]
 
+  - id: dev-sandbox-core-arm64
+    # goose currently does not publish a Linux aarch64 archive, so ARM local/Pi
+    # environments use the rest of the AI/dev tooling until upstream support
+    # exists.
+    includes: [docker, dev-toolchain, claude, codex-cli, hermes, opencode, vscode]
+
   - id: gaming-core
     includes: [sunshine, steam, rustdesk]
 
@@ -258,7 +272,7 @@ profiles:
     os: ubuntu-26.04-amd64
     ui_mode: desktop
     init: ssh-ubuntu-cloud-init
-    bundles: [access-gui-streaming, access-gui-safe, dev-sandbox-core, gaming-core, remote-apps]
+    bundles: [access-gui-streaming, access-gui-safe, dev-sandbox-core, gaming-core]
     location: tokyo
 
   - name: local-qemu-ubuntu-dev-gui
@@ -266,7 +280,7 @@ profiles:
     os: ubuntu-26.04-arm64
     ui_mode: desktop
     init: ssh-ubuntu-cloud-init
-    bundles: [access-gui-safe, dev-sandbox-core, remote-apps]
+    bundles: [access-gui-safe, dev-sandbox-core-arm64]
     location: tokyo
 
   - name: local-qemu-ubuntu-all
@@ -274,7 +288,7 @@ profiles:
     os: ubuntu-26.04-arm64
     ui_mode: desktop
     init: ssh-ubuntu-cloud-init
-    bundles: [access-gui-streaming, access-gui-safe, dev-sandbox-core, gaming-core, remote-apps]
+    bundles: [access-gui-streaming, access-gui-safe, dev-sandbox-core-arm64, gaming-core]
     location: tokyo
 
   - name: local-vmware-ubuntu-dev-gui
@@ -282,7 +296,7 @@ profiles:
     os: ubuntu-26.04-amd64
     ui_mode: desktop
     init: ssh-ubuntu-cloud-init
-    bundles: [access-gui-safe, dev-sandbox-core, remote-apps]
+    bundles: [access-gui-safe, dev-sandbox-core]
     location: tokyo
 
   - name: local-vmware-ubuntu-all
@@ -290,7 +304,7 @@ profiles:
     os: ubuntu-26.04-amd64
     ui_mode: desktop
     init: ssh-ubuntu-cloud-init
-    bundles: [access-gui-streaming, access-gui-safe, dev-sandbox-core, gaming-core, remote-apps]
+    bundles: [access-gui-streaming, access-gui-safe, dev-sandbox-core, gaming-core]
     location: tokyo
 
   - name: truenas-ubuntu-dev-headless
@@ -306,7 +320,7 @@ profiles:
     os: ubuntu-26.04-amd64
     ui_mode: desktop
     init: ssh-ubuntu-cloud-init
-    bundles: [access-gui-streaming, access-gui-safe, dev-sandbox-core, gaming-core, remote-apps]
+    bundles: [access-gui-streaming, access-gui-safe, dev-sandbox-core, gaming-core]
     location: tokyo
     lifecycle: *ttl_default
 
@@ -315,5 +329,5 @@ profiles:
     os: ubuntu-26.04-arm64
     ui_mode: desktop
     init: ssh-ubuntu-metal
-    bundles: [access-gui-streaming, access-gui-safe, dev-sandbox-core, gaming-core, remote-apps]
+    bundles: [access-gui-streaming, access-gui-safe, dev-sandbox-core-arm64, gaming-core]
     location: tokyo

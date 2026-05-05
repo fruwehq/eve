@@ -294,6 +294,7 @@ emit_vagrant() {
     (($r.machine.defaults.memory_mb // 4096)) as $memory_mb |
     ($memory_mb | tostring) as $memory |
     (((($memory_mb / 1024) | floor) | tostring) + "G") as $qemu_memory |
+    (((($r.machine.defaults.disk_gb // 30) | tostring) + "G")) as $qemu_disk |
     ($r.bundle_packages | join(" ")) as $pkg_list |
 
     { docker: ($r.bundle_packages | index("docker") != null), dev: ($r.bundle_packages | index("dev-toolchain") != null) } as $flags |
@@ -351,6 +352,7 @@ emit_vagrant() {
       "    qe.arch = \"" + $qemu_arch + "\"\n" +
       "    qe.smp = \"" + $cpus + "\"\n" +
       "    qe.memory = \"" + $qemu_memory + "\"\n" +
+      "    qe.disk_resize = \"" + $qemu_disk + "\"\n" +
       "  end\n"
     else
       "  config.vm.provider \"" + $provider + "\" do |v|\n" +

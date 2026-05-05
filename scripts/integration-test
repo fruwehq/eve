@@ -51,6 +51,23 @@ def run_stream(env, *cmd)
   }
 end
 
+def validate_step_result!(result)
+  name = result.fetch("name")
+  return unless name.start_with?("package.status.")
+  return unless result.fetch("status") == "passed"
+
+  payload = JSON.parse(result.fetch("output"))
+  package_status = payload.fetch("status")
+  result["package_status"] = package_status
+  return if package_status == "installed"
+
+  result["status"] = "failed"
+  result["failure_reason"] = "expected package status installed, got #{package_status}"
+rescue JSON::ParserError, KeyError => e
+  result["status"] = "failed"
+  result["failure_reason"] = "invalid package status JSON: #{e.message}"
+end
+
 def run_json(env, *cmd)
   result = run_capture(env, *cmd)
   raise result["output"] unless result["status"] == "passed"
@@ -177,6 +194,7 @@ plans.each do |plan|
     puts "$ #{cmd.join(" ")}"
     result = run_stream(env, *cmd)
     result["name"] = name
+    validate_step_result!(result)
     entry.fetch("steps") << result
     break if result["status"] != "passed"
   end

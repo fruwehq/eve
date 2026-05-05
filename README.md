@@ -199,7 +199,7 @@ State is tracked in `$HOME/provision/state/state.json` on the VM — provisionin
 
 ## Remote GUI apps via Xpra (no full desktop)
 
-Xpra forwards individual remote applications over SSH and renders them as native-looking windows on the local host — useful when you want one remote app (e.g. a browser, IDE, or X11 tool) without pulling up a full remote desktop. Xpra is bundle-gated by the `remote-apps` bundle, so it is only installed on profiles that opt in.
+Xpra forwards individual remote applications over SSH and renders them as native-looking windows on the local host — useful when you want one remote app (e.g. a browser, IDE, or X11 tool) without pulling up a full remote desktop. Xpra is bundle-gated by the `remote-apps` bundle, so it is only installed on profiles that opt in. The built-in Ubuntu 26.04 recipes do not include `remote-apps` by default because the current upstream Xpra Linux packages require Python `< 3.13`; add it explicitly only when using a compatible OS/package source.
 
 > Linux profiles use virtual displays (`xpra start :N`). Windows profiles use shadow mode via Scheduled Task + SSH tunnel.
 

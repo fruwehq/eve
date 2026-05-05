@@ -56,4 +56,12 @@ for profile in $PROFILES; do
   printf '  [OK] %s\n' "$profile"
 done
 
+qemu_vagrant="$(./scripts/profile-resolve --profile local-qemu-ubuntu-dev-gui --emit vagrant)"
+if ! printf '%s\n' "$qemu_vagrant" | grep -q 'qe.disk_resize = "64G"'; then
+  printf '  [FAIL] local-qemu Vagrantfile emits disk resize\n' >&2
+  FAIL=$((FAIL + 1))
+else
+  printf '  [OK] local-qemu Vagrantfile emits disk resize\n'
+fi
+
 [ "$FAIL" -eq 0 ]
