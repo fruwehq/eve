@@ -57,6 +57,6 @@ fi
 run_step terramate run "${tm_args[@]}" -- "${init_args[@]}"
 
 if [ -n "${EGAME_INSTANCE_NAME:-}" ]; then
-  run_step terramate run --tags="$TAGS" -- \
+  TF_WORKSPACE="" run_step terramate run --tags="$TAGS" -- \
     terraform workspace select -or-create "$EGAME_INSTANCE_NAME"
 fi
