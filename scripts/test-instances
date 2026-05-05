@@ -323,6 +323,35 @@ else
   FAIL=$((FAIL + 1))
 fi
 
+provider_bridge_failed=0
+for provider_target in init plan up down stop status ip ssh; do
+  provider_bridge_out="$(
+    EGAME_PROVIDER_DRY_RUN=1 EGAME_INSTANCE_REGISTRY="$FIXTURE" EGAME_INSTANCE_WORKDIR="$tmp_overlay_dir/provider-bridge" \
+      make --no-print-directory "$provider_target" INSTANCE=dev-a 2>/dev/null
+  )"
+  if ! printf '%s\n' "$provider_bridge_out" |
+    jq -e --arg command "$provider_target" '.provider == "local-vmware" and .command == $command and .dry_run == true' >/dev/null; then
+    printf '  [FAIL] make %s INSTANCE did not route through provider dry-run\n' "$provider_target" >&2
+    printf '%s\n' "$provider_bridge_out" >&2
+    provider_bridge_failed=$((provider_bridge_failed + 1))
+  fi
+done
+provider_bridge_start="$(
+  EGAME_PROVIDER_DRY_RUN=1 EGAME_INSTANCE_REGISTRY="$FIXTURE" EGAME_INSTANCE_WORKDIR="$tmp_overlay_dir/provider-bridge" \
+    make --no-print-directory start INSTANCE=dev-a 2>/dev/null
+)"
+if ! printf '%s\n' "$provider_bridge_start" |
+  jq -s -e 'map(.command) == ["up", "start"] and all(.[]; .provider == "local-vmware" and .dry_run == true)' >/dev/null; then
+  printf '  [FAIL] make start INSTANCE did not route dependency and start through provider dry-run\n' >&2
+  printf '%s\n' "$provider_bridge_start" >&2
+  provider_bridge_failed=$((provider_bridge_failed + 1))
+fi
+if [ "$provider_bridge_failed" -eq 0 ]; then
+  printf '  [OK] make lifecycle targets route INSTANCE through provider plugins\n'
+else
+  FAIL=$((FAIL + 1))
+fi
+
 state_target="$(EGAME_STATE_DIR="$tmp_overlay_dir/state" make --no-print-directory instance.state INSTANCE=aws-gpu-a 2>/dev/null)"
 if printf '%s\n' "$state_target" | jq -e '.last_operation.name == "provider.status"' >/dev/null; then
   printf '  [OK] make target exposes local instance state\n'

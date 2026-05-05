@@ -134,15 +134,32 @@ else
   FAIL=$((FAIL + 1))
 fi
 
-provider_dry_run="$(
-  EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-provider-dispatch-test" \
-    ./scripts/provider-dispatch --registry "$FIXTURE" --instance rpi-all-a --command status --dry-run
-)"
-if printf '%s\n' "$provider_dry_run" | jq -e '.provider == "raspberry-pi" and .command == "status" and .dry_run == true' >/dev/null; then
-  printf '  [OK] provider dispatch dry-run\n'
+provider_matrix_failed=0
+for provider_case in \
+  "dev-a:local-vmware:vagrant" \
+  "aws-gpu-a:aws:terraform" \
+  "truenas-all-a:truenas:terraform" \
+  "rpi-all-a:raspberry-pi:metal"; do
+  IFS=: read -r provider_instance provider_id provider_engine <<EOF
+$provider_case
+EOF
+  for provider_command in resolve init plan up down start stop status ip ssh; do
+    provider_dry_run="$(
+      EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-provider-dispatch-test" \
+        ./scripts/provider-dispatch --registry "$FIXTURE" --instance "$provider_instance" --command "$provider_command" --dry-run
+    )"
+    if ! printf '%s\n' "$provider_dry_run" |
+      jq -e --arg provider "$provider_id" --arg command "$provider_command" --arg engine "$provider_engine" \
+        '.kind == "provider" and .provider == $provider and .command == $command and .engine == $engine and .dry_run == true' >/dev/null; then
+      printf '  [FAIL] provider dispatch dry-run mismatch: instance=%s command=%s\n' "$provider_instance" "$provider_command" >&2
+      printf '%s\n' "$provider_dry_run" >&2
+      provider_matrix_failed=$((provider_matrix_failed + 1))
+    fi
+  done
+done
+if [ "$provider_matrix_failed" -eq 0 ]; then
+  printf '  [OK] provider dispatch dry-run matrix\n'
 else
-  printf '  [FAIL] provider dispatch dry-run\n' >&2
-  printf '%s\n' "$provider_dry_run" >&2
   FAIL=$((FAIL + 1))
 fi
 

@@ -71,7 +71,7 @@ end
 instance_name = nil
 command = nil
 registry_path = ENV["EGAME_INSTANCE_REGISTRY"] ? File.expand_path(ENV["EGAME_INSTANCE_REGISTRY"], Dir.pwd) : nil
-dry_run = false
+dry_run = ENV["EGAME_PROVIDER_DRY_RUN"] == "1"
 extra_args = []
 
 args = ARGV.dup
