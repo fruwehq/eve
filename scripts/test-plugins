@@ -102,6 +102,20 @@ else
   FAIL=$((FAIL + 1))
 fi
 
+dummy_hook="$(
+  EGAME_PLUGIN_ROOTS="$PLUGIN_FIXTURE" \
+    EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-package-dispatch-test" \
+    EGAME_DISABLE_STATE=1 \
+    ./scripts/package-dispatch --registry "$FIXTURE" --instance dev-a --package dummy --command status
+)"
+if printf '%s\n' "$dummy_hook" | jq -e '.kind == "package-hook" and .package == "dummy" and .instance == "dev-a" and .command == "status"' >/dev/null; then
+  printf '  [OK] package plugin command folder hook runs\n'
+else
+  printf '  [FAIL] package plugin command folder hook runs\n' >&2
+  printf '%s\n' "$dummy_hook" >&2
+  FAIL=$((FAIL + 1))
+fi
+
 state_dir="$(mktemp -d "${TMPDIR:-/tmp}/egame-state-test.XXXXXX")"
 trap 'rm -rf "$state_dir"' EXIT
 empty_state="$(EGAME_STATE_DIR="$state_dir" ./scripts/instance-state --instance fresh-a --get)"

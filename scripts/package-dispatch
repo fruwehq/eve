@@ -46,7 +46,8 @@ def run_plugin(plugin, command, resolved, dry_run)
 
   env = ENV.to_h.merge(
     "EGAME_INSTANCE_NAME" => resolved.fetch("instance").fetch("name"),
-    "EGAME_PACKAGE_PLUGIN" => plugin.fetch("id")
+    "EGAME_PACKAGE_PLUGIN" => plugin.fetch("id"),
+    "EGAME_PACKAGE_PLUGIN_ROOT" => File.dirname(plugin.fetch("path"))
   )
   env["EGAME_PLUGIN_DRY_RUN"] = "1" if dry_run
 

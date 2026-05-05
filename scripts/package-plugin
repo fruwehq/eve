@@ -2,6 +2,7 @@
 # Built-in package plugin compatibility wrapper.
 
 require "json"
+require "open3"
 
 ROOT = File.expand_path("..", __dir__)
 package_id = ARGV.shift
@@ -19,6 +20,34 @@ os_family = resolved.fetch("os").fetch("family")
 
 def shell_single_quote(value)
   "'#{value.gsub("'", "'\"'\"'")}'"
+end
+
+def command_hook(plugin_root, os_family, command)
+  return nil unless plugin_root && !plugin_root.empty?
+
+  candidates = [
+    File.join(plugin_root, "commands", os_family, command),
+    File.join(plugin_root, "commands", "common", command)
+  ]
+  candidates.find { |path| File.file?(path) }
+end
+
+def run_hook(path, resolved)
+  env = ENV.to_h
+  exit_status = 0
+  Open3.popen3(env, path, chdir: ROOT) do |stdin, stdout, stderr, wait_thr|
+    stdin.write(JSON.generate(resolved))
+    stdin.close
+    out = stdout.read
+    err = stderr.read
+    warn err unless err.empty?
+    print out
+    exit_status = wait_thr.value.exitstatus || 1
+  end
+  exit exit_status
+rescue Errno::EACCES
+  warn "package-plugin: command hook is not executable: #{path}"
+  exit 126
 end
 
 linux_down = {
@@ -58,6 +87,9 @@ if ENV["EGAME_PLUGIN_DRY_RUN"] == "1"
   })
   exit 0
 end
+
+hook = command_hook(ENV["EGAME_PACKAGE_PLUGIN_ROOT"], os_family, command)
+run_hook(hook, resolved) if hook
 
 case command
 when "status"

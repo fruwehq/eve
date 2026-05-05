@@ -65,6 +65,12 @@ pinned in `.egame/plugin-sources.yaml` and synchronized with
 `make plugins.sync`. Package `down` and `reinstall` operations are explicit and
 destructive removals require `YES=1`.
 
+Package plugins may provide host-side command hooks at
+`commands/<os_family>/<install|status|down>` or
+`commands/common/<install|status|down>`. The built-in compatibility wrapper
+passes the resolved instance JSON on stdin and sets `EGAME_INSTANCE_NAME`,
+`EGAME_PACKAGE_PLUGIN`, and `EGAME_PACKAGE_PLUGIN_ROOT`.
+
 `make instance.paths INSTANCE=<name>` shows the generated overlay path,
 instance state file path, and Terraform artifact roots used by the bridge.
 
