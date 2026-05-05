@@ -116,6 +116,13 @@ else
   FAIL=$((FAIL + 1))
 fi
 
+if [ -x plugins/packages/docker/commands/ubuntu/down ]; then
+  printf '  [OK] built-in docker package has ubuntu down hook\n'
+else
+  printf '  [FAIL] built-in docker package down hook missing or not executable\n' >&2
+  FAIL=$((FAIL + 1))
+fi
+
 state_dir="$(mktemp -d "${TMPDIR:-/tmp}/egame-state-test.XXXXXX")"
 trap 'rm -rf "$state_dir"' EXIT
 empty_state="$(EGAME_STATE_DIR="$state_dir" ./scripts/instance-state --instance fresh-a --get)"

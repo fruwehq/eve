@@ -1,0 +1,7 @@
+#!/usr/bin/env sh
+set -eu
+
+profile="${EGAME_INSTANCE_NAME:?EGAME_INSTANCE_NAME is required}"
+
+./scripts/instance-ssh "$profile" -- \
+  'sudo systemctl disable --now docker || true; sudo apt-get remove -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin || true'
