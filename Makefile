@@ -1,7 +1,7 @@
 # Makefile
 .DEFAULT_GOAL := default
 .PHONY: all aws.login clean default down env generate help info \
-				init init.all instance.create instance.env instance.info \
+				init init.all instance.create instance.delete instance.env instance.info \
 				instance.list instance.paths instance.state instance.validate ip lint logs plan \
 				package.down package.install package.list package.reinstall package.select \
 				package.status package.unselect \
@@ -153,6 +153,12 @@ instance.create: ## Create a local instance registry entry (INSTANCE=<name> RECI
 	if [ -n "$(ROOT_VOLUME_TYPE)" ]; then args="$$args --root-volume-type $(ROOT_VOLUME_TYPE)"; fi; \
 	if [ -n "$(PLAN)" ]; then args="$$args --plan $(PLAN)"; fi; \
 	./scripts/instance-create $$args
+
+instance.delete: ## Delete a local instance registry entry (INSTANCE=<name>, PURGE=1 to remove generated files)
+	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make instance.delete INSTANCE=<name> [PURGE=1]"; exit 2; fi; \
+	args="--instance $(INSTANCE)"; \
+	if [ "$(PURGE)" = "1" ]; then args="$$args --purge"; fi; \
+	./scripts/instance-delete $$args
 
 instance.env: ## Print resolved concrete instance data as env lines
 	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make instance.env INSTANCE=<name>"; exit 2; fi; \

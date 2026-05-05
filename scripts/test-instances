@@ -107,6 +107,25 @@ else
   FAIL=$((FAIL + 1))
 fi
 
+if ./scripts/instance-delete --registry "$tmp_registry" --instance test-dev >/dev/null; then
+  if ./scripts/instance-resolve --registry "$tmp_registry" --instance test-dev --emit json >/dev/null 2>&1; then
+    printf '  [FAIL] deleted instance still resolves\n' >&2
+    FAIL=$((FAIL + 1))
+  else
+    printf '  [OK] delete instance removes from registry\n'
+  fi
+else
+  printf '  [FAIL] delete instance\n' >&2
+  FAIL=$((FAIL + 1))
+fi
+
+if ./scripts/instance-delete --registry "$tmp_registry" --instance test-dev >/dev/null 2>&1; then
+  printf '  [FAIL] delete non-existent instance succeeded\n' >&2
+  FAIL=$((FAIL + 1))
+else
+  printf '  [OK] delete non-existent instance fails\n'
+fi
+
 overlay="$tmp_overlay_dir/dev-a.catalog.local.yaml"
 if ./scripts/instance-profile-overlay --registry "$FIXTURE" --instance dev-a --output "$overlay"; then
   if EGAME_CATALOG_LOCAL="$overlay" ./scripts/profile-resolve --profile dev-a --validate >/dev/null; then

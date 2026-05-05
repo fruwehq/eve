@@ -1,0 +1,89 @@
+#!/usr/bin/env ruby
+# Delete a concrete local VM instance entry from the instance registry.
+# Optionally removes the generated workdir and state files.
+
+require "fileutils"
+require "yaml"
+
+ROOT = File.expand_path("..", __dir__)
+DEFAULT_REGISTRY_PATH = File.join(ROOT, ".egame/instances.yaml")
+DEFAULT_WORKDIR_BASE = File.join(ROOT, ".generated/instances")
+DEFAULT_STATE_BASE = File.join(ROOT, ".egame/state")
+
+def usage
+  warn <<~USAGE
+    Usage:
+      scripts/instance-delete --instance <name> [options]
+
+    Options:
+      --registry <path>
+      --purge   Remove generated workdir and state files
+  USAGE
+end
+
+instance_name = nil
+registry_path = DEFAULT_REGISTRY_PATH
+purge = false
+
+args = ARGV.dup
+until args.empty?
+  case args.shift
+  when "--instance"
+    instance_name = args.shift
+  when "--registry"
+    registry_path = File.expand_path(args.shift, Dir.pwd)
+  when "--purge"
+    purge = true
+  when "-h", "--help"
+    usage
+    exit 0
+  else
+    usage
+    exit 2
+  end
+end
+
+unless instance_name && !instance_name.empty?
+  usage
+  exit 2
+end
+
+unless File.exist?(registry_path)
+  warn "instance-delete: registry not found: #{registry_path}"
+  exit 1
+end
+
+registry = YAML.safe_load(File.read(registry_path), permitted_classes: [], aliases: true) || {}
+registry["instances"] ||= []
+
+index = registry["instances"].index { |e| e.is_a?(Hash) && e["name"] == instance_name }
+unless index
+  warn "instance-delete: instance not found: #{instance_name}"
+  exit 1
+end
+
+registry["instances"].delete_at(index)
+
+if registry["instances"].empty?
+  FileUtils.rm_f(registry_path)
+else
+  File.write(registry_path, registry.to_yaml)
+end
+
+puts "Deleted instance: #{instance_name}"
+puts "Registry: #{registry_path}"
+
+if purge
+  workdir = File.join(DEFAULT_WORKDIR_BASE, instance_name)
+  state = File.join(DEFAULT_STATE_BASE, "instances", "#{instance_name}.json")
+
+  if File.exist?(workdir)
+    FileUtils.rm_rf(workdir)
+    puts "Removed workdir: #{workdir}"
+  end
+
+  if File.exist?(state)
+    FileUtils.rm_f(state)
+    puts "Removed state: #{state}"
+  end
+end
