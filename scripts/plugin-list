@@ -10,6 +10,8 @@ EXTERNAL_ROOT = File.join(ROOT, ".egame/plugins")
 API_VERSION = "egame.plugin/v1"
 PROVIDER_COMMANDS = %w[resolve init plan up down start stop status ip ssh].freeze
 PACKAGE_COMMANDS = %w[install status down].freeze
+PROVIDER_ENGINES = %w[terraform vagrant metal].freeze
+PROVIDER_KINDS = %w[vm metal].freeze
 
 def usage
   warn <<~USAGE
@@ -82,6 +84,7 @@ def validate_plugin!(plugin)
   end
 
   raise "#{plugin["_path"]}: supports must be a map" unless plugin["supports"].is_a?(Hash)
+  validate_provider_supports!(plugin) if kind == "provider"
   raise "#{plugin["_path"]}: env must be a list" unless plugin["env"].is_a?(Array)
 
   validate_package_install!(plugin) if kind == "package" && plugin.key?("install")
@@ -100,6 +103,30 @@ def require_string_list!(value, path, field)
   return if bad.empty?
 
   raise "#{path}: #{field} must be a list of strings (got non-string entries: #{bad.map(&:inspect).join(", ")})"
+end
+
+def require_allowed_entries!(value, allowed, path, field)
+  unsupported = value - allowed
+  return if unsupported.empty?
+
+  raise "#{path}: #{field} contains unsupported entries: #{unsupported.join(", ")} (allowed: #{allowed.join(", ")})"
+end
+
+def validate_provider_supports!(plugin)
+  supports = plugin["supports"]
+  path = plugin["_path"]
+
+  if supports.key?("engines")
+    engines = supports["engines"]
+    require_string_list!(engines, path, "supports.engines")
+    require_allowed_entries!(engines, PROVIDER_ENGINES, path, "supports.engines")
+  end
+
+  if supports.key?("kinds")
+    kinds = supports["kinds"]
+    require_string_list!(kinds, path, "supports.kinds")
+    require_allowed_entries!(kinds, PROVIDER_KINDS, path, "supports.kinds")
+  end
 end
 
 def validate_package_install!(plugin)

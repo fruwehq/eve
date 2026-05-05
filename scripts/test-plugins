@@ -12,6 +12,7 @@ BAD_PLUGIN_FIXTURE="tests/fixtures/plugins/packages/bad"
 BAD_INSTALL_UBUNTU_FIXTURE="tests/fixtures/plugins/packages/bad-install-ubuntu"
 BAD_INSTALL_WINDOWS_STATE_FIXTURE="tests/fixtures/plugins/packages/bad-install-windows-state"
 BAD_INSTALL_NON_STRING_FIXTURE="tests/fixtures/plugins/packages/bad-install-non-string"
+BAD_PROVIDER_SUPPORTS_FIXTURE="tests/fixtures/plugins/providers/bad-supports"
 FAIL=0
 
 check() {
@@ -110,6 +111,15 @@ if printf '%s' "$bad_install_non_string_err" | grep -q "install.ubuntu.steps mus
 else
   printf '  [FAIL] plugin with non-string install.ubuntu.steps entry rejected\n' >&2
   printf '%s\n' "$bad_install_non_string_err" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+bad_provider_supports_err="$(EGAME_PLUGIN_ROOTS="$BAD_PROVIDER_SUPPORTS_FIXTURE" ./scripts/plugin-list --validate 2>&1 || true)"
+if printf '%s' "$bad_provider_supports_err" | grep -q "supports.engines must be a list"; then
+  printf '  [OK] provider plugin with malformed supports.engines rejected\n'
+else
+  printf '  [FAIL] provider plugin with malformed supports.engines rejected\n' >&2
+  printf '%s\n' "$bad_provider_supports_err" >&2
   FAIL=$((FAIL + 1))
 fi
 
