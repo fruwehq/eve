@@ -1,0 +1,21 @@
+[project]
+name = "ephemeral-cloud-gaming"
+version = "3.0.0"
+description = ""
+authors = [
+    {name = "Christian-Manuel Butzke",email = "chris@fruwe.com"}
+]
+license = "MIT"
+readme = "README.md"
+requires-python = ">=3.13,<4.0"
+dependencies = [
+    "textual (>=8.2.5,<9.0.0)"
+]
+
+
+[tool.poetry]
+package-mode = false
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"

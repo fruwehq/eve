@@ -463,7 +463,7 @@ test.update-golden: ## Regenerate tests/golden/*.env from current profile-resolv
 	@UPDATE_GOLDEN=1 ./scripts/test-instances
 
 tui: ## Open the v3 Textual instance manager
-	@./scripts/egame-tui
+	@poetry run python ./scripts/egame-tui
 
 up: ## Create and start profile resources (terraform or vagrant)
 	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \

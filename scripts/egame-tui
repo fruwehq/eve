@@ -159,7 +159,7 @@ def run_tui() -> int:
             padding: 1;
         }
 
-        #title {
+        .panel-title {
             color: #93c5fd;
             text-style: bold;
             margin-bottom: 1;
@@ -212,10 +212,10 @@ def run_tui() -> int:
             with Container(id="root"):
                 with Horizontal(id="main"):
                     with Vertical(id="left", classes="panel"):
-                        yield Static("Instances", id="title")
+                        yield Static("Instances", classes="panel-title")
                         yield DataTable(id="instances")
                     with Vertical(id="right", classes="panel"):
-                        yield Static("Instance", id="title")
+                        yield Static("Instance", classes="panel-title")
                         yield Static("Select an instance to inspect state.", id="details")
                         with Horizontal(id="actions"):
                             yield Button("Refresh", id="refresh", variant="primary")
@@ -223,7 +223,7 @@ def run_tui() -> int:
                             yield Button("Plan", id="provider-plan")
                             yield Button("Start", id="provider-start", variant="success")
                             yield Button("Stop", id="provider-stop", variant="warning")
-                        yield Static("Packages", id="title")
+                        yield Static("Packages", classes="panel-title")
                         yield DataTable(id="packages")
                         with Horizontal(id="package-actions"):
                             yield Button("Pkg Status", id="package-status")
@@ -243,15 +243,15 @@ def run_tui() -> int:
 
             await self.refresh_instances()
 
-        def log(self, message: str) -> None:
+        def write_log(self, message: str) -> None:
             self.query_one("#logs", RichLog).write(message)
 
         async def refresh_instances(self) -> None:
-            self.log("[b blue]Refreshing instances[/b blue]")
+            self.write_log("[b blue]Refreshing instances[/b blue]")
             try:
                 rows = await asyncio.to_thread(instance_rows)
             except Exception as exc:  # noqa: BLE001 - surfaced to the TUI log.
-                self.log(f"[red]instance-list failed:[/red] {exc}")
+                self.write_log(f"[red]instance-list failed:[/red] {exc}")
                 return
 
             self.instances = rows
@@ -282,11 +282,11 @@ def run_tui() -> int:
             if not self.current_instance:
                 return
 
-            self.log(f"[b blue]Loading {self.current_instance}[/b blue]")
+            self.write_log(f"[b blue]Loading {self.current_instance}[/b blue]")
             try:
                 status = await asyncio.to_thread(instance_status, self.current_instance)
             except Exception as exc:  # noqa: BLE001 - surfaced to the TUI log.
-                self.log(f"[red]instance-status failed:[/red] {exc}")
+                self.write_log(f"[red]instance-status failed:[/red] {exc}")
                 return
 
             self.current_status = status
@@ -322,7 +322,7 @@ def run_tui() -> int:
                 await self.refresh_current_status()
             elif table_id == "packages":
                 self.current_package = row_key
-                self.log(f"Selected package [b]{row_key}[/b]")
+                self.write_log(f"Selected package [b]{row_key}[/b]")
 
         async def on_button_pressed(self, event: Button.Pressed) -> None:
             button_id = event.button.id
@@ -342,21 +342,21 @@ def run_tui() -> int:
 
         async def action_provider_action(self, command: str) -> None:
             if not self.current_instance:
-                self.log("[yellow]Select an instance first.[/yellow]")
+                self.write_log("[yellow]Select an instance first.[/yellow]")
                 return
-            self.log(f"[b blue]provider.{command} {self.current_instance}[/b blue]")
+            self.write_log(f"[b blue]provider.{command} {self.current_instance}[/b blue]")
             code, out, err = await asyncio.to_thread(dispatch_provider, self.current_instance, command)
             self.write_command_result(code, out, err)
             await self.refresh_current_status()
 
         async def package_action(self, command: str) -> None:
             if not self.current_instance:
-                self.log("[yellow]Select an instance first.[/yellow]")
+                self.write_log("[yellow]Select an instance first.[/yellow]")
                 return
             if not self.current_package:
-                self.log("[yellow]Select a package first.[/yellow]")
+                self.write_log("[yellow]Select a package first.[/yellow]")
                 return
-            self.log(f"[b blue]package.{command} {self.current_package} on {self.current_instance}[/b blue]")
+            self.write_log(f"[b blue]package.{command} {self.current_package} on {self.current_instance}[/b blue]")
             code, out, err = await asyncio.to_thread(
                 dispatch_package,
                 self.current_instance,
@@ -368,19 +368,19 @@ def run_tui() -> int:
 
         def write_command_result(self, code: int, out: str, err: str) -> None:
             if out.strip():
-                self.log(out.rstrip())
+                self.write_log(out.rstrip())
             if err.strip():
-                self.log(f"[red]{err.rstrip()}[/red]")
+                self.write_log(f"[red]{err.rstrip()}[/red]")
             if code == 0:
-                self.log("[green]Command succeeded.[/green]")
+                self.write_log("[green]Command succeeded.[/green]")
             else:
-                self.log(f"[red]Command failed with exit {code}.[/red]")
+                self.write_log(f"[red]Command failed with exit {code}.[/red]")
 
         def show_ssh_command(self) -> None:
             if not self.current_instance:
-                self.log("[yellow]Select an instance first.[/yellow]")
+                self.write_log("[yellow]Select an instance first.[/yellow]")
                 return
-            self.log(f"[b]SSH:[/b] make ssh INSTANCE={self.current_instance}")
+            self.write_log(f"[b]SSH:[/b] make ssh INSTANCE={self.current_instance}")
 
     EGameTui().run()
     return 0
