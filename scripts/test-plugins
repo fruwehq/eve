@@ -358,6 +358,15 @@ else
   FAIL=$((FAIL + 1))
 fi
 
+hardcoded_down_refs="$(grep -nE '"(claude|codex-cli|dev-toolchain|docker|goose|hermes|opencode|rdp|rustdesk|ssh|steam|sunshine|vscode|vnc|xpra)"[[:space:]]*=>' scripts/package-plugin || true)"
+if [ -n "$hardcoded_down_refs" ]; then
+  printf '  [FAIL] package-plugin still contains hardcoded package down mappings\n' >&2
+  printf '%s\n' "$hardcoded_down_refs" >&2
+  FAIL=$((FAIL + 1))
+else
+  printf '  [OK] package down implementations live in plugin hooks\n'
+fi
+
 state_dir="$(mktemp -d "${TMPDIR:-/tmp}/egame-state-test.XXXXXX")"
 trap 'rm -rf "$state_dir"' EXIT
 empty_state="$(EGAME_STATE_DIR="$state_dir" ./scripts/instance-state --instance fresh-a --get)"
