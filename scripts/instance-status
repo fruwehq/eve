@@ -65,6 +65,12 @@ begin
     package.merge("state" => package_state.fetch(package.fetch("id"), { "status" => "unknown" }))
   end
   selected_packages = packages.select { |package| package["selected"] }
+  package_summary = selected_packages.each_with_object(Hash.new(0)) do |package, summary|
+    summary[package.dig("state", "status") || "unknown"] += 1
+  end
+  %w[installed missing unknown failed removed reinstalled].each do |status_key|
+    package_summary[status_key] = package_summary.fetch(status_key, 0)
+  end
 
   status = {
     "instance" => {
@@ -80,6 +86,7 @@ begin
     },
     "state" => state,
     "packages" => {
+      "summary" => package_summary.sort.to_h,
       "selected" => selected_packages,
       "all" => packages
     },
@@ -99,7 +106,24 @@ begin
            state.fetch("provision_state")
     printf "Last operation: %s\n", state["last_operation"] ? "#{state.dig("last_operation", "name")} #{state.dig("last_operation", "status")}" : "none"
     printf "Last error: %s\n", state["last_error"] || "none"
-    printf "Selected packages: %s\n", selected_packages.map { |package| package.fetch("id") }.join(",")
+    printf "Selected package states: installed=%d missing=%d unknown=%d failed=%d\n",
+           package_summary.fetch("installed"),
+           package_summary.fetch("missing"),
+           package_summary.fetch("unknown"),
+           package_summary.fetch("failed")
+    if selected_packages.empty?
+      printf "Selected packages: none\n"
+    else
+      printf "\n%-24s %-11s %-9s %s\n", "PACKAGE", "STATE", "SUPPORTED", "SELECTED_BY"
+      printf "%-24s %-11s %-9s %s\n", "-------", "-----", "---------", "-----------"
+      selected_packages.each do |package|
+        printf "%-24s %-11s %-9s %s\n",
+               package.fetch("id"),
+               package.dig("state", "status") || "unknown",
+               package["supported"] ? "yes" : "no",
+               package.fetch("selected_by", []).join(",")
+      end
+    end
   end
 rescue StandardError => e
   warn "instance-status: #{e.message}"
