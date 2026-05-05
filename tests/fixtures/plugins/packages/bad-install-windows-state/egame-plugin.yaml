@@ -1,0 +1,16 @@
+api_version: egame.plugin/v1
+kind: package
+id: bad-install-windows-state
+display_name: Bad Install Windows State Test Package
+commands:
+  install: {exec: scripts/package-plugin, args: [bad-install-windows-state, install]}
+  status: {exec: scripts/package-plugin, args: [bad-install-windows-state, status]}
+  down: {exec: scripts/package-plugin, args: [bad-install-windows-state, down]}
+supports: {os_families: [windows]}
+down: {destructive: false}
+env: []
+install:
+  windows:
+    steps: [99_phantom.ps1]
+    state_files: [secrets.txt]
+    fallback: false

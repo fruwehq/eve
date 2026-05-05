@@ -9,6 +9,8 @@ PLUGIN_FIXTURE="tests/fixtures/plugins/packages/dummy"
 LOCAL_EXEC_PLUGIN_FIXTURE="tests/fixtures/plugins/packages/local-exec"
 OVERRIDE_PLUGIN_FIXTURE="tests/fixtures/plugins/packages/docker-override"
 BAD_PLUGIN_FIXTURE="tests/fixtures/plugins/packages/bad"
+BAD_INSTALL_UBUNTU_FIXTURE="tests/fixtures/plugins/packages/bad-install-ubuntu"
+BAD_INSTALL_WINDOWS_STATE_FIXTURE="tests/fixtures/plugins/packages/bad-install-windows-state"
 FAIL=0
 
 check() {
@@ -71,6 +73,34 @@ if EGAME_PLUGIN_ROOTS="$BAD_PLUGIN_FIXTURE" ./scripts/plugin-list --json >/dev/n
   FAIL=$((FAIL + 1))
 else
   printf '  [OK] invalid external plugin rejected\n'
+fi
+
+# A built-in install block (steam) must validate cleanly.  This exercises
+# the new package-install schema check on real manifests.
+if ./scripts/plugin-list --kind package --json | \
+  jq -e '.plugins[] | select(.id == "steam") | (.install.ubuntu.steps | length > 0) and (.install.windows.steps | length > 0)' >/dev/null; then
+  printf '  [OK] built-in package install metadata validates\n'
+else
+  printf '  [FAIL] built-in package install metadata validates\n' >&2
+  FAIL=$((FAIL + 1))
+fi
+
+bad_install_ubuntu_err="$(EGAME_PLUGIN_ROOTS="$BAD_INSTALL_UBUNTU_FIXTURE" ./scripts/plugin-list --validate 2>&1 || true)"
+if printf '%s' "$bad_install_ubuntu_err" | grep -q "install.ubuntu.steps must be a non-empty list"; then
+  printf '  [OK] plugin with empty install.ubuntu.steps rejected\n'
+else
+  printf '  [FAIL] plugin with empty install.ubuntu.steps rejected\n' >&2
+  printf '%s\n' "$bad_install_ubuntu_err" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+bad_install_windows_err="$(EGAME_PLUGIN_ROOTS="$BAD_INSTALL_WINDOWS_STATE_FIXTURE" ./scripts/plugin-list --validate 2>&1 || true)"
+if printf '%s' "$bad_install_windows_err" | grep -q "install.windows.state_files contains unsupported entries"; then
+  printf '  [OK] plugin with unsupported install.windows.state_files rejected\n'
+else
+  printf '  [FAIL] plugin with unsupported install.windows.state_files rejected\n' >&2
+  printf '%s\n' "$bad_install_windows_err" >&2
+  FAIL=$((FAIL + 1))
 fi
 
 provider_dry_run="$(

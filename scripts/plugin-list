@@ -83,6 +83,62 @@ def validate_plugin!(plugin)
 
   raise "#{plugin["_path"]}: supports must be a map" unless plugin["supports"].is_a?(Hash)
   raise "#{plugin["_path"]}: env must be a list" unless plugin["env"].is_a?(Array)
+
+  validate_package_install!(plugin) if kind == "package" && plugin.key?("install")
+end
+
+# install metadata is consumed by scripts/package-provision and
+# scripts/package-provision-windows.  Validate the shape up front so a
+# malformed manifest fails plugins.validate instead of blowing up at
+# package.install time.
+WINDOWS_STATE_FILES = %w[env.json].freeze
+
+def validate_package_install!(plugin)
+  install = plugin["install"]
+  path = plugin["_path"]
+  raise "#{path}: install must be a map" unless install.is_a?(Hash)
+
+  if install.key?("ubuntu")
+    ubuntu = install["ubuntu"]
+    raise "#{path}: install.ubuntu must be a map" unless ubuntu.is_a?(Hash)
+
+    steps = ubuntu["steps"]
+    if ubuntu.key?("steps")
+      raise "#{path}: install.ubuntu.steps must be a list" unless steps.is_a?(Array)
+    end
+    if steps.nil? || steps.empty?
+      raise "#{path}: install.ubuntu.steps must be a non-empty list"
+    end
+
+    if ubuntu.key?("package_markers")
+      markers = ubuntu["package_markers"]
+      raise "#{path}: install.ubuntu.package_markers must be a list" unless markers.is_a?(Array)
+    end
+  end
+
+  if install.key?("windows")
+    windows = install["windows"]
+    raise "#{path}: install.windows must be a map" unless windows.is_a?(Hash)
+
+    if windows.key?("steps")
+      raise "#{path}: install.windows.steps must be a list" unless windows["steps"].is_a?(Array)
+    end
+    if windows.key?("state_files")
+      state_files = windows["state_files"]
+      raise "#{path}: install.windows.state_files must be a list" unless state_files.is_a?(Array)
+
+      unsupported = state_files - WINDOWS_STATE_FILES
+      unless unsupported.empty?
+        raise "#{path}: install.windows.state_files contains unsupported entries: #{unsupported.join(", ")} (allowed: #{WINDOWS_STATE_FILES.join(", ")})"
+      end
+    end
+    if windows.key?("fallback")
+      fallback = windows["fallback"]
+      unless fallback == true || fallback == false
+        raise "#{path}: install.windows.fallback must be boolean"
+      end
+    end
+  end
 end
 
 kind = nil
