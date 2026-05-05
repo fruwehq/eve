@@ -71,6 +71,12 @@ Package plugins may provide host-side command hooks at
 passes the resolved instance JSON on stdin and sets `EGAME_INSTANCE_NAME`,
 `EGAME_PACKAGE_PLUGIN`, and `EGAME_PACKAGE_PLUGIN_ROOT`.
 
+Manifest command `exec` paths may point at core repo scripts, such as
+`scripts/package-plugin`, or at plugin-local executables. External plugins that
+reuse a built-in id are rejected by default; set `EGAME_PLUGIN_ALLOW_OVERRIDE=1`
+only when you intentionally want the later external plugin to replace the
+built-in one.
+
 `make instance.paths INSTANCE=<name>` shows the generated overlay path,
 instance state file path, and Terraform artifact roots used by the bridge.
 
