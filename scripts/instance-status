@@ -60,7 +60,10 @@ begin
   resolved = run_json(*resolve_cmd)
   paths = run_json(*paths_cmd)
   state = run_json(File.join(ROOT, "scripts/instance-state"), "--instance", instance_name, "--get")
-  packages = run_json(*package_cmd).fetch("packages")
+  package_state = state.fetch("package_state", {})
+  packages = run_json(*package_cmd).fetch("packages").map do |package|
+    package.merge("state" => package_state.fetch(package.fetch("id"), { "status" => "unknown" }))
+  end
   selected_packages = packages.select { |package| package["selected"] }
 
   status = {

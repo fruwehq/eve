@@ -366,7 +366,7 @@ status_target="$(
     make --no-print-directory instance.status INSTANCE=aws-gpu-a EMIT=json 2>/dev/null
 )"
 if printf '%s\n' "$status_target" |
-  jq -e '.instance.name == "aws-gpu-a" and .instance.provider == "aws" and .instance.engine == "terraform" and .state.last_operation.name == "provider.status" and (.packages.selected[] | select(.id == "ssh")) and (.paths.INSTANCE_TF_STATE_BASE | test("aws-gpu-a/tf/state$"))' >/dev/null; then
+  jq -e '.instance.name == "aws-gpu-a" and .instance.provider == "aws" and .instance.engine == "terraform" and .state.last_operation.name == "provider.status" and (.packages.selected[] | select(.id == "ssh" and .state.status == "unknown")) and (.paths.INSTANCE_TF_STATE_BASE | test("aws-gpu-a/tf/state$"))' >/dev/null; then
   printf '  [OK] instance.status combines metadata, state, packages, and paths\n'
 else
   printf '  [FAIL] instance.status combined output mismatch\n' >&2

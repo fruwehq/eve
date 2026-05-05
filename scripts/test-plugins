@@ -167,7 +167,7 @@ package_status="$(
   EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-package-dispatch-test" \
     ./scripts/package-dispatch --registry "$FIXTURE" --instance dev-a --package docker --command status --dry-run
 )"
-if printf '%s\n' "$package_status" | jq -e '.package == "docker" and .command == "status" and .selected == true' >/dev/null; then
+if printf '%s\n' "$package_status" | jq -e '.package == "docker" and .command == "status" and .selected == true and .status == "unknown"' >/dev/null; then
   printf '  [OK] package status dry-run\n'
 else
   printf '  [FAIL] package status dry-run\n' >&2
@@ -346,7 +346,7 @@ dummy_hook="$(
     EGAME_DISABLE_STATE=1 \
     ./scripts/package-dispatch --registry "$FIXTURE" --instance dev-a --package dummy --command status
 )"
-if printf '%s\n' "$dummy_hook" | jq -e '.kind == "package-hook" and .package == "dummy" and .instance == "dev-a" and .command == "status"' >/dev/null; then
+if printf '%s\n' "$dummy_hook" | jq -e '.kind == "package-hook" and .package == "dummy" and .instance == "dev-a" and .command == "status" and .status == "installed"' >/dev/null; then
   printf '  [OK] package plugin command folder hook runs\n'
 else
   printf '  [FAIL] package plugin command folder hook runs\n' >&2
@@ -451,11 +451,24 @@ EGAME_STATE_DIR="$state_dir" \
   EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-package-dispatch-test" \
   ./scripts/package-dispatch --registry "$FIXTURE" --instance dev-a --package docker --command status >/dev/null
 recorded_state="$(EGAME_STATE_DIR="$state_dir" ./scripts/instance-state --instance dev-a --get)"
-if printf '%s\n' "$recorded_state" | jq -e '.last_operation.name == "package.status" and .last_operation.status == "succeeded" and .package_state.docker.status == "checked" and ([.operation_history[-2].status, .operation_history[-1].status] == ["running", "succeeded"])' >/dev/null; then
+if printf '%s\n' "$recorded_state" | jq -e '.last_operation.name == "package.status" and .last_operation.status == "succeeded" and .package_state.docker.status == "unknown" and ([.operation_history[-2].status, .operation_history[-1].status] == ["running", "succeeded"])' >/dev/null; then
   printf '  [OK] package dispatch records state\n'
 else
   printf '  [FAIL] package dispatch records state\n' >&2
   printf '%s\n' "$recorded_state" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+EGAME_PLUGIN_ROOTS="$PLUGIN_FIXTURE" \
+  EGAME_STATE_DIR="$state_dir" \
+  EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-package-dispatch-test" \
+  ./scripts/package-dispatch --registry "$FIXTURE" --instance dev-a --package dummy --command status >/dev/null
+hook_status_state="$(EGAME_STATE_DIR="$state_dir" ./scripts/instance-state --instance dev-a --get)"
+if printf '%s\n' "$hook_status_state" | jq -e '.package_state.dummy.status == "installed"' >/dev/null; then
+  printf '  [OK] package dispatch records hook status contract\n'
+else
+  printf '  [FAIL] package dispatch hook status mismatch\n' >&2
+  printf '%s\n' "$hook_status_state" >&2
   FAIL=$((FAIL + 1))
 fi
 

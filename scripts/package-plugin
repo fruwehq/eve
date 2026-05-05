@@ -54,8 +54,9 @@ if ENV["EGAME_PLUGIN_DRY_RUN"] == "1"
     "profile" => profile,
     "selected" => selected,
     "os_family" => os_family,
+    "status" => command == "status" ? "unknown" : nil,
     "dry_run" => true
-  })
+  }.compact)
   exit 0
 end
 
@@ -69,7 +70,8 @@ when "status"
     "package" => package_id,
     "profile" => profile,
     "selected" => selected,
-    "status" => selected ? "selected" : "not-selected"
+    "os_family" => os_family,
+    "status" => "unknown"
   })
 when "install"
   if os_family == "ubuntu"

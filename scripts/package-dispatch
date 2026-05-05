@@ -44,6 +44,8 @@ def record_state(instance_name, operation, status, package_id, package_state = n
   system(*cmd, out: File::NULL, err: File::NULL)
 end
 
+PACKAGE_STATUS_VALUES = %w[installed missing unknown failed].freeze
+
 def run_plugin(plugin, command, resolved, dry_run)
   spec = plugin.fetch("commands")[command]
   raise "package plugin #{plugin["id"]} has no command: #{command}" unless spec
@@ -56,6 +58,7 @@ def run_plugin(plugin, command, resolved, dry_run)
   env["EGAME_PLUGIN_DRY_RUN"] = "1" if dry_run
 
   cmd = command_vector(plugin, spec)
+  out = nil
   Open3.popen3(env, *cmd, chdir: ROOT) do |stdin, stdout, stderr, wait_thr|
     stdin.write(JSON.generate(resolved))
     stdin.close
@@ -65,6 +68,25 @@ def run_plugin(plugin, command, resolved, dry_run)
     print out
     raise "package command failed: #{command}" unless wait_thr.value.success?
   end
+  out
+end
+
+def package_status_from_output(output)
+  return nil if output.nil? || output.empty?
+
+  output.each_line.reverse_each do |line|
+    line = line.strip
+    next if line.empty?
+
+    begin
+      parsed = JSON.parse(line)
+    rescue JSON::ParserError
+      next
+    end
+    status = parsed["status"]
+    return status if PACKAGE_STATUS_VALUES.include?(status)
+  end
+  nil
 end
 
 instance_name = nil
@@ -141,18 +163,19 @@ begin
 
   record_state(instance_name, "package.#{command}", "running", package_id) unless dry_run
 
+  output = nil
   if command == "reinstall" && !plugin.fetch("commands").key?("reinstall")
     run_plugin(plugin, "down", resolved, dry_run)
-    run_plugin(plugin, "install", resolved, dry_run)
+    output = run_plugin(plugin, "install", resolved, dry_run)
   else
-    run_plugin(plugin, command, resolved, dry_run)
+    output = run_plugin(plugin, command, resolved, dry_run)
   end
 
   package_state = case command
                   when "install" then "installed"
                   when "down" then "removed"
                   when "reinstall" then "reinstalled"
-                  else "checked"
+                  else package_status_from_output(output) || "unknown"
                   end
   record_state(instance_name, "package.#{command}", "succeeded", package_id, package_state) unless dry_run
 rescue StandardError => e

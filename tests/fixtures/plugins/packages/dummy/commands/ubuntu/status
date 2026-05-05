@@ -4,7 +4,7 @@ set -eu
 payload="$(cat)"
 case "$payload" in
   *'"name":"dev-a"'*)
-    printf '{"kind":"package-hook","package":"%s","command":"status","instance":"%s","os_family":"ubuntu"}\n' \
+    printf '{"kind":"package-hook","package":"%s","command":"status","instance":"%s","os_family":"ubuntu","status":"installed"}\n' \
       "${EGAME_PACKAGE_PLUGIN:-}" "${EGAME_INSTANCE_NAME:-}"
     ;;
   *)
