@@ -445,6 +445,37 @@ else
   FAIL=$((FAIL + 1))
 fi
 
+tmp_bin="$(mktemp -d "${TMPDIR:-/tmp}/egame-integration-bin.XXXXXX")"
+cat >"$tmp_bin/make" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+target=""
+for arg in "$@"; do
+  case "$arg" in
+    --no-print-directory) ;;
+    *) target="$arg"; break ;;
+  esac
+done
+printf 'stub live step: %s\n' "$target"
+SH
+chmod +x "$tmp_bin/make"
+integration_report="$tmp_overlay_dir/integration-live-report.json"
+integration_live_out="$(
+  YES=1 PATH="$tmp_bin:$PATH" EGAME_INSTANCE_REGISTRY="$FIXTURE" \
+    ./scripts/integration-test --live --instance dev-a --report "$integration_report"
+)"
+if printf '%s\n' "$integration_live_out" | grep -q '^== dev-a: validate ==$' &&
+  printf '%s\n' "$integration_live_out" | grep -q '^stub live step: instance.validate$' &&
+  [ -f "$integration_report" ] &&
+  jq -e '.instances[0].status == "passed" and .instances[0].steps[0].output == "stub live step: instance.validate"' "$integration_report" >/dev/null; then
+  printf '  [OK] integration-test live mode streams and records step output\n'
+else
+  printf '  [FAIL] integration-test live mode streams and records step output\n' >&2
+  printf '%s\n' "$integration_live_out" >&2
+  [ -f "$integration_report" ] && cat "$integration_report" >&2
+  FAIL=$((FAIL + 1))
+fi
+
 state_target="$(EGAME_STATE_DIR="$tmp_overlay_dir/state" make --no-print-directory instance.state INSTANCE=aws-gpu-a 2>/dev/null)"
 if printf '%s\n' "$state_target" | jq -e '.last_operation.name == "provider.status"' >/dev/null; then
   printf '  [OK] make target exposes local instance state\n'

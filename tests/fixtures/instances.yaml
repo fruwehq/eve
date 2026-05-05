@@ -21,7 +21,7 @@ instances:
     recipe: truenas-ubuntu-all
     overrides:
       disk_gb: 64
-      vcpus: 4
+      vcpus: 1
 
   - name: rpi-all-a
     recipe: rpi-ubuntu-all

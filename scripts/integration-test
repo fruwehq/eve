@@ -30,6 +30,27 @@ def run_capture(env, *cmd)
   }
 end
 
+def run_stream(env, *cmd)
+  output = +""
+  status = nil
+
+  Open3.popen2e(env, *cmd, chdir: ROOT) do |_stdin, stdout_err, wait_thr|
+    stdout_err.each_line do |line|
+      output << line
+      print line
+      $stdout.flush
+    end
+    status = wait_thr.value
+  end
+
+  {
+    "command" => cmd.join(" "),
+    "status" => status&.success? ? "passed" : "failed",
+    "exit_code" => status&.exitstatus,
+    "output" => output.strip
+  }
+end
+
 def run_json(env, *cmd)
   result = run_capture(env, *cmd)
   raise result["output"] unless result["status"] == "passed"
@@ -151,7 +172,10 @@ plans.each do |plan|
   end
 
   commands.each do |name, *cmd|
-    result = run_capture(env, *cmd)
+    puts
+    puts "== #{instance}: #{name} =="
+    puts "$ #{cmd.join(" ")}"
+    result = run_stream(env, *cmd)
     result["name"] = name
     entry.fetch("steps") << result
     break if result["status"] != "passed"

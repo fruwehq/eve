@@ -62,7 +62,11 @@ make package.unselect INSTANCE=dev-a PACKAGE=xpra
 ```
 
 The current v3 slice resolves concrete instances while preserving the existing
-provider execution layer. `INSTANCE=` works by generating a local profile
+provider execution layer. The catalog `profiles` section remains supported as
+the compatibility source for existing `PROFILE=` workflows and as built-in
+recipe definitions for `INSTANCE=` creation, but new UI/orchestration work
+should treat concrete instances as the primary user-facing object. `INSTANCE=`
+works by generating a local profile
 overlay under `.generated/instances/<name>/` and reusing the profile-backed
 scripts through provider plugins. Terraform-backed instances now get
 instance-scoped backend roots and `TF_DATA_DIR` paths under

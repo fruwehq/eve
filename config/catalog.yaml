@@ -90,7 +90,10 @@ machines:
     defaults:
       cpu_cores: 4
       cpu_mode: HOST-PASSTHROUGH
-      vcpus: 2
+      # TrueNAS `vcpus` is socket count, while `cpu_cores` is cores per socket.
+      # Keep the default topology at 1 socket * 4 cores so QEMU/KVM exposes 4
+      # CPUs instead of the previous 2 * 4 = 8 CPU topology.
+      vcpus: 1
       memory_mb: 8192
       disk_gb: 30
       network: br0
