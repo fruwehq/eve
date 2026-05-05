@@ -9,19 +9,9 @@ Write-Host "#########################################################"
 # the entire virtual desktop - which is now VDD's resolution alone.  We just
 # ensure Sunshine has no stale output_name override and restart it.
 
-$confPath = 'C:\Program Files\Sunshine\config\sunshine.conf'
-$exePath  = 'C:\Program Files\Sunshine\sunshine.exe'
+. "$PSScriptRoot\..\lib\sunshine.ps1"
 
-function Restart-Sunshine {
-    $svc = Get-Service -Name 'SunshineService' -ErrorAction SilentlyContinue
-    if ($svc) {
-        Restart-Service -Name 'SunshineService' -Force
-        return
-    }
-    Get-Process -Name 'sunshine' -ErrorAction SilentlyContinue | Stop-Process -Force
-    Start-Sleep -Seconds 2
-    Start-Process -FilePath $exePath -WindowStyle Hidden
-}
+$confPath = 'C:\Program Files\Sunshine\config\sunshine.conf'
 
 $markerPath = 'C:\Users\Administrator\provision\state\display-config-done.flag'
 if (-not (Test-Path $markerPath)) {
