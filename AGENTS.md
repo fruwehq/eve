@@ -44,10 +44,11 @@ config/
   catalog.local.yaml          # Personal overrides (git-ignored, merged over base)
 modules/
   aws/ec2/                    # AWS EC2 instance + VPC + security group
-  vultr/instance.tm.hcl       # os_family-aware Vultr module (Windows script vs Linux cloud-init)
+  gcp/compute/                # GCP Compute Engine instance + firewall
   truenas/vm.tm.hcl           # truenas_zvol + cloud-init + truenas_vm
+  vultr/instance.tm.hcl       # os_family-aware Vultr module (Windows script vs Linux cloud-init)
 stacks/
-  aws/        truenas/        vultr/       # 10-shared (networking) + 20-services per provider
+  aws/        gcp/        truenas/        vultr/       # provider stacks
 scripts/
   catalog-options             # List provider/platform/content choices
   profile-resolve             # Lower-level compatibility resolver for generated overlays
@@ -59,7 +60,7 @@ scripts/
   start / stop / status       # Power on/off and status for all providers
   instance-password            # Display the instance's default password (Windows)
   tf-init / tf-plan / tf-apply / tf-destroy  # Terraform dispatchers used by provider plugins
-  vagrant-up / vagrant-destroy  # Vagrant dispatchers (for local-* providers)
+  vagrant-up / vagrant-destroy  # Vagrant dispatchers for local-qemu
   truenas-cloudinit-upload    # Generates NoCloud seed ISO and uploads to TrueNAS REST API
   truenas-cloudinit-delete    # Removes cloud-init ISO from TrueNAS on destroy
   test / test-catalog / test-instances / test-lint  # Test suite
@@ -116,8 +117,8 @@ This project provisions environments from scratch — we control the OS, install
 
 Machine entries declare a `kind:` field. Current supported kinds:
 
-- `kind: vm` — disposable VM lifecycle (aws, vultr, truenas, local-virtualbox, local-vmware). `up` creates, `down` deletes.
-- `kind: metal` — persistent hardware (planned: raspberry-pi). `down` tears down managed workloads, **not** the machine. Don't force metal targets through VM lifecycle assumptions.
+- `kind: vm` — disposable VM lifecycle (`aws`, `gcp`, `vultr`, `truenas`, `local-qemu`). `up` creates, `down` deletes.
+- `kind: metal` — persistent hardware (`raspberry-pi`). `down` tears down managed workloads, **not** the machine. Don't force metal targets through VM lifecycle assumptions.
 
 See [docs/raspberry-pi-provider.md](docs/raspberry-pi-provider.md) for the metal design guardrails.
 
@@ -148,7 +149,7 @@ Adding a new Linux step:
 
 - **catalog** (`test-catalog`) — validates provider/platform/content choice emission and provider-specific OS image metadata gating.
 - **instances** (`test-instances`) — validates local instance registry fixtures, generated overlays, provider dispatch routing, and state contracts.
-- **terraform** (`test-terraform`) — `terramate generate` + `terraform init -backend=false` + `terraform validate` across `aws-services`, `vultr-services`, `truenas-services`. Uses a fake `MY_IP` and a tempfile SSH key. No cloud credentials required.
+- **terraform** (`test-terraform`) — `terramate generate` + `terraform init -backend=false` + `terraform validate` across `aws-services`, `gcp-services`, `vultr-services`, and `truenas-services`. Uses a fake `MY_IP` and a tempfile SSH key. No cloud credentials required.
 - **shellcheck** (`test-shellcheck`) — runs `shellcheck -x --source-path=SCRIPTDIR` over every shell script with a bash/sh shebang in `scripts/` and `linux/provision/`.
 - **python** (`test-python`) — runs ruff and strict mypy for Python TUI code.
 - **lint** (`test-lint`) — checks Ruby syntax, YAML syntax, Terraform formatting, and Terramate formatting.

@@ -10,6 +10,7 @@ create billable or local VMs.
 ```bash
 scripts/integration-test --instance linux-smoke --instance windows-smoke
 scripts/integration-test --instance linux-smoke --instance windows-smoke --json
+scripts/integration-test --instance linux-smoke --all-packages --json
 ```
 
 Recommended instance shape:
@@ -37,6 +38,11 @@ The runner performs:
 6. `make package.status` for every selected package
 7. `make down` cleanup for each tested instance
 
+With `--all-packages`, the runner additionally inserts
+`make package.install` for every installable package supported by the resolved
+OS family, architecture, and version, then status-checks the selected and
+smoked packages.
+
 It writes a JSON report under `tmp/integration-report-*.json`. Give that report
 to an LLM to summarize failures, propose next commands, or compare Linux versus
 Windows readiness. Use `--no-cleanup` or `EGAME_INTEGRATION_CLEANUP=0` when you
@@ -55,6 +61,16 @@ The equivalent make target is:
 ```bash
 YES=1 DELETE_INSTANCES=1 make integration.test INSTANCES=linux-smoke,windows-smoke
 ```
+
+For the heavier package sweep:
+
+```bash
+YES=1 DELETE_INSTANCES=1 make integration.packages INSTANCES=linux-smoke,windows-smoke
+```
+
+Package status is a necessary smoke signal, not a complete usability proof. It
+confirms the package-specific probe reports `installed`; remote GUI packages
+still need their host-side package action or a manual client connection check.
 
 ## Manual Checks
 

@@ -6,17 +6,6 @@
 >
 > Planned runtime notes: [docs/raspberry-pi-provider.md](docs/raspberry-pi-provider.md)
 
-```bash
-docker run -it mcr.microsoft.com/dotnet/sdk:9.0 pwsh
-
-ssh vultr
-
-ssh vultr 'Remove-Item -Recurse -Force C:\provision\*'
-scp -r ~/src/personal/ephemeral-cloud-gaming/windows/provision/* vultr:/C:/provision/
-
-ssh vultr "pwsh C:\provision\bootstrap.ps1"
-```
-
 ## v3 instance workflow
 
 v3 introduces concrete local instances selected from provider/platform catalog
@@ -42,7 +31,7 @@ make instance.validate INSTANCE=dev-a
 # Browse and operate instances from the optional Textual TUI
 make tui
 
-# Run existing profile-oriented targets through a generated instance overlay
+# Run lifecycle targets through the selected concrete instance
 make init INSTANCE=dev-a
 make env INSTANCE=dev-a
 make provision INSTANCE=dev-a
@@ -66,7 +55,7 @@ init methods, locations, bundles, packages, and plugins; `.egame/instances.yaml`
 defines concrete local instances composed from those catalog entries. Provider
 and package plugins receive resolved instance JSON, and legacy profile-shaped
 overlays are generated only as an internal compatibility detail for lower-level
-provider scripts. Terraform-backed instances now get
+provider scripts.
 
 The built-in Linux Docker package installs Docker in rootless mode. The daemon
 runs as the VM user through `systemd --user`, and `DOCKER_HOST` points at the
@@ -111,14 +100,17 @@ Instance state contracts are documented in [docs/state.md](docs/state.md).
 Manual and AI-assisted live test flow is documented in
 [docs/integration-testing.md](docs/integration-testing.md). Start with
 `make integration.plan INSTANCES=<linux>,<windows>`; live runs require
-`YES=1 make integration.test INSTANCES=<linux>,<windows>`.
+`YES=1 make integration.test INSTANCES=<linux>,<windows>`. For a heavier
+package sweep, use
+`YES=1 make integration.packages INSTANCES=<linux>,<windows>` to install and
+status-check every installable package supported by each instance OS/arch.
 Optional host-side AI agent sandboxing is documented in
 [docs/ai-sandboxes.md](docs/ai-sandboxes.md).
 
 The optional `make tui` target opens a Textual instance manager for browsing
 instances, combined state, package state, and safe provider/package actions.
-Install Textual with `python3 -m pip install textual` when you want the TUI;
-the rest of the v3 command surface has no Python package dependency.
+Use `poetry install` once to install the optional Python dependencies; the rest
+of the v3 command surface has no Python package dependency.
 
 Package plugins may provide host-side command hooks at
 `commands/<os_family>/<install|status|down>` or

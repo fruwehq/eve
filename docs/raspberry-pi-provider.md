@@ -2,7 +2,7 @@
 
 ## Why this fits the repo
 
-The current v2 catalog already separates:
+The current v3 catalog separates:
 
 - machine/provider runtime
 - OS image
