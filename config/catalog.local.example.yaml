@@ -3,7 +3,7 @@
 #
 # Notes:
 # - Entries merge by logical keys:
-#   machines.name, oses.id, inits.id, packages.id, bundles.id, locations.name, profiles.name
+#   machines.name, oses.id, inits.id, packages.id, bundles.id, locations.name, recipes.name
 # - Matching entries are replaced/updated.
 # - New entries are appended.
 
@@ -12,7 +12,7 @@ locations:
     aws:
       availability_zone: ap-northeast-1c
 
-profiles:
+recipes:
   - name: aws-ubuntu-dev-headless
     lifecycle:
       ttl_hours: 336

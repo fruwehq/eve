@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# Run non-Python lint and syntax checks.
+
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+FAIL=0
+
+printf '  -- ruby syntax --\n'
+while IFS= read -r file; do
+  if ! ruby -c "$file" >/dev/null; then
+    FAIL=$((FAIL + 1))
+  fi
+done < <(
+  find scripts -type f -print |
+    while IFS= read -r file; do
+      head -c 80 "$file" | grep -qE '^#!.*ruby' && printf '%s\n' "$file"
+    done
+)
+
+printf '  -- yaml syntax --\n'
+YAML_FILES=()
+while IFS= read -r file; do
+  YAML_FILES+=("$file")
+done < <(find .github config plugins tests -type f \( -name '*.yaml' -o -name '*.yml' \) | sort)
+if ! ruby -ryaml -e '
+  ARGV.each do |path|
+    YAML.safe_load(File.read(path), permitted_classes: [], aliases: true)
+  rescue StandardError => e
+    warn "#{path}: #{e.class}: #{e.message}"
+    exit 1
+  end
+' "${YAML_FILES[@]}"; then
+  FAIL=$((FAIL + 1))
+fi
+
+printf '  -- terraform fmt --\n'
+if ! terraform fmt -check -recursive -no-color modules stacks >/dev/null; then
+  terraform fmt -check -recursive -no-color modules stacks >&2 || true
+  FAIL=$((FAIL + 1))
+fi
+
+printf '  -- terramate fmt --\n'
+tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/egame-terramate-fmt.XXXXXX")"
+trap 'rm -rf "$tmp_dir"' EXIT
+while IFS= read -r file; do
+  tmp_file="$tmp_dir/${file//\//__}"
+  cp "$file" "$tmp_file"
+  terramate fmt --quiet "$tmp_file"
+  if ! cmp -s "$file" "$tmp_file"; then
+    printf '  [FAIL] terramate fmt: %s\n' "$file" >&2
+    diff -u "$file" "$tmp_file" >&2 || true
+    FAIL=$((FAIL + 1))
+  fi
+done < <(find . -type f -name '*.tm.hcl' -not -path './.terraform-cache-dir/*' | sort)
+
+if [ "$FAIL" -ne 0 ]; then
+  exit 1
+fi
+
+printf '  [OK] non-Python lint and syntax checks pass\n'

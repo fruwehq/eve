@@ -112,7 +112,7 @@ fi
 record_state "running" "provisioning"
 
 if [ "$FORCE" = "1" ]; then
-  if ! make --no-print-directory provision.clear-state PROFILE="$INSTANCE_NAME" INSTANCE=; then
+  if ! ./scripts/instance-run provision.clear-state "$INSTANCE_NAME"; then
     record_state "failed" "error" "provision.clear-state failed"
     exit 1
   fi

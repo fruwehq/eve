@@ -99,7 +99,11 @@ def env_or(name, fallback)
 end
 
 def find_recipe(catalog, name)
-  by_key(catalog, "recipes", "name", name) || by_key(catalog, "profiles", "name", name)
+  recipe = by_key(catalog, "recipes", "name", name)
+  profile = by_key(catalog, "profiles", "name", name)
+  return deep_merge(recipe, profile) if recipe && profile
+
+  profile || recipe
 end
 
 def resolve_bundle_packages(catalog, bundle_ids)

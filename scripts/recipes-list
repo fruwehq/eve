@@ -4,13 +4,43 @@ set -eu
 # List reusable VM recipes from the catalog.
 # Usage: scripts/recipes-list [--with-details]
 
+CATALOG_PATH="config/catalog.yaml"
+LOCAL_CATALOG_PATH="config/catalog.local.yaml"
+
 DETAILS=0
 if [ "${1:-}" = "--with-details" ]; then
   DETAILS=1
 fi
 
+extract_names() {
+  grep -A 1000 -E '^(recipes|profiles):' "$1" | grep '^\s*- name:' | sed 's/.*name: *//'
+}
+
+RECIPE_NAMES=""
+for path in "$CATALOG_PATH" "$LOCAL_CATALOG_PATH"; do
+  if [ -f "$path" ]; then
+    for name in $(extract_names "$path"); do
+      case " $RECIPE_NAMES " in
+        *" $name "*) ;;
+        *) RECIPE_NAMES="$RECIPE_NAMES $name" ;;
+      esac
+    done
+  fi
+done
+
+RECIPE_NAMES=$(echo "$RECIPE_NAMES" | sed 's/^ //')
+
 if [ "$DETAILS" -eq 1 ]; then
-  ./scripts/profiles-list --with-details | sed '1s/PROFILE/RECIPE/;2s/-------/------/'
+  printf "%-35s %-30s %-30s %-30s\n" "RECIPE" "MACHINE" "OS" "LOCATION"
+  printf "%-35s %-30s %-30s %-30s\n" "------" "-------" "--" "--------"
+  for name in $RECIPE_NAMES; do
+    machine=$(grep -A 8 "\\- name: $name" "$CATALOG_PATH" "$LOCAL_CATALOG_PATH" 2>/dev/null | grep 'machine:' | head -1 | sed 's/.*machine: *//')
+    os=$(grep -A 8 "\\- name: $name" "$CATALOG_PATH" "$LOCAL_CATALOG_PATH" 2>/dev/null | grep 'os:' | head -1 | sed 's/.*os: *//')
+    location=$(grep -A 8 "\\- name: $name" "$CATALOG_PATH" "$LOCAL_CATALOG_PATH" 2>/dev/null | grep 'location:' | head -1 | sed 's/.*location: *//')
+    printf "%-35s %-30s %-30s %-30s\n" "$name" "${machine:--}" "${os:--}" "${location:--}"
+  done
 else
-  ./scripts/profiles-list
+  for name in $RECIPE_NAMES; do
+    echo "$name"
+  done
 fi

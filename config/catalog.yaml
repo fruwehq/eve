@@ -234,9 +234,9 @@ locations:
       pool: main
 
 # -----------------------------------------------------------------------------
-# Profile catalog (composition entries)
+# Recipe catalog (composition entries)
 # -----------------------------------------------------------------------------
-profiles:
+recipes:
   - name: aws-ubuntu-dev-headless
     machine: aws-cheap-x86
     os: ubuntu-26.04-amd64

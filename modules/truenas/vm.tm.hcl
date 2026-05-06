@@ -79,11 +79,11 @@ generate_hcl "z_truenas_vm.tf" {
     }
 
     locals {
-      vm_name    = join("", regexall("[a-zA-Z0-9]+", var.profile_name))
-      base_dir   = var.vm_base_dir
-      iso_path   = "${local.base_dir}/iso/${local.vm_name}-${var.os_id}-cidata.iso"
-      images_dir = "${local.base_dir}/images"
-      zvol_path  = "${var.vm_zvol_prefix}/${local.vm_name}"
+      vm_name     = join("", regexall("[a-zA-Z0-9]+", var.profile_name))
+      base_dir    = var.vm_base_dir
+      iso_path    = "${local.base_dir}/iso/${local.vm_name}-${var.os_id}-cidata.iso"
+      images_dir  = "${local.base_dir}/images"
+      zvol_path   = "${var.vm_zvol_prefix}/${local.vm_name}"
       zvol_device = "/dev/zvol/${var.vm_pool}/${local.zvol_path}"
     }
 

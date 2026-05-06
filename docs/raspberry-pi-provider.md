@@ -68,7 +68,7 @@ locations:
       ssh_port: 22
       ssh_user: ubuntu
 
-profiles:
+recipes:
   - name: rpi-ubuntu-dev-headless
     machine: raspberry-pi-5-dev
     os: ubuntu-26.04-server-arm64
@@ -112,7 +112,7 @@ That is consistent with the repo's move from gaming-only infrastructure to a gen
 
 ## Good workload fit
 
-Good candidates for Raspberry Pi profiles here:
+Good candidates for Raspberry Pi recipes here:
 
 - `dev-sandbox-core`
 - Docker-based experimentation
@@ -122,7 +122,7 @@ Good candidates for Raspberry Pi profiles here:
 Less ideal as an initial target:
 
 - Windows workloads
-- GPU-heavy gaming/streaming profiles
+- GPU-heavy gaming/streaming recipes
 - assumptions that all providers support disposable VM lifecycle
 
 ## Recommended implementation order
