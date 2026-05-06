@@ -699,10 +699,11 @@ else
 fi
 
 EGAME_STATE_DIR="$state_dir" \
+  EGAME_PACKAGE_STATUS_SSH="$fake_ssh" \
   EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-package-dispatch-test" \
   ./scripts/package-dispatch --registry "$FIXTURE" --instance dev-a --package docker --command status >/dev/null
 recorded_state="$(EGAME_STATE_DIR="$state_dir" ./scripts/instance-state --instance dev-a --get)"
-if printf '%s\n' "$recorded_state" | jq -e '.last_operation.name == "package.status" and .last_operation.status == "succeeded" and .package_state.docker.status == "unknown" and ([.operation_history[-2].status, .operation_history[-1].status] == ["running", "succeeded"])' >/dev/null; then
+if printf '%s\n' "$recorded_state" | jq -e '.last_operation.name == "package.status" and .last_operation.status == "succeeded" and .package_state.docker.status == "installed" and ([.operation_history[-2].status, .operation_history[-1].status] == ["running", "succeeded"])' >/dev/null; then
   printf '  [OK] package dispatch records state\n'
 else
   printf '  [FAIL] package dispatch records state\n' >&2

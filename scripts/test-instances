@@ -512,7 +512,7 @@ if EGAME_INSTANCE_REGISTRY="$FIXTURE" EGAME_INSTANCE_WORKDIR="$tmp_overlay_dir/p
       ./scripts/instance-state --instance dev-a --get
   )"
   if printf '%s\n' "$provision_state" |
-    jq -e '.last_operation.name == "provision" and .last_operation.status == "succeeded" and .provision_state == "provisioned" and ([.operation_history[-2].status, .operation_history[-1].status] == ["running", "succeeded"])' >/dev/null; then
+    jq -e '.last_operation.name == "provision" and .last_operation.status == "succeeded" and .provision_state == "provisioned" and .operation_history[0].status == "running" and .operation_history[-1].status == "succeeded" and .package_state.rustdesk.status == "installed" and .package_state.vnc.status == "installed"' >/dev/null; then
     printf '  [OK] instance provision records provision state\n'
   else
     printf '  [FAIL] instance provision state mismatch\n' >&2

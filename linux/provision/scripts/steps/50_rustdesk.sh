@@ -42,6 +42,42 @@ autologin-user-timeout=0
 user-session=$desktop_session
 EOF
 
+write_display_mode_helper() {
+  local output_name="$1"
+  local mode_name="$2"
+  local modeline="$3"
+  mkdir -p "$HOME/.local/bin" "$HOME/.config/autostart"
+  cat > "$HOME/.local/bin/egame-set-display-mode" <<EOF
+#!/usr/bin/env sh
+set -eu
+export DISPLAY="\${DISPLAY:-:0}"
+export XAUTHORITY="\${XAUTHORITY:-$HOME/.Xauthority}"
+if ! xrandr --query >/dev/null 2>&1; then
+  exit 0
+fi
+EOF
+  if [ -n "$modeline" ]; then
+    cat >> "$HOME/.local/bin/egame-set-display-mode" <<EOF
+xrandr --newmode $modeline 2>/dev/null || true
+xrandr --addmode "$output_name" "$mode_name" 2>/dev/null || true
+EOF
+  fi
+  cat >> "$HOME/.local/bin/egame-set-display-mode" <<EOF
+xrandr --output "$output_name" --mode "$mode_name" 2>/dev/null || true
+EOF
+  chmod +x "$HOME/.local/bin/egame-set-display-mode"
+
+  cat > "$HOME/.config/autostart/egame-display-mode.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=Set display mode
+Exec=$HOME/.local/bin/egame-set-display-mode
+Hidden=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+EOF
+}
+
 if [ "${PROVIDER:-}" = "raspberry-pi" ]; then
   hdmi_connector="${RASPBERRY_PI_HDMI_CONNECTOR:-HDMI-A-1}"
   if [ -n "${RASPBERRY_PI_HDMI_MODE:-}" ]; then
@@ -108,36 +144,50 @@ Section "Screen"
 EndSection
 EOF
 
-  mkdir -p "$HOME/.config/autostart"
-  cat > "$HOME/.local/bin/egame-set-display-mode" <<EOF
-#!/usr/bin/env sh
-set -eu
-export DISPLAY="\${DISPLAY:-:0}"
-export XAUTHORITY="\${XAUTHORITY:-$HOME/.Xauthority}"
-if ! xrandr --query >/dev/null 2>&1; then
-  exit 0
-fi
-EOF
-  if [ -n "$modeline" ]; then
-    cat >> "$HOME/.local/bin/egame-set-display-mode" <<EOF
-xrandr --newmode $modeline 2>/dev/null || true
-xrandr --addmode DUMMY0 "$mode_name" 2>/dev/null || true
-EOF
+  write_display_mode_helper "DUMMY0" "$mode_name" "$modeline"
+elif [ -n "${EPHEMERAL_DISPLAY_RESOLUTION:-}" ]; then
+  xrandr_mode="$EPHEMERAL_DISPLAY_RESOLUTION"
+  xrandr_width="${xrandr_mode%x*}"
+  xrandr_height="${xrandr_mode#*x}"
+  modeline=$(cvt "$xrandr_width" "$xrandr_height" 60 2>/dev/null | awk '/Modeline/ {$1=""; sub(/^ /, ""); print; exit}' || true)
+  if [ -z "$modeline" ]; then
+    modeline=$(gtf "$xrandr_width" "$xrandr_height" 60 2>/dev/null | awk '/Modeline/ {$1=""; sub(/^ /, ""); print; exit}' || true)
   fi
-  cat >> "$HOME/.local/bin/egame-set-display-mode" <<EOF
-xrandr --output DUMMY0 --mode "$mode_name" 2>/dev/null || true
-EOF
-  chmod +x "$HOME/.local/bin/egame-set-display-mode"
+  if [ -n "$modeline" ]; then
+    mode_name=$(printf '%s\n' "$modeline" | awk '{print $1}' | tr -d '"')
+    modeline_config="    Modeline $modeline"
+  else
+    mode_name="$xrandr_mode"
+    modeline_config=""
+  fi
 
-  cat > "$HOME/.config/autostart/egame-display-mode.desktop" <<EOF
-[Desktop Entry]
-Type=Application
-Name=Set display mode
-Exec=$HOME/.local/bin/egame-set-display-mode
-Hidden=false
-NoDisplay=true
-X-GNOME-Autostart-enabled=true
+  log "### 50_rustdesk: configuring Xorg virtual display ${xrandr_mode} for RustDesk"
+  sudo mkdir -p /etc/X11/xorg.conf.d
+  sudo rm -f /etc/X11/xorg.conf.d/20-ephemeral-virtual-display.conf
+  sudo tee /etc/X11/xorg.conf.d/20-ephemeral-virtual-display.conf >/dev/null <<EOF
+Section "Monitor"
+    Identifier "Virtual-1"
+${modeline_config}
+    Option "PreferredMode" "$mode_name"
+EndSection
+
+Section "Screen"
+    Identifier "Default Screen Section"
+    Monitor "Virtual-1"
+    SubSection "Display"
+        Depth 16
+        Virtual ${xrandr_width} ${xrandr_height}
+        Modes "$mode_name" "$xrandr_mode" "1920x1080" "1280x720" "1024x768" "800x600" "640x480"
+    EndSubSection
+    SubSection "Display"
+        Depth 24
+        Virtual ${xrandr_width} ${xrandr_height}
+        Modes "$mode_name" "$xrandr_mode" "1920x1080" "1280x720" "1024x768" "800x600" "640x480"
+    EndSubSection
+EndSection
 EOF
+
+  write_display_mode_helper "Virtual-1" "$mode_name" "$modeline"
 fi
 
 # LightDM's pam_succeed_if rule for the autologin path keys off the `autologin`

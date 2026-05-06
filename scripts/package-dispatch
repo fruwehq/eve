@@ -74,6 +74,18 @@ end
 def package_status_from_output(output)
   return nil if output.nil? || output.empty?
 
+  (output.length - 1).downto(0) do |index|
+    next unless output[index] == "{"
+
+    begin
+      parsed = JSON.parse(output[index..].strip)
+    rescue JSON::ParserError
+      next
+    end
+    status = parsed["status"]
+    return status if PACKAGE_STATUS_VALUES.include?(status)
+  end
+
   output.each_line.reverse_each do |line|
     line = line.strip
     next if line.empty?

@@ -25,6 +25,13 @@ if [ "$ENGINE" = "terraform" ]; then
   eval "$(./scripts/tf-env "$PROFILE")"
 fi
 
+TM_OUTPUT_FLAGS=(
+  --disable-safeguards=git-untracked
+  --disable-safeguards=git-uncommitted
+  --disable-safeguards=git-out-of-sync
+  --disable-safeguards=outdated-code
+)
+
 resolve_host_ip() {
   local host="$1"
   local ip
@@ -139,10 +146,10 @@ case "$ENGINE:$PROVIDER" in
     printf '%s\n' "$IP"
     ;;
   terraform:aws)
-    terramate run --quiet --tags="$TAGS-services" -- terraform output -raw public_ip
+    terramate run "${TM_OUTPUT_FLAGS[@]}" --quiet --tags="$TAGS-services" -- terraform output -raw public_ip
     ;;
   terraform:vultr)
-    terramate run --quiet --tags="$TAGS-services" -- terraform output -raw vultr_instance_main_ip
+    terramate run "${TM_OUTPUT_FLAGS[@]}" --quiet --tags="$TAGS-services" -- terraform output -raw vultr_instance_main_ip
     ;;
   terraform:truenas)
     ./scripts/env-require TRUENAS_SSH_USER
@@ -150,7 +157,7 @@ case "$ENGINE:$PROVIDER" in
     RESOLVED_TRUENAS_SSH_PORT=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^TRUENAS_SSH_PORT=/{print $2}')
     RESOLVED_TRUENAS_SSH_USER=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^TRUENAS_SSH_USER=/{print $2}')
 
-    VM_NAME=$(terramate run --quiet --tags="$TAGS-services" -- terraform output -raw truenas_vm_name)
+    VM_NAME=$(terramate run "${TM_OUTPUT_FLAGS[@]}" --quiet --tags="$TAGS-services" -- terraform output -raw truenas_vm_name)
     SSH_USER="${TRUENAS_SSH_USER:-$RESOLVED_TRUENAS_SSH_USER}"
     SSH_HOST="${TRUENAS_HOST:-$RESOLVED_TRUENAS_HOST}"
     if [ -z "$SSH_HOST" ]; then

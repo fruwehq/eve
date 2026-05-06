@@ -7,6 +7,51 @@ skip_unless_pkg sunshine
 
 log "### 60_sunshine: installing LizardByte Sunshine"
 
+install_sunshine_compat_libs() {
+  # The noble deb is built against Ubuntu 24.04 libs. On 26.04 (resolute) the
+  # ICU soname has bumped and symbol-versioned ICU 74 symbols are required.
+  # Install the real Noble runtime library rather than symlinking ICU 78, which
+  # loads but fails at runtime with missing UCNV_*_74 symbols.
+  # shellcheck disable=SC1091
+  codename=$(. /etc/os-release && echo "$VERSION_CODENAME")
+  if [ "$codename" = "noble" ] || [ "$codename" = "jammy" ]; then
+    return
+  fi
+
+  log "### 60_sunshine: installing Noble compatibility libraries for $codename"
+  case "$(dpkg --print-architecture)" in
+    amd64) multiarch="x86_64-linux-gnu" ;;
+    arm64) multiarch="aarch64-linux-gnu" ;;
+    armhf) multiarch="arm-linux-gnueabihf" ;;
+    *) multiarch="" ;;
+  esac
+  if [ -z "$multiarch" ]; then
+    log "### 60_sunshine: warn: no known multiarch lib dir for $(dpkg --print-architecture)"
+  fi
+  lib_dir="/usr/lib/$multiarch"
+  case "$(dpkg --print-architecture)" in
+    amd64)
+      icu_deb="libicu74_74.2-1ubuntu3.1_$(dpkg --print-architecture).deb"
+      download "https://archive.ubuntu.com/ubuntu/pool/main/i/icu/$icu_deb" "$DOWNLOADS_DIR/$icu_deb"
+      sudo rm -f "$lib_dir/libicuuc.so.74" "$lib_dir/libicui18n.so.74" "$lib_dir/libicudata.so.74" 2>/dev/null || true
+      sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "$DOWNLOADS_DIR/$icu_deb"
+      ;;
+    arm64)
+      icu_deb="libicu74_74.2-1ubuntu3.1_$(dpkg --print-architecture).deb"
+      download "https://ports.ubuntu.com/ubuntu-ports/pool/main/i/icu/$icu_deb" "$DOWNLOADS_DIR/$icu_deb"
+      sudo rm -f "$lib_dir/libicuuc.so.74" "$lib_dir/libicui18n.so.74" "$lib_dir/libicudata.so.74" 2>/dev/null || true
+      sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "$DOWNLOADS_DIR/$icu_deb"
+      ;;
+    *)
+      log "### 60_sunshine: warn: no libicu74 compatibility package configured for $(dpkg --print-architecture)"
+      ;;
+  esac
+  if [ -n "$multiarch" ] && [ -e "$lib_dir/libminiupnpc.so.21" ]; then
+    sudo ln -sf libminiupnpc.so.21 "$lib_dir/libminiupnpc.so.17"
+  fi
+  sudo ldconfig
+}
+
 if ! command -v sunshine >/dev/null 2>&1; then
   arch=$(dpkg --print-architecture)
   # shellcheck disable=SC1091
@@ -27,34 +72,11 @@ if ! command -v sunshine >/dev/null 2>&1; then
   deb="$DOWNLOADS_DIR/$asset"
   download "$url" "$deb"
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "$deb"
-
-  # The noble deb is built against Ubuntu 24.04 libs. On 26.04 (resolute) the
-  # sonames have bumped — create compatibility symlinks so the binary can load.
-  # shellcheck disable=SC1091
-  codename=$(. /etc/os-release && echo "$VERSION_CODENAME")
-  if [ "$codename" != "noble" ] && [ "$codename" != "jammy" ]; then
-    log "### 60_sunshine: patching shared-library sonames for $codename"
-    case "$(dpkg --print-architecture)" in
-      amd64) multiarch="x86_64-linux-gnu" ;;
-      arm64) multiarch="aarch64-linux-gnu" ;;
-      armhf) multiarch="arm-linux-gnueabihf" ;;
-      *) multiarch="" ;;
-    esac
-    if [ -z "$multiarch" ]; then
-      log "### 60_sunshine: warn: no known multiarch lib dir for $(dpkg --print-architecture)"
-    fi
-    lib_dir="/usr/lib/$multiarch"
-    if [ -n "$multiarch" ] && [ -e "$lib_dir/libminiupnpc.so.21" ]; then
-      sudo ln -sf libminiupnpc.so.21 "$lib_dir/libminiupnpc.so.17"
-    fi
-    if [ -n "$multiarch" ] && [ -e "$lib_dir/libicuuc.so.78" ]; then
-      sudo ln -sf libicuuc.so.78 "$lib_dir/libicuuc.so.74"
-    fi
-    sudo ldconfig
-  fi
 else
   log "sunshine already installed — skipping install"
 fi
+
+install_sunshine_compat_libs
 
 # Configure web UI to be reachable from outside localhost. Without this, the
 # host (or vagrant port-forwarder) can hit the port but Sunshine returns 401/403
@@ -146,6 +168,8 @@ SUN_XAUTHORITY="${XAUTHORITY:-$HOME/.Xauthority}"
 sudo loginctl enable-linger "$USER"
 systemctl --user enable sunshine 2>/dev/null || true
 systemctl --user add-wants default.target sunshine.service 2>/dev/null || true
+systemctl --user stop sunshine 2>/dev/null || true
+pkill -u "$USER" -x sunshine 2>/dev/null || true
 
 sunshine_display_ready() {
   DISPLAY="$SUN_DISPLAY" XAUTHORITY="$SUN_XAUTHORITY" xrandr --query >/dev/null 2>&1
@@ -168,8 +192,10 @@ start_sunshine_with_display() {
     "$HOME/.local/bin/egame-set-display-mode" || true
   fi
   systemctl --user import-environment DISPLAY XAUTHORITY XDG_RUNTIME_DIR 2>/dev/null || true
-  systemctl --user start sunshine 2>/dev/null || \
+  systemctl --user reset-failed sunshine 2>/dev/null || true
+  if ! systemctl --user start sunshine 2>/dev/null; then
     setsid nohup sunshine "$SUN_CONF" >>"$LOGS_DIR/sunshine.log" 2>&1 < /dev/null &
+  fi
 }
 
 if systemctl --user is-active sunshine >/dev/null 2>&1; then
@@ -179,6 +205,7 @@ if systemctl --user is-active sunshine >/dev/null 2>&1; then
   if [ -x "$HOME/.local/bin/egame-set-display-mode" ]; then
     "$HOME/.local/bin/egame-set-display-mode" || true
   fi
+  systemctl --user reset-failed sunshine 2>/dev/null || true
   systemctl --user restart sunshine 2>/dev/null || true
 elif [ -d "$XDG_RUNTIME_DIR" ] && { sunshine_display_ready || sunshine_kms_ready; }; then
   log "### 60_sunshine: starting sunshine on display $SUN_DISPLAY"
