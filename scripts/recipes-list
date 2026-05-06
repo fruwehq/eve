@@ -1,46 +1,86 @@
-#!/usr/bin/env sh
-set -eu
-
+#!/usr/bin/env ruby
 # List reusable VM recipes from the catalog.
-# Usage: scripts/recipes-list [--with-details]
 
-CATALOG_PATH="config/catalog.yaml"
-LOCAL_CATALOG_PATH="config/catalog.local.yaml"
+require "json"
+require "yaml"
 
-DETAILS=0
-if [ "${1:-}" = "--with-details" ]; then
-  DETAILS=1
-fi
+ROOT = File.expand_path("..", __dir__)
+CATALOG_PATHS = [
+  File.join(ROOT, "config/catalog.yaml"),
+  File.join(ROOT, "config/catalog.local.yaml")
+].freeze
 
-extract_names() {
-  grep -A 1000 -E '^(recipes|profiles):' "$1" | grep '^\s*- name:' | sed 's/.*name: *//'
-}
+def usage
+  warn "Usage: scripts/recipes-list [--json] [--with-details]"
+end
 
-RECIPE_NAMES=""
-for path in "$CATALOG_PATH" "$LOCAL_CATALOG_PATH"; do
-  if [ -f "$path" ]; then
-    for name in $(extract_names "$path"); do
-      case " $RECIPE_NAMES " in
-        *" $name "*) ;;
-        *) RECIPE_NAMES="$RECIPE_NAMES $name" ;;
-      esac
-    done
-  fi
-done
+def load_any(path)
+  return {} unless File.exist?(path)
 
-RECIPE_NAMES=$(echo "$RECIPE_NAMES" | sed 's/^ //')
+  YAML.safe_load(File.read(path), permitted_classes: [], aliases: true) || {}
+end
 
-if [ "$DETAILS" -eq 1 ]; then
-  printf "%-35s %-30s %-30s %-30s\n" "RECIPE" "MACHINE" "OS" "LOCATION"
-  printf "%-35s %-30s %-30s %-30s\n" "------" "-------" "--" "--------"
-  for name in $RECIPE_NAMES; do
-    machine=$(grep -A 8 "\\- name: $name" "$CATALOG_PATH" "$LOCAL_CATALOG_PATH" 2>/dev/null | grep 'machine:' | head -1 | sed 's/.*machine: *//')
-    os=$(grep -A 8 "\\- name: $name" "$CATALOG_PATH" "$LOCAL_CATALOG_PATH" 2>/dev/null | grep 'os:' | head -1 | sed 's/.*os: *//')
-    location=$(grep -A 8 "\\- name: $name" "$CATALOG_PATH" "$LOCAL_CATALOG_PATH" 2>/dev/null | grep 'location:' | head -1 | sed 's/.*location: *//')
-    printf "%-35s %-30s %-30s %-30s\n" "$name" "${machine:--}" "${os:--}" "${location:--}"
-  done
-else
-  for name in $RECIPE_NAMES; do
-    echo "$name"
-  done
-fi
+json = false
+details = false
+
+args = ARGV.dup
+until args.empty?
+  case args.shift
+  when "--json"
+    json = true
+  when "--with-details"
+    details = true
+  when "-h", "--help"
+    usage
+    exit 0
+  else
+    usage
+    exit 2
+  end
+end
+
+recipes_by_name = {}
+
+CATALOG_PATHS.each do |path|
+  catalog = load_any(path)
+  entries = []
+  entries.concat(catalog["recipes"]) if catalog["recipes"].is_a?(Array)
+  # Lower-level compatibility overlays may still use the old key.
+  entries.concat(catalog["profiles"]) if catalog["profiles"].is_a?(Array)
+
+  entries.each do |entry|
+    next unless entry.is_a?(Hash)
+
+    name = entry["name"]
+    next if name.nil? || name.to_s.empty?
+
+    recipes_by_name[name.to_s] = {
+      "name" => name.to_s,
+      "machine" => entry["machine"],
+      "os" => entry["os"],
+      "location" => entry["location"]
+    }.compact
+  end
+end
+
+recipes = recipes_by_name.values
+
+if json
+  puts JSON.pretty_generate({ "recipes" => recipes })
+  exit 0
+end
+
+if details
+  printf "%-35s %-30s %-30s %-30s\n", "RECIPE", "MACHINE", "OS", "LOCATION"
+  printf "%-35s %-30s %-30s %-30s\n", "------", "-------", "--", "--------"
+  recipes.each do |recipe|
+    printf "%-35s %-30s %-30s %-30s\n",
+           recipe["name"],
+           recipe["machine"] || "-",
+           recipe["os"] || "-",
+           recipe["location"] || "-"
+  end
+  exit 0
+end
+
+recipes.each { |recipe| puts recipe["name"] }

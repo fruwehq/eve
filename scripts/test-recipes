@@ -21,6 +21,16 @@ unset RASPBERRY_PI_HOST SSH_PUBLIC_KEY_FILE \
 FAIL=0
 RECIPES=$(./scripts/recipes-list)
 
+recipes_json="$(./scripts/recipes-list --json)"
+if printf '%s\n' "$recipes_json" |
+  jq -e '(.recipes | type == "array") and any(.recipes[]; .name == "local-qemu-ubuntu-all" and .machine == "local-qemu-medium" and .os == "ubuntu-26.04-arm64")' >/dev/null; then
+  printf '  [OK] recipes-list emits structured JSON\n'
+else
+  printf '  [FAIL] recipes-list emits structured JSON\n' >&2
+  printf '%s\n' "$recipes_json" >&2
+  FAIL=$((FAIL + 1))
+fi
+
 for recipe in $RECIPES; do
   if ! ./scripts/profile-resolve --profile "$recipe" --validate >/dev/null 2>&1; then
     printf '  [FAIL] validate: %s\n' "$recipe" >&2

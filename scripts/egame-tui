@@ -67,7 +67,13 @@ def recipe_rows() -> list[dict[str, Any]]:
         rows = parsed.get("recipes", [])
         return rows if isinstance(rows, list) else []
     if isinstance(parsed, list):
-        return cast(list[dict[str, Any]], parsed)
+        result: list[dict[str, Any]] = []
+        for row in parsed:
+            if isinstance(row, str):
+                result.append({"name": row})
+            elif isinstance(row, dict):
+                result.append(cast(dict[str, Any], row))
+        return result
     return []
 
 
