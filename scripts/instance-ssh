@@ -67,7 +67,15 @@ else
   PRIV_KEY="${SSH_PRIVATE_KEY_FILE:-}"
 fi
 
-SSH_OPTS=(-o StrictHostKeyChecking=no -o ServerAliveInterval=10 -o WarnWeakCrypto=no-pq-kex)
+SSH_OPTS=(
+  -o StrictHostKeyChecking=no
+  -o ConnectTimeout=10
+  -o ConnectionAttempts=1
+  -o ServerAliveInterval=10
+  -o ServerAliveCountMax=3
+  -o WarnWeakCrypto=no-pq-kex
+)
+[ "${EPHEMERAL_SSH_BATCH:-0}" = "1" ] && SSH_OPTS+=(-o BatchMode=yes -o NumberOfPasswordPrompts=0)
 [ -n "$PRIV_KEY" ] && SSH_OPTS+=(-i "$PRIV_KEY" -o IdentitiesOnly=yes)
 if [ "$ENGINE:$PROVIDER" = "metal:raspberry-pi" ] && [ -n "${RASPBERRY_PI_HOST:-}" ] && [ "$IP" != "$RASPBERRY_PI_HOST" ]; then
   SSH_OPTS+=(-o "HostKeyAlias=$RASPBERRY_PI_HOST")

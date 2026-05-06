@@ -14,12 +14,11 @@ cd "$(git rev-parse --show-toplevel)"
 
 RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
 OS_FAMILY=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^OS_FAMILY=/{print $2}')
-OS_UI_MODE=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^OS_UI_MODE=/{print $2}')
 BUNDLE_PACKAGES=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^BUNDLE_PACKAGES=/{print $2}')
 PROFILE_NAME=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^PROFILE_NAME=/{print $2}')
 PROVIDER=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^PROVIDER=/{print $2}')
 
-echo "[provision] profile=$PROFILE os_family=$OS_FAMILY ui_mode=$OS_UI_MODE"
+echo "[provision] profile=$PROFILE os_family=$OS_FAMILY"
 
 ./scripts/ssh-wait "$PROFILE"
 
@@ -52,10 +51,9 @@ case "$OS_FAMILY" in
       _LINK=$(readlink /etc/localtime 2>/dev/null || true)
       _HOST_TZ=$(echo "$_LINK" | sed -n 's|.*/zoneinfo/||p')
     fi
-    # env file: sourced by runner.sh so steps see OS_UI_MODE / PROFILE_NAME etc.
+    # env file: sourced by runner.sh so steps see PROFILE_NAME and local config.
     cat > "$STAGE/state/env" <<EOF
 export OS_FAMILY="$OS_FAMILY"
-export OS_UI_MODE="$OS_UI_MODE"
 export PROFILE_NAME="$PROFILE_NAME"
 export EPHEMERAL_DISPLAY_RESOLUTION="${EPHEMERAL_DISPLAY_RESOLUTION:-}"
 export PROVIDER="$PROVIDER"

@@ -8,7 +8,6 @@ commands:
   down: {exec: scripts/package-plugin, args: [xpra, down]}
 supports:
   os_families: [ubuntu, windows]
-  ui_modes: [desktop]
   arches: [amd64]
   ubuntu_versions: ["22.04", "24.04"]
 down: {destructive: true}

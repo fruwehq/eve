@@ -1,12 +1,12 @@
 # Makefile
 .DEFAULT_GOAL := default
-.PHONY: ai.sandbox all aws.login clean default down env generate help info integration.plan integration.test \
+.PHONY: ai.sandbox all aws.login catalog.list clean default down env generate help info integration.plan integration.test \
 				init init.all instance.create instance.delete instance.env instance.info instance.provision \
 				instance.list instance.paths instance.state instance.status instance.validate ip lint logs plan \
 				package.down package.install package.list package.reinstall package.select \
 				package.status package.unselect \
 				plugins.list plugins.sync plugins.validate \
-				provider.status providers.status provision recipes.list \
+				provider.status providers.status provision \
 				provision.clear-state provision.restart provision.wait reboot \
 				remote.console remote.moonlight remote.moonlight.pair \
 				remote.rdp remote.rustdesk remote.rustdesk.info remote.waypipe \
@@ -15,7 +15,7 @@
 				remote.xpra.desktop remote.xpra.run remote.xpra.start remote.xpra.status \
 				remote.xpra.stop \
 				show-password ssh ssh.run ssh.truenas ssh.wait start status stop \
-				test test.instances test.plugins test.plugins-sync test.recipes test.python test.shellcheck test.terraform \
+				test test.catalog test.instances test.plugins test.plugins-sync test.python test.shellcheck test.terraform \
 				test.lint test.tf-isolation test.tui test.update-golden tui up update upload validate
 
 TM_PARALLEL ?= 8
@@ -138,9 +138,9 @@ init: ## Initialize provider backend for an instance
 init.all: generate ## Init all stacks in parallel (set TM_PARALLEL=N)
 	terramate run --parallel=$(TM_PARALLEL) --continue-on-error -- terraform init -upgrade
 
-instance.create: ## Create a local instance registry entry (INSTANCE=<name> RECIPE=<recipe>)
-	@if [ -z "$(INSTANCE)" ] || [ -z "$(RECIPE)" ]; then echo "Usage: make instance.create INSTANCE=<name> RECIPE=<recipe> [BUNDLES=a,b] [PACKAGES=a,b] [DISK_GB=n] [MEMORY_MB=n]"; exit 2; fi; \
-	args="--instance $(INSTANCE) --recipe $(RECIPE)"; \
+instance.create: ## Create a local instance registry entry (INSTANCE=<name> MACHINE=... OS=... LOCATION=...)
+	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make instance.create INSTANCE=<name> MACHINE=<machine> OS=<os> LOCATION=<location> [INIT=<init>] [BUNDLES=a,b] [PACKAGES=a,b] [DISK_GB=n] [MEMORY_MB=n]"; exit 2; fi; \
+	args="--instance $(INSTANCE)"; \
 	if [ -n "$(MACHINE)" ]; then args="$$args --machine $(MACHINE)"; fi; \
 	if [ -n "$(OS)" ]; then args="$$args --os $(OS)"; fi; \
 	if [ -n "$(INIT)" ]; then args="$$args --init $(INIT)"; fi; \
@@ -262,8 +262,8 @@ provider.status: ## Show provider plugin status for an instance
 providers.status: ## Check provider configuration and connectivity
 	@./scripts/providers-status
 
-recipes.list: ## List reusable VM recipes
-	@./scripts/recipes-list --with-details
+catalog.list: ## List provider/platform/content choices
+	@./scripts/catalog-options
 
 provision: ## Upload and run OS-appropriate provisioning scripts on the instance
 	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make provision INSTANCE=<name>"; exit 2; fi; \
@@ -394,8 +394,11 @@ stop: ## Stop (power off) a running instance without destroying
 	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make stop INSTANCE=<name>"; exit 2; fi; \
 	./scripts/instance-run stop $(INSTANCE)
 
-test: ## Run all tests (recipes, instances, plugins, terraform, lint)
+test: ## Run all tests (catalog, instances, plugins, terraform, lint)
 	@./scripts/test
+
+test.catalog: ## Validate catalog provider/platform/content choices
+	@./scripts/test-catalog
 
 test.instances: ## Validate fixture instances and compare emitted env to golden snapshots
 	@./scripts/test-instances
@@ -408,9 +411,6 @@ test.plugins: ## Validate plugin manifests and dry-run dispatch contracts
 
 test.plugins-sync: ## Validate external plugin synchronization
 	@./scripts/test-plugins-sync
-
-test.recipes: ## Validate all recipes and compare emitted env to golden snapshots
-	@./scripts/test-recipes
 
 test.python: ## Run Python lint and type checks
 	@./scripts/test-python
@@ -427,8 +427,7 @@ test.tf-isolation: ## Verify per-instance Terraform workspace isolation in tf-* 
 test.tui: ## Validate optional Textual TUI entrypoint
 	@./scripts/test-tui
 
-test.update-golden: ## Regenerate tests/golden/*.env from current recipe and instance output
-	@UPDATE_GOLDEN=1 ./scripts/test-recipes
+test.update-golden: ## Regenerate tests/golden/instances/*.env from current instance output
 	@UPDATE_GOLDEN=1 ./scripts/test-instances
 
 tui: ## Open the v3 Textual instance manager

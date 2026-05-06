@@ -54,7 +54,3 @@ request_reboot() {
   touch "$REBOOT_FLAG"
   log "reboot requested"
 }
-
-is_desktop() {
-  [ "${OS_UI_MODE:-headless}" = "desktop" ]
-}

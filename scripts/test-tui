@@ -9,5 +9,13 @@ trap 'rm -rf "$cache_dir"' EXIT
 
 PYTHONPYCACHEPREFIX="$cache_dir" poetry run python -m py_compile scripts/egame-tui
 poetry run python ./scripts/egame-tui --check
+poetry run python - <<'PY'
+import runpy
+
+module = runpy.run_path("scripts/egame-tui")
+options = module["catalog_options"]()
+assert "vultr" in options["providers"]
+assert any(platform["provider"] == "vultr" and platform["os"] == "windows-server-2025" for platform in options["platforms"])
+PY
 
 printf '  [OK] egame-tui compiles without importing optional Textual dependency\n'

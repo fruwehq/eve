@@ -5,11 +5,6 @@ set -euo pipefail
 
 skip_unless_pkg vnc
 
-if ! is_desktop; then
-  log "### 46_vnc: headless OS — skipping"
-  exit 0
-fi
-
 log "### 46_vnc: installing TigerVNC server and tools"
 
 if command -v tigervncserver >/dev/null 2>&1; then

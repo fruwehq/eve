@@ -133,7 +133,6 @@ CATALOG_JSON="$(ruby -rjson -ryaml -e '
   merged["bundles"]   = merge_by_key(base["bundles"],   over["bundles"],   "id")
   merged["locations"] = merge_by_key(base["locations"], over["locations"], "name")
   merged["profiles"]  = merge_by_key(base["profiles"],  over["profiles"],  "name")
-  merged["recipes"]   = merge_by_key(base["recipes"],   over["recipes"],   "name")
 
   puts JSON.generate(merged)
 ' "$CATALOG_PATH" "$LOCAL_CATALOG_PATH")"
@@ -143,9 +142,8 @@ CATALOG_JSON="$(ruby -rjson -ryaml -e '
 jq_get='def by_name($arr; $key; $val): ($arr // [] | map(select(.[$key] == $val)) | .[0]);
 
 . as $root |
-by_name($root.recipes; "name"; $profile) as $recipe |
 by_name($root.profiles; "name"; $profile) as $profile_override |
-($recipe + $profile_override) as $p |
+($profile_override) as $p |
 if $p == null then
   error("Profile not found: \($profile)")
 else
@@ -153,7 +151,6 @@ else
   if $m == null then error("Machine not found: \($p.machine)") else . end |
   by_name($root.oses; "id"; $p.os) as $o |
   if $o == null then error("OS not found: \($p.os)") else . end |
-  ($o + {ui_mode: ($p.ui_mode // $o.ui_mode // "headless")}) as $o |
   by_name($root.inits; "id"; $p.init) as $i |
   if $i == null then error("Init not found: \($p.init)") else . end |
   by_name($root.locations; "name"; $p.location) as $l |
@@ -177,16 +174,10 @@ else
     error("Init/OS mismatch: init \($i.id) expects \($i.os_family), got OS family \($o.family)")
   else . end |
 
-  if (($i.provider // "") != "" and ($i.provider != ($m.provider // ""))) then
+  if ((($i.providers // []) | length) > 0 and (($i.providers // []) | index($m.provider // "") == null)) then
+    error("Init/provider mismatch: init \($i.id) expects provider \($i.providers | join(", ")), got machine provider \($m.provider)")
+  elif (($i.provider // "") != "" and ($i.provider != ($m.provider // ""))) then
     error("Init/provider mismatch: init \($i.id) expects provider \($i.provider), got machine provider \($m.provider)")
-  else . end |
-
-  if (($bundle_packages | index("steam")) != null and ($o.ui_mode // "") != "desktop") then
-    error("Compatibility: steam requires desktop UI mode")
-  else . end |
-
-  if (($bundle_packages | index("sunshine")) != null and ($o.ui_mode // "") != "desktop") then
-    error("Compatibility: sunshine requires desktop UI mode")
   else . end |
 
   if (($bundle_packages | index("codex-cli")) != null and ($bundle_packages | index("dev-toolchain")) == null) then
@@ -240,7 +231,6 @@ emit_env() {
     "LOCATION_NAME=" + .location.name,
     "OS_ID=" + .os.id,
     "OS_FAMILY=" + .os.family,
-    "OS_UI_MODE=" + .os.ui_mode,
     "INIT_ID=" + .init.id,
     "BUNDLE_PACKAGES=" + (.bundle_packages | join(",")),
     "VM_MEMORY_MB=" + ((.machine.defaults.memory_mb // 0) | tostring),

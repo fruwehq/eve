@@ -1,0 +1,167 @@
+#!/usr/bin/env ruby
+# Emit catalog-backed choices for direct instance creation.
+
+require "json"
+require "yaml"
+
+ROOT = File.expand_path("..", __dir__)
+CATALOG_PATHS = [
+  File.join(ROOT, "config/catalog.yaml"),
+  File.join(ROOT, "config/catalog.local.yaml")
+].freeze
+
+def usage
+  warn "Usage: scripts/catalog-options [--json]"
+end
+
+json = false
+args = ARGV.dup
+until args.empty?
+  case args.shift
+  when "--json"
+    json = true
+  when "-h", "--help"
+    usage
+    exit 0
+  else
+    usage
+    exit 2
+  end
+end
+
+def load_any(path)
+  return {} unless File.exist?(path)
+
+  YAML.safe_load(File.read(path), permitted_classes: [], aliases: true) || {}
+end
+
+def merge_entries(target, entries, key)
+  return unless entries.is_a?(Array)
+
+  entries.each do |entry|
+    next unless entry.is_a?(Hash)
+
+    id = entry[key]
+    next if id.nil? || id.to_s.empty?
+
+    index = target.index { |candidate| candidate[key] == id }
+    if index
+      target[index] = entry
+    else
+      target << entry
+    end
+  end
+end
+
+def os_available_for_provider?(os, provider)
+  case provider
+  when "aws"
+    os.key?("aws_ami_name_pattern") || os.key?("aws_ami_id") || os.key?("aws_ssm_parameter")
+  when "vultr"
+    os.key?("vultr_os_id")
+  when "local-virtualbox", "local-vmware", "local-qemu"
+    os.key?("vagrant_box")
+  when "truenas"
+    os.key?("cloud_image_url")
+  when "raspberry-pi"
+    os.key?("metal_image")
+  else
+    false
+  end
+end
+
+def init_available_for_provider?(init, provider)
+  providers = init["providers"].is_a?(Array) ? init["providers"] : []
+  return providers.include?(provider) unless providers.empty?
+
+  init["provider"].nil? || init["provider"] == provider
+end
+
+catalog = {
+  "machines" => [],
+  "oses" => [],
+  "inits" => [],
+  "bundles" => [],
+  "packages" => [],
+  "locations" => []
+}
+
+CATALOG_PATHS.each do |path|
+  doc = load_any(path)
+  merge_entries(catalog["machines"], doc["machines"], "name")
+  merge_entries(catalog["oses"], doc["oses"], "id")
+  merge_entries(catalog["inits"], doc["inits"], "id")
+  merge_entries(catalog["bundles"], doc["bundles"], "id")
+  merge_entries(catalog["packages"], doc["packages"], "id")
+  merge_entries(catalog["locations"], doc["locations"], "name")
+end
+
+providers = catalog["machines"].map { |machine| machine["provider"] }.compact.uniq.sort
+platforms = []
+
+catalog["machines"].each do |machine|
+  provider = machine["provider"]
+  next unless provider
+
+  catalog["oses"].each do |os|
+    supports = machine["supports"].is_a?(Hash) ? machine["supports"] : {}
+    arches = supports["arches"].is_a?(Array) ? supports["arches"] : []
+    os_ids = supports["os_ids"].is_a?(Array) ? supports["os_ids"] : []
+    next unless arches.empty? || arches.include?(os["arch"])
+    next unless os_ids.empty? || os_ids.include?(os["id"])
+    next unless os_available_for_provider?(os, provider)
+
+    catalog["inits"].each do |init|
+      next if init["os_family"] && init["os_family"] != os["family"]
+      next unless init_available_for_provider?(init, provider)
+
+      catalog["locations"].each do |location|
+        next unless location[provider]
+
+        defaults = machine["defaults"].is_a?(Hash) ? machine["defaults"] : {}
+        platforms << {
+          "id" => [provider, machine["name"], os["id"], init["id"], location["name"]].join(":"),
+          "provider" => provider,
+          "machine" => machine["name"],
+          "os" => os["id"],
+          "os_family" => os["family"],
+          "os_version" => os["version"],
+          "arch" => os["arch"],
+          "init" => init["id"],
+          "location" => location["name"],
+          "defaults" => defaults
+        }
+      end
+    end
+  end
+end
+
+bundles = catalog["bundles"].map do |bundle|
+  {
+    "id" => bundle["id"],
+    "includes" => bundle["includes"].is_a?(Array) ? bundle["includes"] : []
+  }
+end
+
+packages = catalog["packages"].map do |package|
+  { "id" => package["id"] }
+end
+
+doc = {
+  "providers" => providers,
+  "platforms" => platforms.sort_by { |platform| [platform["provider"], platform["machine"], platform["os"], platform["location"], platform["init"]] },
+  "bundles" => bundles.sort_by { |bundle| bundle["id"].to_s },
+  "packages" => packages.sort_by { |package| package["id"].to_s }
+}
+
+if json
+  puts JSON.pretty_generate(doc)
+else
+  puts "PROVIDERS"
+  providers.each { |provider| puts "  #{provider}" }
+  puts
+  puts "PLATFORMS"
+  doc["platforms"].each do |platform|
+    puts "  #{platform["provider"]} #{platform["machine"]} #{platform["os"]} #{platform["location"]} #{platform["init"]}"
+  end
+end

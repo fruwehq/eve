@@ -17,8 +17,19 @@ TMPKEY=$(mktemp)
 printf 'ssh-rsa AAAAB3NzaC1yc2EAAAA_test_only test@test\n' > "$TMPKEY"
 TMPWORK=$(mktemp -d)
 TMPSTATE=$(mktemp -d)
-trap 'rm -f "$TMPKEY"; rm -rf "$TMPWORK" "$TMPSTATE"' EXIT
+TMPCATALOG=$(mktemp "${TMPDIR:-/tmp}/egame-tf-profile.XXXXXX.yaml")
+trap 'rm -f "$TMPKEY" "$TMPCATALOG"; rm -rf "$TMPWORK" "$TMPSTATE"' EXIT
+cat >"$TMPCATALOG" <<'YAML'
+profiles:
+  - name: aws-ubuntu-dev-headless
+    machine: aws-cheap-x86
+    os: ubuntu-26.04-amd64
+    init: ssh-ubuntu-cloud-init
+    bundles: [dev-ai]
+    location: tokyo
+YAML
 export SSH_PUBLIC_KEY_FILE="$TMPKEY"
+export EGAME_CATALOG_LOCAL="$TMPCATALOG"
 export EGAME_INSTANCE_REGISTRY="tests/fixtures/instances.yaml"
 export EGAME_INSTANCE_WORKDIR="$TMPWORK/work"
 export EGAME_STATE_DIR="$TMPSTATE/state"
