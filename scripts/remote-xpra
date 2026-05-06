@@ -19,6 +19,8 @@ PROFILE="${1:?Usage: scripts/remote-xpra <profile> <start|stop|run|attach|apps|s
 ACTION="${2:?Usage: scripts/remote-xpra <profile> <start|stop|run|attach|apps|status> [args...]}"
 shift 2
 cd "$(git rev-parse --show-toplevel)"
+# shellcheck source=lib/instance-workdir.sh
+. ./scripts/lib/instance-workdir.sh
 
 RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
 ENGINE=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^ENGINE=/{print $2}')
@@ -26,8 +28,9 @@ ENGINE=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^ENGINE=/{print $2}')
 if [ "$ENGINE" = "vagrant" ]; then
   SSH_USER=vagrant
   IP=$(./scripts/instance-ip "$PROFILE")
-  SSH_PORT=$(cd ".generated/$PROFILE" && vagrant ssh-config | awk '/Port/ {print $2; exit}')
-  PRIV_KEY=$(cd ".generated/$PROFILE" && vagrant ssh-config | awk '/IdentityFile/ {print $2; exit}')
+  WORKDIR="$(egame_instance_workdir "$PROFILE")"
+  SSH_PORT=$(cd "$WORKDIR" && vagrant ssh-config | awk '/Port/ {print $2; exit}')
+  PRIV_KEY=$(cd "$WORKDIR" && vagrant ssh-config | awk '/IdentityFile/ {print $2; exit}')
 else
   SSH_USER=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^SSH_USER=/{print $2}')
   IP=$(./scripts/instance-ip "$PROFILE")

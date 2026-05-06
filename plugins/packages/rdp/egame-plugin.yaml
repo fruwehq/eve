@@ -9,3 +9,7 @@ commands:
 supports: {os_families: [ubuntu, windows]}
 down: {destructive: true}
 env: []
+actions:
+  - id: rdp
+    label: RDP
+    target: remote.rdp

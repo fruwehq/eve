@@ -1,0 +1,78 @@
+#!/usr/bin/env ruby
+# Dispatch package-defined UI/remote actions for a concrete instance.
+
+require "json"
+require "open3"
+
+ROOT = File.expand_path("..", __dir__)
+
+def usage
+  warn <<~USAGE
+    Usage:
+      scripts/package-action --instance <name> --package <id> --action <id> [--dry-run]
+  USAGE
+end
+
+def run_json(*cmd)
+  out, status = Open3.capture2e(*cmd)
+  raise out unless status.success?
+
+  JSON.parse(out)
+end
+
+instance_name = nil
+package_id = nil
+action_id = nil
+dry_run = false
+
+args = ARGV.dup
+until args.empty?
+  case args.shift
+  when "--instance"
+    instance_name = args.shift
+  when "--package"
+    package_id = args.shift
+  when "--action"
+    action_id = args.shift
+  when "--dry-run"
+    dry_run = true
+  when "-h", "--help"
+    usage
+    exit 0
+  else
+    usage
+    exit 2
+  end
+end
+
+unless instance_name && package_id && action_id
+  usage
+  exit 2
+end
+
+begin
+  doc = run_json(File.join(ROOT, "scripts/package-list"), "--instance", instance_name, "--json")
+  package = doc.fetch("packages").find { |entry| entry["id"] == package_id }
+  raise "unknown package: #{package_id}" unless package
+
+  action = package.fetch("actions", []).find { |entry| entry["id"] == action_id }
+  raise "unknown action #{action_id} for package #{package_id}" unless action
+
+  if dry_run
+    puts JSON.pretty_generate({
+      "kind" => "package-action",
+      "instance" => instance_name,
+      "package" => package_id,
+      "action" => action_id,
+      "label" => action.fetch("label"),
+      "target" => action.fetch("target"),
+      "dry_run" => true
+    })
+    exit 0
+  end
+
+  exec File.join(ROOT, "scripts/instance-run"), action.fetch("target"), instance_name
+rescue StandardError => e
+  warn "package-action: #{e.message}"
+  exit 1
+end

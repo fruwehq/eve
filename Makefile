@@ -3,7 +3,7 @@
 .PHONY: ai.sandbox all aws.login catalog.list clean default doctor down env generate help info integration.plan integration.test \
 				init init.all instance.create instance.delete instance.env instance.info instance.provision \
 				instance.list instance.paths instance.recover instance.state instance.status instance.validate ip lint logs plan \
-				package.down package.install package.list package.reinstall package.select \
+				package.action package.down package.install package.list package.reinstall package.select \
 				package.status package.uninstall package.unselect \
 				plugins.list plugins.sync plugins.validate \
 				provider.status providers.status provision \
@@ -219,6 +219,10 @@ logs: ## Stream remote provisioning logs for an instance
 plan: ## Plan provider changes for an instance
 	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make plan INSTANCE=<name>"; exit 2; fi; \
 	./scripts/instance-run plan $(INSTANCE)
+
+package.action: ## Run a package-defined action (PACKAGE=<id> ACTION=<id>)
+	@if [ -z "$(INSTANCE)" ] || [ -z "$(PACKAGE)" ] || [ -z "$(ACTION)" ]; then echo "Usage: make package.action INSTANCE=<name> PACKAGE=<id> ACTION=<id>"; exit 2; fi; \
+	./scripts/package-action --instance $(INSTANCE) --package $(PACKAGE) --action $(ACTION)
 
 package.down: ## Remove package from an instance (PACKAGE=<id>, YES=1 for destructive)
 	@if [ -z "$(INSTANCE)" ] || [ -z "$(PACKAGE)" ]; then echo "Usage: make package.down INSTANCE=<name> PACKAGE=<id> YES=1"; exit 2; fi; \

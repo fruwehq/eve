@@ -690,4 +690,30 @@ else
   printf '  [OK] instance-paths rejects unsafe instance name\n'
 fi
 
+ssh_workdir="$(mktemp -d "${TMPDIR:-/tmp}/egame-instance-ssh.XXXXXX")"
+mkdir -p "$ssh_workdir/dev-a" "$ssh_workdir/bin"
+ssh_workdir="$(cd "$ssh_workdir" && pwd -P)"
+EGAME_INSTANCE_REGISTRY="$FIXTURE" EGAME_INSTANCE_WORKDIR="$ssh_workdir" \
+  ./scripts/instance-profile-overlay --registry "$FIXTURE" --instance dev-a --output "$ssh_workdir/dev-a/catalog.local.yaml"
+touch "$ssh_workdir/dev-a/Vagrantfile"
+cat >"$ssh_workdir/bin/vagrant" <<'SH'
+#!/usr/bin/env sh
+pwd
+SH
+chmod +x "$ssh_workdir/bin/vagrant"
+ssh_pwd="$(
+  PATH="$ssh_workdir/bin:$PATH" \
+    EGAME_CATALOG_LOCAL="$ssh_workdir/dev-a/catalog.local.yaml" \
+    EGAME_INSTANCE_REGISTRY="$FIXTURE" \
+    EGAME_INSTANCE_WORKDIR="$ssh_workdir" \
+    ./scripts/instance-ssh dev-a -- 'true'
+)"
+if [ "$ssh_pwd" = "$ssh_workdir/dev-a" ]; then
+  printf '  [OK] instance-ssh uses per-instance vagrant workdir\n'
+else
+  printf '  [FAIL] instance-ssh used wrong workdir\n' >&2
+  printf 'expected: %s\nactual:   %s\n' "$ssh_workdir/dev-a" "$ssh_pwd" >&2
+  FAIL=$((FAIL + 1))
+fi
+
 [ "$FAIL" -eq 0 ]

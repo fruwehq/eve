@@ -7,7 +7,6 @@ import argparse
 import asyncio
 import json
 import os
-import platform
 import re
 import shlex
 import subprocess
@@ -15,10 +14,11 @@ import sys
 from collections.abc import Coroutine
 from contextlib import suppress
 from pathlib import Path
-from typing import Any, ClassVar, Literal, cast
+from typing import Any, ClassVar, cast
 
 ROOT = Path(__file__).resolve().parents[1]
 NEW_INSTANCE_KEY = "__new_instance__"
+PACKAGE_ACTION_BUTTONS = 8
 
 
 def usage() -> str:
@@ -153,6 +153,22 @@ def status_instance_name(status: dict[str, Any] | None) -> str | None:
     return str(name) if name else None
 
 
+def package_source_label(selected_by: Any) -> str:
+    if not isinstance(selected_by, list) or not selected_by:
+        return "available"
+    labels: list[str] = []
+    bundles: list[str] = []
+    for source in selected_by:
+        source_text = str(source)
+        if source_text == "direct":
+            labels.append("extra")
+        elif source_text.startswith("bundle:"):
+            bundles.append(source_text.split(":", 1)[1])
+    if bundles:
+        labels.append("bundle: " + ", ".join(bundles))
+    return "; ".join(labels) if labels else "selected"
+
+
 def aggregate_state(statuses: dict[str, dict[str, Any]]) -> str:
     counts = {"running": 0, "stopped": 0, "failed": 0, "other": 0}
     for status in statuses.values():
@@ -173,21 +189,6 @@ def aggregate_state(statuses: dict[str, dict[str, Any]]) -> str:
         f"[error]! {counts['failed']} failed[/]  "
         f"? {counts['other']} unknown"
     )
-
-
-def open_terminal(command: str) -> tuple[int, str, str]:
-    if platform.system() == "Darwin":
-        script = f'tell application "Terminal" to do script {json.dumps(command)}'
-        return run_command(["osascript", "-e", script])
-    return run_command(["sh", "-lc", f'{os.environ.get("TERMINAL", "xterm")} -e {shlex.quote(command)} &'])
-
-
-def open_background(args: list[str]) -> tuple[int, str, str]:
-    try:
-        subprocess.Popen(args, cwd=ROOT, env=os.environ.copy())
-    except OSError as exc:
-        return 1, "", str(exc)
-    return 0, "", ""
 
 
 def run_tui() -> int:
@@ -731,14 +732,32 @@ def run_tui() -> int:
             margin-bottom: 1;
         }
 
-        #connect-strip {
-            height: 3;
+        #action-groups {
+            height: 5;
             margin-bottom: 1;
+        }
+
+        .action-group {
+            width: 1fr;
+            margin-right: 1;
+        }
+
+        .action-title {
+            height: 1;
+            color: $text-muted;
+        }
+
+        #remote-strip, #lifecycle-strip, #danger-strip {
+            height: 3;
             background: transparent;
         }
 
         #detail-grid {
             height: 1fr;
+        }
+
+        #danger-strip {
+            margin-top: 1;
         }
 
         #packages-pane {
@@ -820,6 +839,7 @@ def run_tui() -> int:
             self.current_package: str | None = None
             self.current_status: dict[str, Any] | None = None
             self.command_running = False
+            self.current_remote_actions: list[dict[str, str]] = []
             self.background_tasks: set[asyncio.Task[None]] = set()
             self.hero_frame = 0
             self._rendering_instances = False
@@ -858,29 +878,36 @@ def run_tui() -> int:
                                 yield Static("Provider\nunknown", id="provider-pill", classes="pill")
                                 yield Static("Provision\nunknown", id="provision-pill", classes="pill")
                                 yield Static("Packages\nunknown", id="packages-pill", classes="pill")
-                            with Horizontal(id="connect-strip"):
-                                yield Button("SSH", id="connect-ssh")
-                                yield Button("Sunshine", id="connect-sunshine")
-                                yield Button("RustDesk", id="connect-rustdesk")
-                                yield Button("Refresh", id="refresh", variant="primary")
-                                yield Button("Up", id="provider-up", variant="success")
-                                yield Button("Stop", id="provider-stop", variant="warning")
-                                yield Button("Provision", id="provision", variant="primary")
-                                yield Button("Destroy", id="provider-down", variant="error")
-                                yield Button("Delete", id="delete-instance", variant="error")
+                            with Horizontal(id="action-groups"):
+                                with Vertical(classes="action-group"):
+                                    yield Static("Remote Access", classes="action-title")
+                                    with Horizontal(id="remote-strip"):
+                                        yield Button("SSH", id="connect-ssh")
+                                        for index in range(PACKAGE_ACTION_BUTTONS):
+                                            yield Button("", id=f"pkg-action-{index}")
+                                with Vertical(classes="action-group"):
+                                    yield Static("Instance Controls", classes="action-title")
+                                    with Horizontal(id="lifecycle-strip"):
+                                        yield Button("Up", id="provider-up", variant="success")
+                                        yield Button("Stop", id="provider-stop", variant="warning")
+                                        yield Button("Provision", id="provision", variant="primary")
+                                        yield Button("Refresh", id="refresh", variant="primary")
                             with Horizontal(id="detail-grid"):
                                 with Vertical(id="packages-pane"):
                                     yield Static("Packages", classes="section-title")
                                     yield DataTable(id="packages")
                                     with Horizontal(id="package-actions"):
                                         yield Button("Status", id="package-status")
-                                        yield Button("Select", id="package-select")
-                                        yield Button("Unselect", id="package-unselect")
+                                        yield Button("Add Extra", id="package-select")
+                                        yield Button("Remove Extra", id="package-unselect")
                                         yield Button("Install", id="package-install", variant="success")
                                         yield Button("Uninstall", id="package-down", variant="warning")
                                 with Vertical(id="ops-pane"):
                                     yield Static("Recent Ops", classes="section-title")
                                     yield Static("No operations yet.", id="ops")
+                            with Horizontal(id="danger-strip"):
+                                yield Button("Destroy", id="provider-down", variant="error")
+                                yield Button("Delete", id="delete-instance", variant="error")
                 yield Static(
                     "Output  |  press l to focus, arrows/PageUp/PageDown to scroll, y to copy all log text",
                     id="output-help",
@@ -902,7 +929,7 @@ def run_tui() -> int:
 
             packages = self.query_one("#packages", DataTable)
             packages.cursor_type = "row"
-            packages.add_columns("Package", "Want", "State", "OK", "Source")
+            packages.add_columns("Package", "Selection", "State", "OK", "Source")
 
             self.animate_hero()
             self.set_interval(1.2, self.animate_hero)
@@ -1282,13 +1309,12 @@ def run_tui() -> int:
                     current_row = row_index
                 state = package.get("state", {}) or {}
                 selected_by = package.get("selected_by", [])
-                source = ",".join(selected_by) if isinstance(selected_by, list) else ""
                 table.add_row(
                     package_id,
-                    "yes" if selected else "no",
+                    "selected" if selected else "available",
                     str(state.get("status") or "unknown"),
                     "yes" if package.get("supported") else "no",
-                    source,
+                    package_source_label(selected_by),
                     key=package_id,
                 )
                 row_index += 1
@@ -1380,11 +1406,9 @@ def run_tui() -> int:
             elif button_id == "delete-instance":
                 self.action_delete_instance()
             elif button_id == "connect-ssh":
-                await self.action_connect("ssh")
-            elif button_id == "connect-sunshine":
-                await self.action_connect("sunshine")
-            elif button_id == "connect-rustdesk":
-                await self.action_connect("rustdesk")
+                await self.action_connect_ssh()
+            elif button_id.startswith("pkg-action-"):
+                await self.action_package_remote(int(button_id.rsplit("-", 1)[1]))
             elif button_id == "package-status":
                 await self.action_package("package.status")
             elif button_id == "package-select":
@@ -1510,30 +1534,42 @@ def run_tui() -> int:
                 refresh_instance=instance,
             )
 
-        async def action_connect(self, kind: Literal["ssh", "sunshine", "rustdesk"]) -> None:
+        async def action_connect_ssh(self) -> None:
             if not self.current_instance:
                 return
-            if kind == "ssh":
-                command = f"cd {shlex.quote(str(ROOT))} && make ssh INSTANCE={shlex.quote(self.current_instance)}"
-                code, out, err = await asyncio.to_thread(open_terminal, command)
-            elif kind == "sunshine":
-                code, out, err = await asyncio.to_thread(
-                    open_background,
-                    ["make", "remote.sunshine", f"INSTANCE={self.current_instance}"],
-                )
-            else:
-                code, out, err = await asyncio.to_thread(
-                    open_background,
-                    ["make", "remote.rustdesk", f"INSTANCE={self.current_instance}"],
-                )
-            if out.strip():
-                self.log_line(out.rstrip())
-            if err.strip():
-                self.log_line(f"[error]{err.rstrip()}[/]")
+            instance = self.current_instance
+            self.log_line(f"[primary]Opening inline SSH for {instance}. Exit SSH to return to the TUI.[/]")
+            self.refresh()
+            await asyncio.sleep(0.05)
+            with self.suspend():
+                code = subprocess.call(make_args("ssh", instance), cwd=ROOT, env=os.environ.copy())
             if code == 0:
-                self.log_line(f"[success]{kind} hand-off started.[/]")
+                self.log_line("[success]ssh session closed.[/]")
             else:
-                self.log_line(f"[error]{kind} hand-off failed with exit {code}.[/]")
+                self.log_line(f"[error]ssh failed with exit {code}.[/]")
+
+        async def action_package_remote(self, index: int) -> None:
+            if not self.current_instance or index >= len(self.current_remote_actions):
+                return
+            instance = self.current_instance
+            action = self.current_remote_actions[index]
+            package = action["package"]
+            action_id = action["id"]
+            label = action["label"]
+            code = await self.stream_command(
+                f"package.action.{package}.{action_id}",
+                [
+                    "make",
+                    "--no-print-directory",
+                    "package.action",
+                    f"INSTANCE={instance}",
+                    f"PACKAGE={package}",
+                    f"ACTION={action_id}",
+                ],
+                refresh_instance=instance,
+            )
+            if code == 0:
+                self.log_line(f"[success]{label} completed.[/]")
 
         def package_entry(self) -> dict[str, Any] | None:
             if not self.current_status or not self.current_package:
@@ -1544,11 +1580,31 @@ def run_tui() -> int:
                     return package
             return None
 
-        def selected_package_ids(self) -> set[str]:
+        def installed_package_actions(self) -> list[dict[str, str]]:
             if not self.current_status:
-                return set()
-            selected = self.current_status.get("packages", {}).get("selected", [])
-            return {str(package.get("id")) for package in selected if isinstance(package, dict) and package.get("id")}
+                return []
+            package_rows = self.current_status.get("packages", {}).get("all", [])
+            provision_state = str(self.current_status.get("state", {}).get("provision_state", "unknown"))
+            actions: list[dict[str, str]] = []
+            for package in package_rows:
+                if not isinstance(package, dict):
+                    continue
+                package_id = str(package.get("id") or "")
+                state = package.get("state", {}) or {}
+                status = state.get("status")
+                effectively_installed = status in {"installed", "reinstalled"} or (
+                    status in {None, "unknown"} and bool(package.get("selected")) and provision_state == "provisioned"
+                )
+                if not effectively_installed:
+                    continue
+                for action in package.get("actions", []):
+                    if not isinstance(action, dict):
+                        continue
+                    action_id = str(action.get("id") or "")
+                    label = str(action.get("label") or "")
+                    if package_id and action_id and label:
+                        actions.append({"package": package_id, "id": action_id, "label": label})
+            return actions[:PACKAGE_ACTION_BUTTONS]
 
         def set_button(self, button_id: str, *, disabled: bool) -> None:
             self.query_one(f"#{button_id}", Button).disabled = disabled
@@ -1569,8 +1625,7 @@ def run_tui() -> int:
                 "refresh",
                 "provider-stop",
                 "provision",
-                "connect-sunshine",
-                "connect-rustdesk",
+                *(f"pkg-action-{index}" for index in range(PACKAGE_ACTION_BUTTONS)),
                 "provider-down",
                 "delete-instance",
             ):
@@ -1587,7 +1642,7 @@ def run_tui() -> int:
             provision_state = str(state.get("provision_state", "unknown"))
             provider_busy = provider_state == "changing"
             provider_absent = provider_state == "absent"
-            selected_packages = self.selected_package_ids()
+            self.current_remote_actions = self.installed_package_actions()
 
             busy = self.command_running
             self.set_button("refresh", disabled=busy)
@@ -1620,14 +1675,17 @@ def run_tui() -> int:
             )
             self.set_button("delete-instance", disabled=busy or not has_instance)
             self.set_button("connect-ssh", disabled=busy or not has_instance or provider_state != "running")
-            self.set_button(
-                "connect-sunshine",
-                disabled=busy or not has_instance or provider_state != "running" or "sunshine" not in selected_packages,
-            )
-            self.set_button(
-                "connect-rustdesk",
-                disabled=busy or not has_instance or provider_state != "running" or "rustdesk" not in selected_packages,
-            )
+            for index in range(PACKAGE_ACTION_BUTTONS):
+                button = self.query_one(f"#pkg-action-{index}", Button)
+                if index < len(self.current_remote_actions):
+                    action = self.current_remote_actions[index]
+                    button.label = action["label"]
+                    button.display = True
+                    button.disabled = busy or not has_instance or provider_state != "running"
+                else:
+                    button.label = ""
+                    button.display = False
+                    button.disabled = True
 
             package = self.package_entry()
             has_package = package is not None

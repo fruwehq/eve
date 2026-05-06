@@ -121,6 +121,30 @@ else
   FAIL=$((FAIL + 1))
 fi
 
+if ./scripts/plugin-list --kind package --json | \
+  jq -e '.plugins[] | select(.id == "sunshine") | [.actions[].id] == ["sunshine", "pair-moonlight", "moonlight"]' >/dev/null; then
+  printf '  [OK] package remote action metadata validates\n'
+else
+  printf '  [FAIL] package remote action metadata validates\n' >&2
+  FAIL=$((FAIL + 1))
+fi
+
+if ./scripts/package-list --registry "$FIXTURE" --instance dev-a --json | \
+  jq -e '.packages[] | select(.id == "rustdesk") | (.actions[] | select(.id == "rustdesk" and .target == "remote.rustdesk"))' >/dev/null; then
+  printf '  [OK] package-list exposes package actions to callers\n'
+else
+  printf '  [FAIL] package-list exposes package actions to callers\n' >&2
+  FAIL=$((FAIL + 1))
+fi
+
+if EGAME_INSTANCE_REGISTRY="$FIXTURE" ./scripts/package-action --instance dev-a --package rustdesk --action rustdesk-info --dry-run | \
+  jq -e '.kind == "package-action" and .package == "rustdesk" and .action == "rustdesk-info" and .target == "remote.rustdesk.info" and .dry_run == true' >/dev/null; then
+  printf '  [OK] package action dry-run resolves manifest target\n'
+else
+  printf '  [FAIL] package action dry-run resolves manifest target\n' >&2
+  FAIL=$((FAIL + 1))
+fi
+
 bad_install_ubuntu_err="$(EGAME_PLUGIN_ROOTS="$BAD_INSTALL_UBUNTU_FIXTURE" ./scripts/plugin-list --validate 2>&1 || true)"
 if printf '%s' "$bad_install_ubuntu_err" | grep -q "install.ubuntu.steps must be a non-empty list"; then
   printf '  [OK] plugin with empty install.ubuntu.steps rejected\n'

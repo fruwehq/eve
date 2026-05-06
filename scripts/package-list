@@ -69,7 +69,8 @@ begin
       "selected_by" => package_sources.fetch(plugin.fetch("id"), []),
       "supported" => supported_families.empty? || supported_families.include?(os_family),
       "source" => plugin.fetch("source"),
-      "path" => plugin.fetch("path")
+      "path" => plugin.fetch("path"),
+      "actions" => plugin.fetch("actions", [])
     }
   end.sort_by { |package| package["id"] }
 
@@ -83,7 +84,8 @@ begin
       "selected_by" => package_sources.fetch(id, []),
       "supported" => false,
       "source" => "missing",
-      "path" => nil
+      "path" => nil,
+      "actions" => []
     }
   end
   packages.concat(missing_selected)

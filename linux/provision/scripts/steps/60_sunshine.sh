@@ -34,8 +34,22 @@ if ! command -v sunshine >/dev/null 2>&1; then
   codename=$(. /etc/os-release && echo "$VERSION_CODENAME")
   if [ "$codename" != "noble" ] && [ "$codename" != "jammy" ]; then
     log "### 60_sunshine: patching shared-library sonames for $codename"
-    sudo ln -sf libminiupnpc.so.21 /usr/lib/x86_64-linux-gnu/libminiupnpc.so.17 2>/dev/null || true
-    sudo ln -sf libicuuc.so.78 /usr/lib/x86_64-linux-gnu/libicuuc.so.74 2>/dev/null || true
+    case "$(dpkg --print-architecture)" in
+      amd64) multiarch="x86_64-linux-gnu" ;;
+      arm64) multiarch="aarch64-linux-gnu" ;;
+      armhf) multiarch="arm-linux-gnueabihf" ;;
+      *) multiarch="" ;;
+    esac
+    if [ -z "$multiarch" ]; then
+      log "### 60_sunshine: warn: no known multiarch lib dir for $(dpkg --print-architecture)"
+    fi
+    lib_dir="/usr/lib/$multiarch"
+    if [ -n "$multiarch" ] && [ -e "$lib_dir/libminiupnpc.so.21" ]; then
+      sudo ln -sf libminiupnpc.so.21 "$lib_dir/libminiupnpc.so.17"
+    fi
+    if [ -n "$multiarch" ] && [ -e "$lib_dir/libicuuc.so.78" ]; then
+      sudo ln -sf libicuuc.so.78 "$lib_dir/libicuuc.so.74"
+    fi
     sudo ldconfig
   fi
 else

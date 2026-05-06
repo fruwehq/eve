@@ -14,6 +14,8 @@ if [ "${#APP[@]}" -eq 0 ]; then
 fi
 
 cd "$(git rev-parse --show-toplevel)"
+# shellcheck source=lib/instance-workdir.sh
+. ./scripts/lib/instance-workdir.sh
 
 if ! command -v waypipe >/dev/null 2>&1; then
   echo "remote-waypipe: local waypipe is not installed." >&2
@@ -40,7 +42,7 @@ if [ "$ENGINE" = "vagrant" ]; then
   ./scripts/vagrant-up --plan "$PROFILE" >/dev/null
   tmp_config="$(mktemp "${TMPDIR:-/tmp}/egame-waypipe-ssh.XXXXXX")"
   trap 'rm -f "$tmp_config"' EXIT
-  (cd ".generated/$PROFILE" && vagrant ssh-config >"$tmp_config")
+  (cd "$(egame_instance_workdir "$PROFILE")" && vagrant ssh-config >"$tmp_config")
   exec waypipe ssh -F "$tmp_config" default "${APP[@]}"
 fi
 

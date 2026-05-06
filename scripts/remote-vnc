@@ -9,6 +9,8 @@ set -euo pipefail
 
 PROFILE="${1:?Usage: scripts/remote-vnc <profile>}"
 cd "$(git rev-parse --show-toplevel)"
+# shellcheck source=lib/instance-workdir.sh
+. ./scripts/lib/instance-workdir.sh
 
 VNC_PORT="${VNC_PORT:-5901}"
 LOCAL_PORT="${VNC_LOCAL_PORT:-15900}"
@@ -34,8 +36,9 @@ fi
 
 if [ "$ENGINE" = "vagrant" ]; then
     IP=$(./scripts/instance-ip "$PROFILE")
-    SSH_PORT=$(cd ".generated/$PROFILE" && vagrant ssh-config | awk '/Port/ {print $2; exit}')
-    PRIV_KEY=$(cd ".generated/$PROFILE" && vagrant ssh-config | awk '/IdentityFile/ {print $2; exit}')
+    WORKDIR="$(egame_instance_workdir "$PROFILE")"
+    SSH_PORT=$(cd "$WORKDIR" && vagrant ssh-config | awk '/Port/ {print $2; exit}')
+    PRIV_KEY=$(cd "$WORKDIR" && vagrant ssh-config | awk '/IdentityFile/ {print $2; exit}')
 
     ssh -f -N -L "$LOCAL_PORT:127.0.0.1:$VNC_PORT" \
         -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \

@@ -12,6 +12,13 @@ supports:
   ubuntu_versions: ["22.04", "24.04"]
 down: {destructive: true}
 env: []
+actions:
+  - id: xpra-desktop
+    label: Xpra Desktop
+    target: remote.xpra.desktop
+  - id: xpra-attach
+    label: Xpra Attach
+    target: remote.xpra.attach
 install:
   ubuntu:
     steps: [00_base.sh, 05_timezone.sh, 45_xpra.sh]

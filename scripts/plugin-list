@@ -91,6 +91,7 @@ def validate_plugin!(plugin)
   require_string_list!(plugin["env"], plugin["_path"], "env")
 
   validate_package_install!(plugin) if kind == "package" && plugin.key?("install")
+  validate_package_actions!(plugin) if kind == "package" && plugin.key?("actions")
 end
 
 # install metadata is consumed by scripts/package-provision and
@@ -195,6 +196,24 @@ def validate_package_install!(plugin)
       unless fallback == true || fallback == false
         raise "#{path}: install.windows.fallback must be boolean"
       end
+    end
+  end
+end
+
+def validate_package_actions!(plugin)
+  actions = plugin["actions"]
+  path = plugin["_path"]
+  raise "#{path}: actions must be a list" unless actions.is_a?(Array)
+
+  actions.each_with_index do |action, index|
+    field = "actions[#{index}]"
+    raise "#{path}: #{field} must be a map" unless action.is_a?(Hash)
+    %w[id label target].each do |key|
+      value = action[key]
+      raise "#{path}: #{field}.#{key} must be a string" unless value.is_a?(String) && !value.empty?
+    end
+    unless action["id"].match?(/\A[a-z][a-z0-9-]*\z/)
+      raise "#{path}: #{field}.id must match [a-z][a-z0-9-]*"
     end
   end
 end

@@ -9,6 +9,16 @@ commands:
 supports: {os_families: [ubuntu, windows]}
 down: {destructive: true}
 env: [EPHEMERAL_SUNSHINE_PASSWORD, SUNSHINE_VERSION, SUNSHINE_MAX_BITRATE_KBPS]
+actions:
+  - id: sunshine
+    label: Sunshine
+    target: remote.sunshine
+  - id: pair-moonlight
+    label: Pair Moonlight
+    target: remote.moonlight.pair
+  - id: moonlight
+    label: Moonlight
+    target: remote.moonlight
 install:
   ubuntu:
     steps: [00_base.sh, 05_timezone.sh, 60_sunshine.sh]

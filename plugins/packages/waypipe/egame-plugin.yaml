@@ -9,6 +9,10 @@ commands:
 supports: {os_families: [ubuntu], arches: [amd64, arm64]}
 down: {destructive: true}
 env: []
+actions:
+  - id: waypipe
+    label: Waypipe
+    target: remote.waypipe
 install:
   ubuntu:
     steps: [00_base.sh, 05_timezone.sh, 47_waypipe.sh]

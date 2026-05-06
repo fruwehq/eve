@@ -9,6 +9,10 @@ commands:
 supports: {os_families: [ubuntu]}
 down: {destructive: true}
 env: []
+actions:
+  - id: vnc
+    label: VNC
+    target: remote.vnc
 install:
   ubuntu:
     steps: [00_base.sh, 05_timezone.sh, 46_vnc.sh]
