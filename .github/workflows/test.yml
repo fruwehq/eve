@@ -25,6 +25,11 @@ jobs:
         with:
           version: "0.16.0"
 
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
       - name: Install shellcheck + jq + ruby
         run: |
           sudo apt-get update -y
