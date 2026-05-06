@@ -46,16 +46,16 @@ if json
 end
 
 if instances.empty?
-  puts "No instances found. Create one with: make instance.create INSTANCE=<name> RECIPE=<recipe>"
+  puts "No instances found. Create one with: make instance.create INSTANCE=<name> MACHINE=<machine> OS=<os> INIT=<init> LOCATION=<location>"
   exit 0
 end
 
-printf "%-28s %-32s %-24s %-24s\n", "INSTANCE", "RECIPE", "MACHINE", "OS"
-printf "%-28s %-32s %-24s %-24s\n", "--------", "------", "-------", "--"
+printf "%-28s %-32s %-24s %-24s\n", "INSTANCE", "MACHINE", "OS", "LOCATION"
+printf "%-28s %-32s %-24s %-24s\n", "--------", "-------", "--", "--------"
 instances.each do |instance|
   printf "%-28s %-32s %-24s %-24s\n",
          instance["name"],
-         instance["recipe"] || "-",
          instance["machine"] || "-",
-         instance["os"] || "-"
+         instance["os"] || "-",
+         instance["location"] || "-"
 end

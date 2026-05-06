@@ -5,11 +5,6 @@ set -euo pipefail
 
 skip_unless_pkg gnome-desktop
 
-if ! is_desktop; then
-  log "### 48_gnome_desktop: headless OS — skipping"
-  exit 0
-fi
-
 log "### 48_gnome_desktop: installing GNOME desktop session"
 
 apt_install \

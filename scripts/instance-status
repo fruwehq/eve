@@ -75,7 +75,6 @@ begin
   status = {
     "instance" => {
       "name" => instance_name,
-      "recipe" => resolved["recipe_name"],
       "provider" => resolved.dig("machine", "provider"),
       "provider_plugin" => resolved["provider_plugin"],
       "engine" => resolved["engine"],

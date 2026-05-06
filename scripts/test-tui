@@ -13,8 +13,9 @@ poetry run python - <<'PY'
 import runpy
 
 module = runpy.run_path("scripts/egame-tui")
-recipes = module["recipe_rows"]()
-assert any(recipe.get("name") == "local-qemu-ubuntu-all" for recipe in recipes)
+options = module["catalog_options"]()
+assert "vultr" in options["providers"]
+assert any(platform["provider"] == "vultr" and platform["os"] == "windows-server-2025" for platform in options["platforms"])
 PY
 
 printf '  [OK] egame-tui compiles without importing optional Textual dependency\n'

@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Validate catalog-backed provider/platform/content choices.
+
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+FAIL=0
+
+catalog_options_json="$(./scripts/catalog-options --json)"
+if printf '%s\n' "$catalog_options_json" |
+  jq -e '
+    (.providers | index("vultr")) and
+    (.providers | index("truenas")) and
+    any(.platforms[]; .provider == "vultr" and .machine == "vultr-vcg-a40-2c" and .os == "windows-server-2025") and
+    any(.platforms[]; .provider == "truenas" and .machine == "truenas-scale-medium" and .os == "ubuntu-26.04-amd64") and
+    any(.bundles[]; .id == "gaming-core" and (.includes | index("steam"))) and
+    any(.packages[]; .id == "codex-cli")
+  ' >/dev/null; then
+  printf '  [OK] catalog-options emits provider/platform/content choices\n'
+else
+  printf '  [FAIL] catalog-options emits provider/platform/content choices\n' >&2
+  printf '%s\n' "$catalog_options_json" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+if printf '%s\n' "$catalog_options_json" |
+  jq -e '
+    all(.platforms[]; .provider != "vultr" or .os != "ubuntu-26.04-amd64") and
+    all(.platforms[]; .provider != "aws" or .os != "windows-server-2025")
+  ' >/dev/null; then
+  printf '  [OK] catalog-options hides provider/OS pairs without provider image metadata\n'
+else
+  printf '  [FAIL] catalog-options exposes provider/OS pairs without provider image metadata\n' >&2
+  printf '%s\n' "$catalog_options_json" | jq '.platforms[] | select((.provider == "vultr" and .os == "ubuntu-26.04-amd64") or (.provider == "aws" and .os == "windows-server-2025"))' >&2
+  FAIL=$((FAIL + 1))
+fi
+
+[ "$FAIL" -eq 0 ]

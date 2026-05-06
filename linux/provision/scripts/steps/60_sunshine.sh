@@ -5,11 +5,6 @@ set -euo pipefail
 
 skip_unless_pkg sunshine
 
-if ! is_desktop; then
-  log "### 60_sunshine: headless OS — skipping"
-  exit 0
-fi
-
 log "### 60_sunshine: installing LizardByte Sunshine"
 
 if ! command -v sunshine >/dev/null 2>&1; then

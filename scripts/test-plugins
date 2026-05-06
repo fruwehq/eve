@@ -17,7 +17,29 @@ BAD_INSTALL_NON_STRING_FIXTURE="tests/fixtures/plugins/packages/bad-install-non-
 BAD_PACKAGE_SUPPORTS_FIXTURE="tests/fixtures/plugins/packages/bad-supports"
 BAD_PROVIDER_SUPPORTS_FIXTURE="tests/fixtures/plugins/providers/bad-supports"
 WIN_ONLY_PLUGIN_FIXTURE="tests/fixtures/plugins/packages/win-only"
+profile_catalog="$(mktemp "${TMPDIR:-/tmp}/egame-plugin-profiles.XXXXXX.yaml")"
+state_dir=""
 FAIL=0
+
+trap 'rm -f "$profile_catalog"; if [ -n "$state_dir" ]; then rm -rf "$state_dir"; fi' EXIT
+
+cat >"$profile_catalog" <<'YAML'
+profiles:
+  - name: local-vmware-ubuntu-dev-gui
+    machine: local-vmware-medium
+    os: ubuntu-26.04-amd64
+    init: ssh-ubuntu-cloud-init
+    bundles: [access-headless, dev-sandbox-core]
+    location: tokyo
+
+  - name: vultr-windows-gaming
+    machine: vultr-vcg-a40-2c
+    os: windows-server-2025
+    init: ssh-windows-powershell7
+    bundles: [access-gui-streaming, gaming-core]
+    location: tokyo
+YAML
+export EGAME_CATALOG_LOCAL="$profile_catalog"
 
 check() {
   local label="$1"
@@ -481,7 +503,6 @@ else
 fi
 
 state_dir="$(mktemp -d "${TMPDIR:-/tmp}/egame-state-test.XXXXXX")"
-trap 'rm -rf "$state_dir"' EXIT
 tmp_err="$state_dir/error.txt"
 fake_ssh="$state_dir/fake-instance-ssh"
 fake_capture_ssh="$state_dir/fake-capture-instance-ssh"

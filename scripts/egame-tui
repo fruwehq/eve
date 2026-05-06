@@ -58,55 +58,8 @@ def instance_rows() -> list[dict[str, Any]]:
     return rows if isinstance(rows, list) else []
 
 
-def recipe_rows() -> list[dict[str, Any]]:
-    code, out, err = run_command([str(ROOT / "scripts/recipes-list"), "--json"])
-    if code != 0:
-        raise RuntimeError(err.strip() or out.strip() or "recipes-list failed")
-    parsed = json.loads(out)
-    if isinstance(parsed, dict):
-        rows = parsed.get("recipes", [])
-        return rows if isinstance(rows, list) else []
-    if isinstance(parsed, list):
-        result: list[dict[str, Any]] = []
-        for row in parsed:
-            if isinstance(row, str):
-                result.append({"name": row})
-            elif isinstance(row, dict):
-                result.append(cast(dict[str, Any], row))
-        return result
-    return []
-
-
-def package_ids() -> list[str]:
-    code, out, err = run_command([str(ROOT / "scripts/plugin-list"), "--kind", "package", "--json"])
-    if code != 0:
-        raise RuntimeError(err.strip() or out.strip() or "plugin-list failed")
-    parsed = json.loads(out)
-    plugins = parsed.get("plugins", []) if isinstance(parsed, dict) else []
-    ids = [str(plugin.get("id")) for plugin in plugins if isinstance(plugin, dict) and plugin.get("id")]
-    return sorted(ids)
-
-
-def recipe_defaults(recipe: str) -> dict[str, Any]:
-    code, out, err = run_command([str(ROOT / "scripts/profile-resolve"), "--profile", recipe, "--emit", "json"])
-    if code != 0:
-        raise RuntimeError(err.strip() or out.strip() or f"profile-resolve failed for {recipe}")
-    parsed = json.loads(out)
-    if not isinstance(parsed, dict):
-        return {}
-    machine = parsed.get("machine", {}) if isinstance(parsed.get("machine"), dict) else {}
-    defaults = machine.get("defaults", {}) if isinstance(machine.get("defaults"), dict) else {}
-    recipe_entry = parsed.get("profile", {}) if isinstance(parsed.get("profile"), dict) else {}
-    return {
-        "machine": machine.get("name"),
-        "os": parsed.get("os", {}).get("id") if isinstance(parsed.get("os"), dict) else None,
-        "location": parsed.get("location", {}).get("name") if isinstance(parsed.get("location"), dict) else None,
-        "bundles": recipe_entry.get("bundles", []),
-        "packages": parsed.get("bundle_packages", []),
-        "disk_gb": defaults.get("disk_gb"),
-        "memory_mb": defaults.get("memory_mb"),
-        "cpu_cores": defaults.get("cpus") or defaults.get("cpu_cores") or defaults.get("vcpus"),
-    }
+def catalog_options() -> dict[str, Any]:
+    return load_json([str(ROOT / "scripts/catalog-options"), "--json"])
 
 
 def instance_status(instance: str) -> dict[str, Any]:
@@ -121,8 +74,26 @@ def package_make_args(target: str, instance: str, package: str, *extra: str) -> 
     return ["make", "--no-print-directory", target, f"INSTANCE={instance}", f"PACKAGE={package}", *extra]
 
 
-def create_instance_args(name: str, recipe: str, packages: str, disk_gb: str, memory_mb: str) -> list[str]:
-    args = ["make", "--no-print-directory", "instance.create", f"INSTANCE={name}", f"RECIPE={recipe}"]
+def create_instance_args(
+    name: str,
+    platform_choice: dict[str, Any],
+    bundles: str,
+    packages: str,
+    disk_gb: str,
+    memory_mb: str,
+) -> list[str]:
+    args = [
+        "make",
+        "--no-print-directory",
+        "instance.create",
+        f"INSTANCE={name}",
+        f"MACHINE={platform_choice.get('machine', '')}",
+        f"OS={platform_choice.get('os', '')}",
+        f"INIT={platform_choice.get('init', '')}",
+        f"LOCATION={platform_choice.get('location', '')}",
+    ]
+    if bundles:
+        args.append(f"BUNDLES={bundles}")
     if packages:
         args.append(f"PACKAGES={packages}")
     if disk_gb:
@@ -277,9 +248,14 @@ def run_tui() -> int:
             margin-bottom: 1;
         }
 
-        #recipe-cards {
+        #provider-cards,
+        #platform-cards {
             height: 14;
             margin-bottom: 1;
+        }
+
+        #bundle-select {
+            height: 8;
         }
 
         #package-select {
@@ -297,31 +273,62 @@ def run_tui() -> int:
 
         def __init__(
             self,
-            recipes: list[str],
-            recipe_details: dict[str, dict[str, Any]],
-            packages: list[str],
+            options: dict[str, Any],
         ) -> None:
             super().__init__()
-            self.recipes = recipes
-            self.recipe_details = recipe_details
-            self.packages = packages
+            self.providers = [str(provider) for provider in options.get("providers", [])]
+            self.platforms = [
+                cast(dict[str, Any], platform)
+                for platform in options.get("platforms", [])
+                if isinstance(platform, dict)
+            ]
+            self.bundles = [
+                cast(dict[str, Any], bundle) for bundle in options.get("bundles", []) if isinstance(bundle, dict)
+            ]
+            self.bundle_map = {str(bundle.get("id")): bundle for bundle in self.bundles if bundle.get("id")}
+            self.packages = [
+                str(package.get("id"))
+                for package in options.get("packages", [])
+                if isinstance(package, dict) and package.get("id")
+            ]
             self.step = 0
-            self.selected_recipe_name = self.recipes[0] if self.recipes else ""
+            self.selected_provider = self.providers[0] if self.providers else ""
+            self.selected_platform_id = ""
+            self.platform_by_id = {
+                str(platform_choice.get("id")): platform_choice
+                for platform_choice in self.platforms
+                if platform_choice.get("id")
+            }
 
         def compose(self) -> ComposeResult:
             with Vertical(id="new-dialog"):
-                yield Label("[b]New Instance[/b]  [dim]1 Name -> 2 Recipe -> 3 Options -> 4 Review[/dim]")
+                yield Label(
+                    "[b]New Instance[/b]  [dim]1 Name -> 2 Provider -> 3 Platform -> 4 Content -> 5 Review[/dim]"
+                )
                 with Vertical(id="step-name"):
                     yield Input(placeholder="instance name", id="new-name")
                     yield Static("Use a short lowercase name, for example dev-a or windows-test.", classes="muted")
-                with Vertical(id="step-recipe"):
-                    yield Static("Choose a recipe. Use ↑/↓ to preview, Enter to continue.", classes="muted")
-                    yield DataTable(id="recipe-cards")
-                    yield Static("", id="recipe-defaults")
-                with Vertical(id="step-options"):
+                with Vertical(id="step-provider"):
+                    yield Static("Choose where the VM should live. Use ↑/↓ and Enter.", classes="muted")
+                    yield DataTable(id="provider-cards")
+                with Vertical(id="step-platform"):
+                    yield Static("Choose a supported machine / OS / init / location combination.", classes="muted")
+                    yield DataTable(id="platform-cards")
+                    yield Static("", id="platform-defaults")
+                with Vertical(id="step-content"):
                     yield Static("", id="resource-defaults")
                     yield Input(placeholder="disk GB override", id="new-disk")
                     yield Input(placeholder="memory MB override", id="new-memory")
+                    yield Static("Bundles", classes="muted")
+                    yield SelectionList(
+                        *(
+                            (self.bundle_label(bundle), str(bundle.get("id")))
+                            for bundle in self.bundles
+                            if bundle.get("id")
+                        ),
+                        id="bundle-select",
+                        disabled=not self.bundles,
+                    )
                     yield Static("Additional packages", classes="muted")
                     yield SelectionList(
                         *((package, package) for package in self.packages),
@@ -337,82 +344,138 @@ def run_tui() -> int:
                     yield Button("Create", id="create", variant="success")
 
         def on_mount(self) -> None:
-            self.populate_recipe_cards()
+            self.populate_provider_cards()
+            self.populate_platform_cards()
             self.update_wizard()
 
-        def populate_recipe_cards(self) -> None:
-            table = self.query_one("#recipe-cards", DataTable)
+        def bundle_label(self, bundle: dict[str, Any]) -> str:
+            includes = bundle.get("includes", [])
+            include_text = ", ".join(str(package) for package in includes) if isinstance(includes, list) else ""
+            return f"{bundle.get('id')}  ({include_text})" if include_text else str(bundle.get("id"))
+
+        def populate_provider_cards(self) -> None:
+            table = self.query_one("#provider-cards", DataTable)
             table.cursor_type = "row"
-            table.add_columns("Recipe", "Machine", "OS", "Location", "Packages")
-            for recipe in self.recipes:
-                details = self.recipe_details.get(recipe, {})
-                packages = details.get("packages", [])
-                bundles = details.get("bundles", [])
-                package_items: list[str] = []
-                if isinstance(bundles, list):
-                    package_items.extend(f"+{bundle}" for bundle in bundles)
-                if isinstance(packages, list):
-                    package_items.extend(str(package) for package in packages)
-                table.add_row(
-                    recipe,
-                    str(details.get("machine") or "-"),
-                    str(details.get("os") or "-"),
-                    str(details.get("location") or "-"),
-                    ", ".join(package_items) if package_items else "-",
-                    key=recipe,
-                )
-            if self.recipes:
+            table.add_columns("Provider", "Supported platforms")
+            for provider in self.providers:
+                count = sum(1 for platform in self.platforms if platform.get("provider") == provider)
+                table.add_row(provider, f"{count} combinations", key=provider)
+            if self.providers:
                 table.move_cursor(row=0, column=0, animate=False)
 
-        def selected_recipe(self) -> str:
-            return self.selected_recipe_name
+        def populate_platform_cards(self) -> None:
+            table = self.query_one("#platform-cards", DataTable)
+            table.cursor_type = "row"
+            table.clear(columns=True)
+            table.add_columns("Machine", "OS", "Init", "Location", "Defaults")
+            filtered = [
+                platform_choice
+                for platform_choice in self.platforms
+                if platform_choice.get("provider") == self.selected_provider
+            ]
+            for platform_choice in filtered:
+                defaults = (
+                    platform_choice.get("defaults", {}) if isinstance(platform_choice.get("defaults"), dict) else {}
+                )
+                default_parts = []
+                if defaults.get("plan"):
+                    default_parts.append(str(defaults.get("plan")))
+                if defaults.get("instance_type"):
+                    default_parts.append(str(defaults.get("instance_type")))
+                if defaults.get("disk_gb"):
+                    default_parts.append(f"{defaults.get('disk_gb')} GB")
+                memory = defaults.get("memory_mb")
+                if memory:
+                    default_parts.append(f"{memory} MB")
+                table.add_row(
+                    str(platform_choice.get("machine") or "-"),
+                    str(platform_choice.get("os") or "-"),
+                    str(platform_choice.get("init") or "-"),
+                    str(platform_choice.get("location") or "-"),
+                    ", ".join(default_parts) if default_parts else "-",
+                    key=str(platform_choice.get("id")),
+                )
+            if filtered:
+                self.selected_platform_id = str(filtered[0].get("id"))
+                table.move_cursor(row=0, column=0, animate=False)
+            else:
+                self.selected_platform_id = ""
+
+        def selected_platform(self) -> dict[str, Any]:
+            return self.platform_by_id.get(self.selected_platform_id, {})
 
         def selected_packages(self) -> list[str]:
             selected = self.query_one("#package-select", SelectionList).selected
             return [str(package) for package in selected]
 
-        def recipe_default_lines(self, recipe: str) -> list[str]:
-            details = self.recipe_details.get(recipe, {})
-            bundles = details.get("bundles", [])
-            packages = details.get("packages", [])
-            bundle_text = ", ".join(str(bundle) for bundle in bundles) if isinstance(bundles, list) else "-"
-            package_text = ", ".join(str(package) for package in packages) if isinstance(packages, list) else "-"
+        def selected_bundles(self) -> list[str]:
+            selected = self.query_one("#bundle-select", SelectionList).selected
+            return [str(bundle) for bundle in selected]
+
+        def bundled_packages(self) -> list[str]:
+            packages: list[str] = []
+            for bundle_id in self.selected_bundles():
+                bundle = self.bundle_map.get(bundle_id, {})
+                includes = bundle.get("includes", [])
+                if isinstance(includes, list):
+                    packages.extend(str(package) for package in includes)
+            return sorted(set(packages))
+
+        def platform_default_lines(self, platform_choice: dict[str, Any]) -> list[str]:
+            defaults = platform_choice.get("defaults", {}) if isinstance(platform_choice.get("defaults"), dict) else {}
             return [
-                f"Machine: {details.get('machine') or '-'}",
-                f"OS: {details.get('os') or '-'}",
-                f"Location: {details.get('location') or '-'}",
-                f"Bundles: {bundle_text or '-'}",
-                f"Included packages: {package_text or '-'}",
+                f"Provider: {platform_choice.get('provider') or '-'}",
+                f"Machine: {platform_choice.get('machine') or '-'}",
+                f"OS: {platform_choice.get('os') or '-'}",
+                f"Init: {platform_choice.get('init') or '-'}",
+                f"Location: {platform_choice.get('location') or '-'}",
+                f"Defaults: disk {defaults.get('disk_gb') or '-'} GB, "
+                f"memory {defaults.get('memory_mb') or '-'} MB, "
+                f"CPU {defaults.get('cpus') or defaults.get('cpu_cores') or defaults.get('vcpus') or '-'}.",
             ]
 
         def update_wizard(self) -> None:
-            for index, widget_id in enumerate(("step-name", "step-recipe", "step-options", "step-review")):
+            for index, widget_id in enumerate(
+                ("step-name", "step-provider", "step-platform", "step-content", "step-review")
+            ):
                 self.query_one(f"#{widget_id}", Vertical).display = index == self.step
 
-            recipe = self.selected_recipe()
-            details = self.recipe_details.get(recipe, {})
-            self.query_one("#recipe-defaults", Static).update("\n".join(self.recipe_default_lines(recipe)))
+            platform_choice = self.selected_platform()
+            defaults = platform_choice.get("defaults", {}) if isinstance(platform_choice.get("defaults"), dict) else {}
+            self.query_one("#platform-defaults", Static).update("\n".join(self.platform_default_lines(platform_choice)))
             self.query_one("#resource-defaults", Static).update(
-                "Leave overrides empty to use recipe defaults: "
-                f"disk {details.get('disk_gb') or '-'} GB, "
-                f"memory {details.get('memory_mb') or '-'} MB, "
-                f"CPU {details.get('cpu_cores') or '-'}."
+                "Leave overrides empty to use platform defaults: "
+                f"disk {defaults.get('disk_gb') or '-'} GB, "
+                f"memory {defaults.get('memory_mb') or '-'} MB, "
+                f"CPU {defaults.get('cpus') or defaults.get('cpu_cores') or defaults.get('vcpus') or '-'}."
             )
 
             name = self.query_one("#new-name", Input).value.strip() or "<instance>"
             disk = self.query_one("#new-disk", Input).value.strip()
             memory = self.query_one("#new-memory", Input).value.strip()
+            selected_bundles = self.selected_bundles()
+            bundled_packages = self.bundled_packages()
             selected_packages = self.selected_packages()
             package_text = ", ".join(selected_packages) if selected_packages else "(none)"
-            command = create_instance_args(name, recipe, ",".join(selected_packages), disk, memory)
+            bundled_text = ", ".join(bundled_packages) if bundled_packages else "(none)"
+            bundle_text = ", ".join(selected_bundles) if selected_bundles else "(none)"
+            command = create_instance_args(
+                name,
+                platform_choice,
+                ",".join(selected_bundles),
+                ",".join(selected_packages),
+                disk,
+                memory,
+            )
             self.query_one("#review", Static).update(
                 "\n".join(
                     [
                         f"Instance: {name}",
-                        f"Recipe: {recipe or '-'}",
-                        *self.recipe_default_lines(recipe),
-                        f"Disk override: {disk or '(use recipe default)'}",
-                        f"Memory override: {memory or '(use recipe default)'}",
+                        *self.platform_default_lines(platform_choice),
+                        f"Bundles: {bundle_text}",
+                        f"Bundle packages: {bundled_text}",
+                        f"Disk override: {disk or '(use platform default)'}",
+                        f"Memory override: {memory or '(use platform default)'}",
                         f"Additional packages: {package_text}",
                         "",
                         command_label(command),
@@ -421,33 +484,43 @@ def run_tui() -> int:
             )
 
             self.query_one("#back", Button).disabled = self.step == 0
-            self.query_one("#next", Button).display = self.step < 3
-            self.query_one("#create", Button).display = self.step == 3
+            self.query_one("#next", Button).display = self.step < 4
+            self.query_one("#create", Button).display = self.step == 4
 
         def focus_current_step(self) -> None:
             if self.step == 0:
                 self.query_one("#new-name", Input).focus()
             elif self.step == 1:
-                self.query_one("#recipe-cards", DataTable).focus()
+                self.query_one("#provider-cards", DataTable).focus()
             elif self.step == 2:
+                self.query_one("#platform-cards", DataTable).focus()
+            elif self.step == 3:
                 self.query_one("#new-disk", Input).focus()
             else:
                 self.query_one("#create", Button).focus()
 
         def set_step(self, step: int) -> None:
-            self.step = max(0, min(3, step))
+            self.step = max(0, min(4, step))
             self.update_wizard()
             self.focus_current_step()
 
         def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
-            if event.data_table.id == "recipe-cards":
-                self.selected_recipe_name = str(event.row_key.value)
+            if event.data_table.id == "provider-cards":
+                self.selected_provider = str(event.row_key.value)
+                self.populate_platform_cards()
+                self.update_wizard()
+            elif event.data_table.id == "platform-cards":
+                self.selected_platform_id = str(event.row_key.value)
                 self.update_wizard()
 
         def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
-            if event.data_table.id == "recipe-cards":
-                self.selected_recipe_name = str(event.row_key.value)
+            if event.data_table.id == "provider-cards":
+                self.selected_provider = str(event.row_key.value)
+                self.populate_platform_cards()
                 self.set_step(2)
+            elif event.data_table.id == "platform-cards":
+                self.selected_platform_id = str(event.row_key.value)
+                self.set_step(3)
 
         def on_selection_list_selected_changed(self, event: Any) -> None:
             self.update_wizard()
@@ -479,23 +552,31 @@ def run_tui() -> int:
                 if self.step == 0 and not name:
                     self.notify("Name is required", severity="error")
                     return
-                if self.step == 1 and not self.selected_recipe():
-                    self.notify("Name and recipe are required", severity="error")
+                if self.step == 1 and not self.selected_provider:
+                    self.notify("Provider is required", severity="error")
+                    return
+                if self.step == 2 and not self.selected_platform():
+                    self.notify("Platform is required", severity="error")
                     return
                 self.set_step(self.step + 1)
                 return
             if event.button.id != "create":
                 return
             name = self.query_one("#new-name", Input).value.strip()
-            recipe = self.selected_recipe()
-            if not name or not recipe:
-                self.notify("Name and recipe are required", severity="error")
+            platform_choice = self.selected_platform()
+            if not name or not platform_choice:
+                self.notify("Name and platform are required", severity="error")
                 return
             packages = ",".join(self.selected_packages())
+            bundles = ",".join(self.selected_bundles())
             self.dismiss(
                 {
                     "name": name,
-                    "recipe": recipe,
+                    "machine": str(platform_choice.get("machine") or ""),
+                    "os": str(platform_choice.get("os") or ""),
+                    "init": str(platform_choice.get("init") or ""),
+                    "location": str(platform_choice.get("location") or ""),
+                    "bundles": bundles,
                     "packages": packages,
                     "disk_gb": self.query_one("#new-disk", Input).value.strip(),
                     "memory_mb": self.query_one("#new-memory", Input).value.strip(),
@@ -627,14 +708,12 @@ def run_tui() -> int:
             super().__init__()
             self.instances: list[dict[str, Any]] = []
             self.statuses: dict[str, dict[str, Any]] = {}
-            self.recipes: list[str] = []
+            self.catalog_options: dict[str, Any] = {"providers": [], "platforms": [], "bundles": [], "packages": []}
             self.current_instance: str | None = None
             self.current_package: str | None = None
             self.current_status: dict[str, Any] | None = None
             self.command_running = False
             self.background_tasks: set[asyncio.Task[None]] = set()
-            self.recipe_details: dict[str, dict[str, Any]] = {}
-            self.package_ids: list[str] = []
             self.hero_frame = 0
 
         def compose(self) -> ComposeResult:
@@ -699,7 +778,7 @@ def run_tui() -> int:
         async def on_mount(self) -> None:
             instances = self.query_one("#instances", DataTable)
             instances.cursor_type = "row"
-            instances.add_columns("", "Instance", "Provider", "Provision", "Recipe")
+            instances.add_columns("", "Instance", "Provider", "Provision", "OS")
 
             packages = self.query_one("#packages", DataTable)
             packages.cursor_type = "row"
@@ -711,27 +790,15 @@ def run_tui() -> int:
             self.start_task(self.load_initial_data())
 
         async def load_initial_data(self) -> None:
-            await self.load_recipes()
+            await self.load_catalog_options()
             await self.action_refresh()
 
-        async def load_recipes(self) -> None:
+        async def load_catalog_options(self) -> None:
             try:
-                rows = await asyncio.to_thread(recipe_rows)
+                self.catalog_options = await asyncio.to_thread(catalog_options)
             except Exception as exc:
-                self.log_line(f"[warning]recipes-list failed:[/] {exc}")
-                rows = []
-            self.recipes = [str(row.get("name")) for row in rows if isinstance(row, dict) and row.get("name")]
-            self.recipe_details = {}
-            for recipe in self.recipes:
-                try:
-                    self.recipe_details[recipe] = await asyncio.to_thread(recipe_defaults, recipe)
-                except Exception as exc:
-                    self.recipe_details[recipe] = {"error": str(exc)}
-            try:
-                self.package_ids = await asyncio.to_thread(package_ids)
-            except Exception as exc:
-                self.log_line(f"[warning]plugin-list failed:[/] {exc}")
-                self.package_ids = []
+                self.log_line(f"[warning]catalog-options failed:[/] {exc}")
+                self.catalog_options = {"providers": [], "platforms": [], "bundles": [], "packages": []}
 
         def animate_hero(self) -> None:
             frames = [
@@ -827,8 +894,14 @@ def run_tui() -> int:
             filter_text = self.query_one("#filter", Input).value.strip().lower()
             for row in self.instances:
                 name = str(row.get("name", ""))
-                recipe = str(row.get("recipe", "")).lower()
-                if filter_text and filter_text not in name.lower() and filter_text not in recipe:
+                os_id = str(row.get("os", ""))
+                machine = str(row.get("machine", ""))
+                if (
+                    filter_text
+                    and filter_text not in name.lower()
+                    and filter_text not in os_id.lower()
+                    and filter_text not in machine.lower()
+                ):
                     continue
                 status = self.statuses.get(name, {})
                 state = status.get("state", {})
@@ -839,7 +912,7 @@ def run_tui() -> int:
                     name,
                     provider_state,
                     provision_state,
-                    str(row.get("recipe") or "-"),
+                    os_id or "-",
                     key=name,
                 )
             if self.current_instance is None:
@@ -1043,7 +1116,7 @@ def run_tui() -> int:
 
         def action_new_instance(self) -> None:
             self.push_screen(
-                NewInstanceScreen(self.recipes, self.recipe_details, self.package_ids),
+                NewInstanceScreen(self.catalog_options),
                 self.handle_new_instance,
             )
 
@@ -1055,7 +1128,13 @@ def run_tui() -> int:
         async def perform_new_instance(self, result: dict[str, str]) -> None:
             args = create_instance_args(
                 result["name"],
-                result["recipe"],
+                {
+                    "machine": result["machine"],
+                    "os": result["os"],
+                    "init": result["init"],
+                    "location": result["location"],
+                },
+                result["bundles"],
                 result["packages"],
                 result["disk_gb"],
                 result["memory_mb"],

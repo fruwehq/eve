@@ -28,7 +28,7 @@ end
 def usage
   warn <<~USAGE
     Usage:
-      scripts/instance-create --instance <name> --recipe <recipe> [options]
+      scripts/instance-create --instance <name> --machine <machine> --os <os-id> --init <init-id> --location <location> [options]
 
     Options:
       --registry <path>
@@ -49,7 +49,6 @@ def usage
 end
 
 name = nil
-recipe = nil
 registry_path = ENV["EGAME_INSTANCE_REGISTRY"] && !ENV["EGAME_INSTANCE_REGISTRY"].empty? \
                 ? File.expand_path(ENV["EGAME_INSTANCE_REGISTRY"], Dir.pwd) \
                 : DEFAULT_REGISTRY_PATH
@@ -61,8 +60,6 @@ until args.empty?
   case args.shift
   when "--instance"
     name = args.shift
-  when "--recipe"
-    recipe = args.shift
   when "--registry"
     registry_path = File.expand_path(args.shift, Dir.pwd)
   when "--machine"
@@ -100,8 +97,14 @@ until args.empty?
   end
 end
 
-unless name && recipe
+unless name
   usage
+  exit 2
+end
+
+required_fields = %w[machine os init location]
+if required_fields.any? { |field| fields[field].nil? || fields[field].empty? }
+  warn "instance-create: provide --machine, --os, --init, and --location"
   exit 2
 end
 
@@ -127,7 +130,6 @@ with_registry_lock(registry_path) do
   now = Time.now.utc.iso8601
   entry = {
     "name" => name,
-    "recipe" => recipe,
     "created_at" => now,
     "updated_at" => now
   }.merge(fields)

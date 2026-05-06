@@ -52,7 +52,6 @@ env_value() {
 }
 
 OS_FAMILY=$(env_value OS_FAMILY)
-OS_UI_MODE=$(env_value OS_UI_MODE)
 PROFILE_NAME=$(env_value PROFILE_NAME)
 PROVIDER=$(env_value PROVIDER)
 
@@ -130,7 +129,6 @@ fi
 
 cat > "$STAGE/state/env" <<EOF
 export OS_FAMILY="$OS_FAMILY"
-export OS_UI_MODE="$OS_UI_MODE"
 export PROFILE_NAME="$PROFILE_NAME"
 export EPHEMERAL_DISPLAY_RESOLUTION="${EPHEMERAL_DISPLAY_RESOLUTION:-}"
 export PROVIDER="$PROVIDER"

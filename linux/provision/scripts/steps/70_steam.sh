@@ -5,11 +5,6 @@ set -euo pipefail
 
 skip_unless_pkg steam
 
-if ! is_desktop; then
-  log "### 70_steam: headless OS — skipping"
-  exit 0
-fi
-
 if [ "$(dpkg --print-architecture)" != "amd64" ]; then
   log "Steam only available on amd64 — skipping"
   exit 0

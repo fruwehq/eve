@@ -61,7 +61,7 @@ def load_catalog
   over = load_any(LOCAL_CATALOG_PATH)
   merged = deep_merge(base, over)
 
-  %w[machines oses inits packages bundles locations profiles recipes].each do |section|
+  %w[machines oses inits packages bundles locations].each do |section|
     key = case section
           when "oses", "inits", "packages", "bundles" then "id"
           else "name"
@@ -96,14 +96,6 @@ end
 def env_or(name, fallback)
   value = ENV[name]
   value && !value.empty? ? value : fallback
-end
-
-def find_recipe(catalog, name)
-  recipe = by_key(catalog, "recipes", "name", name)
-  profile = by_key(catalog, "profiles", "name", name)
-  return deep_merge(recipe, profile) if recipe && profile
-
-  profile || recipe
 end
 
 def resolve_bundle_packages(catalog, bundle_ids)
@@ -141,17 +133,37 @@ def validate!(catalog, composition, machine, os, init, location, bundle_packages
     raise "Init/provider mismatch: init #{init["id"]} expects #{init["provider"]}, got #{machine["provider"]}"
   end
 
+  provider = machine["provider"]
+  raise "Location #{location["name"]} has no mapping for provider #{provider}" unless location[provider]
+
+  supports = machine["supports"].is_a?(Hash) ? machine["supports"] : {}
+  supported_arches = supports["arches"].is_a?(Array) ? supports["arches"] : []
+  if !supported_arches.empty? && !supported_arches.include?(os["arch"])
+    raise "Machine/OS mismatch: machine #{machine["name"]} does not support architecture #{os["arch"]}"
+  end
+  supported_os_ids = supports["os_ids"].is_a?(Array) ? supports["os_ids"] : []
+  if !supported_os_ids.empty? && !supported_os_ids.include?(os["id"])
+    raise "Machine/OS mismatch: machine #{machine["name"]} does not support OS #{os["id"]}"
+  end
+
+  case provider
+  when "aws"
+    unless os.key?("aws_ami_name_pattern") || os.key?("aws_ami_id") || os.key?("aws_ssm_parameter")
+      raise "OS/provider mismatch: OS #{os["id"]} has no AWS image selector"
+    end
+  when "vultr"
+    raise "OS/provider mismatch: OS #{os["id"]} has no Vultr OS id" unless os.key?("vultr_os_id")
+  when "local-virtualbox", "local-vmware", "local-qemu"
+    raise "OS/provider mismatch: OS #{os["id"]} has no Vagrant box" unless os.key?("vagrant_box")
+  when "truenas"
+    raise "OS/provider mismatch: OS #{os["id"]} has no cloud image URL" unless os.key?("cloud_image_url")
+  when "raspberry-pi"
+    raise "OS/provider mismatch: OS #{os["id"]} has no metal image" unless os.key?("metal_image")
+  end
+
   package_catalog = (catalog["packages"] || []).map { |pkg| pkg["id"] }
   unknown_package = bundle_packages.find { |pkg| !package_catalog.include?(pkg) }
   raise "Bundle references unknown package id: #{unknown_package}" if unknown_package
-
-  if bundle_packages.include?("steam") && os["ui_mode"] != "desktop"
-    raise "Compatibility: steam requires desktop UI mode"
-  end
-
-  if bundle_packages.include?("sunshine") && os["ui_mode"] != "desktop"
-    raise "Compatibility: sunshine requires desktop UI mode"
-  end
 
   if bundle_packages.include?("codex-cli") && !bundle_packages.include?("dev-toolchain")
     raise "Compatibility: codex-cli requires dev-toolchain in bundles"
@@ -161,8 +173,6 @@ def validate!(catalog, composition, machine, os, init, location, bundle_packages
     raise "Compatibility: goose requires dev-toolchain in bundles"
   end
 
-  provider = machine["provider"]
-  raise "Location #{location["name"]} has no mapping for provider #{provider}" unless location[provider]
 end
 
 def engine_for(machine)
@@ -210,7 +220,6 @@ def validate_package_plugins!(bundle_packages, os)
     supports = plugin.fetch("supports", {})
     os_family = os.fetch("family")
     validate_package_support_value!(package_id, supports, os_family, "os_families", "os family")
-    validate_package_support_value!(package_id, supports, os.fetch("ui_mode", "headless"), "ui_modes", "UI mode")
     validate_package_support_value!(package_id, supports, os.fetch("arch", ""), "arches", "architecture")
     validate_package_support_value!(package_id, supports, os.fetch("id"), "os_ids", "OS")
     validate_package_support_value!(package_id, supports, os.fetch("version", ""), "os_versions", "OS version")
@@ -226,7 +235,6 @@ def emit_env(resolved)
 
   lines = {
     "INSTANCE_NAME" => resolved.dig("instance", "name"),
-    "RECIPE_NAME" => resolved["recipe_name"] || "",
     "PROFILE_NAME" => resolved.dig("instance", "name"),
     "ENGINE" => resolved["engine"],
     "PROVIDER" => provider,
@@ -234,7 +242,6 @@ def emit_env(resolved)
     "LOCATION_NAME" => resolved.dig("location", "name"),
     "OS_ID" => os["id"],
     "OS_FAMILY" => os["family"],
-    "OS_UI_MODE" => os["ui_mode"],
     "INIT_ID" => resolved.dig("init", "id"),
     "BUNDLE_PACKAGES" => resolved["bundle_packages"].join(","),
     "VM_MEMORY_MB" => (machine_defaults["memory_mb"] || 0).to_s,
@@ -308,19 +315,14 @@ begin
   instance = (registry["instances"] || []).find { |entry| entry["name"] == instance_name }
   raise "Instance not found: #{instance_name} (registry: #{registry_path})" unless instance
 
-  recipe_name = instance["recipe"]
-  recipe = recipe_name ? find_recipe(catalog, recipe_name) : {}
-  raise "Recipe not found: #{recipe_name}" if recipe_name && !recipe
-
   instance_overrides = instance.reject do |key, _value|
-    %w[name recipe overrides created_at updated_at state].include?(key)
+    %w[name overrides created_at updated_at state].include?(key)
   end
-  composition = deep_merge(recipe || {}, instance_overrides)
+  composition = instance_overrides
   composition["name"] = instance["name"]
 
   machine = by_key(catalog, "machines", "name", composition["machine"])
   os = by_key(catalog, "oses", "id", composition["os"])
-  os = os.merge("ui_mode" => composition["ui_mode"] || os["ui_mode"] || "headless") if os
   init = by_key(catalog, "inits", "id", composition["init"])
   location = by_key(catalog, "locations", "name", composition["location"])
 
@@ -339,8 +341,6 @@ begin
   validate_package_plugins!(bundle_packages, os)
   resolved = {
     "instance" => instance,
-    "recipe_name" => recipe_name,
-    "recipe" => recipe,
     "composition" => composition,
     "machine" => machine,
     "os" => os,

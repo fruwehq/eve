@@ -19,16 +19,16 @@ ssh vultr "pwsh C:\provision\bootstrap.ps1"
 
 ## v3 instance workflow
 
-v3 introduces concrete local instances on top of reusable recipes. Recipes still
-come from the existing catalog entries, while concrete instances live in the
-git-ignored local registry at `.egame/instances.yaml`.
+v3 introduces concrete local instances selected from provider/platform catalog
+choices. Instances live in the git-ignored local registry at
+`.egame/instances.yaml`.
 
 ```bash
-# List reusable recipes
-make recipes.list
+# List supported provider / platform / content choices
+make catalog.list
 
 # Create a concrete instance entry
-make instance.create INSTANCE=dev-a RECIPE=local-qemu-ubuntu-dev-gui DISK_GB=120 MEMORY_MB=12288 PACKAGES=xpra
+make instance.create INSTANCE=dev-a MACHINE=local-qemu-medium OS=ubuntu-26.04-arm64 INIT=ssh-ubuntu-cloud-init LOCATION=tokyo BUNDLES=access-headless PACKAGES=waypipe DISK_GB=32
 
 # List and inspect concrete instances
 make instance.list
@@ -61,12 +61,12 @@ make package.down INSTANCE=dev-a PACKAGE=docker YES=1
 make package.unselect INSTANCE=dev-a PACKAGE=xpra
 ```
 
-The v3 command surface is instance-first. The catalog `recipes` section defines
-reusable compositions; `.egame/instances.yaml` defines concrete local instances
-created from those recipes. Provider and package plugins receive resolved
-instance JSON, and legacy profile-shaped overlays are generated only as an
-internal compatibility detail for lower-level provider scripts. Terraform-backed
-instances now get
+The v3 command surface is instance-first. The catalog defines machines, OSes,
+init methods, locations, bundles, packages, and plugins; `.egame/instances.yaml`
+defines concrete local instances composed from those catalog entries. Provider
+and package plugins receive resolved instance JSON, and legacy profile-shaped
+overlays are generated only as an internal compatibility detail for lower-level
+provider scripts. Terraform-backed instances now get
 
 The built-in Linux Docker package installs Docker in rootless mode. The daemon
 runs as the VM user through `systemd --user`, and `DOCKER_HOST` points at the
@@ -91,7 +91,7 @@ Terraform-backed instances get instance-scoped backend roots and `TF_DATA_DIR` p
 `.generated/instances/<name>/tf/`, so multiple concrete instances on the same
 provider do not share local Terraform state.
 
-Desktop Linux instances default to the existing XFCE-oriented access packages.
+Linux GUI packages are selected explicitly through bundles and packages.
 For GNOME trials, select `gnome-desktop`; adding `macos-desktop-theme` applies a
 best-effort dock-at-bottom, left-side window controls, dark color scheme, and
 Papirus icon setup on the next GNOME login.
@@ -141,14 +141,14 @@ Terraform provider versions are pinned exactly in the Terramate provider templat
 
 ### Fresh checkout expectations
 
-- Local instance recipes (for example QEMU/Vagrant) should work without cloud API keys.
+- Local instance choices (for example QEMU/Vagrant) should work without cloud API keys.
 - Cloud providers (AWS/Vultr/TrueNAS) only require their own env vars when used.
 - Keep personal settings in `.env.local`.
 
 ```bash
-# List recipes and create a concrete instance
-make recipes.list
-make instance.create INSTANCE=dev-a RECIPE=local-qemu-ubuntu-dev-gui
+# List catalog choices and create a concrete instance
+make catalog.list
+make instance.create INSTANCE=dev-a MACHINE=local-qemu-medium OS=ubuntu-26.04-arm64 INIT=ssh-ubuntu-cloud-init LOCATION=tokyo BUNDLES=access-headless
 
 # Validate and inspect the instance
 make validate INSTANCE=dev-a
@@ -166,7 +166,7 @@ cp config/catalog.local.example.yaml config/catalog.local.yaml
 
 ```bash
 # Cloud instance (terraform engine)
-make instance.create INSTANCE=aws-dev-a RECIPE=aws-ubuntu-dev-headless
+make instance.create INSTANCE=aws-dev-a MACHINE=aws-cheap-x86 OS=ubuntu-26.04-amd64 INIT=ssh-ubuntu-cloud-init LOCATION=tokyo BUNDLES=access-headless,dev-sandbox-core
 make init INSTANCE=aws-dev-a
 make plan INSTANCE=aws-dev-a
 make up INSTANCE=aws-dev-a
@@ -175,13 +175,13 @@ make ssh INSTANCE=aws-dev-a
 make down INSTANCE=aws-dev-a
 
 # Local instance (vagrant engine)
-make instance.create INSTANCE=local-dev-a RECIPE=local-qemu-ubuntu-dev-gui
+make instance.create INSTANCE=local-dev-a MACHINE=local-qemu-medium OS=ubuntu-26.04-arm64 INIT=ssh-ubuntu-cloud-init LOCATION=tokyo BUNDLES=access-headless
 make plan INSTANCE=local-dev-a
 make up INSTANCE=local-dev-a
 make down INSTANCE=local-dev-a
 
 # TrueNAS instance (real provider wiring)
-make instance.create INSTANCE=truenas-dev-a RECIPE=truenas-ubuntu-dev-headless
+make instance.create INSTANCE=truenas-dev-a MACHINE=truenas-scale-medium OS=ubuntu-26.04-amd64 INIT=ssh-ubuntu-cloud-init LOCATION=tokyo BUNDLES=access-headless,dev-sandbox-core
 make validate INSTANCE=truenas-dev-a
 make info INSTANCE=truenas-dev-a
 
@@ -219,7 +219,7 @@ State is tracked in `$HOME/provision/state/state.json` on the VM — provisionin
 
 ## Remote GUI apps via Xpra (no full desktop)
 
-Xpra forwards individual remote applications over SSH and renders them as native-looking windows on the local host — useful when you want one remote app (e.g. a browser, IDE, or X11 tool) without pulling up a full remote desktop. Xpra is package-gated, so it is only installed on instances that opt in. The built-in Ubuntu 26.04 recipes do not include `remote-apps` by default because the current upstream Xpra Linux packages require Python `< 3.13`; add it explicitly only when using a compatible OS/package source.
+Xpra forwards individual remote applications over SSH and renders them as native-looking windows on the local host — useful when you want one remote app (e.g. a browser, IDE, or X11 tool) without pulling up a full remote desktop. Xpra is package-gated, so it is only installed on instances that opt in. The current upstream Xpra Linux packages require Python `< 3.13`; add it explicitly only when using a compatible OS/package source.
 
 > Linux instances use virtual displays (`xpra start :N`). Windows instances use shadow mode via Scheduled Task + SSH tunnel.
 
@@ -372,7 +372,7 @@ Flash **Ubuntu Server 26.04 LTS (64-bit)** with the official [Raspberry Pi Image
 In Imager's advanced options (gear icon), preseed:
 
 - **Hostname**: e.g. `rpi5`
-- **Username**: `terraform` — matches `ssh_user` for the other remote-provisioned recipes ([config/catalog.yaml](config/catalog.yaml)) so the Pi doesn't introduce a third naming convention.
+- **Username**: `terraform` — matches `ssh_user` for the other remote-provisioned instances ([config/catalog.yaml](config/catalog.yaml)) so the Pi doesn't introduce a third naming convention.
 - **Password**: a long throwaway. Provisioning enforces `PasswordAuthentication no`, so it only matters until first SSH-in.
 - **SSH**: enabled, "Allow public-key authentication only", paste your public key.
 - **Wi-Fi**: optional; fine for first boot / provisioning. Prefer **Ethernet** for actual streaming — Sunshine over Wi-Fi tends to surface as jitter and frame drops well before bandwidth is the bottleneck.

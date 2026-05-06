@@ -5,11 +5,6 @@ set -euo pipefail
 
 skip_unless_pkg macos-desktop-theme
 
-if ! is_desktop; then
-  log "### 49_macos_desktop_theme: headless OS — skipping"
-  exit 0
-fi
-
 log "### 49_macos_desktop_theme: installing macOS-like GNOME defaults"
 
 apt_install \

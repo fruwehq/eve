@@ -1,6 +1,6 @@
 # v2 catalog
 # Single source of truth for machine composition:
-# machine + os + init + packages/bundles + location + profile
+# machine + os + init + packages/bundles + location
 version: 1
 
 # -----------------------------------------------------------------------------
@@ -32,6 +32,8 @@ machines:
   - name: aws-cheap-x86
     provider: aws
     kind: vm
+    supports:
+      arches: [amd64]
     defaults:
       instance_type: t3.large
       disk_gb: 80
@@ -40,6 +42,8 @@ machines:
   - name: aws-gpu-g5
     provider: aws
     kind: vm
+    supports:
+      arches: [amd64]
     defaults:
       instance_type: g5.2xlarge
       disk_gb: 200
@@ -47,45 +51,61 @@ machines:
   - name: vultr-vcg-a40-1c # 1 vCPU, 5 GB RAM, 90 GB NVMe, 3 TB/mo, $0.075/hr, 1/24 NVIDIA A40 (2 GB VRAM)
     provider: vultr
     kind: vm
+    supports:
+      arches: [amd64]
     defaults:
       plan: vcg-a40-1c-5g-2vram
 
   - name: vultr-vcg-a40-2c # 2 vCPUs, 10 GB RAM, 180 GB NVMe, 4 TB/mo, $0.144/hr, 1/12 NVIDIA A40 (4 GB VRAM)
     provider: vultr
     kind: vm
+    supports:
+      arches: [amd64]
     defaults:
       plan: vcg-a40-2c-10g-4vram
 
   - name: vultr-vcg-a40-4c # 4 vCPUs, 20 GB RAM, 360 GB NVMe, 5 TB/mo, $0.288/hr, 1/6 NVIDIA A40 (8 GB VRAM)
     provider: vultr
     kind: vm
+    supports:
+      arches: [amd64]
     defaults:
       plan: vcg-a40-4c-20g-8vram
 
   - name: vultr-vcg-a40-6c # 6 vCPUs, 30 GB RAM, 550 GB NVMe, 6 TB/mo, $0.432/hr, 1/4 NVIDIA A40 (12 GB VRAM)
     provider: vultr
     kind: vm
+    supports:
+      arches: [amd64]
     defaults:
       plan: vcg-a40-6c-30g-12vram
 
   - name: local-virtualbox-medium
     provider: local-virtualbox
     kind: vm
+    supports:
+      arches: [amd64]
     defaults: *local_medium
 
   - name: local-qemu-medium
     provider: local-qemu
     kind: vm
+    supports:
+      arches: [arm64]
     defaults: *local_qemu_medium
 
   - name: local-vmware-medium
     provider: local-vmware
     kind: vm
+    supports:
+      arches: [amd64]
     defaults: *local_medium
 
   - name: raspberry-pi-5
     provider: raspberry-pi
     kind: metal
+    supports:
+      arches: [arm64]
     defaults:
       # CPU / memory / disk are physical attributes of the Pi, not knobs this
       # repo can set. Only architecture is recorded so provisioning can pick
@@ -95,6 +115,8 @@ machines:
   - name: truenas-scale-medium
     provider: truenas
     kind: vm
+    supports:
+      arches: [amd64]
     defaults:
       cpu_cores: 4
       cpu_mode: HOST-PASSTHROUGH
@@ -118,18 +140,19 @@ oses:
     arch: amd64
     vagrant_box: cloud-image/ubuntu-26.04
     cloud_image_url: https://cloud-images.ubuntu.com/releases/26.04/release/ubuntu-26.04-server-cloudimg-amd64.img
+    aws_ami_name_pattern: ubuntu/images/hvm-ssd-gp3/ubuntu-resolute-26.04-amd64-server-*
 
   - id: ubuntu-26.04-arm64
     family: ubuntu
     version: "26.04"
     arch: arm64
     vagrant_box: cloud-image/ubuntu-26.04
+    metal_image: ubuntu-26.04-arm64
 
   - id: windows-server-2025
     family: windows
     version: "2025"
     arch: amd64
-    ui_mode: desktop
     vultr_os_id: 2514 # Windows 2025 Standard x64
 
 # -----------------------------------------------------------------------------
@@ -244,102 +267,3 @@ locations:
       # Used by module defaults if machine.network is omitted
       bridge: br0
       pool: main
-
-# -----------------------------------------------------------------------------
-# Recipe catalog (composition entries)
-# -----------------------------------------------------------------------------
-recipes:
-  - name: aws-ubuntu-dev-headless
-    machine: aws-cheap-x86
-    os: ubuntu-26.04-amd64
-    init: ssh-ubuntu-cloud-init
-    bundles: [access-headless, dev-sandbox-core]
-    location: tokyo
-    lifecycle: *ttl_default
-
-  - name: aws-ubuntu-dev-gui
-    machine: aws-cheap-x86
-    os: ubuntu-26.04-amd64
-    ui_mode: desktop
-    init: ssh-ubuntu-cloud-init
-    bundles: [access-gui-safe, dev-sandbox-core]
-    location: tokyo
-
-  - name: vultr-windows-gaming
-    machine: vultr-vcg-a40-2c
-    os: windows-server-2025
-    init: ssh-windows-powershell7
-    bundles: [access-gui-streaming, gaming-core]
-    location: tokyo
-
-  - name: local-vbox-ubuntu-dev
-    machine: local-virtualbox-medium
-    os: ubuntu-26.04-amd64
-    init: ssh-ubuntu-cloud-init
-    bundles: [access-headless, dev-sandbox-core]
-    location: tokyo
-
-  - name: local-vbox-ubuntu-all
-    machine: local-virtualbox-medium
-    os: ubuntu-26.04-amd64
-    ui_mode: desktop
-    init: ssh-ubuntu-cloud-init
-    bundles: [access-gui-streaming, access-gui-safe, dev-sandbox-core, gaming-core]
-    location: tokyo
-
-  - name: local-qemu-ubuntu-dev-gui
-    machine: local-qemu-medium
-    os: ubuntu-26.04-arm64
-    ui_mode: desktop
-    init: ssh-ubuntu-cloud-init
-    bundles: [access-gui-safe, dev-sandbox-core-arm64]
-    location: tokyo
-
-  - name: local-qemu-ubuntu-all
-    machine: local-qemu-medium
-    os: ubuntu-26.04-arm64
-    ui_mode: desktop
-    init: ssh-ubuntu-cloud-init
-    bundles: [access-gui-streaming, access-gui-safe, dev-sandbox-core-arm64, gaming-core]
-    location: tokyo
-
-  - name: local-vmware-ubuntu-dev-gui
-    machine: local-vmware-medium
-    os: ubuntu-26.04-amd64
-    ui_mode: desktop
-    init: ssh-ubuntu-cloud-init
-    bundles: [access-gui-safe, dev-sandbox-core]
-    location: tokyo
-
-  - name: local-vmware-ubuntu-all
-    machine: local-vmware-medium
-    os: ubuntu-26.04-amd64
-    ui_mode: desktop
-    init: ssh-ubuntu-cloud-init
-    bundles: [access-gui-streaming, access-gui-safe, dev-sandbox-core, gaming-core]
-    location: tokyo
-
-  - name: truenas-ubuntu-dev-headless
-    machine: truenas-scale-medium
-    os: ubuntu-26.04-amd64
-    init: ssh-ubuntu-cloud-init
-    bundles: [access-headless, dev-sandbox-core]
-    location: tokyo
-    lifecycle: *ttl_default
-
-  - name: truenas-ubuntu-all
-    machine: truenas-scale-medium
-    os: ubuntu-26.04-amd64
-    ui_mode: desktop
-    init: ssh-ubuntu-cloud-init
-    bundles: [access-gui-streaming, access-gui-safe, dev-sandbox-core, gaming-core]
-    location: tokyo
-    lifecycle: *ttl_default
-
-  - name: rpi-ubuntu-all
-    machine: raspberry-pi-5
-    os: ubuntu-26.04-arm64
-    ui_mode: desktop
-    init: ssh-ubuntu-metal
-    bundles: [access-gui-streaming, access-gui-safe, dev-sandbox-core-arm64, gaming-core]
-    location: tokyo

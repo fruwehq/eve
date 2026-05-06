@@ -66,7 +66,11 @@ rm -f "$tmp_registry" "$tmp_concurrent_registry"
 if ./scripts/instance-create \
   --registry "$tmp_registry" \
   --instance test-dev \
-  --recipe local-vmware-ubuntu-dev-gui \
+  --machine local-vmware-medium \
+  --os ubuntu-26.04-amd64 \
+  --init ssh-ubuntu-cloud-init \
+  --location tokyo \
+  --bundles access-gui-safe,dev-sandbox-core \
   --packages steam \
   --disk-gb 90 \
   --memory-mb 8192 >/dev/null; then
@@ -83,6 +87,36 @@ else
   FAIL=$((FAIL + 1))
 fi
 
+if ./scripts/instance-create \
+  --registry "$tmp_registry" \
+  --instance direct-dev \
+  --machine local-qemu-medium \
+  --os ubuntu-26.04-arm64 \
+  --init ssh-ubuntu-cloud-init \
+  --location tokyo \
+  --bundles access-headless,dev-sandbox-core-arm64 \
+  --packages waypipe \
+  --disk-gb 32 >/dev/null; then
+  if ./scripts/instance-resolve --registry "$tmp_registry" --instance direct-dev --validate >/dev/null &&
+    ./scripts/instance-resolve --registry "$tmp_registry" --instance direct-dev --emit json |
+      jq -e '
+        .composition.machine == "local-qemu-medium" and
+        .composition.os == "ubuntu-26.04-arm64" and
+        (.bundle_packages | index("ssh")) and
+        (.bundle_packages | index("waypipe")) and
+        .package_sources.waypipe == ["direct"]
+      ' >/dev/null; then
+    printf '  [OK] create direct composition instance\n'
+  else
+    printf '  [FAIL] direct composition instance did not validate\n' >&2
+    ./scripts/instance-resolve --registry "$tmp_registry" --instance direct-dev --emit json >&2 || true
+    FAIL=$((FAIL + 1))
+  fi
+else
+  printf '  [FAIL] create direct composition instance\n' >&2
+  FAIL=$((FAIL + 1))
+fi
+
 if EGAME_INSTANCE_REGISTRY="$tmp_registry" make --no-print-directory instance.validate INSTANCE=test-dev >/dev/null &&
   EGAME_INSTANCE_REGISTRY="$tmp_registry" make --no-print-directory instance.list |
     grep -q '^test-dev'; then
@@ -96,12 +130,18 @@ fi
 ./scripts/instance-create \
   --registry "$tmp_concurrent_registry" \
   --instance concurrent-a \
-  --recipe local-vmware-ubuntu-dev-gui >/dev/null &
+  --machine local-vmware-medium \
+  --os ubuntu-26.04-amd64 \
+  --init ssh-ubuntu-cloud-init \
+  --location tokyo >/dev/null &
 create_a_pid=$!
 ./scripts/instance-create \
   --registry "$tmp_concurrent_registry" \
   --instance concurrent-b \
-  --recipe local-vmware-ubuntu-dev-gui >/dev/null &
+  --machine local-vmware-medium \
+  --os ubuntu-26.04-amd64 \
+  --init ssh-ubuntu-cloud-init \
+  --location tokyo >/dev/null &
 create_b_pid=$!
 if wait "$create_a_pid" && wait "$create_b_pid" &&
   ./scripts/instance-list --registry "$tmp_concurrent_registry" --json |
@@ -136,12 +176,12 @@ else
 fi
 
 cat >"$tmp_local_catalog" <<'YAML'
-profiles:
-  - name: local-vmware-ubuntu-dev-gui
-    packages: [steam]
+bundles:
+  - id: access-gui-safe
+    includes: [ssh, rustdesk, vnc, steam]
 YAML
 if EGAME_CATALOG_LOCAL="$tmp_local_catalog" ./scripts/instance-resolve --registry "$FIXTURE" --instance dev-a --emit json |
-  jq -e '(.bundle_packages | index("steam")) and .package_sources.steam == ["direct"]' >/dev/null; then
+  jq -e '(.bundle_packages | index("steam")) and .package_sources.steam == ["bundle:access-gui-safe"]' >/dev/null; then
   printf '  [OK] instance resolver honors EGAME_CATALOG_LOCAL\n'
 else
   printf '  [FAIL] instance resolver honors EGAME_CATALOG_LOCAL\n' >&2
@@ -149,9 +189,9 @@ else
 fi
 
 cat >"$tmp_local_catalog" <<'YAML'
-profiles:
-  - name: local-vmware-ubuntu-dev-gui
-    packages: [xpra]
+bundles:
+  - id: access-gui-safe
+    includes: [xpra]
 YAML
 if EGAME_CATALOG_LOCAL="$tmp_local_catalog" \
   ./scripts/instance-resolve --registry "$FIXTURE" --instance dev-a --validate 2>"$invalid_output"; then
@@ -166,9 +206,9 @@ else
 fi
 
 cat >"$tmp_local_catalog" <<'YAML'
-profiles:
-  - name: local-qemu-ubuntu-dev-gui
-    packages: [goose]
+bundles:
+  - id: access-gui-safe
+    includes: [goose]
 YAML
 if EGAME_CATALOG_LOCAL="$tmp_local_catalog" \
   ./scripts/instance-resolve --registry "$FIXTURE" --instance qemu-a --validate 2>"$invalid_output"; then
@@ -190,13 +230,6 @@ machines:
     defaults:
       disk_gb: 30
       memory_mb: 4096
-profiles:
-  - name: acme-test
-    machine: acme-small
-    os: ubuntu-26.04-amd64
-    init: ssh-ubuntu-cloud-init
-    bundles: [access-headless]
-    location: tokyo
 locations:
   - name: tokyo
     acme:
@@ -206,7 +239,11 @@ cat >"$tmp_external_registry" <<'YAML'
 version: 1
 instances:
   - name: acme-a
-    recipe: acme-test
+    machine: acme-small
+    os: ubuntu-26.04-amd64
+    init: ssh-ubuntu-cloud-init
+    bundles: [access-headless]
+    location: tokyo
 YAML
 
 if EGAME_CATALOG_LOCAL="$tmp_local_catalog" \
@@ -234,19 +271,12 @@ fi
 
 cat >"$tmp_local_catalog" <<'YAML'
 machines:
-  - name: acme-metal
+  - name: acme-small
     provider: acme
     kind: metal
     defaults:
       disk_gb: 30
       memory_mb: 4096
-profiles:
-  - name: acme-test
-    machine: acme-metal
-    os: ubuntu-26.04-amd64
-    init: ssh-ubuntu-cloud-init
-    bundles: [access-headless]
-    location: tokyo
 locations:
   - name: tokyo
     acme:
@@ -268,7 +298,10 @@ before_invalid="$(cat "$tmp_registry")"
 if ./scripts/instance-create \
   --registry "$tmp_registry" \
   --instance bad-a \
-  --recipe no-such-recipe >"$invalid_output" 2>&1; then
+  --machine no-such-machine \
+  --os ubuntu-26.04-amd64 \
+  --init ssh-ubuntu-cloud-init \
+  --location tokyo >"$invalid_output" 2>&1; then
   printf '  [FAIL] invalid instance create succeeded\n' >&2
   FAIL=$((FAIL + 1))
 elif [ "$(cat "$tmp_registry")" = "$before_invalid" ]; then
@@ -302,7 +335,10 @@ purge_state="$tmp_overlay_dir/delete-state"
 if ./scripts/instance-create \
   --registry "$tmp_registry" \
   --instance purge-dev \
-  --recipe local-vmware-ubuntu-dev-gui >/dev/null; then
+  --machine local-vmware-medium \
+  --os ubuntu-26.04-amd64 \
+  --init ssh-ubuntu-cloud-init \
+  --location tokyo >/dev/null; then
   mkdir -p "$purge_workdir/purge-dev" "$purge_state/instances"
   printf '{}\n' > "$purge_state/instances/purge-dev.json"
   if EGAME_INSTANCE_REGISTRY="$tmp_registry" EGAME_INSTANCE_WORKDIR="$purge_workdir" EGAME_STATE_DIR="$purge_state" \

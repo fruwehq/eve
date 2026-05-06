@@ -1,27 +1,46 @@
 version: 1
 instances:
   - name: dev-a
-    recipe: local-vmware-ubuntu-dev-gui
+    machine: local-vmware-medium
+    os: ubuntu-26.04-amd64
+    init: ssh-ubuntu-cloud-init
+    location: tokyo
+    bundles: [access-gui-safe, dev-sandbox-core]
     overrides:
       disk_gb: 120
       memory_mb: 12288
 
   - name: qemu-a
-    recipe: local-qemu-ubuntu-dev-gui
+    machine: local-qemu-medium
+    os: ubuntu-26.04-arm64
+    init: ssh-ubuntu-cloud-init
+    location: tokyo
+    bundles: [access-gui-safe, dev-sandbox-core-arm64]
 
   - name: aws-gpu-a
-    recipe: aws-ubuntu-dev-headless
     machine: aws-gpu-g5
+    os: ubuntu-26.04-amd64
+    init: ssh-ubuntu-cloud-init
+    location: tokyo
+    bundles: [access-headless, dev-sandbox-core]
     overrides:
       disk_gb: 240
       instance_type: g5.xlarge
       root_volume_type: gp3
 
   - name: truenas-all-a
-    recipe: truenas-ubuntu-all
+    machine: truenas-scale-medium
+    os: ubuntu-26.04-amd64
+    init: ssh-ubuntu-cloud-init
+    location: tokyo
+    bundles: [access-gui-streaming, access-gui-safe, dev-sandbox-core, gaming-core]
     overrides:
       disk_gb: 64
       vcpus: 1
 
   - name: rpi-all-a
-    recipe: rpi-ubuntu-all
+    machine: raspberry-pi-5
+    os: ubuntu-26.04-arm64
+    init: ssh-ubuntu-metal
+    location: tokyo
+    bundles: [access-gui-streaming, access-gui-safe, dev-sandbox-core-arm64, gaming-core]

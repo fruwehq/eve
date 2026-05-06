@@ -14,10 +14,10 @@ scripts/integration-test --instance linux-smoke --instance windows-smoke --json
 
 Recommended instance shape:
 
-- Linux AI engineering smoke: Ubuntu recipe with `dev-sandbox-core` plus GUI or
-  remote-app packages when needed.
-- Windows gaming smoke: Windows GPU recipe with `gaming-core` and
-  `access-gui-streaming`.
+- Linux AI engineering smoke: Ubuntu provider/platform choice with
+  `dev-sandbox-core` plus GUI or remote-app packages when needed.
+- Windows gaming smoke: Windows GPU provider/platform choice with `gaming-core`
+  and `access-gui-streaming`.
 
 ## Run a Live Test
 

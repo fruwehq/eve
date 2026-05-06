@@ -42,7 +42,7 @@ write_step() {
 
 [ -d "$STEPS_DIR" ] || { log "ERROR: steps dir missing: $STEPS_DIR"; exit 1; }
 
-# Load environment snapshot written by the uploader (OS_UI_MODE, PROFILE_NAME, ...).
+# Load environment snapshot written by the uploader (PROFILE_NAME, package env, ...).
 # shellcheck disable=SC1091
 [ -f "$STATE_DIR/env" ] && . "$STATE_DIR/env"
 

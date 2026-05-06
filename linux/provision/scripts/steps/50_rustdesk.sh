@@ -5,11 +5,6 @@ set -euo pipefail
 
 skip_unless_pkg rustdesk
 
-if ! is_desktop; then
-  log "### 50_rustdesk: headless OS — skipping"
-  exit 0
-fi
-
 log "### 50_rustdesk: installing RustDesk"
 
 if ! command -v rustdesk >/dev/null 2>&1; then

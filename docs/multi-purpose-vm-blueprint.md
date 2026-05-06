@@ -1,4 +1,4 @@
-# v2: Profile-Driven VM Platform
+# v3: Instance-Driven VM Platform
 
 ## Why this evolution
 
@@ -19,7 +19,7 @@ Every environment should be composed from 4 explicit layers:
 
 2. **OS layer**
    - Concrete OS image/version (not generic “linux”).
-   - Example: `ubuntu-26.04-server-amd64`, `ubuntu-26.04-desktop-amd64`, `windows-server-2025`.
+   - Example: `ubuntu-26.04-amd64`, `ubuntu-26.04-arm64`, `windows-server-2025`.
 
 3. **Init layer**
    - First-boot bootstrap to establish secure access and baseline hardening.
@@ -29,16 +29,16 @@ Every environment should be composed from 4 explicit layers:
    - What you install for purpose: Goose, Codex, Sunshine, Steam, RustDesk, toolchains, etc.
    - This should be composable as package/bundle lists.
 
-This layered approach replaces rigid provider/os/purpose profile paths and avoids combinatorial explosion.
+This layered approach replaces rigid provider/os/purpose presets and avoids combinatorial explosion.
 
 ---
 
 ## Access methods (requested)
 
-Access is no longer tied to one profile path. It is expressed as bundles/components:
+Access is no longer tied to one preset path. It is expressed as bundles/components:
 
 - `ssh`
-- `rdp` (Windows or Linux desktop if needed)
+- `rdp` (Windows or Linux GUI workloads if needed)
 - `sunshine`
 - `rustdesk`
 
@@ -53,29 +53,24 @@ Access is no longer tied to one profile path. It is expressed as bundles/compone
 
 ## OS naming and recommended defaults
 
-Use explicit OS catalog IDs (version + flavor + arch). Avoid generic `linux` in profiles.
+Use explicit OS catalog IDs (version + arch). Avoid generic `linux` in instance definitions.
 
 Recommended starter OSes:
 
-1. `ubuntu-26.04-server-amd64` (default for headless dev/sandbox)
-2. `ubuntu-26.04-desktop-amd64` (for GUI dev/remote desktop use cases)
+1. `ubuntu-26.04-amd64` (default for Linux dev/sandbox and optional GUI workloads)
+2. `ubuntu-26.04-arm64` (for ARM hosts, e.g. QEMU/RPi flows)
 3. `windows-server-2025` (for Windows-native/gaming workflows)
 
 Optional later:
 
 - `debian-12-server-amd64` (stable/minimal alternative)
-- `ubuntu-26.04-server-arm64` (for ARM hosts, e.g., some cloud/RPi flows)
+- `debian-13-amd64` (stable/minimal alternative once provider image metadata exists)
 
-### GUI vs non-graphical Unix
+### Graphical Workloads
 
-Add OS capability metadata:
-
-- `ui_mode: headless | desktop`
-
-Examples:
-
-- `ubuntu-26.04-server-amd64` → `headless`
-- `ubuntu-26.04-desktop-amd64` → `desktop`
+Graphical capabilities are selected through packages and bundles rather than an
+OS-wide setting. For example, selecting `gnome-desktop`, `vnc`, `rustdesk`,
+`sunshine`, or `steam` installs the relevant graphical stack.
 
 This lets one workload catalog run on both, with compatibility checks.
 
@@ -83,14 +78,14 @@ This lets one workload catalog run on both, with compatibility checks.
 
 ## Data model (manifest-driven)
 
-Instead of path-only profiles like `aws/linux/dev-sandbox`, define reusable catalogs:
+Instead of path-only presets like `aws/linux/dev-sandbox`, define reusable catalogs:
 
 - `machines[]`
 - `oses[]`
 - `inits[]`
 - `packages[]` and/or `bundles[]`
 - `locations[]`
-- `profiles[]` (composition entries)
+- concrete instances in `.egame/instances.yaml` (composition entries)
 
 ## Example manifest (aligned with your idea)
 
@@ -160,19 +155,11 @@ oses:
     family: ubuntu
     version: "26.04"
     arch: amd64
-    ui_mode: headless
-
-  - id: ubuntu-26.04-desktop-amd64
-    family: ubuntu
-    version: "26.04"
-    arch: amd64
-    ui_mode: desktop
 
   - id: windows-server-2025
     family: windows
     version: "2025"
     arch: amd64
-    ui_mode: desktop
 
 inits:
   - id: ssh-ubuntu-cloud-init
@@ -202,10 +189,10 @@ bundles:
     includes: [ssh]
 
   - id: access-gui-safe
-    includes: [ssh, rustdesk]
+    includes: [rustdesk]
 
   - id: access-gui-streaming
-    includes: [ssh, sunshine, rustdesk]
+    includes: [rustdesk, sunshine]
 
   - id: dev-sandbox-core
     includes: [docker, dev-toolchain, goose, codex-cli]
@@ -225,10 +212,10 @@ locations:
     local-vmware:
       host: local
 
-profiles:
+instances:
   - name: aws-ubuntu-dev-headless
     machine: aws-cheap-x86
-    os: ubuntu-26.04-server-amd64
+    os: ubuntu-26.04-amd64
     init: ssh-ubuntu-cloud-init
     bundles: [access-headless, dev-sandbox-core]
     location: tokyo
@@ -240,7 +227,7 @@ profiles:
 
   - name: aws-ubuntu-dev-gui
     machine: aws-cheap-x86
-    os: ubuntu-26.04-desktop-amd64
+    os: ubuntu-26.04-amd64
     init: ssh-ubuntu-cloud-init
     bundles: [access-gui-safe, dev-sandbox-core]
     location: tokyo
@@ -262,9 +249,9 @@ Introduce validation before provisioning:
 1. `machine.provider` must support selected `os` image.
 2. `init.os_family` must match selected OS family.
 3. bundle/package compatibility checks:
-   - `steam` requires GUI mode.
-   - `sunshine` requires GUI mode.
-   - `goose/codex-cli` can run on headless or desktop.
+   - `steam` requires an OS/package combination that can provide a graphical session.
+   - `sunshine` requires an OS/package combination that can provide a graphical session.
+   - `goose/codex-cli` can run without graphical packages.
 4. location must define provider-specific mapping for chosen machine provider.
 
 Fail fast at plan time with actionable errors.
@@ -276,26 +263,26 @@ Fail fast at plan time with actionable errors.
 Given your current Terramate/Terraform layout:
 
 - Keep existing `stacks/aws/*` and `stacks/vultr/*` working.
-- Add a generated layer that resolves one `profile` into concrete Terramate globals.
+- Add a generated layer that resolves one concrete instance into provider-specific working files and Terraform/Terramate inputs.
 - Existing provider blocks (`aws`, `vultr`) and local backend setup remain valid.
 
 ### Suggested incremental implementation
 
 ## Phase 1: Manifest + resolver (no behavior break)
 
-- Add `config/catalog.yaml` with machine/os/init/package/location/profile catalogs.
-- Add a small resolver script to produce Terramate globals for selected profile.
-- Keep current gaming stack as a legacy profile equivalent.
+- Add `config/catalog.yaml` with machine/os/init/package/location catalogs.
+- Add a small resolver script to produce provider inputs for selected instances.
+- Keep current gaming stack as an instance composition.
 
-## Phase 2: New profile target
+## Phase 2: New instance target
 
 - Implement `aws-ubuntu-dev-headless` end-to-end.
-- Add `make profile.plan PROFILE=aws-ubuntu-dev-headless` etc.
+- Add `make plan INSTANCE=aws-ubuntu-dev-headless` etc.
 
 ## Phase 3: GUI and remote access bundles
 
 - Add `access-gui-safe` (RustDesk) and `access-gui-streaming` (Sunshine+RustDesk).
-- Add desktop Ubuntu profile.
+- Add Linux GUI package bundles.
 
 ## Phase 4: Local providers (Vagrant-first)
 
@@ -306,9 +293,9 @@ Given your current Terramate/Terraform layout:
 ## Phase 5: Additional runtimes
 
 - TrueNAS-hosted VM mapping.
-  - Catalog scaffold is in place (`provider: truenas` + sample profile).
+  - Catalog scaffold is in place (`provider: truenas` + sample instance).
   - Terramate stack/module implementation is in place (`stacks/truenas/*`, `modules/truenas/*`) with `deevus/truenas` provider and `truenas_vm` resource wiring.
-  - Current profile defaults are conservative (STOPPED by default, explicit SSH host key fingerprint required).
+  - Current instance defaults are conservative (STOPPED by default, explicit SSH host key fingerprint required).
 - USB/metal (Raspberry Pi) machine kind with cloud-init/ansible init adaptation.
   - Prefer a dedicated machine/provider model such as `provider: raspberry-pi`, `kind: metal`.
   - Treat it as a persistent ARM sandbox target, not as a local hypervisor abstraction.
@@ -354,13 +341,13 @@ This keeps the layered machine/OS/init/workload architecture intact while avoidi
 
 ## GUI / Web control plane roadmap (later phase)
 
-A GUI is a great fit for this project, especially once profile resolution and engine dispatch are stable.
+A GUI is a great fit for this project, especially once instance resolution and engine dispatch are stable.
 
 ### Goal
 
-Provide a simple control plane that uses the same backend profile engine (no separate logic):
+Provide a simple control plane that uses the same backend instance engine (no separate logic):
 
-- choose profile
+- choose or create instance
 - validate
 - plan/apply/destroy
 - inspect status/logs
@@ -370,18 +357,18 @@ Provide a simple control plane that uses the same backend profile engine (no sep
 
 - **Web GUI first** (fastest iteration, easiest sharing)
 - Optional desktop wrapper later (Tauri/Electron) if needed
-- Backend should call existing commands/resolver (`scripts/profile-resolve`, `make profile.*`) instead of duplicating orchestration logic
+- Backend should call existing instance commands/resolver (`scripts/instance-resolve`, `make instance.*`) instead of duplicating orchestration logic
 
 ### Minimal backend API contract
 
-- `GET /api/catalog` → return machine/os/init/package/location/profile catalog
-- `POST /api/profiles/{name}/validate`
-- `POST /api/profiles/{name}/plan`
-- `POST /api/profiles/{name}/apply`
-- `POST /api/profiles/{name}/destroy`
-- `GET /api/profiles/{name}/status`
-- `GET /api/profiles/{name}/logs`
-- `POST /api/profiles/{name}/ttl/extend` (e.g., add hours)
+- `GET /api/catalog` → return machine/os/init/package/location catalog
+- `POST /api/instances/{name}/validate`
+- `POST /api/instances/{name}/plan`
+- `POST /api/instances/{name}/apply`
+- `POST /api/instances/{name}/destroy`
+- `GET /api/instances/{name}/status`
+- `GET /api/instances/{name}/logs`
+- `POST /api/instances/{name}/ttl/extend` (e.g., add hours)
 
 Use job IDs for long-running actions (`plan/apply/destroy`) and expose:
 
@@ -390,9 +377,9 @@ Use job IDs for long-running actions (`plan/apply/destroy`) and expose:
 
 ### Minimal UI screens
 
-1. **Catalog/Profile picker**
-   - filter by provider, OS family, UI mode, purpose bundles
-2. **Profile details**
+1. **Instance picker**
+   - filter by provider, OS family, state, and selected bundles/packages
+2. **Instance details**
    - resolved machine/os/init/packages/location + compatibility checks
 3. **Lifecycle actions**
    - validate / plan / apply / destroy buttons
@@ -414,32 +401,24 @@ Use job IDs for long-running actions (`plan/apply/destroy`) and expose:
 
 ## Phase 6: Control plane UI
 
-- add lightweight API wrapper over `profile-resolve` + `make profile.*`
-- add web GUI for profile lifecycle and observability
+- add lightweight API wrapper over `instance-resolve` + `make instance.*`
+- add web GUI for instance lifecycle and observability
 - keep CLI parity (GUI is additive, not replacement)
 
 ---
 
 ## Makefile direction
 
-Add profile-driven commands (keeping old commands intact):
+Keep commands instance-first:
 
-```make
-PROFILE ?= aws-ubuntu-dev-headless
-
-profile.validate:
-	./scripts/profile-resolve --validate --profile $(PROFILE)
-
-profile.plan: profile.validate
-	./scripts/profile-resolve --emit terramate --profile $(PROFILE)
-	terramate run --tags profile:$(PROFILE) -- terraform plan
-
-profile.apply: profile.validate
-	./scripts/profile-resolve --emit terramate --profile $(PROFILE)
-	terramate run --tags profile:$(PROFILE) -- terraform apply -auto-approve
-
-profile.destroy:
-	terramate run --tags profile:$(PROFILE) --reverse -- terraform destroy -auto-approve
+```bash
+make catalog.list
+make instance.create INSTANCE=aws-dev-a MACHINE=aws-cheap-x86 OS=ubuntu-26.04-amd64 INIT=ssh-ubuntu-cloud-init LOCATION=tokyo BUNDLES=access-headless,dev-sandbox-core
+make instance.validate INSTANCE=aws-dev-a
+make plan INSTANCE=aws-dev-a
+make up INSTANCE=aws-dev-a
+make provision INSTANCE=aws-dev-a
+make down INSTANCE=aws-dev-a
 ```
 
 ---
@@ -448,16 +427,16 @@ profile.destroy:
 
 For your immediate safe sandbox need:
 
-- Start with profile: `aws-ubuntu-dev-headless`
-- OS: `ubuntu-26.04-server-amd64`
+- Start with instance: `aws-ubuntu-dev-headless`
+- OS: `ubuntu-26.04-amd64`
 - Access bundle: `ssh` only
 - Workloads: `goose + codex-cli + docker + dev-toolchain`
 - Lifecycle: 7-day TTL with reminders and stop→grace→destroy flow
 
 For GUI-required workflows, add:
 
-- profile: `aws-ubuntu-dev-gui`
-- OS: `ubuntu-26.04-desktop-amd64`
+- instance: `aws-ubuntu-dev-gui`
+- OS: `ubuntu-26.04-amd64`
 - Access bundle: `sunshine + rustdesk + ssh`
 
 This gives a clean layered system while preserving your existing cloud gaming workflows.
