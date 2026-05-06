@@ -867,13 +867,9 @@ def run_tui() -> int:
             self.query_one("#empty-state", Static).update(
                 "\n".join(
                     [
-                        f"[primary]{frame}     {frame}     {frame}[/]",
+                        f"[primary]{frame}  {frame}  {frame}[/]",
                         "",
                         "[b]EPHEMERAL VM COCKPIT[/b]",
-                        "",
-                        "        +-------------------+",
-                        "        |  new / start / ssh |",
-                        "        +-------------------+",
                         "",
                         "[b]Please, select an instance[/b]",
                         "The instance list is focused on << New Instance >>.",
