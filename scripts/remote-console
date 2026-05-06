@@ -2,9 +2,7 @@
 # Open the VM's graphical console for a local profile.
 # Usage: scripts/remote-console <profile>
 #
-# VMware Fusion: opens the VMX in the Fusion GUI
-# VirtualBox: opens the VirtualBox GUI
-# QEMU: not implemented; use VNC/RustDesk/Xpra inside the guest.
+# QEMU: not implemented; use VNC/RustDesk/Waypipe/Xpra inside the guest.
 
 set -euo pipefail
 
@@ -23,37 +21,6 @@ if [ "$ENGINE" != "vagrant" ]; then
 fi
 
 case "$PROVIDER" in
-  local-vmware)
-    WORKDIR="$(egame_instance_workdir "$PROFILE")"
-    VMX=$(find "$WORKDIR/.vagrant/machines/default" -name '*.vmx' 2>/dev/null | head -1)
-    if [ -z "$VMX" ]; then
-      echo "No VMX found. Try: make apply PROFILE=$PROFILE" >&2
-      exit 1
-    fi
-    if vmrun list | grep -q "$VMX"; then
-      echo "[remote.console] VM is running, opening Fusion console"
-      open -a "VMware Fusion" "$VMX"
-    else
-      echo "[remote.console] VM is stopped, starting with GUI"
-      vmrun -T fusion start "$VMX" gui
-    fi
-    ;;
-  local-virtualbox)
-    WORKDIR="$(egame_instance_workdir "$PROFILE")"
-    VM_ID=$(cd "$WORKDIR" && VBoxManage list runningvms 2>/dev/null | head -1 | awk -F'"' '{print $2}')
-    if [ -n "$VM_ID" ]; then
-      echo "[remote.console] VM is running, opening VirtualBox window"
-      VBoxManage startvm "$VM_ID" --type separate
-    else
-      VM_ID=$(cd "$WORKDIR" && VBoxManage list vms 2>/dev/null | head -1 | awk -F'"' '{print $2}')
-      if [ -z "$VM_ID" ]; then
-        echo "No VirtualBox VM found. Try: make apply PROFILE=$PROFILE" >&2
-        exit 1
-      fi
-      echo "[remote.console] VM is stopped, starting with GUI"
-      VBoxManage startvm "$VM_ID" --type gui
-    fi
-    ;;
   local-qemu)
     echo "remote.console is not implemented for local-qemu. Use SSH or provision a remote GUI package." >&2
     exit 2

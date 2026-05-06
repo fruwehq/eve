@@ -68,6 +68,13 @@ def instance_status(instance: str) -> dict[str, Any]:
     return load_json([str(ROOT / "scripts/instance-status"), "--instance", instance, "--json"])
 
 
+def instance_ip(instance: str) -> str:
+    code, out, err = run_command(["make", "--no-print-directory", "ip", f"INSTANCE={instance}"])
+    if code != 0:
+        raise RuntimeError(err.strip() or out.strip() or f"make ip exited {code}")
+    return out.strip()
+
+
 def make_args(target: str, instance: str, *extra: str) -> list[str]:
     return ["make", "--no-print-directory", target, f"INSTANCE={instance}", *extra]
 
@@ -860,6 +867,7 @@ def run_tui() -> int:
             self.current_status: dict[str, Any] | None = None
             self.command_running = False
             self.current_remote_actions: list[dict[str, str]] = []
+            self.instance_ips: dict[str, str] = {}
             self.background_tasks: set[asyncio.Task[None]] = set()
             self.hero_frame = 0
             self._rendering_instances = False
@@ -896,6 +904,7 @@ def run_tui() -> int:
                             yield Static("Select an instance.", id="title", classes="section-title")
                             with Horizontal(id="state-strip"):
                                 yield Static("Provider\nunknown", id="provider-pill", classes="pill")
+                                yield Static("IP\n-", id="ip-pill", classes="pill")
                                 yield Static("Provision\nunknown", id="provision-pill", classes="pill")
                                 yield Static("Packages\nunknown", id="packages-pill", classes="pill")
                             with Horizontal(id="action-groups"):
@@ -911,6 +920,7 @@ def run_tui() -> int:
                                         yield Button("Up", id="provider-up", variant="success")
                                         yield Button("Stop", id="provider-stop", variant="warning")
                                         yield Button("Provision", id="provision", variant="primary")
+                                        yield Button("Logs", id="logs")
                                         yield Button("Refresh", id="refresh", variant="primary")
                             with Horizontal(id="detail-grid"):
                                 with Vertical(id="packages-pane"):
@@ -1195,6 +1205,16 @@ def run_tui() -> int:
             if refresh_seq != self._detail_refresh_seq or instance_name != self.current_instance:
                 return
             self.current_status = next_status
+            provider_state = str(next_status.get("state", {}).get("provider_state", "unknown"))
+            if provider_state == "running":
+                try:
+                    ip = await asyncio.to_thread(instance_ip, instance_name)
+                    if refresh_seq == self._detail_refresh_seq and instance_name == self.current_instance:
+                        self.instance_ips[instance_name] = ip or "-"
+                except Exception:
+                    self.instance_ips[instance_name] = "-"
+            else:
+                self.instance_ips[instance_name] = "-"
             self.render_detail()
             self.update_action_state()
             self.restore_focus(focused_id)
@@ -1214,6 +1234,12 @@ def run_tui() -> int:
             self.statuses[instance_name] = status
             if self.current_instance == instance_name:
                 self.current_status = status
+                provider_state = str(status.get("state", {}).get("provider_state", "unknown"))
+                if provider_state == "running":
+                    with suppress(Exception):
+                        self.instance_ips[instance_name] = await asyncio.to_thread(instance_ip, instance_name) or "-"
+                else:
+                    self.instance_ips[instance_name] = "-"
                 self.render_detail()
                 self.update_action_state()
 
@@ -1222,6 +1248,7 @@ def run_tui() -> int:
             self.query_one("#instance-detail", Vertical).display = False
             self.render_empty_state()
             self.query_one("#provider-pill", Static).update("Provider\nunknown")
+            self.query_one("#ip-pill", Static).update("IP\n-")
             self.query_one("#provision-pill", Static).update("Provision\nunknown")
             self.query_one("#packages-pill", Static).update("Packages\nunknown")
             self.query_one("#bundles", DataTable).clear()
@@ -1233,6 +1260,7 @@ def run_tui() -> int:
             self.query_one("#instance-detail", Vertical).display = True
             self.query_one("#title", Static).update(f"{instance_name}  loading status...")
             self.query_one("#provider-pill", Static).update("Provider\nloading")
+            self.query_one("#ip-pill", Static).update("IP\nloading")
             self.query_one("#provision-pill", Static).update("Provision\nloading")
             self.query_one("#packages-pill", Static).update("Packages\nloading")
             self.query_one("#bundles", DataTable).clear()
@@ -1258,12 +1286,17 @@ def run_tui() -> int:
             )
             provision_state = str(state.get("provision_state", "unknown"))
             provider_name = str(instance.get("provider") or "-")
+            provider_state = str(state.get("provider_state", "unknown"))
+            ip_text = self.instance_ips.get(str(instance.get("name") or ""), "-")
+            if provider_state != "running":
+                ip_text = "-"
             package_text = (
                 f"{summary.get('installed', 0)} installed / "
                 f"{summary.get('missing', 0)} missing / "
                 f"{summary.get('failed', 0)} failed"
             )
             self.query_one("#provider-pill", Static).update(f"Provider\n{provider_name}")
+            self.query_one("#ip-pill", Static).update(f"IP\n{ip_text or '-'}")
             self.query_one("#provision-pill", Static).update(
                 f"Provision\n{markup_for_status(display_state(provision_state))}"
             )
@@ -1508,6 +1541,8 @@ def run_tui() -> int:
                 self.action_destroy_instance()
             elif button_id == "provision":
                 await self.action_provision()
+            elif button_id == "logs":
+                await self.action_logs()
             elif button_id == "delete-instance":
                 self.action_delete_instance()
             elif button_id == "connect-ssh":
@@ -1612,6 +1647,10 @@ def run_tui() -> int:
                     make_args("instance.provision", instance),
                     refresh_instance=instance,
                 )
+
+        async def action_logs(self) -> None:
+            if self.current_instance:
+                await self.stream_command("logs", make_args("logs", self.current_instance))
 
         async def action_package(self, target: str) -> None:
             if not self.current_instance or not self.current_package:
@@ -1749,6 +1788,7 @@ def run_tui() -> int:
                 "refresh",
                 "provider-stop",
                 "provision",
+                "logs",
                 *(f"pkg-action-{index}" for index in range(PACKAGE_ACTION_BUTTONS)),
                 "bundle-select",
                 "bundle-unselect",
@@ -1795,6 +1835,7 @@ def run_tui() -> int:
                     or provision_state == "provisioning"
                 ),
             )
+            self.set_button("logs", disabled=busy or not has_instance or provider_state != "running")
             self.set_button(
                 "provider-down",
                 disabled=busy or not has_instance or provider_busy or provider_state in {"absent", "unknown"},

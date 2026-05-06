@@ -14,7 +14,7 @@ Your key idea is correct: provider and installed software should be decoupled.
 Every environment should be composed from 4 explicit layers:
 
 1. **Machine layer**
-   - Provider/runtime specifics: AWS, Vultr, VirtualBox, VMware, TrueNAS VM, Raspberry Pi/metal, etc.
+   - Provider/runtime specifics: AWS, GCP, Vultr, QEMU, TrueNAS VM, Raspberry Pi/metal, etc.
    - Example fields: instance type/plan, disk, CPU/RAM, network mode, provider tags.
 
 2. **OS layer**
@@ -134,21 +134,13 @@ machines:
     defaults:
       plan: vcg-a40-6c-30g-12vram
 
-  - name: local-virtualbox-medium
-    provider: local-virtualbox
+  - name: local-qemu-medium
+    provider: local-qemu
     kind: vm
     defaults:
-      cpus: 4
-      memory_mb: 8192
-      disk_gb: 100
-
-  - name: local-vmware-medium
-    provider: local-vmware
-    kind: vm
-    defaults:
-      cpus: 4
-      memory_mb: 8192
-      disk_gb: 100
+      cpus: 2
+      memory_mb: 4096
+      disk_gb: 64
 
 oses:
   - id: ubuntu-26.04-server-amd64
@@ -164,7 +156,7 @@ oses:
 inits:
   - id: ssh-ubuntu-cloud-init
     os_family: ubuntu
-    providers: [aws, local-qemu, local-virtualbox, local-vmware, truenas]
+    providers: [aws, gcp, local-qemu, truenas]
 
   - id: ssh-windows-powershell7
     os_family: windows
@@ -199,9 +191,7 @@ locations:
       availability_zone: ap-northeast-1b
     vultr:
       region: nrt
-    local-virtualbox:
-      host: local
-    local-vmware:
+    local-qemu:
       host: local
 
 instances:
@@ -276,11 +266,10 @@ Given your current Terramate/Terraform layout:
 - Add `desktop-rustdesk-vnc` and `desktop-streaming` (Sunshine+RustDesk).
 - Add Linux GUI package bundles.
 
-## Phase 4: Local providers (Vagrant-first)
+## Phase 4: Local provider
 
-- Implement `local-virtualbox` and `local-vmware` using **Vagrant** as the primary local orchestration layer.
-- Use Vagrant provider plugins (VirtualBox / VMware) to avoid re-implementing VM lifecycle plumbing.
-- Keep `VBoxManage`/`vmrun` wrappers only as fallback for edge cases or environments where Vagrant is unavailable.
+- Implement `local-qemu` using **Vagrant + qemu** as the local orchestration layer.
+- Prefer QEMU as the only supported local provider, especially on Apple Silicon.
 
 ## Phase 5: Additional runtimes
 
@@ -297,14 +286,13 @@ Given your current Terramate/Terraform layout:
 
 ## Local implementation strategy (reduce wheel reinvention)
 
-For local providers, prefer existing ecosystem tooling first.
+For the local provider, prefer existing ecosystem tooling first.
 
-### Primary: Vagrant orchestration
+### Primary: Vagrant + QEMU orchestration
 
 Use Vagrant as the local runtime abstraction for:
 
-- `local-virtualbox` (VirtualBox provider)
-- `local-vmware` (VMware provider)
+- `local-qemu` (QEMU provider)
 
 Benefits:
 
@@ -313,18 +301,9 @@ Benefits:
 - easier SSH metadata discovery and provisioning handoff
 - less custom lifecycle scripting in this repo
 
-### Fallback: direct hypervisor CLI wrappers
-
-Use `VBoxManage` / `vmrun` wrappers only when:
-
-- Vagrant provider support is insufficient for a required feature
-- host constraints prevent Vagrant usage
-- specialized snapshot/network behavior is needed
-
 ### Suggested mapping
 
-- `machine.provider = local-virtualbox` → Vagrant + VirtualBox provider
-- `machine.provider = local-vmware` → Vagrant + VMware provider
+- `machine.provider = local-qemu` → Vagrant + QEMU provider
 - resolver emits provider-specific Vagrantfile fragments from the same manifest model
 
 This keeps the layered machine/OS/init/workload architecture intact while avoiding unnecessary reinvention.

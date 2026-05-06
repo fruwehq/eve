@@ -196,7 +196,7 @@ def validate!(catalog, composition, machine, os, init, location, bundle_packages
     end
   when "vultr"
     raise "OS/provider mismatch: OS #{os["id"]} has no Vultr OS id" unless os.key?("vultr_os_id")
-  when "local-virtualbox", "local-vmware", "local-qemu"
+  when "local-qemu"
     raise "OS/provider mismatch: OS #{os["id"]} has no Vagrant box" unless os.key?("vagrant_box")
   when "truenas"
     raise "OS/provider mismatch: OS #{os["id"]} has no cloud image URL" unless os.key?("cloud_image_url")

@@ -326,35 +326,9 @@ QEMU is the preferred local Linux provider on Apple Silicon. It uses the public
 3. **Vagrant QEMU plugin** — `vagrant plugin install vagrant-qemu`
 4. No cloud credentials needed
 
-### VirtualBox (local, Intel macOS/Linux)
-
-> **Note**: VirtualBox is kept as a legacy/local option. It can use
-> `cloud-image/ubuntu-26.04`, but is not the recommended path on Apple Silicon.
-
-1. **VirtualBox** — [install](https://www.virtualbox.org/wiki/Downloads) (version 7.1+)
-2. **Vagrant** — `brew install hashicorp/tap/vagrant`
-3. No cloud credentials needed
-
-### VMware Fusion (local, legacy)
-
-> **Note**: `cloud-image/ubuntu-26.04` does not publish a VMware Vagrant
-> artifact, so VMware is not recommended for Ubuntu 26.04 unless you provide a
-> compatible custom box.
-
-1. **VMware Fusion** — [install](https://www.vmware.com/products/desktop-hypervisor/workstation-and-fusion) (free for personal use)
-2. **Vagrant** — `brew install hashicorp/tap/vagrant`
-3. **Vagrant VMware plugin** — `vagrant plugin install vagrant-vmware-desktop`
-4. **Vagrant VMware Utility** — `brew install --cask vagrant-vmware-utility`, then:
-   ```bash
-   vagrant-vmware-utility certificate generate
-   vagrant-vmware-utility service install
-   ```
-   The service install step requires `sudo`.
-5. No cloud credentials needed
-
 ### Raspberry Pi / ARM metal
 
-The Pi is wired in as `provider: raspberry-pi`, `kind: metal` — a first-class target alongside the VM-oriented runtimes (`local-virtualbox`, `local-vmware`, `truenas`), but with a simpler lifecycle: there is nothing to "create" or "destroy" remotely. You flash the SD card by hand once, then the repo SSHs in to do the rest.
+The Pi is wired in as `provider: raspberry-pi`, `kind: metal` — a first-class target alongside the VM-oriented runtimes (`local-qemu`, `truenas`, cloud providers), but with a simpler lifecycle: there is nothing to "create" or "destroy" remotely. You flash the SD card by hand once, then the repo SSHs in to do the rest.
 
 Recommended shape:
 

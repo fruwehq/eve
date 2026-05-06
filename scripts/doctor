@@ -25,7 +25,7 @@ for command in bash jq ruby ssh scp; do
 done
 
 section "optional provider tools"
-for command in aws curl nc terraform terramate vagrant qemu-system-aarch64 qemu-system-x86_64 vmrun VBoxManage; do
+for command in aws curl gcloud nc terraform terramate vagrant qemu-system-aarch64 qemu-system-x86_64; do
   check_command "$command"
 done
 

@@ -11,14 +11,16 @@ ROOT = File.expand_path("..", __dir__)
 def usage
   warn <<~USAGE
     Usage:
-      scripts/integration-test --instance <name> [--instance <name> ...] [--registry <path>] [--json]
-      scripts/integration-test --live --instance <name> [--instance <name> ...] [--report <path>] [--no-cleanup] [--delete-instances]
+      scripts/integration-test --instance <name> [--instance <name> ...] [--registry <path>] [--json] [--all-packages]
+      scripts/integration-test --live --instance <name> [--instance <name> ...] [--report <path>] [--no-cleanup] [--delete-instances] [--all-packages]
 
     Dry-run mode prints the commands a human or LLM should run/review.
     Live mode creates/starts, waits for SSH, provisions, checks selected packages,
     and writes a JSON report. Live mode requires YES=1 and runs provider down
     after each instance unless --no-cleanup or EGAME_INTEGRATION_CLEANUP=0 is set.
     Set EGAME_INTEGRATION_DELETE_INSTANCES=1 for temporary smoke entries.
+    --all-packages additionally installs and status-checks every package plugin
+    supported by the selected instance OS/architecture.
   USAGE
 end
 
@@ -84,6 +86,7 @@ json = false
 report_path = nil
 cleanup = ENV.fetch("EGAME_INTEGRATION_CLEANUP", "1") != "0"
 delete_instances = ENV["EGAME_INTEGRATION_DELETE_INSTANCES"] == "1"
+all_packages = ENV["EGAME_INTEGRATION_ALL_PACKAGES"] == "1"
 
 args = ARGV.dup
 until args.empty?
@@ -102,6 +105,8 @@ until args.empty?
     cleanup = false
   when "--delete-instances"
     delete_instances = true
+  when "--all-packages"
+    all_packages = true
   when "-h", "--help"
     usage
     exit 0
@@ -134,6 +139,17 @@ plans = instances.map do |instance|
   resolved = run_json(env, *resolved_cmd)
   packages = resolved.fetch("bundle_packages")
   os_family = resolved.fetch("os").fetch("family")
+  package_list_cmd = [File.join(ROOT, "scripts/package-list"), "--instance", instance, "--json"]
+  package_list_cmd += ["--registry", registry_path] if registry_path
+  package_doc = run_json(env, *package_list_cmd)
+  package_smoke_packages = if all_packages
+                             package_doc.fetch("packages")
+                                        .select { |package| package["supported"] && package["installable"] }
+                                        .map { |package| package.fetch("id") }
+                           else
+                             []
+                           end
+  status_packages = (packages + package_smoke_packages).uniq
 
   {
     "instance" => instance,
@@ -142,17 +158,21 @@ plans = instances.map do |instance|
     "machine" => resolved.fetch("composition").fetch("machine"),
     "os" => resolved.fetch("os").fetch("id"),
     "selected_packages" => packages,
+    "package_smoke" => all_packages ? "all-supported" : "selected-only",
+    "package_smoke_packages" => package_smoke_packages,
     "commands" => [
       "make instance.validate INSTANCE=#{instance}",
       "make up INSTANCE=#{instance}",
       "make ssh.wait INSTANCE=#{instance}",
       "make instance.provision INSTANCE=#{instance}",
       "make instance.status INSTANCE=#{instance} EMIT=json",
-      *packages.map { |package| "make package.status INSTANCE=#{instance} PACKAGE=#{package}" }
+      *package_smoke_packages.map { |package| "make package.install INSTANCE=#{instance} PACKAGE=#{package}" },
+      *status_packages.map { |package| "make package.status INSTANCE=#{instance} PACKAGE=#{package}" }
     ],
     "manual_checks" => [
       "Confirm SSH command execution works.",
       "Review make instance.status INSTANCE=#{instance} for provider/provision/package state.",
+      "Package status confirms the package probe reports installed; GUI/remote-access packages still need their package action or manual connection smoke.",
       (os_family == "windows" ? "Confirm Sunshine/RustDesk access and a smooth 3D app or game launch." : "Confirm AI/dev package commands run inside the safer Linux environment."),
       "Destroy or stop the instance when testing is complete if it is billable."
     ]
@@ -194,7 +214,10 @@ plans.each do |plan|
     ["provision", "make", "--no-print-directory", "instance.provision", "INSTANCE=#{instance}"],
     ["status", "make", "--no-print-directory", "instance.status", "INSTANCE=#{instance}", "EMIT=json"]
   ]
-  plan.fetch("selected_packages").each do |package|
+  plan.fetch("package_smoke_packages").each do |package|
+    commands << ["package.install.#{package}", "make", "--no-print-directory", "package.install", "INSTANCE=#{instance}", "PACKAGE=#{package}"]
+  end
+  (plan.fetch("selected_packages") + plan.fetch("package_smoke_packages")).uniq.each do |package|
     commands << ["package.status.#{package}", "make", "--no-print-directory", "package.status", "INSTANCE=#{instance}", "PACKAGE=#{package}"]
   end
 

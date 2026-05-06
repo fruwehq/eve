@@ -1,6 +1,6 @@
 # Makefile
 .DEFAULT_GOAL := default
-.PHONY: ai.sandbox all aws.login bundle.select bundle.unselect catalog.list clean default doctor down env generate help info integration.plan integration.test \
+.PHONY: ai.sandbox all aws.login bundle.select bundle.unselect catalog.list clean default doctor down env generate help info integration.packages integration.plan integration.test \
 				init init.all instance.create instance.delete instance.env instance.info instance.provision \
 				instance.list instance.paths instance.recover instance.state instance.status instance.validate ip lint logs plan \
 				package.action package.down package.install package.list package.reinstall package.select \
@@ -132,6 +132,13 @@ integration.test: ## Run live integration test (INSTANCES=a,b YES=1 DELETE_INSTA
 	for instance in $$(printf '%s' "$(INSTANCES)" | tr ',' ' '); do args="$$args --instance $$instance"; done; \
 	if [ "$(DELETE_INSTANCES)" = "1" ]; then args="$$args --delete-instances"; fi; \
 	./scripts/integration-test --live $$args
+
+integration.packages: ## Optional live smoke: install/status every supported package (INSTANCES=a,b YES=1)
+	@if [ -z "$(INSTANCES)" ]; then echo "Usage: make integration.packages INSTANCES=<linux>,<windows> YES=1 [DELETE_INSTANCES=1]"; exit 2; fi; \
+	args=""; \
+	for instance in $$(printf '%s' "$(INSTANCES)" | tr ',' ' '); do args="$$args --instance $$instance"; done; \
+	if [ "$(DELETE_INSTANCES)" = "1" ]; then args="$$args --delete-instances"; fi; \
+	./scripts/integration-test --live --all-packages $$args
 
 init: ## Initialize provider backend for an instance
 	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make init INSTANCE=<name>"; exit 2; fi; \

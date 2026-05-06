@@ -6,11 +6,6 @@ version: 1
 # -----------------------------------------------------------------------------
 # Reusable YAML anchors (to reduce repetition)
 # -----------------------------------------------------------------------------
-x-local-medium: &local_medium
-  cpus: 4
-  memory_mb: 8192
-  disk_gb: 100
-
 x-local-qemu-medium: &local_qemu_medium
   cpus: 2
   memory_mb: 4096
@@ -90,26 +85,12 @@ machines:
     defaults:
       plan: vcg-a40-6c-30g-12vram
 
-  - name: local-virtualbox-medium
-    provider: local-virtualbox
-    kind: vm
-    supports:
-      arches: [amd64]
-    defaults: *local_medium
-
   - name: local-qemu-medium
     provider: local-qemu
     kind: vm
     supports:
       arches: [arm64]
     defaults: *local_qemu_medium
-
-  - name: local-vmware-medium
-    provider: local-vmware
-    kind: vm
-    supports:
-      arches: [amd64]
-    defaults: *local_medium
 
   - name: raspberry-pi-5
     provider: raspberry-pi
@@ -173,7 +154,7 @@ oses:
 inits:
   - id: ssh-ubuntu-cloud-init
     os_family: ubuntu
-    providers: [aws, gcp, local-qemu, local-virtualbox, local-vmware, truenas]
+    providers: [aws, gcp, local-qemu, truenas]
 
   - id: ssh-ubuntu-metal
     os_family: ubuntu
@@ -255,11 +236,7 @@ locations:
       zone: asia-northeast1-b
     vultr:
       region: nrt
-    local-virtualbox:
-      host: local
     local-qemu:
-      host: local
-    local-vmware:
       host: local
     raspberry-pi:
       # Host comes from RASPBERRY_PI_HOST env var (required at runtime).

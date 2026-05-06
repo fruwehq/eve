@@ -57,17 +57,32 @@ begin
   plugin_by_id = plugins.to_h { |plugin| [plugin.fetch("id"), plugin] }
   selected_ids = resolved.fetch("bundle_packages")
   package_sources = resolved.fetch("package_sources", {})
-  os_family = resolved.fetch("os").fetch("family")
+  os = resolved.fetch("os")
+  os_family = os.fetch("family")
+  os_arch = os.fetch("arch", "")
+  os_version = os.fetch("version", "")
+
+  support_allowed = lambda do |supports, field, value|
+    allowed = supports[field] || []
+    allowed.empty? || allowed.include?(value.to_s)
+  end
 
   packages = plugins.map do |plugin|
-    supported_families = plugin.dig("supports", "os_families") || []
+    supports = plugin.fetch("supports", {})
+    supported = support_allowed.call(supports, "os_families", os_family) &&
+                support_allowed.call(supports, "arches", os_arch) &&
+                support_allowed.call(supports, "os_ids", os.fetch("id")) &&
+                support_allowed.call(supports, "os_versions", os_version) &&
+                support_allowed.call(supports, "#{os_family}_versions", os_version)
+    installable = plugin.dig("install", os_family).is_a?(Hash)
     {
       "id" => plugin.fetch("id"),
       "display_name" => plugin.fetch("display_name"),
       "plugin" => plugin.fetch("id"),
       "selected" => selected_ids.include?(plugin.fetch("id")),
       "selected_by" => package_sources.fetch(plugin.fetch("id"), []),
-      "supported" => supported_families.empty? || supported_families.include?(os_family),
+      "supported" => supported,
+      "installable" => installable,
       "source" => plugin.fetch("source"),
       "path" => plugin.fetch("path"),
       "actions" => plugin.fetch("actions", [])

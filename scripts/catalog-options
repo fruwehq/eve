@@ -61,7 +61,7 @@ def os_available_for_provider?(os, provider)
     os.key?("gcp_image_project") && os.key?("gcp_image_family")
   when "vultr"
     os.key?("vultr_os_id")
-  when "local-virtualbox", "local-vmware", "local-qemu"
+  when "local-qemu"
     os.key?("vagrant_box")
   when "truenas"
     os.key?("cloud_image_url")

@@ -58,25 +58,25 @@ tmp_registry="$(mktemp "${TMPDIR:-/tmp}/egame-instance-test.XXXXXX")"
 tmp_concurrent_registry="$(mktemp "${TMPDIR:-/tmp}/egame-instance-concurrent.XXXXXX")"
 tmp_external_registry="$(mktemp "${TMPDIR:-/tmp}/egame-instance-external.XXXXXX")"
 invalid_output="$(mktemp "${TMPDIR:-/tmp}/egame-instance-test-output.XXXXXX")"
-tmp_local_catalog="$(mktemp "${TMPDIR:-/tmp}/egame-instance-catalog.XXXXXX.yaml")"
 tmp_overlay_dir="$(mktemp -d "${TMPDIR:-/tmp}/egame-instance-overlay.XXXXXX")"
-trap 'rm -f "$tmp_registry" "$tmp_registry.lock" "$tmp_concurrent_registry" "$tmp_concurrent_registry.lock" "$tmp_external_registry" "$invalid_output" "$tmp_local_catalog"; rm -rf "$tmp_overlay_dir"' EXIT
+tmp_local_catalog="$tmp_overlay_dir/catalog.local.yaml"
+trap 'rm -f "$tmp_registry" "$tmp_registry.lock" "$tmp_concurrent_registry" "$tmp_concurrent_registry.lock" "$tmp_external_registry" "$invalid_output"; rm -rf "$tmp_overlay_dir"' EXIT
 rm -f "$tmp_registry" "$tmp_concurrent_registry"
 
 if ./scripts/instance-create \
   --registry "$tmp_registry" \
   --instance test-dev \
-  --machine local-vmware-medium \
-  --os ubuntu-26.04-amd64 \
+  --machine local-qemu-medium \
+  --os ubuntu-26.04-arm64 \
   --init ssh-ubuntu-cloud-init \
   --location tokyo \
-  --bundles desktop-rustdesk-vnc,dev-ai \
-  --packages steam \
-  --disk-gb 90 \
-  --memory-mb 8192 >/dev/null; then
+  --bundles desktop-rustdesk-vnc,dev-ai-arm64 \
+  --packages waypipe \
+  --disk-gb 64 \
+  --memory-mb 4096 >/dev/null; then
   if ./scripts/instance-resolve --registry "$tmp_registry" --instance test-dev --validate >/dev/null &&
     ./scripts/instance-resolve --registry "$tmp_registry" --instance test-dev --emit json |
-      jq -e '.composition.packages == ["steam"] and (.bundle_packages | index("steam")) and .package_sources.steam == ["direct"]' >/dev/null; then
+      jq -e '.composition.packages == ["waypipe"] and (.bundle_packages | index("waypipe")) and .package_sources.waypipe == ["direct"]' >/dev/null; then
     printf '  [OK] create valid instance\n'
   else
     printf '  [FAIL] created instance did not validate\n' >&2
@@ -129,15 +129,15 @@ fi
 ./scripts/instance-create \
   --registry "$tmp_concurrent_registry" \
   --instance concurrent-a \
-  --machine local-vmware-medium \
-  --os ubuntu-26.04-amd64 \
+  --machine local-qemu-medium \
+  --os ubuntu-26.04-arm64 \
   --location tokyo >/dev/null &
 create_a_pid=$!
 ./scripts/instance-create \
   --registry "$tmp_concurrent_registry" \
   --instance concurrent-b \
-  --machine local-vmware-medium \
-  --os ubuntu-26.04-amd64 \
+  --machine local-qemu-medium \
+  --os ubuntu-26.04-arm64 \
   --location tokyo >/dev/null &
 create_b_pid=$!
 if wait "$create_a_pid" && wait "$create_b_pid" &&
@@ -150,12 +150,12 @@ else
   FAIL=$((FAIL + 1))
 fi
 
-if EGAME_INSTANCE_REGISTRY="$tmp_registry" make package.unselect INSTANCE=test-dev PACKAGE=steam >/dev/null &&
+if EGAME_INSTANCE_REGISTRY="$tmp_registry" make package.unselect INSTANCE=test-dev PACKAGE=waypipe >/dev/null &&
   ! ./scripts/instance-resolve --registry "$tmp_registry" --instance test-dev --emit json |
-    jq -e '.bundle_packages | index("steam")' >/dev/null &&
-  EGAME_INSTANCE_REGISTRY="$tmp_registry" make package.select INSTANCE=test-dev PACKAGE=steam >/dev/null &&
+    jq -e '.bundle_packages | index("waypipe")' >/dev/null &&
+  EGAME_INSTANCE_REGISTRY="$tmp_registry" make package.select INSTANCE=test-dev PACKAGE=waypipe >/dev/null &&
   ./scripts/instance-resolve --registry "$tmp_registry" --instance test-dev --emit json |
-    jq -e '.composition.packages == ["steam"] and (.bundle_packages | index("steam")) and .package_sources.steam == ["direct"]' >/dev/null; then
+    jq -e '.composition.packages == ["waypipe"] and (.bundle_packages | index("waypipe")) and .package_sources.waypipe == ["direct"]' >/dev/null; then
   printf '  [OK] package selection updates direct instance packages\n'
 else
   printf '  [FAIL] package selection updates direct instance packages\n' >&2
@@ -163,7 +163,7 @@ else
   FAIL=$((FAIL + 1))
 fi
 
-if EGAME_INSTANCE_REGISTRY="$tmp_registry" make bundle.unselect INSTANCE=test-dev BUNDLE=dev-ai >/dev/null &&
+if EGAME_INSTANCE_REGISTRY="$tmp_registry" make bundle.unselect INSTANCE=test-dev BUNDLE=dev-ai-arm64 >/dev/null &&
   ./scripts/instance-resolve --registry "$tmp_registry" --instance test-dev --emit json |
     jq -e '(.composition.bundles == ["desktop-rustdesk-vnc"]) and (.bundle_packages | index("docker") | not)' >/dev/null &&
   EGAME_INSTANCE_REGISTRY="$tmp_registry" make bundle.select INSTANCE=test-dev BUNDLE=desktop-streaming >/dev/null &&
@@ -189,7 +189,7 @@ fi
 
 if EGAME_INSTANCE_REGISTRY="$tmp_registry" EGAME_INSTANCE_WORKDIR="$tmp_overlay_dir/direct" \
   make --no-print-directory env INSTANCE=test-dev |
-  grep -q '^BUNDLE_PACKAGES=.*steam'; then
+  grep -q '^BUNDLE_PACKAGES=.*waypipe'; then
   printf '  [OK] profile overlay exposes direct instance packages\n'
 else
   printf '  [FAIL] profile overlay exposes direct instance packages\n' >&2
@@ -215,7 +215,7 @@ bundles:
     includes: [xpra]
 YAML
 if EGAME_CATALOG_LOCAL="$tmp_local_catalog" \
-  ./scripts/instance-resolve --registry "$FIXTURE" --instance dev-a --validate 2>"$invalid_output"; then
+  ./scripts/instance-resolve --registry "$FIXTURE" --instance truenas-all-a --validate 2>"$invalid_output"; then
   printf '  [FAIL] instance resolver accepted unsupported ubuntu package version\n' >&2
   FAIL=$((FAIL + 1))
 elif grep -q 'Package plugin xpra does not support ubuntu version 26.04' "$invalid_output"; then
@@ -361,8 +361,8 @@ purge_state="$tmp_overlay_dir/delete-state"
 if ./scripts/instance-create \
   --registry "$tmp_registry" \
   --instance purge-dev \
-  --machine local-vmware-medium \
-  --os ubuntu-26.04-amd64 \
+  --machine local-qemu-medium \
+  --os ubuntu-26.04-arm64 \
   --location tokyo >/dev/null; then
   mkdir -p "$purge_workdir/purge-dev" "$purge_state/instances"
   printf '{}\n' > "$purge_state/instances/purge-dev.json"
@@ -397,9 +397,9 @@ fi
 
 profile_env="$(EGAME_CATALOG_LOCAL="$overlay" ./scripts/profile-resolve --profile dev-a --emit env | LC_ALL=C sort)"
 if printf '%s\n' "$profile_env" | grep -qx 'PROFILE_NAME=dev-a' &&
-  printf '%s\n' "$profile_env" | grep -qx 'VM_DISK_GB=120' &&
-  printf '%s\n' "$profile_env" | grep -qx 'VM_MEMORY_MB=12288' &&
-  printf '%s\n' "$profile_env" | grep -qx 'STACK_TAGS=local-vmware'; then
+  printf '%s\n' "$profile_env" | grep -qx 'VM_DISK_GB=64' &&
+  printf '%s\n' "$profile_env" | grep -qx 'VM_MEMORY_MB=4096' &&
+  printf '%s\n' "$profile_env" | grep -qx 'STACK_TAGS=local-qemu'; then
   printf '  [OK] profile overlay preserves instance overrides\n'
 else
   printf '  [FAIL] profile overlay env mismatch\n' >&2
@@ -409,8 +409,8 @@ fi
 
 bridge_env="$(EGAME_INSTANCE_REGISTRY="$FIXTURE" EGAME_INSTANCE_WORKDIR="$tmp_overlay_dir/run" make env INSTANCE=dev-a 2>/dev/null | LC_ALL=C sort)"
 if printf '%s\n' "$bridge_env" | grep -qx 'PROFILE_NAME=dev-a' &&
-  printf '%s\n' "$bridge_env" | grep -qx 'VM_DISK_GB=120' &&
-  printf '%s\n' "$bridge_env" | grep -qx 'VM_MEMORY_MB=12288'; then
+  printf '%s\n' "$bridge_env" | grep -qx 'VM_DISK_GB=64' &&
+  printf '%s\n' "$bridge_env" | grep -qx 'VM_MEMORY_MB=4096'; then
   printf '  [OK] make target routes INSTANCE through generated profile overlay\n'
 else
   printf '  [FAIL] INSTANCE make bridge env mismatch\n' >&2
@@ -456,7 +456,7 @@ for provider_target in init plan up down stop status ip ssh; do
       make --no-print-directory "$provider_target" INSTANCE=dev-a 2>/dev/null
   )"
   if ! printf '%s\n' "$provider_bridge_out" |
-    jq -e --arg command "$provider_target" '.provider == "local-vmware" and .command == $command and .dry_run == true' >/dev/null; then
+    jq -e --arg command "$provider_target" '.provider == "local-qemu" and .command == $command and .dry_run == true' >/dev/null; then
     printf '  [FAIL] make %s INSTANCE did not route through provider dry-run\n' "$provider_target" >&2
     printf '%s\n' "$provider_bridge_out" >&2
     provider_bridge_failed=$((provider_bridge_failed + 1))
@@ -467,7 +467,7 @@ provider_bridge_start="$(
     make --no-print-directory start INSTANCE=dev-a 2>/dev/null
 )"
 if ! printf '%s\n' "$provider_bridge_start" |
-  jq -e '.provider == "local-vmware" and .command == "start" and .dry_run == true' >/dev/null; then
+  jq -e '.provider == "local-qemu" and .command == "start" and .dry_run == true' >/dev/null; then
   printf '  [FAIL] make start INSTANCE did not route through provider dry-run\n' >&2
   printf '%s\n' "$provider_bridge_start" >&2
   provider_bridge_failed=$((provider_bridge_failed + 1))

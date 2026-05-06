@@ -16,7 +16,7 @@ For this repo, the cleanest interpretation is:
 - `provider: raspberry-pi`
 - `kind: metal`
 
-That makes the Pi a first-class target alongside `aws`, `vultr`, `truenas`, `local-virtualbox`, and `local-vmware`, while acknowledging that its lifecycle is different.
+That makes the Pi a first-class target alongside `aws`, `gcp`, `vultr`, `truenas`, and `local-qemu`, while acknowledging that its lifecycle is different.
 
 ## Recommended role
 

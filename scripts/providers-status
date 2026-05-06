@@ -28,34 +28,6 @@ check_aws() {
   fi
 }
 
-check_local_virtualbox() {
-  configured=no reachable=no notes="vagrant/virtualbox not found"
-
-  if command -v vagrant >/dev/null 2>&1 || command -v VBoxManage >/dev/null 2>&1; then
-    configured=yes
-    if command -v VBoxManage >/dev/null 2>&1; then
-      reachable=yes
-      notes="VBoxManage available"
-    else
-      notes="vagrant present, VBoxManage missing"
-    fi
-  fi
-}
-
-check_local_vmware() {
-  configured=no reachable=no notes="vagrant/vmrun not found"
-
-  if command -v vagrant >/dev/null 2>&1 || command -v vmrun >/dev/null 2>&1; then
-    configured=yes
-    if command -v vmrun >/dev/null 2>&1; then
-      reachable=yes
-      notes="vmrun available"
-    else
-      notes="vagrant present, vmrun missing"
-    fi
-  fi
-}
-
 check_local_qemu() {
   configured=no reachable=no notes="vagrant/qemu not found"
 
@@ -154,15 +126,13 @@ print_row() {
   printf '%-17s  %-10s  %-9s  %s\n' "$name" "$configured" "$reachable" "$notes"
 }
 
-PROVIDERS="aws gcp local-qemu local-virtualbox local-vmware truenas vultr"
+PROVIDERS="aws gcp local-qemu truenas vultr"
 
 if [ -n "$PROVIDER" ]; then
   case "$PROVIDER" in
     aws)               check_aws ;;
     gcp)               check_gcp ;;
     local-qemu)        check_local_qemu ;;
-    local-virtualbox)  check_local_virtualbox ;;
-    local-vmware)      check_local_vmware ;;
     truenas)           check_truenas ;;
     vultr)             check_vultr ;;
     *)                 echo "Unknown provider: $PROVIDER (valid: $PROVIDERS)" >&2; exit 1 ;;
@@ -186,8 +156,6 @@ else
   check_aws;               print_row "aws"
   check_gcp;               print_row "gcp"
   check_local_qemu;         print_row "local-qemu"
-  check_local_virtualbox;  print_row "local-virtualbox"
-  check_local_vmware;      print_row "local-vmware"
   check_truenas;           print_row "truenas"
   check_vultr;             print_row "vultr"
 fi

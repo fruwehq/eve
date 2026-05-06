@@ -280,9 +280,8 @@ emit_vagrant() {
   fi
   echo "$RESOLVED_JSON" | jq -r '
     . as $r |
-    (if $r.machine.provider == "local-vmware" then "vmware_desktop"
-     elif $r.machine.provider == "local-qemu" then "qemu"
-     else "virtualbox"
+    (if $r.machine.provider == "local-qemu" then "qemu"
+     else error("Vagrant emit only supports local-qemu, got " + $r.machine.provider)
      end) as $provider |
     ($r.os.vagrant_box // "cloud-image/ubuntu-26.04") as $box |
     ($r.os.arch // "amd64") as $arch |

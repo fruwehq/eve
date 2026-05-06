@@ -17,19 +17,20 @@ BAD_INSTALL_NON_STRING_FIXTURE="tests/fixtures/plugins/packages/bad-install-non-
 BAD_PACKAGE_SUPPORTS_FIXTURE="tests/fixtures/plugins/packages/bad-supports"
 BAD_PROVIDER_SUPPORTS_FIXTURE="tests/fixtures/plugins/providers/bad-supports"
 WIN_ONLY_PLUGIN_FIXTURE="tests/fixtures/plugins/packages/win-only"
-profile_catalog="$(mktemp "${TMPDIR:-/tmp}/egame-plugin-profiles.XXXXXX.yaml")"
+profile_catalog_dir="$(mktemp -d "${TMPDIR:-/tmp}/egame-plugin-profiles.XXXXXX")"
+profile_catalog="$profile_catalog_dir/catalog.local.yaml"
 state_dir=""
 FAIL=0
 
-trap 'rm -f "$profile_catalog"; if [ -n "$state_dir" ]; then rm -rf "$state_dir"; fi' EXIT
+trap 'rm -rf "$profile_catalog_dir"; if [ -n "$state_dir" ]; then rm -rf "$state_dir"; fi' EXIT
 
 cat >"$profile_catalog" <<'YAML'
 profiles:
-  - name: local-vmware-ubuntu-dev-gui
-    machine: local-vmware-medium
-    os: ubuntu-26.04-amd64
+  - name: local-qemu-ubuntu-dev-gui
+    machine: local-qemu-medium
+    os: ubuntu-26.04-arm64
     init: ssh-ubuntu-cloud-init
-    bundles: [dev-ai]
+    bundles: [dev-ai-arm64]
     location: tokyo
 
   - name: vultr-windows-gaming
@@ -64,7 +65,7 @@ docker_package_listed() {
 
 instance_maps_plugins() {
   ./scripts/instance-resolve --registry "$FIXTURE" --instance dev-a --emit json |
-    jq -e '.provider_plugin == "local-vmware" and (.package_plugins[] | select(.id == "docker" and .plugin == "docker"))' >/dev/null
+    jq -e '.provider_plugin == "local-qemu" and (.package_plugins[] | select(.id == "docker" and .plugin == "docker"))' >/dev/null
 }
 
 dummy_plugin_listed() {
@@ -192,7 +193,7 @@ fi
 
 provider_matrix_failed=0
 for provider_case in \
-  "dev-a:local-vmware:vagrant" \
+  "dev-a:local-qemu:vagrant" \
   "qemu-a:local-qemu:vagrant" \
   "aws-gpu-a:aws:terraform" \
   "truenas-all-a:truenas:terraform" \
@@ -247,7 +248,7 @@ fi
 
 unsupported_version_err="$(
   EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-package-dispatch-test" \
-    ./scripts/package-dispatch --registry "$FIXTURE" --instance dev-a --package xpra --command status --dry-run 2>&1 >/dev/null || true
+    ./scripts/package-dispatch --registry "$FIXTURE" --instance truenas-all-a --package xpra --command status --dry-run 2>&1 >/dev/null || true
 )"
 if printf '%s\n' "$unsupported_version_err" | grep -q "package plugin xpra does not support ubuntu version 26.04"; then
   printf '  [OK] package dispatch rejects unsupported os version\n'
@@ -259,7 +260,7 @@ fi
 
 package_install="$(
   EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-package-dispatch-test" \
-    ./scripts/package-provision --profile local-vmware-ubuntu-dev-gui --package docker --dry-run
+    ./scripts/package-provision --profile local-qemu-ubuntu-dev-gui --package docker --dry-run
 )"
 if printf '%s\n' "$package_install" | jq -e '.kind == "package-provision" and .package == "docker" and .steps == ["00_base.sh", "05_timezone.sh", "10_docker.sh"] and .dry_run == true' >/dev/null; then
   printf '  [OK] ubuntu package install maps to granular provision steps\n'
@@ -270,7 +271,7 @@ else
 fi
 
 codex_install="$(
-  ./scripts/package-provision --profile local-vmware-ubuntu-dev-gui --package codex-cli --dry-run
+  ./scripts/package-provision --profile local-qemu-ubuntu-dev-gui --package codex-cli --dry-run
 )"
 if printf '%s\n' "$codex_install" | jq -e '.package == "codex-cli" and .steps == ["00_base.sh", "05_timezone.sh", "20_dev-toolchain.sh", "30_codex-cli.sh"] and .package_markers == ["dev-toolchain", "codex-cli"]' >/dev/null; then
   printf '  [OK] package install includes dependency package markers\n'
@@ -380,7 +381,7 @@ fi
 package_list="$(
   EGAME_INSTANCE_REGISTRY="$FIXTURE" make --no-print-directory package.list INSTANCE=dev-a EMIT=json
 )"
-if printf '%s\n' "$package_list" | jq -e '.instance == "dev-a" and (.packages[] | select(.id == "docker" and .selected == true and .supported == true and .plugin == "docker" and (.selected_by | index("bundle:dev-ai")))) and (.packages[] | select(.id == "steam" and .selected == false and .selected_by == []))' >/dev/null; then
+if printf '%s\n' "$package_list" | jq -e '.instance == "dev-a" and (.packages[] | select(.id == "docker" and .selected == true and .supported == true and .plugin == "docker" and (.selected_by | index("bundle:dev-ai-arm64")))) and (.packages[] | select(.id == "steam" and .selected == false and .selected_by == []))' >/dev/null; then
   printf '  [OK] package list shows selected and available packages\n'
 else
   printf '  [FAIL] package list shows selected and available packages\n' >&2

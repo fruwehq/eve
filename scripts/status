@@ -52,25 +52,6 @@ case "$ENGINE" in
       VM_STATUS="not created"
     else
       case "$PROVIDER" in
-        local-vmware)
-          VMX=$(find "$GENERATED_DIR/.vagrant/machines/default" -name '*.vmx' 2>/dev/null | head -1)
-          if [ -z "$VMX" ]; then
-            VM_STATUS="not created"
-          elif vmrun list | grep -q "$VMX"; then
-            VM_STATUS="running"
-          else
-            VM_STATUS="stopped"
-          fi
-          ;;
-        local-virtualbox)
-          VAGRANT_STATE=$(cd "$GENERATED_DIR" && vagrant status --machine-readable 2>/dev/null | awk -F, '$3=="state"{print $4}')
-          case "$VAGRANT_STATE" in
-            running) VM_STATUS="running" ;;
-            stopped|poweroff) VM_STATUS="stopped" ;;
-            "") VM_STATUS="not created" ;;
-            *) VM_STATUS="$VAGRANT_STATE" ;;
-          esac
-          ;;
         local-qemu)
           VAGRANT_STATE=$(cd "$GENERATED_DIR" && vagrant status --machine-readable 2>/dev/null | awk -F, '$3=="state"{print $4}')
           case "$VAGRANT_STATE" in

@@ -17,8 +17,9 @@ TMPKEY=$(mktemp)
 printf 'ssh-rsa AAAAB3NzaC1yc2EAAAA_test_only test@test\n' > "$TMPKEY"
 TMPWORK=$(mktemp -d)
 TMPSTATE=$(mktemp -d)
-TMPCATALOG=$(mktemp "${TMPDIR:-/tmp}/egame-tf-profile.XXXXXX.yaml")
-trap 'rm -f "$TMPKEY" "$TMPCATALOG"; rm -rf "$TMPWORK" "$TMPSTATE"' EXIT
+TMPCATALOG_DIR=$(mktemp -d "${TMPDIR:-/tmp}/egame-tf-profile.XXXXXX")
+TMPCATALOG="$TMPCATALOG_DIR/catalog.local.yaml"
+trap 'rm -f "$TMPKEY"; rm -rf "$TMPWORK" "$TMPSTATE" "$TMPCATALOG_DIR"' EXIT
 cat >"$TMPCATALOG" <<'YAML'
 profiles:
   - name: aws-ubuntu-dev-headless

@@ -25,6 +25,9 @@ target-version = "py313"
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 
+[tool.ruff.lint.per-file-ignores]
+"scripts/egame-tui" = ["E501"]
+
 [tool.mypy]
 python_version = "3.13"
 strict = true
