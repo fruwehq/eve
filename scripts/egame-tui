@@ -508,6 +508,7 @@ def run_tui() -> int:
 
         #instance-detail {
             height: 1fr;
+            display: none;
         }
 
         #state-strip {
@@ -589,7 +590,11 @@ def run_tui() -> int:
         def compose(self) -> ComposeResult:
             yield Header(show_clock=True)
             with Container(id="root"):
-                yield Static("", id="hero")
+                yield Static(
+                    "[primary]◇[/] ephemeral vm cockpit  [success]starting[/]  "
+                    "[dim]create -> provision -> connect[/dim]",
+                    id="hero",
+                )
                 yield Static("Loading instances...", id="summary")
                 with Horizontal(id="body"):
                     with Vertical(id="left"):
@@ -597,7 +602,18 @@ def run_tui() -> int:
                         yield Input(placeholder="Filter instances", id="filter")
                         yield DataTable(id="instances")
                     with Vertical(id="right"):
-                        yield Static("Please, select an instance", id="empty-state")
+                        yield Static(
+                            "\n".join(
+                                [
+                                    "[primary]◇[/]",
+                                    "[b]Please, select an instance[/b]",
+                                    "",
+                                    "Loading instances...",
+                                    "Press Enter on << New Instance >> to create one.",
+                                ]
+                            ),
+                            id="empty-state",
+                        )
                         with Vertical(id="instance-detail"):
                             yield Static("Select an instance.", id="title", classes="section-title")
                             with Horizontal(id="state-strip"):
@@ -639,11 +655,14 @@ def run_tui() -> int:
             packages.cursor_type = "row"
             packages.add_columns("Package", "Want", "State", "OK", "Source")
 
-            await self.load_recipes()
-            await self.action_refresh()
             self.animate_hero()
             self.set_interval(1.2, self.animate_hero)
             self.set_interval(5, self.poll_statuses)
+            self.start_task(self.load_initial_data())
+
+        async def load_initial_data(self) -> None:
+            await self.load_recipes()
+            await self.action_refresh()
 
         async def load_recipes(self) -> None:
             try:
