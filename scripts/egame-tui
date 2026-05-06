@@ -862,13 +862,57 @@ def run_tui() -> int:
             self.render_ops(status)
 
         def render_empty_state(self) -> None:
-            frames = ["◇", "◈", "◆", "◈"]
-            frame = frames[self.hero_frame % len(frames)]
+            river_frames = [
+                [
+                    "   ~~~    ~~~  ",
+                    " ~~   ~~~~   ~~",
+                    "~~   ~~   ~~   ~~",
+                    " ~~   ~~~~   ~~",
+                    "   ~~~    ~~~  ",
+                    " .  .    .  .  ",
+                    "  .   .  .   . ",
+                    ".   .    .   . ",
+                    "  .  .    .  . ",
+                ],
+                [
+                    " ~~   ~~~~   ~~",
+                    "~~   ~~   ~~   ~~",
+                    " ~~   ~~~~   ~~",
+                    "   ~~~    ~~~  ",
+                    " ~~   ~~~~   ~~",
+                    "  .   .  .   . ",
+                    ".   .    .   . ",
+                    "  .  .    .  . ",
+                    " .  .    .  .  ",
+                ],
+                [
+                    "~~   ~~   ~~   ~~",
+                    " ~~   ~~~~   ~~",
+                    "   ~~~    ~~~  ",
+                    " ~~   ~~~~   ~~",
+                    "~~   ~~   ~~   ~~",
+                    ".   .    .   . ",
+                    "  .  .    .  . ",
+                    " .  .    .  .  ",
+                    "  .   .  .   . ",
+                ],
+                [
+                    " ~~   ~~~~   ~~",
+                    "   ~~~    ~~~  ",
+                    " ~~   ~~~~   ~~",
+                    "~~   ~~   ~~   ~~",
+                    " ~~   ~~~~   ~~",
+                    "  .  .    .  . ",
+                    " .  .    .  .  ",
+                    "  .   .  .   . ",
+                    ".   .    .   . ",
+                ],
+            ]
+            frame = [line.ljust(16)[:16] for line in river_frames[self.hero_frame % len(river_frames)]]
             self.query_one("#empty-state", Static).update(
                 "\n".join(
                     [
-                        f"[primary]{frame}  {frame}  {frame}[/]",
-                        "",
+                        *[f"[primary]{line}[/]" for line in frame],
                         "[b]EPHEMERAL VM COCKPIT[/b]",
                         "",
                         "[b]Please, select an instance[/b]",
