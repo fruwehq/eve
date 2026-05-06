@@ -82,6 +82,25 @@ case "$PROVIDER" in
     print_kv TF_VAR_region "$(getv LOCATION_REGION)"
     print_kv TF_VAR_root_volume_type "$(getv VM_ROOT_VOLUME_TYPE)"
     ;;
+  gcp)
+    PROJECT_ID="${GOOGLE_CLOUD_PROJECT:-${GOOGLE_PROJECT:-}}"
+    if [ -z "$PROJECT_ID" ] && command -v gcloud >/dev/null 2>&1; then
+      PROJECT_ID="$(gcloud config get-value project 2>/dev/null || true)"
+    fi
+    if [ -z "$PROJECT_ID" ]; then
+      echo "tf-env: missing GOOGLE_CLOUD_PROJECT or GOOGLE_PROJECT for gcp provider" >&2
+      exit 2
+    fi
+    print_kv TF_VAR_disk_gb "$(getv VM_DISK_GB)"
+    print_kv TF_VAR_disk_type "$(getv VM_DISK_TYPE)"
+    print_kv TF_VAR_image_family "$(getv GCP_IMAGE_FAMILY)"
+    print_kv TF_VAR_image_project "$(getv GCP_IMAGE_PROJECT)"
+    print_kv TF_VAR_machine_type "$(getv VM_MACHINE_TYPE)"
+    print_kv TF_VAR_project_id "$PROJECT_ID"
+    print_kv TF_VAR_region "$(getv LOCATION_REGION)"
+    print_kv TF_VAR_ssh_allowed_cidr "${MY_IP}/32"
+    print_kv TF_VAR_zone "$(getv LOCATION_ZONE)"
+    ;;
   vultr)
     print_kv TF_VAR_plan "$(getv VM_PLAN)"
     print_kv TF_VAR_region "$(getv LOCATION_REGION)"

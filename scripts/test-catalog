@@ -11,8 +11,10 @@ if printf '%s\n' "$catalog_options_json" |
   jq -e '
     (.providers | index("vultr")) and
     (.providers | index("truenas")) and
+    (.providers | index("gcp")) and
     any(.platforms[]; .provider == "vultr" and .machine == "vultr-vcg-a40-2c" and .os == "windows-server-2025") and
     any(.platforms[]; .provider == "truenas" and .machine == "truenas-scale-medium" and .os == "ubuntu-26.04-amd64") and
+    any(.platforms[]; .provider == "gcp" and .machine == "gcp-cheap-x86" and .os == "ubuntu-26.04-amd64") and
     any(.bundles[]; .id == "gaming-streaming" and (.includes | index("steam"))) and
     any(.packages[]; .id == "codex-cli")
   ' >/dev/null; then

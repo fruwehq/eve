@@ -102,6 +102,15 @@ case "$ENGINE" in
             *) VM_STATUS="$RAW" ;;
           esac
           ;;
+        gcp)
+          RAW=$(tf_attr "$STATE_JSON" "google_compute_instance.main" "current_status")
+          case "$RAW" in
+            RUNNING) VM_STATUS="running" ;;
+            TERMINATED) VM_STATUS="stopped" ;;
+            "") VM_STATUS="not created" ;;
+            *) VM_STATUS="$RAW" ;;
+          esac
+          ;;
         vultr)
           RAW=$(tf_attr "$STATE_JSON" "vultr_instance.default" "power_status")
           case "$RAW" in

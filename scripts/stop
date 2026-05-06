@@ -55,6 +55,18 @@ case "$ENGINE" in
         echo "[stop] Stopping AWS instance $INSTANCE_ID in $REGION"
         aws ec2 stop-instances --instance-ids "$INSTANCE_ID" --region "$REGION" --output table
         ;;
+      gcp)
+        RAW=$(tf_attr "$STATE_JSON" "google_compute_instance.main" "current_status")
+        if [ "$RAW" = "TERMINATED" ]; then
+          echo "[stop] Already stopped"
+          exit 0
+        fi
+        INSTANCE_NAME=$(terramate run --quiet --tags="$TAGS-services" -- terraform output -raw instance_name)
+        ZONE=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^LOCATION_ZONE=/{print $2}')
+        PROJECT_ID="${GOOGLE_CLOUD_PROJECT:-${GOOGLE_PROJECT:-}}"
+        echo "[stop] Stopping GCP instance $INSTANCE_NAME in $ZONE"
+        gcloud compute instances stop "$INSTANCE_NAME" --zone "$ZONE" ${PROJECT_ID:+--project "$PROJECT_ID"} --quiet
+        ;;
       vultr)
         RAW=$(tf_attr "$STATE_JSON" "vultr_instance.default" "power_status")
         if [ "$RAW" = "stopped" ]; then

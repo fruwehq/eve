@@ -243,11 +243,16 @@ emit_env() {
     "VM_DISK_GB=" + ((.machine.defaults.disk_gb // 30) | tostring),
     "VM_POOL=" + (.machine.defaults.pool // $locp.pool // "main"),
     "VM_PLAN=" + (.machine.defaults.plan // ""),
+    "VM_MACHINE_TYPE=" + (.machine.defaults.machine_type // ""),
+    "VM_DISK_TYPE=" + (.machine.defaults.disk_type // ""),
     "VM_INSTANCE_TYPE=" + (.machine.defaults.instance_type // ""),
     "VM_ROOT_VOLUME_TYPE=" + (.machine.defaults.root_volume_type // ""),
+    "GCP_IMAGE_FAMILY=" + (.os.gcp_image_family // ""),
+    "GCP_IMAGE_PROJECT=" + (.os.gcp_image_project // ""),
     "VULTR_OS_ID=" + ((.os.vultr_os_id // 0) | tostring),
     "LOCATION_REGION=" + ($locp.region // ""),
     "LOCATION_AVAILABILITY_ZONE=" + ($locp.availability_zone // ""),
+    "LOCATION_ZONE=" + ($locp.zone // ""),
     "SSH_USER=" + (
       if (.os.family == "windows") then "Administrator"
       elif ($provider == "raspberry-pi") then env_or("VM_USER_NAME"; "")

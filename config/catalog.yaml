@@ -48,6 +48,16 @@ machines:
       instance_type: g5.2xlarge
       disk_gb: 200
 
+  - name: gcp-cheap-x86
+    provider: gcp
+    kind: vm
+    supports:
+      arches: [amd64]
+    defaults:
+      machine_type: e2-small
+      disk_gb: 20
+      disk_type: pd-balanced
+
   - name: vultr-vcg-a40-1c # 1 vCPU, 5 GB RAM, 90 GB NVMe, 3 TB/mo, $0.075/hr, 1/24 NVIDIA A40 (2 GB VRAM)
     provider: vultr
     kind: vm
@@ -141,6 +151,8 @@ oses:
     vagrant_box: cloud-image/ubuntu-26.04
     cloud_image_url: https://cloud-images.ubuntu.com/releases/26.04/release/ubuntu-26.04-server-cloudimg-amd64.img
     aws_ami_name_pattern: ubuntu/images/hvm-ssd-gp3/ubuntu-resolute-26.04-amd64-server-*
+    gcp_image_project: ubuntu-os-cloud
+    gcp_image_family: ubuntu-2604-lts-amd64
 
   - id: ubuntu-26.04-arm64
     family: ubuntu
@@ -161,7 +173,7 @@ oses:
 inits:
   - id: ssh-ubuntu-cloud-init
     os_family: ubuntu
-    providers: [aws, local-qemu, local-virtualbox, local-vmware, truenas]
+    providers: [aws, gcp, local-qemu, local-virtualbox, local-vmware, truenas]
 
   - id: ssh-ubuntu-metal
     os_family: ubuntu
@@ -238,6 +250,9 @@ locations:
     aws:
       region: ap-northeast-1
       availability_zone: ap-northeast-1b
+    gcp:
+      region: asia-northeast1
+      zone: asia-northeast1-b
     vultr:
       region: nrt
     local-virtualbox:

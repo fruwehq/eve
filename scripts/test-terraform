@@ -20,7 +20,7 @@ terramate generate >/dev/null
 TM_FLAGS=("--disable-safeguards=git-untracked,git-uncommitted,git-out-of-sync,outdated-code")
 
 FAIL=0
-for tags in aws-services vultr-services truenas-services; do
+for tags in aws-services gcp-services vultr-services truenas-services; do
   printf '  -- %s --\n' "$tags"
   if ! terramate run "${TM_FLAGS[@]}" --tags="$tags" --quiet -- \
       terraform init -backend=false -input=false -upgrade=false >/dev/null 2>&1; then

@@ -190,6 +190,10 @@ def validate!(catalog, composition, machine, os, init, location, bundle_packages
     unless os.key?("aws_ami_name_pattern") || os.key?("aws_ami_id") || os.key?("aws_ssm_parameter")
       raise "OS/provider mismatch: OS #{os["id"]} has no AWS image selector"
     end
+  when "gcp"
+    unless os.key?("gcp_image_project") && os.key?("gcp_image_family")
+      raise "OS/provider mismatch: OS #{os["id"]} has no GCP image selector"
+    end
   when "vultr"
     raise "OS/provider mismatch: OS #{os["id"]} has no Vultr OS id" unless os.key?("vultr_os_id")
   when "local-virtualbox", "local-vmware", "local-qemu"
@@ -293,11 +297,16 @@ def emit_env(resolved)
     "VM_DISK_GB" => (machine_defaults["disk_gb"] || 30).to_s,
     "VM_POOL" => (machine_defaults["pool"] || locp["pool"] || "main"),
     "VM_PLAN" => (machine_defaults["plan"] || ""),
+    "VM_MACHINE_TYPE" => (machine_defaults["machine_type"] || ""),
+    "VM_DISK_TYPE" => (machine_defaults["disk_type"] || ""),
     "VM_INSTANCE_TYPE" => (machine_defaults["instance_type"] || ""),
     "VM_ROOT_VOLUME_TYPE" => (machine_defaults["root_volume_type"] || ""),
+    "GCP_IMAGE_FAMILY" => (os["gcp_image_family"] || ""),
+    "GCP_IMAGE_PROJECT" => (os["gcp_image_project"] || ""),
     "VULTR_OS_ID" => (os["vultr_os_id"] || 0).to_s,
     "LOCATION_REGION" => (locp["region"] || ""),
     "LOCATION_AVAILABILITY_ZONE" => (locp["availability_zone"] || ""),
+    "LOCATION_ZONE" => (locp["zone"] || ""),
     "SSH_USER" => if os["family"] == "windows"
                     "Administrator"
                   elsif provider == "raspberry-pi"

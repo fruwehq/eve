@@ -274,6 +274,13 @@ The target starts an Xpra server on the VM, launches the requested app, and atta
    - `AWS_PROFILE` — e.g. `hekk-dev`
    - `AWS_REGION` — e.g. `ap-northeast-1`
 
+### GCP
+
+1. **Google Cloud CLI** — [install](https://cloud.google.com/sdk/docs/install)
+2. **Authenticate** — run `gcloud auth application-default login`, or export `GOOGLE_OAUTH_ACCESS_TOKEN="$(gcloud auth print-access-token)"` when ADC has less access than your active user account.
+3. **Required env vars** (in `.env` or `.env.local`):
+   - `GOOGLE_CLOUD_PROJECT` — optional if `gcloud config get-value project` is correct
+
 ### Vultr
 
 1. **API key** — [generate one](https://my.vultr.com/settings/#settingsapi)

@@ -28,6 +28,17 @@ instances:
       instance_type: g5.xlarge
       root_volume_type: gp3
 
+  - name: gcp-cheap-a
+    machine: gcp-cheap-x86
+    os: ubuntu-26.04-amd64
+    init: ssh-ubuntu-cloud-init
+    location: tokyo
+    bundles: [dev-ai]
+    overrides:
+      disk_gb: 20
+      machine_type: e2-small
+      disk_type: pd-balanced
+
   - name: truenas-all-a
     machine: truenas-scale-medium
     os: ubuntu-26.04-amd64

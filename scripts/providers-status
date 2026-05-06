@@ -70,6 +70,33 @@ check_local_qemu() {
   fi
 }
 
+check_gcp() {
+  configured=no reachable=no notes="missing GOOGLE_CLOUD_PROJECT/GOOGLE_PROJECT or gcloud config project"
+
+  local project="${GOOGLE_CLOUD_PROJECT:-${GOOGLE_PROJECT:-}}"
+  if [ -z "$project" ] && command -v gcloud >/dev/null 2>&1; then
+    project="$(gcloud config get-value project 2>/dev/null || true)"
+  fi
+
+  if [ -n "$project" ]; then
+    configured=yes
+    if ! command -v gcloud >/dev/null 2>&1; then
+      notes="configured, but gcloud not found"
+    elif [ -n "${GOOGLE_OAUTH_ACCESS_TOKEN:-}" ]; then
+      reachable=yes
+      notes="GOOGLE_OAUTH_ACCESS_TOKEN set; project=$project"
+    elif gcloud auth application-default print-access-token >/dev/null 2>&1; then
+      reachable=yes
+      notes="gcloud application-default auth ok; project=$project"
+    elif gcloud auth print-access-token >/dev/null 2>&1; then
+      reachable=yes
+      notes="gcloud user auth ok; Terraform may need GOOGLE_OAUTH_ACCESS_TOKEN"
+    else
+      notes="configured, but gcloud auth failed"
+    fi
+  fi
+}
+
 check_truenas() {
   local host="${TRUENAS_HOST:-}"
   local port="${TRUENAS_SSH_PORT:-22}"
@@ -127,11 +154,12 @@ print_row() {
   printf '%-17s  %-10s  %-9s  %s\n' "$name" "$configured" "$reachable" "$notes"
 }
 
-PROVIDERS="aws local-qemu local-virtualbox local-vmware truenas vultr"
+PROVIDERS="aws gcp local-qemu local-virtualbox local-vmware truenas vultr"
 
 if [ -n "$PROVIDER" ]; then
   case "$PROVIDER" in
     aws)               check_aws ;;
+    gcp)               check_gcp ;;
     local-qemu)        check_local_qemu ;;
     local-virtualbox)  check_local_virtualbox ;;
     local-vmware)      check_local_vmware ;;
@@ -156,6 +184,7 @@ else
   printf '%s\n' 'Provider           Configured  Reachable  Notes'
   printf '%s\n' '-----------------  ----------  ---------  -------------------------------------------'
   check_aws;               print_row "aws"
+  check_gcp;               print_row "gcp"
   check_local_qemu;         print_row "local-qemu"
   check_local_virtualbox;  print_row "local-virtualbox"
   check_local_vmware;      print_row "local-vmware"

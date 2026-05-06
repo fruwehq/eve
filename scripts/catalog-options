@@ -57,6 +57,8 @@ def os_available_for_provider?(os, provider)
   case provider
   when "aws"
     os.key?("aws_ami_name_pattern") || os.key?("aws_ami_id") || os.key?("aws_ssm_parameter")
+  when "gcp"
+    os.key?("gcp_image_project") && os.key?("gcp_image_family")
   when "vultr"
     os.key?("vultr_os_id")
   when "local-virtualbox", "local-vmware", "local-qemu"

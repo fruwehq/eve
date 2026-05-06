@@ -4,6 +4,7 @@
 #
 # Dispatches by engine/provider:
 #   - terraform + aws         -> output "public_ip"
+#   - terraform + gcp         -> output "public_ip"
 #   - terraform + vultr       -> output "vultr_instance_main_ip"
 #   - terraform + truenas     -> output VM MAC, then resolve it from NAS ARP
 #   - metal + raspberry-pi    -> use RASPBERRY_PI_IP or resolve RASPBERRY_PI_HOST
@@ -146,6 +147,9 @@ case "$ENGINE:$PROVIDER" in
     printf '%s\n' "$IP"
     ;;
   terraform:aws)
+    terramate run "${TM_OUTPUT_FLAGS[@]}" --quiet --tags="$TAGS-services" -- terraform output -raw public_ip
+    ;;
+  terraform:gcp)
     terramate run "${TM_OUTPUT_FLAGS[@]}" --quiet --tags="$TAGS-services" -- terraform output -raw public_ip
     ;;
   terraform:vultr)
