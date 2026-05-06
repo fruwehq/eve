@@ -35,10 +35,20 @@ The runner performs:
 4. `make instance.provision`
 5. `make instance.status EMIT=json`
 6. `make package.status` for every selected package
+7. `make down` cleanup for each tested instance
 
 It writes a JSON report under `tmp/integration-report-*.json`. Give that report
 to an LLM to summarize failures, propose next commands, or compare Linux versus
-Windows readiness.
+Windows readiness. Use `--no-cleanup` or `EGAME_INTEGRATION_CLEANUP=0` when you
+intentionally want to keep provider resources running after the test.
+
+For temporary smoke entries, also delete the local instance registry entries:
+
+```bash
+YES=1 EGAME_INTEGRATION_DELETE_INSTANCES=1 scripts/integration-test --live \
+  --instance linux-smoke \
+  --instance windows-smoke
+```
 
 ## Manual Checks
 
@@ -56,4 +66,5 @@ For Windows gaming environments:
 - Connect through the expected remote access path and launch a 3D app or game
   to verify smooth interaction.
 
-Always stop or destroy billable instances after the test.
+The live runner destroys provider resources by default. If cleanup fails, stop
+or destroy billable instances manually before continuing.

@@ -543,8 +543,9 @@ integration_live_out="$(
 )"
 if printf '%s\n' "$integration_live_out" | grep -q '^== dev-a: validate ==$' &&
   printf '%s\n' "$integration_live_out" | grep -q '^stub live step: instance.validate$' &&
+  printf '%s\n' "$integration_live_out" | grep -q '^== dev-a: cleanup.down ==$' &&
   [ -f "$integration_report" ] &&
-  jq -e '.instances[0].status == "passed" and .instances[0].steps[0].output == "stub live step: instance.validate"' "$integration_report" >/dev/null; then
+  jq -e '.instances[0].status == "passed" and .instances[0].steps[0].output == "stub live step: instance.validate" and .instances[0].cleanup[0].name == "cleanup.down"' "$integration_report" >/dev/null; then
   printf '  [OK] integration-test live mode streams and records step output\n'
 else
   printf '  [FAIL] integration-test live mode streams and records step output\n' >&2
@@ -583,7 +584,7 @@ integration_missing_status=$?
 set -e
 if [ "$integration_missing_status" -ne 0 ] &&
   [ -f "$integration_missing_report" ] &&
-  jq -e '.instances[0].status == "failed" and (.instances[0].steps[] | select(.name | startswith("package.status.")) | .status == "failed" and .package_status == "missing" and (.failure_reason | test("expected package status installed")))' "$integration_missing_report" >/dev/null; then
+  jq -e '.instances[0].status == "failed" and .instances[0].cleanup[0].name == "cleanup.down" and (.instances[0].steps[] | select(.name | startswith("package.status.")) | .status == "failed" and .package_status == "missing" and (.failure_reason | test("expected package status installed")))' "$integration_missing_report" >/dev/null; then
   printf '  [OK] integration-test live mode fails on missing selected package\n'
 else
   printf '  [FAIL] integration-test live mode missing package handling mismatch\n' >&2

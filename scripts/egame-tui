@@ -12,6 +12,7 @@ import shlex
 import subprocess
 import sys
 from collections.abc import Coroutine
+from contextlib import suppress
 from pathlib import Path
 from typing import Any, ClassVar, Literal, cast
 
@@ -201,7 +202,7 @@ def run_tui() -> int:
 
         #confirm-dialog {
             width: 72;
-            height: auto;
+            height: 10;
             border: round $error;
             background: $surface;
             padding: 1 2;
@@ -209,6 +210,17 @@ def run_tui() -> int:
 
         #confirm-message {
             margin-bottom: 1;
+        }
+
+        #confirm-actions {
+            height: 3;
+            width: 28;
+            background: transparent;
+        }
+
+        #confirm-actions Button {
+            width: 12;
+            min-width: 12;
         }
         """
 
@@ -221,7 +233,7 @@ def run_tui() -> int:
             with Vertical(id="confirm-dialog"):
                 yield Label(f"[b]{self.dialog_title}[/b]")
                 yield Static(self.message, id="confirm-message")
-                with Horizontal():
+                with Horizontal(id="confirm-actions"):
                     yield Button("Cancel", id="cancel")
                     yield Button("Confirm", id="confirm", variant="error")
 
@@ -248,8 +260,8 @@ def run_tui() -> int:
             margin-bottom: 1;
         }
 
-        #override-row {
-            height: 4;
+        Horizontal {
+            background: transparent;
         }
 
         #override-row Input {
@@ -258,7 +270,7 @@ def run_tui() -> int:
         }
 
         #content-selects {
-            height: 15;
+            height: 18;
             margin-bottom: 1;
         }
 
@@ -273,16 +285,32 @@ def run_tui() -> int:
         }
 
         #bundle-select {
-            height: 12;
+            height: 10;
         }
 
         #package-select {
-            height: 12;
+            height: 14;
+        }
+
+        #bundle-preview {
+            height: 4;
+            margin-bottom: 1;
         }
 
         #included-packages {
             height: 2;
             margin-bottom: 1;
+        }
+
+        #wizard-actions {
+            height: 3;
+            width: 52;
+            background: transparent;
+        }
+
+        #wizard-actions Button {
+            width: 12;
+            min-width: 12;
         }
 
         .wizard-hidden {
@@ -315,6 +343,7 @@ def run_tui() -> int:
             ]
             self.step = 0
             self.selected_platform_id = ""
+            self.highlighted_bundle_id = ""
             self.rendered_bundled_package_ids: set[str] = set()
             self.platform_by_id = {
                 str(platform_choice.get("id")): platform_choice
@@ -335,10 +364,6 @@ def run_tui() -> int:
                     yield DataTable(id="platform-cards")
                     yield Static("", id="platform-defaults")
                 with Vertical(id="step-content"):
-                    yield Static("", id="resource-defaults")
-                    with Horizontal(id="override-row"):
-                        yield Input(placeholder="disk GB override", id="new-disk")
-                        yield Input(placeholder="memory MB override", id="new-memory")
                     with Horizontal(id="content-selects"):
                         with Vertical(classes="content-column"):
                             yield Static("Bundles", classes="muted")
@@ -351,13 +376,18 @@ def run_tui() -> int:
                                 id="bundle-select",
                                 disabled=not self.bundles,
                             )
+                            yield Static("", id="bundle-preview", classes="muted")
                         with Vertical(classes="content-column"):
                             yield Static("Additional packages", classes="muted")
                             yield SelectionList(id="package-select", disabled=not self.packages)
                     yield Static("", id="included-packages", classes="muted")
+                    yield Static("", id="resource-defaults")
+                    with Horizontal(id="override-row"):
+                        yield Input(placeholder="disk GB override", id="new-disk")
+                        yield Input(placeholder="memory MB override", id="new-memory")
                 with Vertical(id="step-review"):
                     yield Static("", id="review")
-                with Horizontal():
+                with Horizontal(id="wizard-actions"):
                     yield Button("Back", id="back")
                     yield Button("Cancel", id="cancel")
                     yield Button("Next", id="next", variant="primary")
@@ -425,6 +455,13 @@ def run_tui() -> int:
                     packages.extend(str(package) for package in includes)
             return sorted(set(packages))
 
+        def bundle_includes(self, bundle_id: str) -> list[str]:
+            bundle = self.bundle_map.get(bundle_id, {})
+            includes = bundle.get("includes", [])
+            if isinstance(includes, list):
+                return [str(package) for package in includes]
+            return []
+
         def sync_package_options(self) -> None:
             package_list = self.query_one("#package-select", SelectionList)
             bundled = set(self.bundled_packages())
@@ -475,9 +512,19 @@ def run_tui() -> int:
             selected_bundles = self.selected_bundles()
             bundled_packages = self.bundled_packages()
             selected_packages = self.selected_packages()
+            highlighted_bundle_id = self.highlighted_bundle_id or (selected_bundles[0] if selected_bundles else "")
+            highlighted_includes = self.bundle_includes(highlighted_bundle_id)
             package_text = ", ".join(selected_packages) if selected_packages else "(none)"
             bundled_text = ", ".join(bundled_packages) if bundled_packages else "(none)"
             bundle_text = ", ".join(selected_bundles) if selected_bundles else "(none)"
+            if highlighted_bundle_id:
+                preview_text = (
+                    f"Highlighted bundle: {highlighted_bundle_id}\n"
+                    f"Includes: {', '.join(highlighted_includes) if highlighted_includes else '(none)'}"
+                )
+            else:
+                preview_text = "Highlight a bundle to preview included packages before selecting it."
+            self.query_one("#bundle-preview", Static).update(preview_text)
             self.query_one("#included-packages", Static).update(
                 "Included by selected bundles (locked): " + bundled_text
             )
@@ -515,7 +562,7 @@ def run_tui() -> int:
             elif self.step == 1:
                 self.query_one("#platform-cards", DataTable).focus()
             elif self.step == 2:
-                self.query_one("#new-disk", Input).focus()
+                self.query_one("#bundle-select", SelectionList).focus()
             else:
                 self.query_one("#create", Button).focus()
 
@@ -527,6 +574,11 @@ def run_tui() -> int:
         def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
             if event.data_table.id == "platform-cards":
                 self.selected_platform_id = str(event.row_key.value)
+                self.update_wizard()
+
+        def on_selection_list_selection_highlighted(self, event: SelectionList.SelectionHighlighted[Any]) -> None:
+            if event.selection_list.id == "bundle-select":
+                self.highlighted_bundle_id = str(event.selection.value)
                 self.update_wizard()
 
         def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
@@ -623,8 +675,8 @@ def run_tui() -> int:
         }
 
         #left {
-            width: 44;
-            min-width: 38;
+            width: 64;
+            min-width: 58;
             border-right: solid $primary;
             padding: 1;
         }
@@ -659,6 +711,7 @@ def run_tui() -> int:
         #connect-strip {
             height: 3;
             margin-bottom: 1;
+            background: transparent;
         }
 
         #detail-grid {
@@ -670,6 +723,11 @@ def run_tui() -> int:
             margin-right: 1;
         }
 
+        #package-actions {
+            height: 3;
+            background: transparent;
+        }
+
         #ops-pane {
             width: 1fr;
         }
@@ -679,6 +737,10 @@ def run_tui() -> int:
             border-top: solid $primary;
             padding: 1;
             background: $boost;
+        }
+
+        #output:focus {
+            border-top: solid $accent;
         }
 
         .section-title {
@@ -710,6 +772,7 @@ def run_tui() -> int:
             Binding("p", "provision", "Provision"),
             Binding("x", "destroy_instance", "Destroy"),
             Binding("d", "delete_instance", "Delete"),
+            Binding("l", "focus_log", "Log"),
             Binding("q", "quit", "Quit"),
         ]
 
@@ -724,6 +787,7 @@ def run_tui() -> int:
             self.command_running = False
             self.background_tasks: set[asyncio.Task[None]] = set()
             self.hero_frame = 0
+            self._rendering_instances = False
 
         def compose(self) -> ComposeResult:
             yield Header(show_clock=True)
@@ -772,7 +836,7 @@ def run_tui() -> int:
                                 with Vertical(id="packages-pane"):
                                     yield Static("Packages", classes="section-title")
                                     yield DataTable(id="packages")
-                                    with Horizontal():
+                                    with Horizontal(id="package-actions"):
                                         yield Button("Status", id="package-status")
                                         yield Button("Select", id="package-select")
                                         yield Button("Unselect", id="package-unselect")
@@ -787,7 +851,7 @@ def run_tui() -> int:
         async def on_mount(self) -> None:
             instances = self.query_one("#instances", DataTable)
             instances.cursor_type = "row"
-            instances.add_columns("", "Instance", "Provider", "Provision", "OS")
+            instances.add_columns("", "Instance", "State", "OS")
 
             packages = self.query_one("#packages", DataTable)
             packages.cursor_type = "row"
@@ -801,6 +865,7 @@ def run_tui() -> int:
         async def load_initial_data(self) -> None:
             await self.load_catalog_options()
             await self.action_refresh()
+            self.call_after_refresh(self.focus_instance_list_if_empty)
 
         async def load_catalog_options(self) -> None:
             try:
@@ -864,9 +929,15 @@ def run_tui() -> int:
         async def poll_statuses(self) -> None:
             if self.command_running:
                 return
-            await self.refresh_instances(preserve_selection=True, quiet=True)
+            await self.refresh_instances(preserve_selection=True, quiet=True, repaint_table=False)
 
-        async def refresh_instances(self, *, preserve_selection: bool = False, quiet: bool = False) -> None:
+        async def refresh_instances(
+            self,
+            *,
+            preserve_selection: bool = False,
+            quiet: bool = False,
+            repaint_table: bool = True,
+        ) -> None:
             if not quiet:
                 self.log_line("[primary]Refreshing instances[/]")
             try:
@@ -876,6 +947,8 @@ def run_tui() -> int:
                 return
 
             previous = self.current_instance if preserve_selection else None
+            previous_names = [str(row.get("name", "")) for row in self.instances if row.get("name")]
+            next_names = [str(row.get("name", "")) for row in rows if row.get("name")]
             self.instances = rows
             self.statuses = {}
             for row in rows:
@@ -892,15 +965,25 @@ def run_tui() -> int:
             elif self.current_instance not in self.statuses:
                 self.current_instance = None
 
-            self.render_instances()
+            if repaint_table or previous_names != next_names:
+                self.render_instances()
             await self.refresh_current_status()
             self.query_one("#summary", Static).update(aggregate_state(self.statuses))
 
+        def focus_instance_list_if_empty(self) -> None:
+            if self.current_instance is None:
+                self.query_one("#instances", DataTable).focus()
+
         def render_instances(self) -> None:
             table = self.query_one("#instances", DataTable)
+            self._rendering_instances = True
+            focused_id = self.focused.id if self.focused is not None else None
+            table_has_focus = self.focused is table
             table.clear()
-            table.add_row("+", "<< New Instance >>", "", "", "", key=NEW_INSTANCE_KEY)
+            table.add_row("+", "<< New Instance >>", "", "", key=NEW_INSTANCE_KEY)
             filter_text = self.query_one("#filter", Input).value.strip().lower()
+            current_row = 0
+            row_index = 1
             for row in self.instances:
                 name = str(row.get("name", ""))
                 os_id = str(row.get("os", ""))
@@ -912,23 +995,36 @@ def run_tui() -> int:
                     and filter_text not in machine.lower()
                 ):
                     continue
+                if name == self.current_instance:
+                    current_row = row_index
                 status = self.statuses.get(name, {})
                 state = status.get("state", {})
                 provider_state = str(state.get("provider_state", "unknown"))
                 provision_state = str(state.get("provision_state", "unknown"))
+                display_state = provider_state if provider_state != "unknown" else ""
+                if not display_state and provision_state != "unknown":
+                    display_state = provision_state
+                if not display_state:
+                    display_state = "new"
                 table.add_row(
                     glyph_for_status(provider_state),
                     name,
-                    provider_state,
-                    provision_state,
+                    display_state,
                     os_id or "-",
                     key=name,
                 )
+                row_index += 1
+            if table_has_focus or self.current_instance is None:
+                table.move_cursor(row=current_row, column=0, animate=False, scroll=True)
             if self.current_instance is None:
-                table.move_cursor(row=0, column=0, animate=False, scroll=True)
                 table.focus()
+            elif focused_id:
+                with suppress(Exception):
+                    self.query_one(f"#{focused_id}").focus()
+            self._rendering_instances = False
 
         async def refresh_current_status(self) -> None:
+            focused_id = self.focused.id if self.focused is not None else None
             if not self.current_instance:
                 self.current_status = None
                 self.query_one("#title", Static).update("Select an instance.")
@@ -945,6 +1041,7 @@ def run_tui() -> int:
                     return
             self.render_detail()
             self.update_action_state()
+            self.restore_focus(focused_id)
 
         def render_empty_detail(self) -> None:
             self.query_one("#empty-state", Static).display = True
@@ -1020,18 +1117,21 @@ def run_tui() -> int:
                         "[b]EPHEMERAL VM COCKPIT[/b]",
                         "",
                         "[b]Please, select an instance[/b]",
-                        "The instance list is focused on << New Instance >>.",
-                        "Press Enter to create a VM.",
+                        "Highlight an instance to preview and manage it.",
+                        "Press Enter on << New Instance >> to create a VM.",
                     ]
                 )
             )
 
         def render_packages(self, status: dict[str, Any]) -> None:
             table = self.query_one("#packages", DataTable)
+            table_has_focus = self.focused is table
             table.clear()
             package_rows = status.get("packages", {}).get("all", [])
             current_seen = False
             first_selected: str | None = None
+            current_row = 0
+            row_index = 0
             for package in package_rows:
                 if not isinstance(package, dict):
                     continue
@@ -1043,6 +1143,7 @@ def run_tui() -> int:
                     first_selected = package_id
                 if package_id == self.current_package:
                     current_seen = True
+                    current_row = row_index
                 state = package.get("state", {}) or {}
                 selected_by = package.get("selected_by", [])
                 source = ",".join(selected_by) if isinstance(selected_by, list) else ""
@@ -1054,8 +1155,16 @@ def run_tui() -> int:
                     source,
                     key=package_id,
                 )
+                row_index += 1
             if not current_seen:
                 self.current_package = first_selected
+                if first_selected is not None:
+                    for index, package in enumerate(package_rows):
+                        if isinstance(package, dict) and package.get("id") == first_selected:
+                            current_row = index
+                            break
+            if row_index and table_has_focus:
+                table.move_cursor(row=current_row, column=0, animate=False, scroll=True)
 
         def render_ops(self, status: dict[str, Any]) -> None:
             state = status.get("state", {})
@@ -1077,6 +1186,19 @@ def run_tui() -> int:
             if event.input.id == "filter":
                 self.render_instances()
 
+        async def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
+            if event.data_table.id == "instances":
+                if self._rendering_instances or self.focused is not event.data_table:
+                    return
+                row_key = str(event.row_key.value)
+                next_instance = None if row_key == NEW_INSTANCE_KEY else row_key
+                if next_instance != self.current_instance:
+                    self.current_instance = next_instance
+                    await self.refresh_current_status()
+            elif event.data_table.id == "packages":
+                self.current_package = str(event.row_key.value)
+                self.update_action_state()
+
         async def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
             row_key = str(event.row_key.value)
             if event.data_table.id == "instances":
@@ -1085,6 +1207,7 @@ def run_tui() -> int:
                     return
                 self.current_instance = row_key
                 await self.refresh_current_status()
+                self.focus_top_action()
             elif event.data_table.id == "packages":
                 self.current_package = row_key
                 self.update_action_state()
@@ -1265,7 +1388,34 @@ def run_tui() -> int:
         def set_button(self, button_id: str, *, disabled: bool) -> None:
             self.query_one(f"#{button_id}", Button).disabled = disabled
 
+        def restore_focus(self, focused_id: str | None) -> None:
+            if not focused_id:
+                return
+            with suppress(Exception):
+                widget = self.query_one(f"#{focused_id}")
+                if isinstance(widget, Button) and (widget.disabled or not widget.display):
+                    return
+                widget.focus()
+
+        def focus_top_action(self) -> None:
+            for button_id in (
+                "connect-ssh",
+                "provider-up",
+                "refresh",
+                "provider-stop",
+                "provision",
+                "connect-sunshine",
+                "connect-rustdesk",
+                "provider-down",
+                "delete-instance",
+            ):
+                button = self.query_one(f"#{button_id}", Button)
+                if not button.disabled and button.display:
+                    button.focus()
+                    return
+
         def update_action_state(self) -> None:
+            focused_id = self.focused.id if self.focused is not None else None
             has_instance = self.current_instance is not None
             state = self.current_status.get("state", {}) if self.current_status else {}
             provider_state = str(state.get("provider_state", "unknown"))
@@ -1330,13 +1480,17 @@ def run_tui() -> int:
             )
             self.set_button("package-install", disabled=package_disabled)
             self.set_button("package-down", disabled=package_disabled)
+            self.restore_focus(focused_id)
 
         def action_focus_filter(self) -> None:
             self.query_one("#filter", Input).focus()
 
+        def action_focus_log(self) -> None:
+            self.query_one("#output", RichLog).focus()
+
         async def action_help(self) -> None:
             self.log_line(
-                "[b]Keys[/b] / filter, r refresh, u up, s start, t stop, p provision, d delete, q quit. "
+                "[b]Keys[/b] / filter, l log, r refresh, u up, s start, t stop, p provision, d delete, q quit. "
                 "Select << New Instance >> to create an instance."
             )
 

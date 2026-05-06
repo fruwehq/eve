@@ -12,11 +12,13 @@ def usage
   warn <<~USAGE
     Usage:
       scripts/integration-test --instance <name> [--instance <name> ...] [--registry <path>] [--json]
-      scripts/integration-test --live --instance <name> [--instance <name> ...] [--report <path>]
+      scripts/integration-test --live --instance <name> [--instance <name> ...] [--report <path>] [--no-cleanup]
 
     Dry-run mode prints the commands a human or LLM should run/review.
     Live mode creates/starts, waits for SSH, provisions, checks selected packages,
-    and writes a JSON report. Live mode requires YES=1.
+    and writes a JSON report. Live mode requires YES=1 and runs provider down
+    after each instance unless --no-cleanup or EGAME_INTEGRATION_CLEANUP=0 is set.
+    Set EGAME_INTEGRATION_DELETE_INSTANCES=1 for temporary smoke entries.
   USAGE
 end
 
@@ -80,6 +82,8 @@ registry_path = ENV["EGAME_INSTANCE_REGISTRY"]
 live = false
 json = false
 report_path = nil
+cleanup = ENV.fetch("EGAME_INTEGRATION_CLEANUP", "1") != "0"
+delete_instances = ENV["EGAME_INTEGRATION_DELETE_INSTANCES"] == "1"
 
 args = ARGV.dup
 until args.empty?
@@ -94,6 +98,8 @@ until args.empty?
     json = true
   when "--report"
     report_path = args.shift
+  when "--no-cleanup"
+    cleanup = false
   when "-h", "--help"
     usage
     exit 0
@@ -177,6 +183,7 @@ plans.each do |plan|
   instance = plan.fetch("instance")
   entry = plan.reject { |key, _| key == "commands" }
   entry["steps"] = []
+  entry["cleanup"] = []
 
   commands = [
     ["validate", "make", "--no-print-directory", "instance.validate", "INSTANCE=#{instance}"],
@@ -200,7 +207,34 @@ plans.each do |plan|
     break if result["status"] != "passed"
   end
 
-  entry["status"] = entry.fetch("steps").all? { |step| step["status"] == "passed" } ? "passed" : "failed"
+  if cleanup
+    cleanup_commands = [
+      ["cleanup.down", "make", "--no-print-directory", "down", "INSTANCE=#{instance}"]
+    ]
+    if delete_instances
+      cleanup_commands << [
+        "cleanup.delete",
+        "make",
+        "--no-print-directory",
+        "instance.delete",
+        "INSTANCE=#{instance}",
+        "PURGE=1"
+      ]
+    end
+
+    cleanup_commands.each do |name, *cmd|
+      puts
+      puts "== #{instance}: #{name} =="
+      puts "$ #{cmd.join(" ")}"
+      result = run_stream(env, *cmd)
+      result["name"] = name
+      entry.fetch("cleanup") << result
+    end
+  end
+
+  steps_passed = entry.fetch("steps").all? { |step| step["status"] == "passed" }
+  cleanup_passed = entry.fetch("cleanup").all? { |step| step["status"] == "passed" }
+  entry["status"] = steps_passed && cleanup_passed ? "passed" : "failed"
   report.fetch("instances") << entry
 end
 
