@@ -62,9 +62,9 @@ check_gcp() {
       notes="gcloud application-default auth ok; project=$project"
     elif gcloud auth print-access-token >/dev/null 2>&1; then
       reachable=yes
-      notes="gcloud user auth ok; Terraform may need GOOGLE_OAUTH_ACCESS_TOKEN"
+      notes="gcloud user auth ok; project=$project; Terraform may need GOOGLE_OAUTH_ACCESS_TOKEN"
     else
-      notes="configured, but gcloud auth failed"
+      notes="configured, but gcloud auth failed; project=$project"
     fi
   fi
 }
