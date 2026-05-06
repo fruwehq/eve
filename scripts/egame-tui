@@ -415,6 +415,19 @@ def run_tui() -> int:
             if event.input.id in {"new-name", "new-disk", "new-memory"}:
                 self.update_wizard()
 
+        def on_key(self, event: Any) -> None:
+            if event.key != "enter":
+                return
+            if self.step == 0 and self.query_one("#new-name", Input).has_focus:
+                event.stop()
+                name = self.query_one("#new-name", Input).value.strip()
+                if not name:
+                    self.notify("Name is required", severity="error")
+                    return
+                self.step = 1
+                self.update_wizard()
+                self.query_one("#new-recipe", Select).focus()
+
         def on_button_pressed(self, event: Button.Pressed) -> None:
             if event.button.id == "cancel":
                 self.dismiss(None)
@@ -854,11 +867,17 @@ def run_tui() -> int:
             self.query_one("#empty-state", Static).update(
                 "\n".join(
                     [
-                        f"[primary]{frame}[/]",
-                        "[b]Please, select an instance[/b]",
+                        f"[primary]{frame}     {frame}     {frame}[/]",
                         "",
-                        "The instance list is focused.",
-                        "Press Enter on << New Instance >> to create one.",
+                        "[b]EPHEMERAL VM COCKPIT[/b]",
+                        "",
+                        "        +-------------------+",
+                        "        |  new / start / ssh |",
+                        "        +-------------------+",
+                        "",
+                        "[b]Please, select an instance[/b]",
+                        "The instance list is focused on << New Instance >>.",
+                        "Press Enter to create a VM.",
                     ]
                 )
             )
