@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+set -eu
+
+exec ./scripts/package-status-command agent-orchestrator 'if [ -d /opt/agent-hub/.git ]; then echo installed; else echo missing; fi'

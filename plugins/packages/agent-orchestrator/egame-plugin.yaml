@@ -1,0 +1,18 @@
+api_version: egame.plugin/v1
+kind: package
+id: agent-orchestrator
+display_name: Agent Orchestrator
+commands:
+  install: {exec: scripts/package-plugin, args: [agent-orchestrator, install]}
+  status: {exec: scripts/package-plugin, args: [agent-orchestrator, status]}
+  down: {exec: scripts/package-plugin, args: [agent-orchestrator, down]}
+supports: {os_families: [ubuntu]}
+down: {destructive: true}
+env:
+  - AGENT_HUB_REPO
+  - AGENT_HUB_BRANCH
+  - AGENT_HUB_REF
+  - AGENT_HUB_INSTALL_PREFIX
+install:
+  ubuntu:
+    steps: [00_base.sh, 05_timezone.sh, 10_docker.sh, 20_dev-toolchain.sh, 23_hermes.sh, 25_agent-orchestrator.sh]

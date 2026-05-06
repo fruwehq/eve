@@ -168,6 +168,7 @@ inits:
 # Workload package catalog
 # -----------------------------------------------------------------------------
 packages:
+  - id: agent-orchestrator
   - id: claude
   - id: codex-cli
   - id: dev-toolchain
@@ -204,6 +205,11 @@ bundles:
 
   - id: dev-ai
     includes: [docker, dev-toolchain, goose, claude, codex-cli, hermes, opencode, vscode]
+
+  - id: dev-ai-orchestrator
+    # Full agent orchestration: all AI agents + agent-hub config for Hermes
+    # gateway dispatch. For always-on orchestrator VMs (Pi, TrueNAS).
+    includes: [docker, dev-toolchain, goose, claude, codex-cli, hermes, opencode, vscode, agent-orchestrator]
 
   - id: gaming-streaming
     includes: [sunshine, steam, rustdesk]
