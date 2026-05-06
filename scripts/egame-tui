@@ -77,6 +77,38 @@ def recipe_rows() -> list[dict[str, Any]]:
     return []
 
 
+def package_ids() -> list[str]:
+    code, out, err = run_command([str(ROOT / "scripts/plugin-list"), "--kind", "package", "--json"])
+    if code != 0:
+        raise RuntimeError(err.strip() or out.strip() or "plugin-list failed")
+    parsed = json.loads(out)
+    plugins = parsed.get("plugins", []) if isinstance(parsed, dict) else []
+    ids = [str(plugin.get("id")) for plugin in plugins if isinstance(plugin, dict) and plugin.get("id")]
+    return sorted(ids)
+
+
+def recipe_defaults(recipe: str) -> dict[str, Any]:
+    code, out, err = run_command([str(ROOT / "scripts/profile-resolve"), "--profile", recipe, "--emit", "json"])
+    if code != 0:
+        raise RuntimeError(err.strip() or out.strip() or f"profile-resolve failed for {recipe}")
+    parsed = json.loads(out)
+    if not isinstance(parsed, dict):
+        return {}
+    machine = parsed.get("machine", {}) if isinstance(parsed.get("machine"), dict) else {}
+    defaults = machine.get("defaults", {}) if isinstance(machine.get("defaults"), dict) else {}
+    recipe_entry = parsed.get("profile", {}) if isinstance(parsed.get("profile"), dict) else {}
+    return {
+        "machine": machine.get("name"),
+        "os": parsed.get("os", {}).get("id") if isinstance(parsed.get("os"), dict) else None,
+        "location": parsed.get("location", {}).get("name") if isinstance(parsed.get("location"), dict) else None,
+        "bundles": recipe_entry.get("bundles", []),
+        "packages": parsed.get("bundle_packages", []),
+        "disk_gb": defaults.get("disk_gb"),
+        "memory_mb": defaults.get("memory_mb"),
+        "cpu_cores": defaults.get("cpus") or defaults.get("cpu_cores") or defaults.get("vcpus"),
+    }
+
+
 def instance_status(instance: str) -> dict[str, Any]:
     return load_json([str(ROOT / "scripts/instance-status"), "--instance", instance, "--json"])
 
@@ -171,7 +203,18 @@ def run_tui() -> int:
         from textual.binding import Binding
         from textual.containers import Container, Horizontal, Vertical
         from textual.screen import ModalScreen
-        from textual.widgets import Button, DataTable, Footer, Header, Input, Label, RichLog, Select, Static
+        from textual.widgets import (
+            Button,
+            DataTable,
+            Footer,
+            Header,
+            Input,
+            Label,
+            RichLog,
+            Select,
+            SelectionList,
+            Static,
+        )
     except ModuleNotFoundError:
         print(
             "Textual is required for the TUI.\n"
@@ -223,7 +266,7 @@ def run_tui() -> int:
         }
 
         #new-dialog {
-            width: 86;
+            width: 96;
             height: auto;
             border: round $primary;
             background: $surface;
@@ -231,52 +274,174 @@ def run_tui() -> int:
         }
 
         Input,
-        Select {
+        Select,
+        SelectionList {
             margin-bottom: 1;
+        }
+
+        #package-select {
+            height: 12;
+        }
+
+        .wizard-hidden {
+            display: none;
+        }
+
+        .muted {
+            color: $text-muted;
         }
         """
 
-        def __init__(self, recipes: list[str]) -> None:
+        def __init__(
+            self,
+            recipes: list[str],
+            recipe_details: dict[str, dict[str, Any]],
+            packages: list[str],
+        ) -> None:
             super().__init__()
             self.recipes = recipes
+            self.recipe_details = recipe_details
+            self.packages = packages
+            self.step = 0
 
         def compose(self) -> ComposeResult:
             first_recipe = self.recipes[0] if self.recipes else ""
             recipe_options = [(recipe, recipe) for recipe in self.recipes]
             with Vertical(id="new-dialog"):
-                yield Label("[b]New Instance[/b]")
-                yield Input(placeholder="instance name", id="new-name")
-                yield Select(
-                    recipe_options,
-                    prompt="recipe",
-                    allow_blank=False,
-                    value=first_recipe,
-                    id="new-recipe",
-                    disabled=not recipe_options,
-                )
-                yield Input(placeholder="optional packages, comma separated", id="new-packages")
-                yield Input(placeholder="optional disk GB", id="new-disk")
-                yield Input(placeholder="optional memory MB", id="new-memory")
-                yield Static("Available recipes: " + (", ".join(self.recipes[:8]) or "none"))
+                yield Label("[b]New Instance[/b]  [dim]1 Recipe -> 2 Options -> 3 Review[/dim]")
+                with Vertical(id="step-recipe"):
+                    yield Input(placeholder="instance name", id="new-name")
+                    yield Select(
+                        recipe_options,
+                        prompt="recipe",
+                        allow_blank=False,
+                        value=first_recipe,
+                        id="new-recipe",
+                        disabled=not recipe_options,
+                    )
+                    yield Static("", id="recipe-defaults")
+                with Vertical(id="step-options"):
+                    yield Static("", id="resource-defaults")
+                    yield Input(placeholder="disk GB override", id="new-disk")
+                    yield Input(placeholder="memory MB override", id="new-memory")
+                    yield Static("Additional packages", classes="muted")
+                    yield SelectionList(
+                        *((package, package) for package in self.packages),
+                        id="package-select",
+                        disabled=not self.packages,
+                    )
+                with Vertical(id="step-review"):
+                    yield Static("", id="review")
                 with Horizontal():
+                    yield Button("Back", id="back")
                     yield Button("Cancel", id="cancel")
+                    yield Button("Next", id="next", variant="primary")
                     yield Button("Create", id="create", variant="success")
 
+        def on_mount(self) -> None:
+            self.update_wizard()
+
+        def selected_recipe(self) -> str:
+            recipe_value = self.query_one("#new-recipe", Select).value
+            return recipe_value if isinstance(recipe_value, str) else ""
+
+        def selected_packages(self) -> list[str]:
+            selected = self.query_one("#package-select", SelectionList).selected
+            return [str(package) for package in selected]
+
+        def recipe_default_lines(self, recipe: str) -> list[str]:
+            details = self.recipe_details.get(recipe, {})
+            bundles = details.get("bundles", [])
+            packages = details.get("packages", [])
+            bundle_text = ", ".join(str(bundle) for bundle in bundles) if isinstance(bundles, list) else "-"
+            package_text = ", ".join(str(package) for package in packages) if isinstance(packages, list) else "-"
+            return [
+                f"Machine: {details.get('machine') or '-'}",
+                f"OS: {details.get('os') or '-'}",
+                f"Location: {details.get('location') or '-'}",
+                f"Bundles: {bundle_text or '-'}",
+                f"Included packages: {package_text or '-'}",
+            ]
+
+        def update_wizard(self) -> None:
+            for index, widget_id in enumerate(("step-recipe", "step-options", "step-review")):
+                self.query_one(f"#{widget_id}", Vertical).display = index == self.step
+
+            recipe = self.selected_recipe()
+            details = self.recipe_details.get(recipe, {})
+            self.query_one("#recipe-defaults", Static).update("\n".join(self.recipe_default_lines(recipe)))
+            self.query_one("#resource-defaults", Static).update(
+                "Leave overrides empty to use recipe defaults: "
+                f"disk {details.get('disk_gb') or '-'} GB, "
+                f"memory {details.get('memory_mb') or '-'} MB, "
+                f"CPU {details.get('cpu_cores') or '-'}."
+            )
+
+            name = self.query_one("#new-name", Input).value.strip() or "<instance>"
+            disk = self.query_one("#new-disk", Input).value.strip()
+            memory = self.query_one("#new-memory", Input).value.strip()
+            selected_packages = self.selected_packages()
+            package_text = ", ".join(selected_packages) if selected_packages else "(none)"
+            command = create_instance_args(name, recipe, ",".join(selected_packages), disk, memory)
+            self.query_one("#review", Static).update(
+                "\n".join(
+                    [
+                        f"Instance: {name}",
+                        f"Recipe: {recipe or '-'}",
+                        *self.recipe_default_lines(recipe),
+                        f"Disk override: {disk or '(use recipe default)'}",
+                        f"Memory override: {memory or '(use recipe default)'}",
+                        f"Additional packages: {package_text}",
+                        "",
+                        command_label(command),
+                    ]
+                )
+            )
+
+            self.query_one("#back", Button).disabled = self.step == 0
+            self.query_one("#next", Button).display = self.step < 2
+            self.query_one("#create", Button).display = self.step == 2
+
+        def on_select_changed(self, event: Select.Changed) -> None:
+            if event.select.id == "new-recipe":
+                self.update_wizard()
+
+        def on_selection_list_selected_changed(self, event: Any) -> None:
+            self.update_wizard()
+
+        def on_input_changed(self, event: Input.Changed) -> None:
+            if event.input.id in {"new-name", "new-disk", "new-memory"}:
+                self.update_wizard()
+
         def on_button_pressed(self, event: Button.Pressed) -> None:
-            if event.button.id != "create":
+            if event.button.id == "cancel":
                 self.dismiss(None)
                 return
+            if event.button.id == "back":
+                self.step = max(0, self.step - 1)
+                self.update_wizard()
+                return
+            if event.button.id == "next":
+                name = self.query_one("#new-name", Input).value.strip()
+                if self.step == 0 and (not name or not self.selected_recipe()):
+                    self.notify("Name and recipe are required", severity="error")
+                    return
+                self.step = min(2, self.step + 1)
+                self.update_wizard()
+                return
+            if event.button.id != "create":
+                return
             name = self.query_one("#new-name", Input).value.strip()
-            recipe_value = self.query_one("#new-recipe", Select).value
-            recipe = recipe_value if isinstance(recipe_value, str) else ""
+            recipe = self.selected_recipe()
             if not name or not recipe:
                 self.notify("Name and recipe are required", severity="error")
                 return
+            packages = ",".join(self.selected_packages())
             self.dismiss(
                 {
                     "name": name,
                     "recipe": recipe,
-                    "packages": self.query_one("#new-packages", Input).value.strip(),
+                    "packages": packages,
                     "disk_gb": self.query_one("#new-disk", Input).value.strip(),
                     "memory_mb": self.query_one("#new-memory", Input).value.strip(),
                 }
@@ -294,6 +459,12 @@ def run_tui() -> int:
         #root {
             height: 1fr;
             layout: vertical;
+        }
+
+        #hero {
+            height: 1;
+            padding: 0 1;
+            background: $primary 15%;
         }
 
         #summary {
@@ -394,10 +565,14 @@ def run_tui() -> int:
             self.current_status: dict[str, Any] | None = None
             self.command_running = False
             self.background_tasks: set[asyncio.Task[None]] = set()
+            self.recipe_details: dict[str, dict[str, Any]] = {}
+            self.package_ids: list[str] = []
+            self.hero_frame = 0
 
         def compose(self) -> ComposeResult:
             yield Header(show_clock=True)
             with Container(id="root"):
+                yield Static("", id="hero")
                 yield Static("Loading instances...", id="summary")
                 with Horizontal(id="body"):
                     with Vertical(id="left"):
@@ -447,6 +622,8 @@ def run_tui() -> int:
 
             await self.load_recipes()
             await self.action_refresh()
+            self.animate_hero()
+            self.set_interval(1.2, self.animate_hero)
             self.set_interval(5, self.poll_statuses)
 
         async def load_recipes(self) -> None:
@@ -456,6 +633,27 @@ def run_tui() -> int:
                 self.log_line(f"[warning]recipes-list failed:[/] {exc}")
                 rows = []
             self.recipes = [str(row.get("name")) for row in rows if isinstance(row, dict) and row.get("name")]
+            self.recipe_details = {}
+            for recipe in self.recipes:
+                try:
+                    self.recipe_details[recipe] = await asyncio.to_thread(recipe_defaults, recipe)
+                except Exception as exc:
+                    self.recipe_details[recipe] = {"error": str(exc)}
+            try:
+                self.package_ids = await asyncio.to_thread(package_ids)
+            except Exception as exc:
+                self.log_line(f"[warning]plugin-list failed:[/] {exc}")
+                self.package_ids = []
+
+        def animate_hero(self) -> None:
+            frames = [
+                "[primary]◇[/] ephemeral vm cockpit  [success]ready[/]",
+                "[primary]◈[/] ephemeral vm cockpit  [success]ready[/]",
+                "[primary]◆[/] ephemeral vm cockpit  [success]ready[/]",
+                "[primary]◈[/] ephemeral vm cockpit  [success]ready[/]",
+            ]
+            self.query_one("#hero", Static).update(frames[self.hero_frame % len(frames)])
+            self.hero_frame += 1
 
         def log_line(self, message: str) -> None:
             self.query_one("#output", RichLog).write(message)
@@ -702,7 +900,10 @@ def run_tui() -> int:
             await self.refresh_instances(preserve_selection=True)
 
         def action_new_instance(self) -> None:
-            self.push_screen(NewInstanceScreen(self.recipes), self.handle_new_instance)
+            self.push_screen(
+                NewInstanceScreen(self.recipes, self.recipe_details, self.package_ids),
+                self.handle_new_instance,
+            )
 
         def handle_new_instance(self, result: dict[str, str] | None) -> None:
             if not result:
