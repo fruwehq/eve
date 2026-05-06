@@ -81,7 +81,8 @@ begin
       "machine" => resolved.dig("composition", "machine"),
       "os" => resolved.dig("os", "id"),
       "os_family" => resolved.dig("os", "family"),
-      "location" => resolved.dig("location", "name")
+      "location" => resolved.dig("location", "name"),
+      "bundles" => resolved.dig("composition", "bundles") || []
     },
     "state" => state,
     "packages" => {

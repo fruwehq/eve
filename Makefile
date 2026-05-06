@@ -1,6 +1,6 @@
 # Makefile
 .DEFAULT_GOAL := default
-.PHONY: ai.sandbox all aws.login catalog.list clean default doctor down env generate help info integration.plan integration.test \
+.PHONY: ai.sandbox all aws.login bundle.select bundle.unselect catalog.list clean default doctor down env generate help info integration.plan integration.test \
 				init init.all instance.create instance.delete instance.env instance.info instance.provision \
 				instance.list instance.paths instance.recover instance.state instance.status instance.validate ip lint logs plan \
 				package.action package.down package.install package.list package.reinstall package.select \
@@ -217,6 +217,14 @@ plan: ## Plan provider changes for an instance
 package.action: ## Run a package-defined action (PACKAGE=<id> ACTION=<id>)
 	@if [ -z "$(INSTANCE)" ] || [ -z "$(PACKAGE)" ] || [ -z "$(ACTION)" ]; then echo "Usage: make package.action INSTANCE=<name> PACKAGE=<id> ACTION=<id>"; exit 2; fi; \
 	./scripts/package-action --instance $(INSTANCE) --package $(PACKAGE) --action $(ACTION)
+
+bundle.select: ## Add a bundle to an instance's desired bundle list
+	@if [ -z "$(INSTANCE)" ] || [ -z "$(BUNDLE)" ]; then echo "Usage: make bundle.select INSTANCE=<name> BUNDLE=<id>"; exit 2; fi; \
+	./scripts/bundle-selection --instance $(INSTANCE) --bundle $(BUNDLE) --add
+
+bundle.unselect: ## Remove a bundle from an instance's desired bundle list
+	@if [ -z "$(INSTANCE)" ] || [ -z "$(BUNDLE)" ]; then echo "Usage: make bundle.unselect INSTANCE=<name> BUNDLE=<id>"; exit 2; fi; \
+	./scripts/bundle-selection --instance $(INSTANCE) --bundle $(BUNDLE) --remove
 
 package.down: ## Remove package from an instance (PACKAGE=<id>, YES=1 for destructive)
 	@if [ -z "$(INSTANCE)" ] || [ -z "$(PACKAGE)" ]; then echo "Usage: make package.down INSTANCE=<name> PACKAGE=<id> YES=1"; exit 2; fi; \

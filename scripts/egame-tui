@@ -76,6 +76,10 @@ def package_make_args(target: str, instance: str, package: str, *extra: str) -> 
     return ["make", "--no-print-directory", target, f"INSTANCE={instance}", f"PACKAGE={package}", *extra]
 
 
+def bundle_make_args(target: str, instance: str, bundle: str) -> list[str]:
+    return ["make", "--no-print-directory", target, f"INSTANCE={instance}", f"BUNDLE={bundle}"]
+
+
 def create_instance_args(
     name: str,
     platform_choice: dict[str, Any],
@@ -765,6 +769,21 @@ def run_tui() -> int:
             margin-right: 1;
         }
 
+        #bundles {
+            height: 8;
+            margin-bottom: 1;
+        }
+
+        #bundle-actions {
+            height: 3;
+            background: transparent;
+            margin-bottom: 1;
+        }
+
+        #packages {
+            height: 1fr;
+        }
+
         #package-actions {
             height: 3;
             background: transparent;
@@ -836,6 +855,7 @@ def run_tui() -> int:
             self.statuses: dict[str, dict[str, Any]] = {}
             self.catalog_options: dict[str, Any] = {"providers": [], "platforms": [], "bundles": [], "packages": []}
             self.current_instance: str | None = None
+            self.current_bundle: str | None = None
             self.current_package: str | None = None
             self.current_status: dict[str, Any] | None = None
             self.command_running = False
@@ -894,6 +914,11 @@ def run_tui() -> int:
                                         yield Button("Refresh", id="refresh", variant="primary")
                             with Horizontal(id="detail-grid"):
                                 with Vertical(id="packages-pane"):
+                                    yield Static("Bundles", classes="section-title")
+                                    yield DataTable(id="bundles")
+                                    with Horizontal(id="bundle-actions"):
+                                        yield Button("Add Bundle", id="bundle-select")
+                                        yield Button("Remove Bundle", id="bundle-unselect")
                                     yield Static("Packages", classes="section-title")
                                     yield DataTable(id="packages")
                                     with Horizontal(id="package-actions"):
@@ -930,6 +955,10 @@ def run_tui() -> int:
             packages = self.query_one("#packages", DataTable)
             packages.cursor_type = "row"
             packages.add_columns("Package", "Selection", "State", "OK", "Source")
+
+            bundles = self.query_one("#bundles", DataTable)
+            bundles.cursor_type = "row"
+            bundles.add_columns("Bundle", "Selection", "Includes")
 
             self.animate_hero()
             self.set_interval(1.2, self.animate_hero)
@@ -1195,6 +1224,7 @@ def run_tui() -> int:
             self.query_one("#provider-pill", Static).update("Provider\nunknown")
             self.query_one("#provision-pill", Static).update("Provision\nunknown")
             self.query_one("#packages-pill", Static).update("Packages\nunknown")
+            self.query_one("#bundles", DataTable).clear()
             self.query_one("#packages", DataTable).clear()
             self.query_one("#ops", Static).update("No instance selected.")
 
@@ -1205,6 +1235,7 @@ def run_tui() -> int:
             self.query_one("#provider-pill", Static).update("Provider\nloading")
             self.query_one("#provision-pill", Static).update("Provision\nloading")
             self.query_one("#packages-pill", Static).update("Packages\nloading")
+            self.query_one("#bundles", DataTable).clear()
             self.query_one("#packages", DataTable).clear()
             self.query_one("#ops", Static).update("Loading status...")
 
@@ -1237,6 +1268,7 @@ def run_tui() -> int:
                 f"Provision\n{markup_for_status(display_state(provision_state))}"
             )
             self.query_one("#packages-pill", Static).update(f"Packages\n{package_text}")
+            self.render_bundles(status)
             self.render_packages(status)
             self.render_ops(status)
 
@@ -1285,6 +1317,57 @@ def run_tui() -> int:
                     ]
                 )
             )
+
+        def selected_bundle_ids(self, status: dict[str, Any]) -> set[str]:
+            instance = status.get("instance", {})
+            bundles = instance.get("bundles", []) if isinstance(instance, dict) else []
+            if not isinstance(bundles, list):
+                return set()
+            return {str(bundle) for bundle in bundles}
+
+        def render_bundles(self, status: dict[str, Any]) -> None:
+            table = self.query_one("#bundles", DataTable)
+            table_has_focus = self.focused is table
+            table.clear()
+            selected_bundles = self.selected_bundle_ids(status)
+            catalog_bundles = self.catalog_options.get("bundles", [])
+            current_seen = False
+            first_bundle: str | None = None
+            first_selected: str | None = None
+            current_row = 0
+            row_index = 0
+            for bundle in catalog_bundles:
+                if not isinstance(bundle, dict):
+                    continue
+                bundle_id = str(bundle.get("id", ""))
+                if not bundle_id:
+                    continue
+                includes = bundle.get("includes", [])
+                include_text = ", ".join(str(package) for package in includes) if isinstance(includes, list) else ""
+                selected = bundle_id in selected_bundles
+                if first_bundle is None:
+                    first_bundle = bundle_id
+                if selected and first_selected is None:
+                    first_selected = bundle_id
+                if bundle_id == self.current_bundle:
+                    current_seen = True
+                    current_row = row_index
+                table.add_row(
+                    bundle_id,
+                    "selected" if selected else "available",
+                    include_text or "-",
+                    key=bundle_id,
+                )
+                row_index += 1
+            if not current_seen:
+                self.current_bundle = first_selected or first_bundle
+                if self.current_bundle is not None:
+                    for index, bundle in enumerate(catalog_bundles):
+                        if isinstance(bundle, dict) and bundle.get("id") == self.current_bundle:
+                            current_row = index
+                            break
+            if row_index and table_has_focus:
+                table.move_cursor(row=current_row, column=0, animate=False, scroll=True)
 
         def render_packages(self, status: dict[str, Any]) -> None:
             table = self.query_one("#packages", DataTable)
@@ -1370,6 +1453,9 @@ def run_tui() -> int:
             elif event.data_table.id == "packages":
                 self.current_package = str(event.row_key.value)
                 self.update_action_state()
+            elif event.data_table.id == "bundles":
+                self.current_bundle = str(event.row_key.value)
+                self.update_action_state()
 
         async def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
             row_key = str(event.row_key.value)
@@ -1389,6 +1475,9 @@ def run_tui() -> int:
                 self.focus_top_action()
             elif event.data_table.id == "packages":
                 self.current_package = row_key
+                self.update_action_state()
+            elif event.data_table.id == "bundles":
+                self.current_bundle = row_key
                 self.update_action_state()
 
         async def on_button_pressed(self, event: Button.Pressed) -> None:
@@ -1419,6 +1508,10 @@ def run_tui() -> int:
                 await self.action_package("package.install")
             elif button_id == "package-down":
                 self.action_package_down()
+            elif button_id == "bundle-select":
+                await self.action_bundle("bundle.select")
+            elif button_id == "bundle-unselect":
+                await self.action_bundle("bundle.unselect")
 
         async def action_refresh(self) -> None:
             await self.refresh_instances(preserve_selection=True)
@@ -1514,6 +1607,16 @@ def run_tui() -> int:
                 refresh_instance=instance,
             )
 
+        async def action_bundle(self, target: str) -> None:
+            if not self.current_instance or not self.current_bundle:
+                return
+            instance = self.current_instance
+            await self.stream_command(
+                target,
+                bundle_make_args(target, instance, self.current_bundle),
+                refresh_instance=instance,
+            )
+
         def action_package_down(self) -> None:
             if not self.current_instance or not self.current_package:
                 return
@@ -1580,6 +1683,11 @@ def run_tui() -> int:
                     return package
             return None
 
+        def bundle_selected(self) -> bool:
+            if not self.current_status or not self.current_bundle:
+                return False
+            return self.current_bundle in self.selected_bundle_ids(self.current_status)
+
         def installed_package_actions(self) -> list[dict[str, str]]:
             if not self.current_status:
                 return []
@@ -1626,6 +1734,8 @@ def run_tui() -> int:
                 "provider-stop",
                 "provision",
                 *(f"pkg-action-{index}" for index in range(PACKAGE_ACTION_BUTTONS)),
+                "bundle-select",
+                "bundle-unselect",
                 "provider-down",
                 "delete-instance",
             ):
@@ -1703,6 +1813,14 @@ def run_tui() -> int:
             )
             self.set_button("package-install", disabled=package_disabled)
             self.set_button("package-down", disabled=package_disabled)
+
+            has_bundle = self.current_bundle is not None
+            bundle_selected = self.bundle_selected()
+            self.set_button("bundle-select", disabled=busy or not has_instance or not has_bundle or bundle_selected)
+            self.set_button(
+                "bundle-unselect",
+                disabled=busy or not has_instance or not has_bundle or not bundle_selected,
+            )
             self.restore_focus(focused_id)
 
         def action_focus_filter(self) -> None:

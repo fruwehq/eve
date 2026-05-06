@@ -163,6 +163,30 @@ else
   FAIL=$((FAIL + 1))
 fi
 
+if EGAME_INSTANCE_REGISTRY="$tmp_registry" make bundle.unselect INSTANCE=test-dev BUNDLE=dev-ai >/dev/null &&
+  ./scripts/instance-resolve --registry "$tmp_registry" --instance test-dev --emit json |
+    jq -e '(.composition.bundles == ["desktop-rustdesk-vnc"]) and (.bundle_packages | index("docker") | not)' >/dev/null &&
+  EGAME_INSTANCE_REGISTRY="$tmp_registry" make bundle.select INSTANCE=test-dev BUNDLE=desktop-streaming >/dev/null &&
+  ./scripts/instance-resolve --registry "$tmp_registry" --instance test-dev --emit json |
+    jq -e '(.composition.bundles | index("desktop-streaming")) and (.bundle_packages | index("sunshine")) and .package_sources.sunshine == ["bundle:desktop-streaming"]' >/dev/null; then
+  printf '  [OK] bundle selection updates instance bundles\n'
+else
+  printf '  [FAIL] bundle selection updates instance bundles\n' >&2
+  ./scripts/instance-resolve --registry "$tmp_registry" --instance test-dev --emit json >&2 || true
+  FAIL=$((FAIL + 1))
+fi
+
+registry_before_invalid_bundle="$(cat "$tmp_registry")"
+if EGAME_INSTANCE_REGISTRY="$tmp_registry" make bundle.select INSTANCE=test-dev BUNDLE=does-not-exist >/dev/null 2>&1; then
+  printf '  [FAIL] invalid bundle selection should fail\n' >&2
+  FAIL=$((FAIL + 1))
+elif [ "$registry_before_invalid_bundle" = "$(cat "$tmp_registry")" ]; then
+  printf '  [OK] invalid bundle selection leaves registry unchanged\n'
+else
+  printf '  [FAIL] invalid bundle selection mutated registry\n' >&2
+  FAIL=$((FAIL + 1))
+fi
+
 if EGAME_INSTANCE_REGISTRY="$tmp_registry" EGAME_INSTANCE_WORKDIR="$tmp_overlay_dir/direct" \
   make --no-print-directory env INSTANCE=test-dev |
   grep -q '^BUNDLE_PACKAGES=.*steam'; then
