@@ -130,7 +130,7 @@ else
 fi
 
 if ./scripts/package-list --registry "$FIXTURE" --instance dev-a --json | \
-  jq -e '.packages[] | select(.id == "rustdesk") | (.actions[] | select(.id == "rustdesk" and .target == "remote.rustdesk"))' >/dev/null; then
+  jq -e '.packages[] | select(.id == "rustdesk") | (.actions[] | select(.id == "rustdesk" and .target == "rustdesk.connect"))' >/dev/null; then
   printf '  [OK] package-list exposes package actions to callers\n'
 else
   printf '  [FAIL] package-list exposes package actions to callers\n' >&2
@@ -138,7 +138,7 @@ else
 fi
 
 if EGAME_INSTANCE_REGISTRY="$FIXTURE" ./scripts/package-action --instance dev-a --package rustdesk --action rustdesk-info --dry-run | \
-  jq -e '.kind == "package-action" and .package == "rustdesk" and .action == "rustdesk-info" and .target == "remote.rustdesk.info" and .dry_run == true' >/dev/null; then
+  jq -e '.kind == "package-action" and .package == "rustdesk" and .action == "rustdesk-info" and .target == "rustdesk.info" and .dry_run == true' >/dev/null; then
   printf '  [OK] package action dry-run resolves manifest target\n'
 else
   printf '  [FAIL] package action dry-run resolves manifest target\n' >&2

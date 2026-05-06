@@ -3,6 +3,8 @@ set -euo pipefail
 
 PROFILE="${1:?Usage: scripts/status <profile>}"
 cd "$(git rev-parse --show-toplevel)"
+# shellcheck source=lib/instance-workdir.sh
+. ./scripts/lib/instance-workdir.sh
 
 RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
 ENGINE=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^ENGINE=/{print $2}')
@@ -45,7 +47,7 @@ case "$ENGINE" in
     esac
     ;;
   vagrant)
-    GENERATED_DIR=".generated/$PROFILE"
+    GENERATED_DIR="$(egame_instance_workdir "$PROFILE")"
     if [ ! -d "$GENERATED_DIR" ]; then
       VM_STATUS="not created"
     else

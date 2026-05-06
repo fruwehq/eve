@@ -12,7 +12,7 @@ env: []
 actions:
   - id: waypipe
     label: Waypipe
-    target: remote.waypipe
+    target: waypipe.open
 install:
   ubuntu:
     steps: [00_base.sh, 05_timezone.sh, 47_waypipe.sh]

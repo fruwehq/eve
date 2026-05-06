@@ -8,12 +8,6 @@
 				plugins.list plugins.sync plugins.validate \
 				provider.status providers.status provision \
 				provision.clear-state provision.restart provision.wait reboot \
-				remote.console remote.moonlight remote.moonlight.pair \
-				remote.rdp remote.rustdesk remote.rustdesk.info remote.waypipe \
-				remote.sunshine remote.sunshine.wait \
-				remote.vnc remote.xpra remote.xpra.apps remote.xpra.attach \
-				remote.xpra.desktop remote.xpra.run remote.xpra.start remote.xpra.status \
-				remote.xpra.stop \
 				show-password ssh ssh.run ssh.truenas ssh.wait start status stop \
 				test test.catalog test.instances test.plugins test.plugins-sync test.python test.shellcheck test.terraform \
 				test.lint test.tf-isolation test.tui test.update-golden tui up update upload validate
@@ -76,7 +70,7 @@ export VAGRANT_SHOW_CONSOLE
 export VM_USER_NAME
 export VULTR_API_KEY
 
-all: init up ssh.wait provision provision.wait remote.sunshine.wait remote.moonlight.pair remote.moonlight ## Full setup: up, provision, pair Moonlight, start stream
+all: init up ssh.wait provision provision.wait ## Full setup: up and provision the instance
 
 aws.login: ## Refresh AWS CLI login session for the selected profile
 	aws login --profile $(AWS_PROFILE)
@@ -300,78 +294,6 @@ update: ## Update all installed tools to latest versions
 reboot: ## Reboot the instance
 	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make reboot INSTANCE=<name>"; exit 2; fi; \
 	./scripts/instance-run reboot $(INSTANCE)
-
-remote.console: ## Open the VM's graphical console (VMware Fusion / VirtualBox)
-	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make remote.console INSTANCE=<name>"; exit 2; fi; \
-	./scripts/instance-run remote.console $(INSTANCE)
-
-remote.moonlight: remote.sunshine.wait ## Start Moonlight stream
-	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make remote.moonlight INSTANCE=<name>"; exit 2; fi; \
-	./scripts/instance-run remote.moonlight $(INSTANCE)
-
-remote.moonlight.pair: remote.sunshine.wait ## Pair Moonlight with Sunshine via a fixed PIN
-	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make remote.moonlight.pair INSTANCE=<name>"; exit 2; fi; \
-	./scripts/instance-run remote.moonlight.pair $(INSTANCE)
-
-remote.rdp: ## Open RDP session to Windows instance
-	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make remote.rdp INSTANCE=<name>"; exit 2; fi; \
-	./scripts/instance-run remote.rdp $(INSTANCE)
-
-remote.rustdesk: ## Open local RustDesk client connected to the instance
-	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make remote.rustdesk INSTANCE=<name>"; exit 2; fi; \
-	./scripts/instance-run remote.rustdesk $(INSTANCE)
-
-remote.rustdesk.info: ## Print RustDesk connection details (ID, password, server)
-	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make remote.rustdesk.info INSTANCE=<name>"; exit 2; fi; \
-	./scripts/instance-run remote.rustdesk.info $(INSTANCE)
-
-remote.sunshine: ## Open the Sunshine web UI for the instance
-	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make remote.sunshine INSTANCE=<name>"; exit 2; fi; \
-	./scripts/instance-run remote.sunshine $(INSTANCE)
-
-remote.sunshine.wait: ## Wait until the Sunshine API accepts authenticated requests
-	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make remote.sunshine.wait INSTANCE=<name>"; exit 2; fi; \
-	./scripts/instance-run remote.sunshine.wait $(INSTANCE)
-
-remote.vnc: ## Open VNC viewer to the VM (requires vnc package in profile)
-	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make remote.vnc INSTANCE=<name>"; exit 2; fi; \
-	./scripts/instance-run remote.vnc $(INSTANCE)
-
-remote.waypipe: ## Run a remote Wayland app through waypipe (APP='foot' by default)
-	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make remote.waypipe INSTANCE=<name> [APP=<command>]"; exit 2; fi; \
-	./scripts/instance-run remote.waypipe $(INSTANCE)
-
-remote.xpra: ## Start server, launch app, and attach (requires APP=<cmd>)
-	@if [ -z "$(INSTANCE)" ] || [ -z "$(APP)" ]; then echo "Usage: make remote.xpra INSTANCE=<name> APP=<command>"; exit 2; fi; \
-	./scripts/instance-run remote.xpra $(INSTANCE)
-
-remote.xpra.apps: ## List available GUI apps on the remote instance
-	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make remote.xpra.apps INSTANCE=<name>"; exit 2; fi; \
-	./scripts/instance-run remote.xpra.apps $(INSTANCE)
-
-remote.xpra.attach: ## Attach local xpra client to the running session
-	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make remote.xpra.attach INSTANCE=<name>"; exit 2; fi; \
-	./scripts/instance-run remote.xpra.attach $(INSTANCE)
-
-remote.xpra.desktop: ## Start and attach an Xpra full desktop session
-	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make remote.xpra.desktop INSTANCE=<name>"; exit 2; fi; \
-	./scripts/instance-run remote.xpra.desktop $(INSTANCE)
-
-remote.xpra.run: ## Run an additional app on the existing Xpra session (requires APP=<cmd>)
-	@if [ -z "$(INSTANCE)" ] || [ -z "$(APP)" ]; then echo "Usage: make remote.xpra.run INSTANCE=<name> APP=<command>"; exit 2; fi; \
-	./scripts/instance-run remote.xpra.run $(INSTANCE)
-
-remote.xpra.start: ## Start the xpra server on the remote
-	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make remote.xpra.start INSTANCE=<name>"; exit 2; fi; \
-	./scripts/instance-run remote.xpra.start $(INSTANCE)
-
-remote.xpra.status: ## Show xpra server status
-	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make remote.xpra.status INSTANCE=<name>"; exit 2; fi; \
-	./scripts/instance-run remote.xpra.status $(INSTANCE)
-
-remote.xpra.stop: ## Stop the remote xpra server
-	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make remote.xpra.stop INSTANCE=<name>"; exit 2; fi; \
-	./scripts/instance-run remote.xpra.stop $(INSTANCE)
 
 show-password: ## Display the instance's default password (Windows)
 	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make show-password INSTANCE=<name>"; exit 2; fi; \

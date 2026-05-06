@@ -12,4 +12,4 @@ env: []
 actions:
   - id: rdp
     label: RDP
-    target: remote.rdp
+    target: rdp.open

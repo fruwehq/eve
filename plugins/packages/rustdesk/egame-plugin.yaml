@@ -12,10 +12,10 @@ env: [RUSTDESK_SERVER, RUSTDESK_KEY, RUSTDESK_PASSWORD]
 actions:
   - id: rustdesk
     label: RustDesk
-    target: remote.rustdesk
+    target: rustdesk.connect
   - id: rustdesk-info
     label: RustDesk Info
-    target: remote.rustdesk.info
+    target: rustdesk.info
 install:
   ubuntu:
     steps: [00_base.sh, 05_timezone.sh, 50_rustdesk.sh]
