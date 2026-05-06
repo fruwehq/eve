@@ -133,6 +133,7 @@ CATALOG_JSON="$(ruby -rjson -ryaml -e '
   merged["bundles"]   = merge_by_key(base["bundles"],   over["bundles"],   "id")
   merged["locations"] = merge_by_key(base["locations"], over["locations"], "name")
   merged["profiles"]  = merge_by_key(base["profiles"],  over["profiles"],  "name")
+  merged["recipes"]   = merge_by_key(base["recipes"],   over["recipes"],   "name")
 
   puts JSON.generate(merged)
 ' "$CATALOG_PATH" "$LOCAL_CATALOG_PATH")"
@@ -142,7 +143,9 @@ CATALOG_JSON="$(ruby -rjson -ryaml -e '
 jq_get='def by_name($arr; $key; $val): ($arr // [] | map(select(.[$key] == $val)) | .[0]);
 
 . as $root |
-by_name($root.profiles; "name"; $profile) as $p |
+by_name($root.recipes; "name"; $profile) as $recipe |
+by_name($root.profiles; "name"; $profile) as $profile_override |
+($recipe + $profile_override) as $p |
 if $p == null then
   error("Profile not found: \($profile)")
 else

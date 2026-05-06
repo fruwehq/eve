@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # Top-level test orchestrator. Runs all project checks.
 # Usage: scripts/test              # run all
-#        scripts/test profiles     # run only one suite
-#        UPDATE_GOLDEN=1 scripts/test profiles  # refresh goldens
+#        scripts/test recipes      # run only one suite
+#        UPDATE_GOLDEN=1 scripts/test recipes   # refresh goldens
 
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
 FAIL=0
 if [ "$#" -eq 0 ]; then
-  SUITES=(profiles instances plugins plugins-sync terraform tf-isolation tui python shellcheck)
+  SUITES=(recipes instances plugins plugins-sync terraform tf-isolation tui python shellcheck lint)
 else
   SUITES=("$@")
 fi
@@ -27,7 +27,7 @@ run() {
 
 for suite in "${SUITES[@]}"; do
   case "$suite" in
-    profiles)   run "profiles"   ./scripts/test-profiles   ;;
+    recipes)   run "recipes"   ./scripts/test-recipes   ;;
     instances)  run "instances"  ./scripts/test-instances  ;;
     plugins)    run "plugins"    ./scripts/test-plugins    ;;
     plugins-sync) run "plugins-sync" ./scripts/test-plugins-sync ;;
@@ -36,6 +36,7 @@ for suite in "${SUITES[@]}"; do
     tui) run "tui" ./scripts/test-tui ;;
     python) run "python" ./scripts/test-python ;;
     shellcheck) run "shellcheck" ./scripts/test-shellcheck ;;
+    lint) run "lint" ./scripts/test-lint ;;
     *) echo "unknown suite: $suite" >&2; exit 2 ;;
   esac
 done

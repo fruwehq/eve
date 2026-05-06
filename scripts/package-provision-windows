@@ -121,7 +121,7 @@ fi
 
 if [ "$fallback" -eq 1 ]; then
   echo "[package-provision-windows] no granular mapping for package=$PACKAGE; falling back to full provisioning"
-  exec make provision PROFILE="$PROFILE" INSTANCE=
+  exec ./scripts/provision "$PROFILE"
 fi
 
 ./scripts/ssh-wait "$PROFILE"

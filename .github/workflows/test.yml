@@ -30,5 +30,10 @@ jobs:
           sudo apt-get update -y
           sudo apt-get install -y shellcheck jq ruby
 
+      - name: Install Python dependencies
+        run: |
+          pipx install poetry
+          poetry install --no-interaction --no-root
+
       - name: Run make test
         run: make test

@@ -6,8 +6,7 @@
 				package.down package.install package.list package.reinstall package.select \
 				package.status package.unselect \
 				plugins.list plugins.sync plugins.validate \
-				profiles.list profiles.menu provider.status providers.status provision \
-				recipes.list \
+				provider.status providers.status provision recipes.list \
 				provision.clear-state provision.restart provision.wait reboot \
 				remote.console remote.moonlight remote.moonlight.pair \
 				remote.rdp remote.rustdesk remote.rustdesk.info \
@@ -16,14 +15,10 @@
 				remote.xpra.desktop remote.xpra.run remote.xpra.start remote.xpra.status \
 				remote.xpra.stop \
 				show-password ssh ssh.run ssh.truenas ssh.wait start status stop \
-				test test.instances test.plugins test.plugins-sync test.profiles test.python test.shellcheck test.terraform \
-				test.tf-isolation test.tui test.update-golden tui up update upload validate
+				test test.instances test.plugins test.plugins-sync test.recipes test.python test.shellcheck test.terraform \
+				test.lint test.tf-isolation test.tui test.update-golden tui up update upload validate
 
 TM_PARALLEL ?= 8
-
-# Profile selection: set PROFILE= explicitly, or run `make profiles.menu` to pick
-# one. If PROFILE is unset, interactive targets will prompt.
-PROFILE ?=
 
 # v3 concrete instance selection. Instances live in .egame/instances.yaml.
 INSTANCE ?=
@@ -95,21 +90,13 @@ clean: ## Remove terramate-generated terraform files and cache
 
 default: help  ## Show help
 
-down: ## Destroy profile resources (terraform or vagrant)
-	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	./scripts/profile-resolve --profile $(PROFILE) --validate; \
-	ENGINE=$$(./scripts/profile-resolve --profile $(PROFILE) --emit env | awk -F= '/^ENGINE=/{print $$2}'); \
-	if [ "$$ENGINE" = "vagrant" ]; then \
-		./scripts/vagrant-destroy $(PROFILE); \
-	elif [ "$$ENGINE" = "metal" ]; then \
-		echo "[down] PROFILE=$(PROFILE) is metal hardware; nothing to destroy."; \
-	else \
-		./scripts/tf-destroy $(PROFILE); \
-	fi
+down: ## Destroy provider resources for an instance
+	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make down INSTANCE=<name>"; exit 2; fi; \
+	./scripts/instance-run down $(INSTANCE)
 
-env: ## Print resolved profile data as env lines
-	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	./scripts/profile-resolve --profile $(PROFILE) --emit env
+env: ## Print resolved instance data as env lines
+	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make env INSTANCE=<name>"; exit 2; fi; \
+	./scripts/instance-run env $(INSTANCE)
 
 generate: ## Generate terraform configuration from terramate files
 	terramate generate
@@ -119,9 +106,9 @@ help: ## Show this help message
 	@echo
 	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[$$()% a-zA-Z_.-]+:.*?##/ { printf "  \033[36m%-30s\033[0m %s\n", $$1, $$2 } ' $(MAKEFILE_LIST)
 
-info: ## Print resolved profile data as JSON
-	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	./scripts/profile-resolve --profile $(PROFILE) --emit json
+info: ## Print resolved instance data as JSON
+	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make info INSTANCE=<name>"; exit 2; fi; \
+	./scripts/instance-run info $(INSTANCE)
 
 integration.plan: ## Print integration test plan (INSTANCES=a,b)
 	@if [ -z "$(INSTANCES)" ]; then echo "Usage: make integration.plan INSTANCES=<linux>,<windows>"; exit 2; fi; \
@@ -135,15 +122,9 @@ integration.test: ## Run live integration test (INSTANCES=a,b YES=1)
 	for instance in $$(printf '%s' "$(INSTANCES)" | tr ',' ' '); do args="$$args --instance $$instance"; done; \
 	./scripts/integration-test --live $$args
 
-init: ## Initialize profile backend/providers (terraform only)
-	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	./scripts/profile-resolve --profile $(PROFILE) --validate; \
-	ENGINE=$$(./scripts/profile-resolve --profile $(PROFILE) --emit env | awk -F= '/^ENGINE=/{print $$2}'); \
-	if [ "$$ENGINE" = "metal" ]; then \
-		echo "[init] PROFILE=$(PROFILE) is metal hardware; no Terraform backend to initialize."; \
-	else \
-		./scripts/tf-init $(PROFILE); \
-	fi
+init: ## Initialize provider backend for an instance
+	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make init INSTANCE=<name>"; exit 2; fi; \
+	./scripts/instance-run init $(INSTANCE)
 
 init.all: generate ## Init all stacks in parallel (set TM_PARALLEL=N)
 	terramate run --parallel=$(TM_PARALLEL) --continue-on-error -- terraform init -upgrade
@@ -207,29 +188,20 @@ instance.validate: ## Validate a concrete instance from .egame/instances.yaml
 	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make instance.validate INSTANCE=<name>"; exit 2; fi; \
 	./scripts/instance-resolve --instance $(INSTANCE) --validate
 
-ip: ## Print the instance IP for a profile
-	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	./scripts/instance-ip $(PROFILE)
+ip: ## Print the instance IP
+	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make ip INSTANCE=<name>"; exit 2; fi; \
+	./scripts/instance-run ip $(INSTANCE)
 
 lint: ## Format terramate files in place
 	terramate fmt
 
-logs: ## Stream the remote provisioning logs for a profile (OS-aware)
-	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	./scripts/logs $(PROFILE)
+logs: ## Stream remote provisioning logs for an instance
+	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make logs INSTANCE=<name>"; exit 2; fi; \
+	./scripts/instance-run logs $(INSTANCE)
 
-plan: ## Plan profile changes (terraform or vagrant)
-	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	./scripts/profile-resolve --profile $(PROFILE) --validate; \
-	ENGINE=$$(./scripts/profile-resolve --profile $(PROFILE) --emit env | awk -F= '/^ENGINE=/{print $$2}'); \
-	if [ "$$ENGINE" = "vagrant" ]; then \
-		./scripts/vagrant-up --plan $(PROFILE); \
-	elif [ "$$ENGINE" = "metal" ]; then \
-		echo "[plan] PROFILE=$(PROFILE) is metal hardware; provisioning will run over SSH."; \
-		./scripts/profile-resolve --profile $(PROFILE) --emit env; \
-	else \
-		./scripts/tf-plan $(PROFILE); \
-	fi
+plan: ## Plan provider changes for an instance
+	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make plan INSTANCE=<name>"; exit 2; fi; \
+	./scripts/instance-run plan $(INSTANCE)
 
 package.down: ## Remove package from an instance (PACKAGE=<id>, YES=1 for destructive)
 	@if [ -z "$(INSTANCE)" ] || [ -z "$(PACKAGE)" ]; then echo "Usage: make package.down INSTANCE=<name> PACKAGE=<id> YES=1"; exit 2; fi; \
@@ -274,12 +246,6 @@ plugins.sync: ## Download pinned external plugins from .egame/plugin-sources.yam
 plugins.validate: ## Validate provider and package plugin manifests
 	@./scripts/plugin-list --validate
 
-profiles.list: ## List available profiles with details
-	@./scripts/profiles-list --with-details
-
-profiles.menu: ## Interactive profile selector
-	@./scripts/profile-menu
-
 provider.status: ## Show provider plugin status for an instance
 	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make provider.status INSTANCE=<name>"; exit 2; fi; \
 	./scripts/provider-dispatch --instance $(INSTANCE) --command status
@@ -291,122 +257,106 @@ recipes.list: ## List reusable VM recipes
 	@./scripts/recipes-list --with-details
 
 provision: ## Upload and run OS-appropriate provisioning scripts on the instance
-	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	./scripts/provision $(PROFILE)
+	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make provision INSTANCE=<name>"; exit 2; fi; \
+	./scripts/instance-run provision $(INSTANCE)
 
 provision.clear-state: ## Clear remote provisioning state, logs, and downloads
-	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	OS_FAMILY=$$(./scripts/profile-resolve --profile $(PROFILE) --emit env | awk -F= '/^OS_FAMILY=/{print $$2}'); \
-	case "$$OS_FAMILY" in \
-		ubuntu) ./scripts/instance-ssh $(PROFILE) -- 'rm -rf ~/provision/state ~/provision/logs ~/provision/downloads' ;; \
-		windows) ./scripts/instance-ssh $(PROFILE) -- 'if (Test-Path "C:\Users\Administrator\provision\state") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\state" }; if (Test-Path "C:\Users\Administrator\provision\logs") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\logs" }; if (Test-Path "C:\Users\Administrator\provision\downloads") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\downloads" }' ;; \
-		*) echo "[provision.clear-state] unknown os_family: $$OS_FAMILY" >&2; exit 2 ;; \
-	esac
+	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make provision.clear-state INSTANCE=<name>"; exit 2; fi; \
+	./scripts/instance-run provision.clear-state $(INSTANCE)
 
 provision.restart: provision.clear-state provision ## Clear remote state then re-provision
 
 provision.wait: ## Wait until provisioning finishes (survives intermediate reboots)
-	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	./scripts/wait-for-provision $(PROFILE)
+	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make provision.wait INSTANCE=<name>"; exit 2; fi; \
+	./scripts/instance-run provision.wait $(INSTANCE)
 
 update: ## Update all installed tools to latest versions
-	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	./scripts/update-tools $(PROFILE)
+	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make update INSTANCE=<name>"; exit 2; fi; \
+	./scripts/instance-run update $(INSTANCE)
 
 reboot: ## Reboot the instance
-	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	OS_FAMILY=$$(./scripts/profile-resolve --profile $(PROFILE) --emit env | awk -F= '/^OS_FAMILY=/{print $$2}'); \
-	case "$$OS_FAMILY" in \
-		windows) ./scripts/instance-ssh $(PROFILE) -- 'shutdown /r /t 0' ;; \
-		*) ./scripts/instance-ssh $(PROFILE) -- 'sudo reboot' ;; \
-	esac
+	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make reboot INSTANCE=<name>"; exit 2; fi; \
+	./scripts/instance-run reboot $(INSTANCE)
 
 remote.console: ## Open the VM's graphical console (VMware Fusion / VirtualBox)
-	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	./scripts/remote-console $(PROFILE)
+	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make remote.console INSTANCE=<name>"; exit 2; fi; \
+	./scripts/instance-run remote.console $(INSTANCE)
 
 remote.moonlight: remote.sunshine.wait ## Start Moonlight stream
-	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	./scripts/remote-moonlight $(PROFILE)
+	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make remote.moonlight INSTANCE=<name>"; exit 2; fi; \
+	./scripts/instance-run remote.moonlight $(INSTANCE)
 
 remote.moonlight.pair: remote.sunshine.wait ## Pair Moonlight with Sunshine via a fixed PIN
-	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	./scripts/remote-moonlight-pair $(PROFILE)
+	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make remote.moonlight.pair INSTANCE=<name>"; exit 2; fi; \
+	./scripts/instance-run remote.moonlight.pair $(INSTANCE)
 
 remote.rdp: ## Open RDP session to Windows instance
-	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	./scripts/remote-rdp $(PROFILE)
+	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make remote.rdp INSTANCE=<name>"; exit 2; fi; \
+	./scripts/instance-run remote.rdp $(INSTANCE)
 
 remote.rustdesk: ## Open local RustDesk client connected to the instance
-	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	./scripts/remote-rustdesk $(PROFILE) connect
+	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make remote.rustdesk INSTANCE=<name>"; exit 2; fi; \
+	./scripts/instance-run remote.rustdesk $(INSTANCE)
 
 remote.rustdesk.info: ## Print RustDesk connection details (ID, password, server)
-	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	./scripts/remote-rustdesk $(PROFILE)
+	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make remote.rustdesk.info INSTANCE=<name>"; exit 2; fi; \
+	./scripts/instance-run remote.rustdesk.info $(INSTANCE)
 
 remote.sunshine: ## Open the Sunshine web UI for the instance
-	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	IP=$$(./scripts/instance-ip $(PROFILE)); \
-	open "https://$$IP:47990" || open -a "Google Chrome" "https://$$IP:47990"
+	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make remote.sunshine INSTANCE=<name>"; exit 2; fi; \
+	./scripts/instance-run remote.sunshine $(INSTANCE)
 
 remote.sunshine.wait: ## Wait until the Sunshine API accepts authenticated requests
-	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	./scripts/remote-sunshine-wait $(PROFILE)
+	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make remote.sunshine.wait INSTANCE=<name>"; exit 2; fi; \
+	./scripts/instance-run remote.sunshine.wait $(INSTANCE)
 
 remote.vnc: ## Open VNC viewer to the VM (requires vnc package in profile)
-	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	./scripts/remote-vnc $(PROFILE)
+	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make remote.vnc INSTANCE=<name>"; exit 2; fi; \
+	./scripts/instance-run remote.vnc $(INSTANCE)
 
 remote.xpra: ## Start server, launch app, and attach (requires APP=<cmd>)
-	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	if [ -z "$(APP)" ]; then echo "Usage: make remote.xpra PROFILE=<name> APP=<command>"; exit 2; fi; \
-	./scripts/remote-xpra $(PROFILE) start && \
-	./scripts/remote-xpra $(PROFILE) run $(APP) && \
-	./scripts/remote-xpra $(PROFILE) attach
+	@if [ -z "$(INSTANCE)" ] || [ -z "$(APP)" ]; then echo "Usage: make remote.xpra INSTANCE=<name> APP=<command>"; exit 2; fi; \
+	./scripts/instance-run remote.xpra $(INSTANCE)
 
 remote.xpra.apps: ## List available GUI apps on the remote instance
-	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	./scripts/remote-xpra $(PROFILE) apps
+	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make remote.xpra.apps INSTANCE=<name>"; exit 2; fi; \
+	./scripts/instance-run remote.xpra.apps $(INSTANCE)
 
 remote.xpra.attach: ## Attach local xpra client to the running session
-	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	./scripts/remote-xpra $(PROFILE) attach
+	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make remote.xpra.attach INSTANCE=<name>"; exit 2; fi; \
+	./scripts/instance-run remote.xpra.attach $(INSTANCE)
 
 remote.xpra.desktop: ## Start and attach an Xpra full desktop session
-	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	./scripts/remote-xpra $(PROFILE) desktop
+	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make remote.xpra.desktop INSTANCE=<name>"; exit 2; fi; \
+	./scripts/instance-run remote.xpra.desktop $(INSTANCE)
 
 remote.xpra.run: ## Run an additional app on the existing Xpra session (requires APP=<cmd>)
-	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	if [ -z "$(APP)" ]; then echo "Usage: make remote.xpra.run PROFILE=<name> APP=<command>"; exit 2; fi; \
-	./scripts/remote-xpra $(PROFILE) run $(APP)
+	@if [ -z "$(INSTANCE)" ] || [ -z "$(APP)" ]; then echo "Usage: make remote.xpra.run INSTANCE=<name> APP=<command>"; exit 2; fi; \
+	./scripts/instance-run remote.xpra.run $(INSTANCE)
 
 remote.xpra.start: ## Start the xpra server on the remote
-	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	./scripts/remote-xpra $(PROFILE) start
+	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make remote.xpra.start INSTANCE=<name>"; exit 2; fi; \
+	./scripts/instance-run remote.xpra.start $(INSTANCE)
 
 remote.xpra.status: ## Show xpra server status
-	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	./scripts/remote-xpra $(PROFILE) status
+	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make remote.xpra.status INSTANCE=<name>"; exit 2; fi; \
+	./scripts/instance-run remote.xpra.status $(INSTANCE)
 
 remote.xpra.stop: ## Stop the remote xpra server
-	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	./scripts/remote-xpra $(PROFILE) stop
+	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make remote.xpra.stop INSTANCE=<name>"; exit 2; fi; \
+	./scripts/instance-run remote.xpra.stop $(INSTANCE)
 
 show-password: ## Display the instance's default password (Windows)
-	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	./scripts/instance-password $(PROFILE)
+	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make show-password INSTANCE=<name>"; exit 2; fi; \
+	./scripts/instance-run show-password $(INSTANCE)
 
-ssh: ## SSH into the profile's instance
-	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	./scripts/instance-ssh $(PROFILE)
+ssh: ## SSH into the instance
+	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make ssh INSTANCE=<name>"; exit 2; fi; \
+	./scripts/instance-run ssh $(INSTANCE)
 
-ssh.run: ## Run a remote command on the profile's instance (command read from stdin)
-	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	if [ -t 0 ]; then echo "Usage: echo '<command>' | make ssh.run PROFILE=<name>"; exit 2; fi; \
-	cmd=$$(cat); \
-	./scripts/instance-ssh $(PROFILE) -- "$$cmd"
+ssh.run: ## Run a remote command on the instance (command read from stdin)
+	@if [ -z "$(INSTANCE)" ]; then echo "Usage: echo '<command>' | make ssh.run INSTANCE=<name>"; exit 2; fi; \
+	./scripts/instance-run ssh.run $(INSTANCE)
 
 ssh.truenas: ## SSH directly into the TrueNAS host (no profile needed)
 	@./scripts/env-require TRUENAS_HOST TRUENAS_SSH_USER; \
@@ -415,27 +365,30 @@ ssh.truenas: ## SSH directly into the TrueNAS host (no profile needed)
 	if [ -n "$$TRUENAS_SSH_PORT" ]; then opts="$$opts -p $$TRUENAS_SSH_PORT"; fi; \
 	exec ssh $$opts "$${TRUENAS_SSH_USER}@$${TRUENAS_HOST}"
 
-ssh.wait: ## Wait until SSH on the profile's instance accepts connections
-	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	./scripts/ssh-wait $(PROFILE)
+ssh.wait: ## Wait until SSH on the instance accepts connections
+	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make ssh.wait INSTANCE=<name>"; exit 2; fi; \
+	./scripts/instance-run ssh.wait $(INSTANCE)
 
-start: up ## Start (power on) a stopped instance (runs up first if not created)
-	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	./scripts/start $(PROFILE)
+start: ## Start (power on) a stopped instance
+	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make start INSTANCE=<name>"; exit 2; fi; \
+	./scripts/instance-run start $(INSTANCE)
 
 status: ## Show VM status (running/stopped/not created) and IP
-	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	./scripts/status $(PROFILE)
+	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make status INSTANCE=<name>"; exit 2; fi; \
+	./scripts/instance-run status $(INSTANCE)
 
 stop: ## Stop (power off) a running instance without destroying
-	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	./scripts/stop $(PROFILE)
+	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make stop INSTANCE=<name>"; exit 2; fi; \
+	./scripts/instance-run stop $(INSTANCE)
 
-test: ## Run all tests (profiles, instances, plugins, terraform validate, shellcheck)
+test: ## Run all tests (recipes, instances, plugins, terraform, lint)
 	@./scripts/test
 
 test.instances: ## Validate fixture instances and compare emitted env to golden snapshots
 	@./scripts/test-instances
+
+test.lint: ## Run non-Python language lint and syntax checks
+	@./scripts/test-lint
 
 test.plugins: ## Validate plugin manifests and dry-run dispatch contracts
 	@./scripts/test-plugins
@@ -443,8 +396,8 @@ test.plugins: ## Validate plugin manifests and dry-run dispatch contracts
 test.plugins-sync: ## Validate external plugin synchronization
 	@./scripts/test-plugins-sync
 
-test.profiles: ## Validate all profiles and compare emitted env to golden snapshots
-	@./scripts/test-profiles
+test.recipes: ## Validate all recipes and compare emitted env to golden snapshots
+	@./scripts/test-recipes
 
 test.python: ## Run Python lint and type checks
 	@./scripts/test-python
@@ -461,29 +414,21 @@ test.tf-isolation: ## Verify per-instance Terraform workspace isolation in tf-* 
 test.tui: ## Validate optional Textual TUI entrypoint
 	@./scripts/test-tui
 
-test.update-golden: ## Regenerate tests/golden/*.env from current profile-resolve output
-	@UPDATE_GOLDEN=1 ./scripts/test-profiles
+test.update-golden: ## Regenerate tests/golden/*.env from current recipe and instance output
+	@UPDATE_GOLDEN=1 ./scripts/test-recipes
 	@UPDATE_GOLDEN=1 ./scripts/test-instances
 
 tui: ## Open the v3 Textual instance manager
 	@poetry run python ./scripts/egame-tui
 
-up: ## Create and start profile resources (terraform or vagrant)
-	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	./scripts/profile-resolve --profile $(PROFILE) --validate; \
-	ENGINE=$$(./scripts/profile-resolve --profile $(PROFILE) --emit env | awk -F= '/^ENGINE=/{print $$2}'); \
-	if [ "$$ENGINE" = "vagrant" ]; then \
-		./scripts/vagrant-up $(PROFILE); \
-	elif [ "$$ENGINE" = "metal" ]; then \
-		echo "[up] PROFILE=$(PROFILE) is metal hardware; nothing to create."; \
-	else \
-		./scripts/tf-apply $(PROFILE); \
-	fi
+up: ## Create and start provider resources for an instance
+	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make up INSTANCE=<name>"; exit 2; fi; \
+	./scripts/instance-run up $(INSTANCE)
 
 upload: ## scp ./upload/* to the instance (skips files that already exist remotely)
-	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	./scripts/upload $(PROFILE)
+	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make upload INSTANCE=<name>"; exit 2; fi; \
+	./scripts/instance-run upload $(INSTANCE)
 
-validate: ## Validate a profile from config/catalog.yaml
-	@if [ -z "$(PROFILE)" ]; then exec ./scripts/profile-run $@; fi; \
-	./scripts/profile-resolve --profile $(PROFILE) --validate
+validate: ## Validate an instance from .egame/instances.yaml
+	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make validate INSTANCE=<name>"; exit 2; fi; \
+	./scripts/instance-run validate $(INSTANCE)

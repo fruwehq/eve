@@ -406,8 +406,8 @@ provider_bridge_start="$(
     make --no-print-directory start INSTANCE=dev-a 2>/dev/null
 )"
 if ! printf '%s\n' "$provider_bridge_start" |
-  jq -s -e 'map(.command) == ["up", "start"] and all(.[]; .provider == "local-vmware" and .dry_run == true)' >/dev/null; then
-  printf '  [FAIL] make start INSTANCE did not route dependency and start through provider dry-run\n' >&2
+  jq -e '.provider == "local-vmware" and .command == "start" and .dry_run == true' >/dev/null; then
+  printf '  [FAIL] make start INSTANCE did not route through provider dry-run\n' >&2
   printf '%s\n' "$provider_bridge_start" >&2
   provider_bridge_failed=$((provider_bridge_failed + 1))
 fi

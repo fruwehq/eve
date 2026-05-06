@@ -40,18 +40,50 @@ if ENV["EGAME_PLUGIN_DRY_RUN"] == "1" || command == "resolve"
 end
 
 make_targets = {
-  "init" => "init",
-  "plan" => "plan",
-  "up" => "up",
-  "down" => "down",
   "start" => "start",
   "stop" => "stop",
   "status" => "status"
 }
 
 case command
+when "init"
+  if resolved.fetch("engine") == "metal"
+    warn "[init] instance=#{profile} uses metal hardware; no Terraform backend to initialize."
+    exit 0
+  end
+  exec File.join(ROOT, "scripts/tf-init"), profile
+when "plan"
+  case resolved.fetch("engine")
+  when "vagrant"
+    exec File.join(ROOT, "scripts/vagrant-up"), "--plan", profile
+  when "metal"
+    warn "[plan] instance=#{profile} uses metal hardware; provisioning will run over SSH."
+    exec File.join(ROOT, "scripts/profile-resolve"), "--profile", profile, "--emit", "env"
+  else
+    exec File.join(ROOT, "scripts/tf-plan"), profile
+  end
+when "up"
+  case resolved.fetch("engine")
+  when "vagrant"
+    exec File.join(ROOT, "scripts/vagrant-up"), profile
+  when "metal"
+    warn "[up] instance=#{profile} uses metal hardware; nothing to create."
+    exit 0
+  else
+    exec File.join(ROOT, "scripts/tf-apply"), profile
+  end
+when "down"
+  case resolved.fetch("engine")
+  when "vagrant"
+    exec File.join(ROOT, "scripts/vagrant-destroy"), profile
+  when "metal"
+    warn "[down] instance=#{profile} uses metal hardware; nothing to destroy."
+    exit 0
+  else
+    exec File.join(ROOT, "scripts/tf-destroy"), profile
+  end
 when *make_targets.keys
-  exec "make", make_targets.fetch(command), "PROFILE=#{profile}", "INSTANCE="
+  exec File.join(ROOT, "scripts", make_targets.fetch(command)), profile
 when "ip"
   exec File.join(ROOT, "scripts/instance-ip"), profile
 when "ssh"

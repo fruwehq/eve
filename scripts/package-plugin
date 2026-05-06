@@ -84,13 +84,13 @@ when "install"
   end
 
   if os_family == "windows"
-    # package-provision-windows handles its own fallback to `make provision`
+    # package-provision-windows handles its own fallback to full provisioning
     # for packages without a granular step mapping, and logs the fallback.
     exec File.join(ROOT, "scripts/package-provision-windows"), "--profile", profile, "--package", package_id
   end
 
   warn "[package-plugin] install currently delegates to full provisioning for #{os_family}"
-  exec "make", "provision", "PROFILE=#{profile}", "INSTANCE="
+  exec File.join(ROOT, "scripts/provision"), profile
 when "down"
   warn "package-plugin: no #{os_family} down hook for package: #{package_id}"
   exit 2

@@ -61,14 +61,12 @@ make package.down INSTANCE=dev-a PACKAGE=docker YES=1
 make package.unselect INSTANCE=dev-a PACKAGE=xpra
 ```
 
-The current v3 slice resolves concrete instances while preserving the existing
-provider execution layer. The catalog `profiles` section remains supported as
-the compatibility source for existing `PROFILE=` workflows and as built-in
-recipe definitions for `INSTANCE=` creation, but new UI/orchestration work
-should treat concrete instances as the primary user-facing object. `INSTANCE=`
-works by generating a local profile
-overlay under `.generated/instances/<name>/` and reusing the profile-backed
-scripts through provider plugins. Terraform-backed instances now get
+The v3 command surface is instance-first. The catalog `recipes` section defines
+reusable compositions; `.egame/instances.yaml` defines concrete local instances
+created from those recipes. Provider and package plugins receive resolved
+instance JSON, and legacy profile-shaped overlays are generated only as an
+internal compatibility detail for lower-level provider scripts. Terraform-backed
+instances now get
 instance-scoped backend roots and `TF_DATA_DIR` paths under
 `.generated/instances/<name>/tf/`, so multiple concrete instances on the same
 provider do not share local Terraform state.
@@ -110,28 +108,24 @@ built-in one.
 `make instance.paths INSTANCE=<name>` shows the generated overlay path,
 instance state file path, and Terraform artifact roots used by the bridge.
 
-## v2 profile workflow
-
-Profiles are defined in `config/catalog.yaml` and resolved by `scripts/profile-resolve`.
+## Instance Workflow
 
 Terraform provider versions are pinned exactly in the Terramate provider templates for reproducibility.
 
 ### Fresh checkout expectations
 
-- Local profile paths (e.g. VirtualBox/Vagrant) should work without cloud API keys.
+- Local instance recipes (for example QEMU/Vagrant) should work without cloud API keys.
 - Cloud providers (AWS/Vultr/TrueNAS) only require their own env vars when used.
 - Keep personal settings in `.env.local`.
 
 ```bash
-# List available profiles
-make profiles.list
+# List recipes and create a concrete instance
+make recipes.list
+make instance.create INSTANCE=dev-a RECIPE=local-qemu-ubuntu-dev-gui
 
-# Pick a profile interactively
-make profiles.menu
-
-# Targets without PROFILE=… will prompt you to pick one
-make validate
-make plan
+# Validate and inspect the instance
+make validate INSTANCE=dev-a
+make info INSTANCE=dev-a
 ```
 
 Local customizations (without git-dirty state):
@@ -144,26 +138,25 @@ cp config/catalog.local.example.yaml config/catalog.local.yaml
 `config/catalog.local.yaml` is git-ignored and merged over the base catalog.
 
 ```bash
-# Validate and inspect a profile
-make validate PROFILE=aws-ubuntu-dev-headless
-make info PROFILE=aws-ubuntu-dev-headless
+# Cloud instance (terraform engine)
+make instance.create INSTANCE=aws-dev-a RECIPE=aws-ubuntu-dev-headless
+make init INSTANCE=aws-dev-a
+make plan INSTANCE=aws-dev-a
+make up INSTANCE=aws-dev-a
+make provision INSTANCE=aws-dev-a
+make ssh INSTANCE=aws-dev-a
+make down INSTANCE=aws-dev-a
 
-# Cloud profile (terraform engine)
-make init PROFILE=aws-ubuntu-dev-headless
-make plan PROFILE=aws-ubuntu-dev-headless
-make up PROFILE=aws-ubuntu-dev-headless
-make provision PROFILE=aws-ubuntu-dev-headless  # installs bundle packages on the VM
-make ssh PROFILE=aws-ubuntu-dev-headless
-make down PROFILE=aws-ubuntu-dev-headless
+# Local instance (vagrant engine)
+make instance.create INSTANCE=local-dev-a RECIPE=local-qemu-ubuntu-dev-gui
+make plan INSTANCE=local-dev-a
+make up INSTANCE=local-dev-a
+make down INSTANCE=local-dev-a
 
-# Local profile (vagrant engine)
-make plan PROFILE=local-vbox-ubuntu-dev
-make up PROFILE=local-vbox-ubuntu-dev
-make down PROFILE=local-vbox-ubuntu-dev
-
-# TrueNAS profile (real provider wiring)
-make validate PROFILE=truenas-ubuntu-dev-headless
-make info PROFILE=truenas-ubuntu-dev-headless
+# TrueNAS instance (real provider wiring)
+make instance.create INSTANCE=truenas-dev-a RECIPE=truenas-ubuntu-dev-headless
+make validate INSTANCE=truenas-dev-a
+make info INSTANCE=truenas-dev-a
 
 # Required env vars for provider auth:
 # - TRUENAS_SSH_PRIVATE_KEY_FILE (path to private key)
@@ -174,10 +167,10 @@ make info PROFILE=truenas-ubuntu-dev-headless
 # export TRUENAS_SSH_PRIVATE_KEY_FILE="$HOME/.ssh/truenas_ed25519"
 # export TRUENAS_SSH_HOST_KEY_FINGERPRINT="SHA256:..."
 
-make init PROFILE=truenas-ubuntu-dev-headless
-make plan PROFILE=truenas-ubuntu-dev-headless
-make up PROFILE=truenas-ubuntu-dev-headless
-make down PROFILE=truenas-ubuntu-dev-headless
+make init INSTANCE=truenas-dev-a
+make plan INSTANCE=truenas-dev-a
+make up INSTANCE=truenas-dev-a
+make down INSTANCE=truenas-dev-a
 ```
 
 ## Post-boot provisioning (Linux + Windows)
@@ -185,23 +178,23 @@ make down PROFILE=truenas-ubuntu-dev-headless
 After `up` creates an instance, run `provision` to install bundle packages:
 
 ```bash
-make ssh.wait PROFILE=aws-ubuntu-dev-headless   # optional — wait for SSH
-make provision PROFILE=aws-ubuntu-dev-headless  # installs bundles
-make logs PROFILE=aws-ubuntu-dev-headless       # tail remote logs
+make ssh.wait INSTANCE=aws-dev-a   # optional — wait for SSH
+make provision INSTANCE=aws-dev-a  # installs selected package set
+make logs INSTANCE=aws-dev-a       # tail remote logs
 ```
 
-`make provision` dispatches by the profile's `os_family`:
+`make provision` dispatches by the instance OS family:
 
-- Linux: uploads [linux/provision/](linux/provision/) to `$HOME/provision` on the VM, installs a `systemd` unit, and runs numbered steps (`00_base`, `10_docker`, `20_dev-toolchain`, `30_codex-cli`, `40_goose`, `45_xpra`, `50_rustdesk`, `60_sunshine`, `70_steam`, `99_finish`). Each step is skipped if its package id is not in the profile's bundles.
+- Linux: uploads [linux/provision/](linux/provision/) to `$HOME/provision` on the VM, installs a `systemd` unit, and runs numbered package steps. Each step is skipped if its package id is not selected by the instance.
 - Windows: uploads [windows/provision/](windows/provision/) to `C:\Users\Administrator\provision` and runs `bootstrap.ps1`, which registers a Scheduled Task that walks a similar sorted `steps/` directory. Requires `EPHEMERAL_WINDOWS_PASSWORD` (or a terraform output) and `EPHEMERAL_SUNSHINE_PASSWORD` — used to build `./tmp/env.json` and scp it into the provision state dir.
 
 State is tracked in `$HOME/provision/state/state.json` on the VM — provisioning resumes from the last completed step after a reboot.
 
 ## Remote GUI apps via Xpra (no full desktop)
 
-Xpra forwards individual remote applications over SSH and renders them as native-looking windows on the local host — useful when you want one remote app (e.g. a browser, IDE, or X11 tool) without pulling up a full remote desktop. Xpra is bundle-gated by the `remote-apps` bundle, so it is only installed on profiles that opt in. The built-in Ubuntu 26.04 recipes do not include `remote-apps` by default because the current upstream Xpra Linux packages require Python `< 3.13`; add it explicitly only when using a compatible OS/package source.
+Xpra forwards individual remote applications over SSH and renders them as native-looking windows on the local host — useful when you want one remote app (e.g. a browser, IDE, or X11 tool) without pulling up a full remote desktop. Xpra is package-gated, so it is only installed on instances that opt in. The built-in Ubuntu 26.04 recipes do not include `remote-apps` by default because the current upstream Xpra Linux packages require Python `< 3.13`; add it explicitly only when using a compatible OS/package source.
 
-> Linux profiles use virtual displays (`xpra start :N`). Windows profiles use shadow mode via Scheduled Task + SSH tunnel.
+> Linux instances use virtual displays (`xpra start :N`). Windows instances use shadow mode via Scheduled Task + SSH tunnel.
 
 ### Local install (macOS)
 
@@ -217,31 +210,24 @@ sudo apt-get install xpra          # Debian/Ubuntu
 # or follow https://github.com/Xpra-org/xpra/wiki/Download for other distros
 ```
 
-### Enable on a profile
+### Enable on an instance
 
-Add the `remote-apps` bundle to the profile in `config/catalog.yaml` (or your `catalog.local.yaml`):
+Select the package on a compatible instance:
 
-```yaml
-profiles:
-  - name: aws-ubuntu-dev-headless
-    machine: aws-cheap-x86
-    os: ubuntu-26.04-server-amd64
-    init: ssh-ubuntu-cloud-init
-    bundles: [access-headless, dev-sandbox-core, remote-apps]
-    location: tokyo
+```bash
+make package.select INSTANCE=dev-a PACKAGE=xpra
+make package.install INSTANCE=dev-a PACKAGE=xpra
 ```
-
-Then re-run `make provision PROFILE=…` to install `xpra` on the VM.
 
 ### Launch an app
 
 ```bash
-make remote.xpra PROFILE=aws-ubuntu-dev-headless APP=xeyes          # smoke test
-make remote.xpra PROFILE=aws-ubuntu-dev-headless APP=firefox        # browser
-make remote.xpra PROFILE=aws-ubuntu-dev-headless APP="xterm -e htop"
+make remote.xpra INSTANCE=dev-a APP=xeyes          # smoke test
+make remote.xpra INSTANCE=dev-a APP=firefox        # browser
+make remote.xpra INSTANCE=dev-a APP="xterm -e htop"
 ```
 
-The target starts an Xpra server on the VM, launches the requested app, and attaches a local client window. Use `make remote.xpra.stop PROFILE=...` to stop the remote session.
+The target starts an Xpra server on the VM, launches the requested app, and attaches a local client window. Use `make remote.xpra.stop INSTANCE=...` to stop the remote session.
 
 ## Provider setup guides
 
@@ -350,7 +336,7 @@ Set in `.env.local`:
 - `VM_USER_NAME` — the username preseeded into the SD card image (see Imager step below)
 - `SSH_PUBLIC_KEY_FILE` — path to the public key whose private half is loaded in your agent
 
-These are validated at runtime by [scripts/env-require](scripts/env-require) — `make ssh PROFILE=rpi-ubuntu-all` errors clearly if any are missing.
+These are validated at runtime by [scripts/env-require](scripts/env-require) — `make ssh INSTANCE=<rpi-instance>` errors clearly if any are missing.
 
 #### Initial SD card image (first boot)
 
@@ -359,7 +345,7 @@ Flash **Ubuntu Server 26.04 LTS (64-bit)** with the official [Raspberry Pi Image
 In Imager's advanced options (gear icon), preseed:
 
 - **Hostname**: e.g. `rpi5`
-- **Username**: `terraform` — matches `ssh_user` for the other remote-provisioned profiles ([config/catalog.yaml](config/catalog.yaml)) so the Pi doesn't introduce a third naming convention.
+- **Username**: `terraform` — matches `ssh_user` for the other remote-provisioned recipes ([config/catalog.yaml](config/catalog.yaml)) so the Pi doesn't introduce a third naming convention.
 - **Password**: a long throwaway. Provisioning enforces `PasswordAuthentication no`, so it only matters until first SSH-in.
 - **SSH**: enabled, "Allow public-key authentication only", paste your public key.
 - **Wi-Fi**: optional; fine for first boot / provisioning. Prefer **Ethernet** for actual streaming — Sunshine over Wi-Fi tends to surface as jitter and frame drops well before bandwidth is the bottleneck.
