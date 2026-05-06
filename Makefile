@@ -1,6 +1,6 @@
 # Makefile
 .DEFAULT_GOAL := default
-.PHONY: all aws.login clean default down env generate help info integration.plan integration.test \
+.PHONY: ai.sandbox all aws.login clean default down env generate help info integration.plan integration.test \
 				init init.all instance.create instance.delete instance.env instance.info instance.provision \
 				instance.list instance.paths instance.state instance.status instance.validate ip lint logs plan \
 				package.down package.install package.list package.reinstall package.select \
@@ -19,6 +19,7 @@
 				test.lint test.tf-isolation test.tui test.update-golden tui up update upload validate
 
 TM_PARALLEL ?= 8
+AGENT ?= codex
 
 # v3 concrete instance selection. Instances live in .egame/instances.yaml.
 INSTANCE ?=
@@ -89,6 +90,14 @@ clean: ## Remove terramate-generated terraform files and cache
 	rm -rf .terraform-cache-dir/state/*
 
 default: help  ## Show help
+
+ai.sandbox: ## Run a coding agent in Docker Sandboxes (AGENT=codex|opencode|claude|shell)
+	@if ! command -v sbx >/dev/null 2>&1; then \
+		echo "Docker Sandboxes CLI (sbx) is not installed."; \
+		echo "See docs/ai-sandboxes.md for setup notes."; \
+		exit 2; \
+	fi; \
+	exec sbx run $(AGENT) .
 
 down: ## Destroy provider resources for an instance
 	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make down INSTANCE=<name>"; exit 2; fi; \
