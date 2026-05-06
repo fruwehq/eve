@@ -171,7 +171,7 @@ def run_tui() -> int:
         from textual.binding import Binding
         from textual.containers import Container, Horizontal, Vertical
         from textual.screen import ModalScreen
-        from textual.widgets import Button, DataTable, Footer, Header, Input, Label, RichLog, Static
+        from textual.widgets import Button, DataTable, Footer, Header, Input, Label, RichLog, Select, Static
     except ModuleNotFoundError:
         print(
             "Textual is required for the TUI.\n"
@@ -230,7 +230,8 @@ def run_tui() -> int:
             padding: 1 2;
         }
 
-        Input {
+        Input,
+        Select {
             margin-bottom: 1;
         }
         """
@@ -241,10 +242,18 @@ def run_tui() -> int:
 
         def compose(self) -> ComposeResult:
             first_recipe = self.recipes[0] if self.recipes else ""
+            recipe_options = [(recipe, recipe) for recipe in self.recipes]
             with Vertical(id="new-dialog"):
                 yield Label("[b]New Instance[/b]")
                 yield Input(placeholder="instance name", id="new-name")
-                yield Input(value=first_recipe, placeholder="recipe", id="new-recipe")
+                yield Select(
+                    recipe_options,
+                    prompt="recipe",
+                    allow_blank=False,
+                    value=first_recipe,
+                    id="new-recipe",
+                    disabled=not recipe_options,
+                )
                 yield Input(placeholder="optional packages, comma separated", id="new-packages")
                 yield Input(placeholder="optional disk GB", id="new-disk")
                 yield Input(placeholder="optional memory MB", id="new-memory")
@@ -258,7 +267,8 @@ def run_tui() -> int:
                 self.dismiss(None)
                 return
             name = self.query_one("#new-name", Input).value.strip()
-            recipe = self.query_one("#new-recipe", Input).value.strip()
+            recipe_value = self.query_one("#new-recipe", Select).value
+            recipe = recipe_value if isinstance(recipe_value, str) else ""
             if not name or not recipe:
                 self.notify("Name and recipe are required", severity="error")
                 return
