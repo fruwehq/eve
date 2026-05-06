@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# Run a remote Wayland app through waypipe.
+#
+# Usage:
+#   scripts/remote-waypipe <profile-or-instance> [app [args...]]
+
+set -euo pipefail
+
+PROFILE="${1:?Usage: scripts/remote-waypipe <profile-or-instance> [app [args...]]}"
+shift || true
+APP=("$@")
+if [ "${#APP[@]}" -eq 0 ]; then
+  APP=(foot)
+fi
+
+cd "$(git rev-parse --show-toplevel)"
+
+if ! command -v waypipe >/dev/null 2>&1; then
+  echo "remote-waypipe: local waypipe is not installed." >&2
+  echo "  macOS experiment: brew tap J-x-Z/tap && brew install waypipe-darwin" >&2
+  exit 2
+fi
+
+if [ -z "${WAYLAND_DISPLAY:-}" ] && [ -z "${DISPLAY:-}" ]; then
+  echo "remote-waypipe: no local WAYLAND_DISPLAY or DISPLAY is set." >&2
+  echo "  Start a local Wayland compositor first, e.g. Wawona or Weston-on-macOS." >&2
+fi
+
+RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
+ENGINE=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^ENGINE=/{print $2}')
+PROVIDER=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^PROVIDER=/{print $2}')
+OS_FAMILY=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^OS_FAMILY=/{print $2}')
+
+if [ "$OS_FAMILY" != "ubuntu" ]; then
+  echo "remote-waypipe: waypipe is currently implemented for Ubuntu instances only." >&2
+  exit 2
+fi
+
+if [ "$ENGINE" = "vagrant" ]; then
+  ./scripts/vagrant-up --plan "$PROFILE" >/dev/null
+  tmp_config="$(mktemp "${TMPDIR:-/tmp}/egame-waypipe-ssh.XXXXXX")"
+  trap 'rm -f "$tmp_config"' EXIT
+  (cd ".generated/$PROFILE" && vagrant ssh-config >"$tmp_config")
+  exec waypipe ssh -F "$tmp_config" default "${APP[@]}"
+fi
+
+SSH_USER=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^SSH_USER=/{print $2}')
+if [ "$ENGINE" = "metal" ] && [ "$PROVIDER" = "raspberry-pi" ] && [ -n "${RASPBERRY_PI_IP:-}" ]; then
+  IP="$RASPBERRY_PI_IP"
+else
+  IP=$(./scripts/instance-ip "$PROFILE")
+fi
+[ -n "$IP" ] || { echo "remote-waypipe: could not resolve IP for $PROFILE" >&2; exit 1; }
+
+KEY_FILE="${SSH_PUBLIC_KEY_FILE:-}"
+if [ -n "$KEY_FILE" ] && [ "${KEY_FILE%.pub}" != "$KEY_FILE" ]; then
+  PRIV_KEY="${KEY_FILE%.pub}"
+else
+  PRIV_KEY="${SSH_PRIVATE_KEY_FILE:-}"
+fi
+
+SSH_OPTS=(-o StrictHostKeyChecking=no -o ServerAliveInterval=10 -o WarnWeakCrypto=no-pq-kex)
+[ -n "$PRIV_KEY" ] && SSH_OPTS+=(-i "$PRIV_KEY" -o IdentitiesOnly=yes)
+
+exec waypipe ssh "${SSH_OPTS[@]}" "$SSH_USER@$IP" "${APP[@]}"

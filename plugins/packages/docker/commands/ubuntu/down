@@ -1,4 +1,4 @@
 #!/usr/bin/env sh
 set -eu
 
-exec ./scripts/package-down-command docker 'sudo systemctl disable --now docker || true; sudo apt-get remove -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin || true'
+exec ./scripts/package-down-command docker 'systemctl --user disable --now docker || true; dockerd-rootless-setuptool.sh uninstall || true; sudo systemctl disable --now docker.service docker.socket || true; sudo apt-get remove -y docker-ce docker-ce-cli docker-ce-rootless-extras docker-buildx-plugin docker-compose-plugin slirp4netns uidmap || true'

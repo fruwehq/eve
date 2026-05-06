@@ -112,6 +112,12 @@ case "$TARGET" in
   remote.vnc)
     exec ./scripts/remote-vnc "$INSTANCE_NAME"
     ;;
+  remote.waypipe)
+    if [ -n "${APP:-}" ]; then
+      exec ./scripts/remote-waypipe "$INSTANCE_NAME" "$APP"
+    fi
+    exec ./scripts/remote-waypipe "$INSTANCE_NAME"
+    ;;
   remote.xpra)
     if [ -z "${APP:-}" ]; then
       echo "Usage: make remote.xpra INSTANCE=<name> APP=<command>" >&2

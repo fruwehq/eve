@@ -1,4 +1,5 @@
 #!/usr/bin/env sh
 set -eu
 
-exec ./scripts/package-status-command docker 'if command -v docker >/dev/null 2>&1; then echo installed; else echo missing; fi'
+# shellcheck disable=SC2016 # Remote command must expand on the VM.
+exec ./scripts/package-status-command docker 'sock="/run/user/$(id -u)/docker.sock"; if command -v docker >/dev/null 2>&1 && [ -S "$sock" ]; then echo installed; else echo missing; fi'
