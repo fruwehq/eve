@@ -199,10 +199,10 @@ fi
 cat >"$tmp_local_catalog" <<'YAML'
 bundles:
   - id: desktop-rustdesk-vnc
-    includes: [rustdesk, vnc, steam]
+    includes: [rustdesk, vnc, waypipe]
 YAML
 if EGAME_CATALOG_LOCAL="$tmp_local_catalog" ./scripts/instance-resolve --registry "$FIXTURE" --instance dev-a --emit json |
-  jq -e '(.bundle_packages | index("steam")) and .package_sources.steam == ["bundle:desktop-rustdesk-vnc"]' >/dev/null; then
+  jq -e '(.bundle_packages | index("waypipe")) and .package_sources.waypipe == ["bundle:desktop-rustdesk-vnc"]' >/dev/null; then
   printf '  [OK] instance resolver honors EGAME_CATALOG_LOCAL\n'
 else
   printf '  [FAIL] instance resolver honors EGAME_CATALOG_LOCAL\n' >&2
@@ -367,7 +367,7 @@ if ./scripts/instance-create \
   mkdir -p "$purge_workdir/purge-dev" "$purge_state/instances"
   printf '{}\n' > "$purge_state/instances/purge-dev.json"
   if EGAME_INSTANCE_REGISTRY="$tmp_registry" EGAME_INSTANCE_WORKDIR="$purge_workdir" EGAME_STATE_DIR="$purge_state" \
-    make package.select INSTANCE=purge-dev PACKAGE=steam >/dev/null &&
+    make package.select INSTANCE=purge-dev PACKAGE=waypipe >/dev/null &&
     EGAME_INSTANCE_REGISTRY="$tmp_registry" EGAME_INSTANCE_WORKDIR="$purge_workdir" EGAME_STATE_DIR="$purge_state" \
       make instance.delete INSTANCE=purge-dev PURGE=1 >/dev/null &&
     [ ! -e "$purge_workdir/purge-dev" ] &&

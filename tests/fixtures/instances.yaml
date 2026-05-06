@@ -54,4 +54,4 @@ instances:
     os: ubuntu-26.04-arm64
     init: ssh-ubuntu-metal
     location: tokyo
-    bundles: [desktop-streaming, desktop-rustdesk-vnc, dev-ai-arm64, gaming-streaming]
+    bundles: [desktop-streaming, desktop-rustdesk-vnc, dev-ai-arm64]
