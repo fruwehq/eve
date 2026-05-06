@@ -5,7 +5,7 @@ instances:
     os: ubuntu-26.04-amd64
     init: ssh-ubuntu-cloud-init
     location: tokyo
-    bundles: [access-gui-safe, dev-sandbox-core]
+    bundles: [desktop-rustdesk-vnc, dev-ai]
     overrides:
       disk_gb: 120
       memory_mb: 12288
@@ -15,14 +15,14 @@ instances:
     os: ubuntu-26.04-arm64
     init: ssh-ubuntu-cloud-init
     location: tokyo
-    bundles: [access-gui-safe, dev-sandbox-core-arm64]
+    bundles: [desktop-rustdesk-vnc, dev-ai-arm64]
 
   - name: aws-gpu-a
     machine: aws-gpu-g5
     os: ubuntu-26.04-amd64
     init: ssh-ubuntu-cloud-init
     location: tokyo
-    bundles: [access-headless, dev-sandbox-core]
+    bundles: [dev-ai]
     overrides:
       disk_gb: 240
       instance_type: g5.xlarge
@@ -33,7 +33,7 @@ instances:
     os: ubuntu-26.04-amd64
     init: ssh-ubuntu-cloud-init
     location: tokyo
-    bundles: [access-gui-streaming, access-gui-safe, dev-sandbox-core, gaming-core]
+    bundles: [desktop-streaming, desktop-rustdesk-vnc, dev-ai, gaming-streaming]
     overrides:
       disk_gb: 64
       vcpus: 1
@@ -43,4 +43,4 @@ instances:
     os: ubuntu-26.04-arm64
     init: ssh-ubuntu-metal
     location: tokyo
-    bundles: [access-gui-streaming, access-gui-safe, dev-sandbox-core-arm64, gaming-core]
+    bundles: [desktop-streaming, desktop-rustdesk-vnc, dev-ai-arm64, gaming-streaming]

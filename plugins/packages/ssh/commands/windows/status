@@ -1,6 +1,0 @@
-#!/usr/bin/env sh
-set -eu
-
-exec ./scripts/package-status-windows ssh \
-  'C:\Windows\System32\OpenSSH\sshd.exe' \
-  'C:\Windows\System32\OpenSSH\ssh.exe'

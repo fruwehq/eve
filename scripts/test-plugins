@@ -29,14 +29,14 @@ profiles:
     machine: local-vmware-medium
     os: ubuntu-26.04-amd64
     init: ssh-ubuntu-cloud-init
-    bundles: [access-headless, dev-sandbox-core]
+    bundles: [dev-ai]
     location: tokyo
 
   - name: vultr-windows-gaming
     machine: vultr-vcg-a40-2c
     os: windows-server-2025
     init: ssh-windows-powershell7
-    bundles: [access-gui-streaming, gaming-core]
+    bundles: [desktop-streaming, gaming-streaming]
     location: tokyo
 YAML
 export EGAME_CATALOG_LOCAL="$profile_catalog"
@@ -356,7 +356,7 @@ fi
 package_list="$(
   EGAME_INSTANCE_REGISTRY="$FIXTURE" make --no-print-directory package.list INSTANCE=dev-a EMIT=json
 )"
-if printf '%s\n' "$package_list" | jq -e '.instance == "dev-a" and (.packages[] | select(.id == "docker" and .selected == true and .supported == true and .plugin == "docker" and (.selected_by | index("bundle:dev-sandbox-core")))) and (.packages[] | select(.id == "steam" and .selected == false and .selected_by == []))' >/dev/null; then
+if printf '%s\n' "$package_list" | jq -e '.instance == "dev-a" and (.packages[] | select(.id == "docker" and .selected == true and .supported == true and .plugin == "docker" and (.selected_by | index("bundle:dev-ai")))) and (.packages[] | select(.id == "steam" and .selected == false and .selected_by == []))' >/dev/null; then
   printf '  [OK] package list shows selected and available packages\n'
 else
   printf '  [FAIL] package list shows selected and available packages\n' >&2
@@ -429,7 +429,7 @@ else
 fi
 
 ubuntu_down_missing=0
-for package in claude codex-cli dev-toolchain docker gnome-desktop goose hermes macos-desktop-theme opencode rdp rustdesk ssh steam sunshine vnc vscode waypipe xpra; do
+for package in claude codex-cli dev-toolchain docker gnome-desktop goose hermes macos-desktop-theme opencode rdp rustdesk steam sunshine vnc vscode waypipe xpra; do
   if [ ! -x "plugins/packages/$package/commands/ubuntu/down" ]; then
     printf '  [FAIL] built-in package missing ubuntu down hook: %s\n' "$package" >&2
     ubuntu_down_missing=$((ubuntu_down_missing + 1))
@@ -442,7 +442,7 @@ else
 fi
 
 ubuntu_status_missing=0
-for package in claude codex-cli dev-toolchain docker gnome-desktop goose hermes macos-desktop-theme opencode rdp rustdesk ssh steam sunshine vnc vscode waypipe xpra; do
+for package in claude codex-cli dev-toolchain docker gnome-desktop goose hermes macos-desktop-theme opencode rdp rustdesk steam sunshine vnc vscode waypipe xpra; do
   if [ ! -x "plugins/packages/$package/commands/ubuntu/status" ]; then
     printf '  [FAIL] built-in package missing ubuntu status hook: %s\n' "$package" >&2
     ubuntu_status_missing=$((ubuntu_status_missing + 1))
@@ -493,7 +493,7 @@ else
   FAIL=$((FAIL + 1))
 fi
 
-hardcoded_down_refs="$(grep -nE '"(claude|codex-cli|dev-toolchain|docker|gnome-desktop|goose|hermes|macos-desktop-theme|opencode|rdp|rustdesk|ssh|steam|sunshine|vscode|vnc|waypipe|xpra)"[[:space:]]*=>' scripts/package-plugin || true)"
+hardcoded_down_refs="$(grep -nE '"(claude|codex-cli|dev-toolchain|docker|gnome-desktop|goose|hermes|macos-desktop-theme|opencode|rdp|rustdesk|steam|sunshine|vscode|vnc|waypipe|xpra)"[[:space:]]*=>' scripts/package-plugin || true)"
 if [ -n "$hardcoded_down_refs" ]; then
   printf '  [FAIL] package-plugin still contains hardcoded package down mappings\n' >&2
   printf '%s\n' "$hardcoded_down_refs" >&2

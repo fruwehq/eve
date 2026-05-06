@@ -28,13 +28,13 @@ end
 def usage
   warn <<~USAGE
     Usage:
-      scripts/instance-create --instance <name> --machine <machine> --os <os-id> --init <init-id> --location <location> [options]
+      scripts/instance-create --instance <name> --machine <machine> --os <os-id> --location <location> [options]
 
     Options:
       --registry <path>
       --machine <machine>
       --os <os-id>
-      --init <init-id>
+      --init <init-id>     Override automatic init selection when more than one init matches.
       --location <location>
       --bundles <bundle-a,bundle-b>
       --packages <package-a,package-b>
@@ -102,9 +102,9 @@ unless name
   exit 2
 end
 
-required_fields = %w[machine os init location]
+required_fields = %w[machine os location]
 if required_fields.any? { |field| fields[field].nil? || fields[field].empty? }
-  warn "instance-create: provide --machine, --os, --init, and --location"
+  warn "instance-create: provide --machine, --os, and --location"
   exit 2
 end
 

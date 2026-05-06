@@ -25,7 +25,7 @@ profiles:
     machine: aws-cheap-x86
     os: ubuntu-26.04-amd64
     init: ssh-ubuntu-cloud-init
-    bundles: [access-headless, dev-sandbox-core]
+    bundles: [dev-ai]
     location: tokyo
 YAML
 export SSH_PUBLIC_KEY_FILE="$TMPKEY"

@@ -28,7 +28,7 @@ choices. Instances live in the git-ignored local registry at
 make catalog.list
 
 # Create a concrete instance entry
-make instance.create INSTANCE=dev-a MACHINE=local-qemu-medium OS=ubuntu-26.04-arm64 INIT=ssh-ubuntu-cloud-init LOCATION=tokyo BUNDLES=access-headless PACKAGES=waypipe DISK_GB=32
+make instance.create INSTANCE=dev-a MACHINE=local-qemu-medium OS=ubuntu-26.04-arm64 LOCATION=tokyo BUNDLES=remote-waypipe DISK_GB=32
 
 # List and inspect concrete instances
 make instance.list
@@ -73,7 +73,7 @@ runs as the VM user through `systemd --user`, and `DOCKER_HOST` points at the
 user socket under `/run/user/<uid>/docker.sock`.
 
 Experimental Wayland app forwarding is available through the `waypipe` package
-and `remote-wayland` bundle:
+and `remote-waypipe` bundle:
 
 ```bash
 make package.select INSTANCE=dev-a PACKAGE=waypipe
@@ -148,7 +148,7 @@ Terraform provider versions are pinned exactly in the Terramate provider templat
 ```bash
 # List catalog choices and create a concrete instance
 make catalog.list
-make instance.create INSTANCE=dev-a MACHINE=local-qemu-medium OS=ubuntu-26.04-arm64 INIT=ssh-ubuntu-cloud-init LOCATION=tokyo BUNDLES=access-headless
+make instance.create INSTANCE=dev-a MACHINE=local-qemu-medium OS=ubuntu-26.04-arm64 LOCATION=tokyo BUNDLES=dev-ai-arm64
 
 # Validate and inspect the instance
 make validate INSTANCE=dev-a
@@ -166,7 +166,7 @@ cp config/catalog.local.example.yaml config/catalog.local.yaml
 
 ```bash
 # Cloud instance (terraform engine)
-make instance.create INSTANCE=aws-dev-a MACHINE=aws-cheap-x86 OS=ubuntu-26.04-amd64 INIT=ssh-ubuntu-cloud-init LOCATION=tokyo BUNDLES=access-headless,dev-sandbox-core
+make instance.create INSTANCE=aws-dev-a MACHINE=aws-cheap-x86 OS=ubuntu-26.04-amd64 LOCATION=tokyo BUNDLES=dev-ai
 make init INSTANCE=aws-dev-a
 make plan INSTANCE=aws-dev-a
 make up INSTANCE=aws-dev-a
@@ -175,13 +175,13 @@ make ssh INSTANCE=aws-dev-a
 make down INSTANCE=aws-dev-a
 
 # Local instance (vagrant engine)
-make instance.create INSTANCE=local-dev-a MACHINE=local-qemu-medium OS=ubuntu-26.04-arm64 INIT=ssh-ubuntu-cloud-init LOCATION=tokyo BUNDLES=access-headless
+make instance.create INSTANCE=local-dev-a MACHINE=local-qemu-medium OS=ubuntu-26.04-arm64 LOCATION=tokyo BUNDLES=dev-ai-arm64
 make plan INSTANCE=local-dev-a
 make up INSTANCE=local-dev-a
 make down INSTANCE=local-dev-a
 
 # TrueNAS instance (real provider wiring)
-make instance.create INSTANCE=truenas-dev-a MACHINE=truenas-scale-medium OS=ubuntu-26.04-amd64 INIT=ssh-ubuntu-cloud-init LOCATION=tokyo BUNDLES=access-headless,dev-sandbox-core
+make instance.create INSTANCE=truenas-dev-a MACHINE=truenas-scale-medium OS=ubuntu-26.04-amd64 LOCATION=tokyo BUNDLES=dev-ai
 make validate INSTANCE=truenas-dev-a
 make info INSTANCE=truenas-dev-a
 

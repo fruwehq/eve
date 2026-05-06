@@ -58,8 +58,7 @@ oses:
 inits:
   - id: ssh-ubuntu-metal
     os_family: ubuntu
-    provider: raspberry-pi
-    features: [ssh, hardening, nonroot-user]
+    providers: [raspberry-pi]
 
 locations:
   - name: home-lan
@@ -74,7 +73,7 @@ instances:
     os: ubuntu-26.04-server-arm64
     init: ssh-ubuntu-metal
     location: home-lan
-    bundles: [access-headless, dev-sandbox-core]
+    bundles: [dev-ai]
 ```
 
 ## Lifecycle expectations
@@ -114,7 +113,7 @@ That is consistent with the repo's move from gaming-only infrastructure to a gen
 
 Good candidates for Raspberry Pi instances here:
 
-- `dev-sandbox-core`
+- `dev-ai`
 - Docker-based experimentation
 - OpenCode or similar CLI/dev-agent environments
 - lightweight self-hosted services

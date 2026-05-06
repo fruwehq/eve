@@ -119,6 +119,44 @@ def resolve_package_sources(catalog, bundle_ids, direct_packages)
   sources.transform_values(&:uniq)
 end
 
+def init_available_for_provider?(init, provider)
+  providers = init["providers"].is_a?(Array) ? init["providers"] : []
+  return providers.include?(provider) unless providers.empty?
+
+  init["provider"].nil? || init["provider"] == provider
+end
+
+def compatible_inits(catalog, machine, os)
+  return [] unless machine && os
+
+  provider = machine["provider"]
+  (catalog["inits"] || []).select do |init|
+    next false unless init.is_a?(Hash)
+    next false if init["os_family"] && init["os_family"] != os["family"]
+
+    init_available_for_provider?(init, provider)
+  end
+end
+
+def resolve_init!(catalog, composition, machine, os)
+  if composition["init"] && !composition["init"].to_s.empty?
+    return by_key(catalog, "inits", "id", composition["init"])
+  end
+
+  candidates = compatible_inits(catalog, machine, os)
+  if candidates.length == 1
+    composition["init"] = candidates.first.fetch("id")
+    return candidates.first
+  end
+
+  if candidates.empty?
+    raise "No init supports machine #{composition["machine"]} with OS #{composition["os"]}"
+  end
+
+  ids = candidates.map { |candidate| candidate["id"] }.join(", ")
+  raise "Multiple inits support machine #{composition["machine"]} with OS #{composition["os"]}; choose one of: #{ids}"
+end
+
 def validate!(catalog, composition, machine, os, init, location, bundle_packages)
   raise "Machine not found: #{composition["machine"]}" unless machine
   raise "OS not found: #{composition["os"]}" unless os
@@ -129,8 +167,9 @@ def validate!(catalog, composition, machine, os, init, location, bundle_packages
     raise "Init/OS mismatch: init #{init["id"]} expects #{init["os_family"]}, got #{os["family"]}"
   end
 
-  if init["provider"] && init["provider"] != machine["provider"]
-    raise "Init/provider mismatch: init #{init["id"]} expects #{init["provider"]}, got #{machine["provider"]}"
+  unless init_available_for_provider?(init, machine["provider"])
+    expected = init["providers"].is_a?(Array) ? init["providers"].join(", ") : init["provider"]
+    raise "Init/provider mismatch: init #{init["id"]} expects provider #{expected}, got machine provider #{machine["provider"]}"
   end
 
   provider = machine["provider"]
@@ -323,12 +362,14 @@ begin
 
   machine = by_key(catalog, "machines", "name", composition["machine"])
   os = by_key(catalog, "oses", "id", composition["os"])
-  init = by_key(catalog, "inits", "id", composition["init"])
   location = by_key(catalog, "locations", "name", composition["location"])
 
-  machine = deep_merge(machine, {
-    "defaults" => deep_merge(machine&.fetch("defaults", nil) || {}, instance["overrides"] || {})
-  })
+  if machine
+    machine = deep_merge(machine, {
+      "defaults" => deep_merge(machine.fetch("defaults", nil) || {}, instance["overrides"] || {})
+    })
+  end
+  init = resolve_init!(catalog, composition, machine, os)
 
   direct_packages = composition["packages"] || []
   package_sources = resolve_package_sources(catalog, composition["bundles"] || [], direct_packages)

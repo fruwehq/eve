@@ -70,6 +70,13 @@ def os_available_for_provider?(os, provider)
   end
 end
 
+def init_available_for_provider?(init, provider)
+  providers = init["providers"].is_a?(Array) ? init["providers"] : []
+  return providers.include?(provider) unless providers.empty?
+
+  init["provider"].nil? || init["provider"] == provider
+end
+
 catalog = {
   "machines" => [],
   "oses" => [],
@@ -106,7 +113,7 @@ catalog["machines"].each do |machine|
 
     catalog["inits"].each do |init|
       next if init["os_family"] && init["os_family"] != os["family"]
-      next if init["provider"] && init["provider"] != provider
+      next unless init_available_for_provider?(init, provider)
 
       catalog["locations"].each do |location|
         next unless location[provider]

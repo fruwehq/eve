@@ -46,7 +46,7 @@ if json
 end
 
 if instances.empty?
-  puts "No instances found. Create one with: make instance.create INSTANCE=<name> MACHINE=<machine> OS=<os> INIT=<init> LOCATION=<location>"
+  puts "No instances found. Create one with: make instance.create INSTANCE=<name> MACHINE=<machine> OS=<os> LOCATION=<location>"
   exit 0
 end
 

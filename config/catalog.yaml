@@ -161,20 +161,15 @@ oses:
 inits:
   - id: ssh-ubuntu-cloud-init
     os_family: ubuntu
-    features: [ssh, hardening, nonroot-user]
+    providers: [aws, local-qemu, local-virtualbox, local-vmware, truenas]
 
   - id: ssh-ubuntu-metal
     os_family: ubuntu
-    features: [ssh, hardening]
+    providers: [raspberry-pi]
 
   - id: ssh-windows-powershell7
     os_family: windows
-    features: [ssh, hardening]
-
-  - id: ssm-aws-linux
-    os_family: ubuntu
-    provider: aws
-    features: [ssm, ssh-optional]
+    providers: [vultr]
 
 # -----------------------------------------------------------------------------
 # Workload package catalog
@@ -191,7 +186,6 @@ packages:
   - id: opencode
   - id: rdp
   - id: rustdesk
-  - id: ssh
   - id: steam
   - id: sunshine
   - id: vscode
@@ -203,40 +197,37 @@ packages:
 # Bundle catalog (composable package groups)
 # -----------------------------------------------------------------------------
 bundles:
-  - id: access-headless
-    includes: [ssh]
+  - id: desktop-rustdesk-vnc
+    includes: [rustdesk, vnc]
 
-  - id: access-gui-safe
-    includes: [ssh, rustdesk, vnc]
+  - id: desktop-gnome
+    includes: [gnome-desktop, rustdesk]
 
-  - id: access-gui-gnome
-    includes: [ssh, gnome-desktop, rustdesk]
+  - id: desktop-gnome-mac
+    includes: [gnome-desktop, macos-desktop-theme, rustdesk]
 
-  - id: access-gui-gnome-mac
-    includes: [ssh, gnome-desktop, macos-desktop-theme, rustdesk]
+  - id: desktop-vnc
+    includes: [vnc]
 
-  - id: access-gui-vnc
-    includes: [ssh, vnc]
+  - id: desktop-streaming
+    includes: [sunshine, rustdesk]
 
-  - id: access-gui-streaming
-    includes: [ssh, sunshine, rustdesk]
+  - id: remote-xpra
+    includes: [xpra]
 
-  - id: remote-apps
-    includes: [ssh, xpra]
+  - id: remote-waypipe
+    includes: [waypipe]
 
-  - id: remote-wayland
-    includes: [ssh, waypipe]
-
-  - id: dev-sandbox-core
+  - id: dev-ai
     includes: [docker, dev-toolchain, goose, claude, codex-cli, hermes, opencode, vscode]
 
-  - id: dev-sandbox-core-arm64
+  - id: dev-ai-arm64
     # goose currently does not publish a Linux aarch64 archive, so ARM local/Pi
     # environments use the rest of the AI/dev tooling until upstream support
     # exists.
     includes: [docker, dev-toolchain, claude, codex-cli, hermes, opencode, vscode]
 
-  - id: gaming-core
+  - id: gaming-streaming
     includes: [sunshine, steam, rustdesk]
 
 # -----------------------------------------------------------------------------

@@ -80,12 +80,22 @@ tests/golden/                  # Frozen instance env snapshots
 3. Thread it through `scripts/tf-env` as a `TF_VAR_*` if terraform needs it (remember to gate it inside the right `PROVIDER` case), or use it directly via the exported environment.
 4. Do **not** use `${VAR:-fallback}` in scripts — the fallback belongs in `.env`.
 
-## Adding a new machine / OS / bundle
+## Adding a new machine / OS / init / bundle
 
 1. Edit `config/catalog.yaml` — add entries under the relevant top-level key (`machines`, `oses`, `inits`, `bundles`, `packages`, or `locations`).
 2. Run `make catalog.list` to confirm the provider/platform/content choices are exposed as expected.
 3. If instance resolution changes emitted env, run `make test.update-golden` to refresh `tests/golden/instances/<name>.env`.
 4. Run `make test` — all suites must pass before committing.
+
+## Init model
+
+Init entries are bootstrap/access methods, not user-facing workload choices. They exist so the manager can reach a machine and start normal provisioning, usually through SSH. Prefer exactly one valid init for a given provider/machine/OS combination and let `instance-create` infer it.
+
+- Use `providers: [...]` on init entries to bind them to provider implementations such as `raspberry-pi` or `vultr`.
+- Do not add descriptive-only fields such as `features`; package and bundle manifests model capabilities.
+- Only expose or require `INIT=` when there is a real ambiguous bootstrap choice for the same provider/machine/OS combination.
+- Keep graphical/user tooling decisions in packages and bundles, not in init metadata.
+- SSH is baseline management access from init/provider plumbing. Do not model SSH as a removable package or bundle entry.
 
 ## Provider conventions
 

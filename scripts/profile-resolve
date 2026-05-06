@@ -174,7 +174,9 @@ else
     error("Init/OS mismatch: init \($i.id) expects \($i.os_family), got OS family \($o.family)")
   else . end |
 
-  if (($i.provider // "") != "" and ($i.provider != ($m.provider // ""))) then
+  if ((($i.providers // []) | length) > 0 and (($i.providers // []) | index($m.provider // "") == null)) then
+    error("Init/provider mismatch: init \($i.id) expects provider \($i.providers | join(", ")), got machine provider \($m.provider)")
+  elif (($i.provider // "") != "" and ($i.provider != ($m.provider // ""))) then
     error("Init/provider mismatch: init \($i.id) expects provider \($i.provider), got machine provider \($m.provider)")
   else . end |
 

@@ -35,9 +35,9 @@ This layered approach replaces rigid provider/os/purpose presets and avoids comb
 
 ## Access methods (requested)
 
-Access is no longer tied to one preset path. It is expressed as bundles/components:
+SSH management access is provided by init and is always expected. User-facing
+remote access beyond that is expressed as bundles/components:
 
-- `ssh`
 - `rdp` (Windows or Linux GUI workloads if needed)
 - `sunshine`
 - `rustdesk`
@@ -46,8 +46,8 @@ Access is no longer tied to one preset path. It is expressed as bundles/componen
 
 - **Sunshine**: best for low-latency streaming workflows (gaming / high-FPS desktop interaction).
 - **RustDesk**: best for admin/support fallback and remote troubleshooting.
-- Recommended combo for GUI machines: `sunshine + rustdesk + ssh`.
-- For headless dev sandboxes: usually `ssh` only.
+- Recommended combo for GUI machines: `sunshine + rustdesk` plus baseline SSH.
+- For headless dev sandboxes: baseline SSH is enough unless dev packages are selected.
 
 ---
 
@@ -164,16 +164,11 @@ oses:
 inits:
   - id: ssh-ubuntu-cloud-init
     os_family: ubuntu
-    features: [ssh, hardening, nonroot-user]
+    providers: [aws, local-qemu, local-virtualbox, local-vmware, truenas]
 
   - id: ssh-windows-powershell7
     os_family: windows
-    features: [ssh, hardening]
-
-  - id: ssm-aws-linux
-    os_family: ubuntu
-    provider: aws
-    features: [ssm, ssh-optional]
+    providers: [vultr]
 
 packages:
   - id: goose
@@ -185,19 +180,16 @@ packages:
   - id: steam
 
 bundles:
-  - id: access-headless
-    includes: [ssh]
-
-  - id: access-gui-safe
+  - id: desktop-rustdesk-vnc
     includes: [rustdesk]
 
-  - id: access-gui-streaming
+  - id: desktop-streaming
     includes: [rustdesk, sunshine]
 
-  - id: dev-sandbox-core
+  - id: dev-ai
     includes: [docker, dev-toolchain, goose, codex-cli]
 
-  - id: gaming-core
+  - id: gaming-streaming
     includes: [sunshine, steam, rustdesk]
 
 locations:
@@ -217,7 +209,7 @@ instances:
     machine: aws-cheap-x86
     os: ubuntu-26.04-amd64
     init: ssh-ubuntu-cloud-init
-    bundles: [access-headless, dev-sandbox-core]
+    bundles: [dev-ai]
     location: tokyo
     lifecycle:
       ttl_hours: 168
@@ -229,14 +221,14 @@ instances:
     machine: aws-cheap-x86
     os: ubuntu-26.04-amd64
     init: ssh-ubuntu-cloud-init
-    bundles: [access-gui-safe, dev-sandbox-core]
+    bundles: [desktop-rustdesk-vnc, dev-ai]
     location: tokyo
 
   - name: vultr-windows-gaming
     machine: vultr-vcg-a40-2c
     os: windows-server-2025
     init: ssh-windows-powershell7
-    bundles: [access-gui-streaming, gaming-core]
+    bundles: [desktop-streaming, gaming-streaming]
     location: tokyo
 ```
 
@@ -281,7 +273,7 @@ Given your current Terramate/Terraform layout:
 
 ## Phase 3: GUI and remote access bundles
 
-- Add `access-gui-safe` (RustDesk) and `access-gui-streaming` (Sunshine+RustDesk).
+- Add `desktop-rustdesk-vnc` and `desktop-streaming` (Sunshine+RustDesk).
 - Add Linux GUI package bundles.
 
 ## Phase 4: Local providers (Vagrant-first)
@@ -413,7 +405,7 @@ Keep commands instance-first:
 
 ```bash
 make catalog.list
-make instance.create INSTANCE=aws-dev-a MACHINE=aws-cheap-x86 OS=ubuntu-26.04-amd64 INIT=ssh-ubuntu-cloud-init LOCATION=tokyo BUNDLES=access-headless,dev-sandbox-core
+make instance.create INSTANCE=aws-dev-a MACHINE=aws-cheap-x86 OS=ubuntu-26.04-amd64 LOCATION=tokyo BUNDLES=dev-ai
 make instance.validate INSTANCE=aws-dev-a
 make plan INSTANCE=aws-dev-a
 make up INSTANCE=aws-dev-a
@@ -429,7 +421,7 @@ For your immediate safe sandbox need:
 
 - Start with instance: `aws-ubuntu-dev-headless`
 - OS: `ubuntu-26.04-amd64`
-- Access bundle: `ssh` only
+- Access: SSH is baseline management access from init.
 - Workloads: `goose + codex-cli + docker + dev-toolchain`
 - Lifecycle: 7-day TTL with reminders and stop→grace→destroy flow
 
@@ -437,6 +429,6 @@ For GUI-required workflows, add:
 
 - instance: `aws-ubuntu-dev-gui`
 - OS: `ubuntu-26.04-amd64`
-- Access bundle: `sunshine + rustdesk + ssh`
+- Access bundle: `sunshine + rustdesk`
 
 This gives a clean layered system while preserving your existing cloud gaming workflows.

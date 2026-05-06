@@ -89,7 +89,6 @@ def create_instance_args(
         f"INSTANCE={name}",
         f"MACHINE={platform_choice.get('machine', '')}",
         f"OS={platform_choice.get('os', '')}",
-        f"INIT={platform_choice.get('init', '')}",
         f"LOCATION={platform_choice.get('location', '')}",
     ]
     if bundles:
@@ -236,7 +235,8 @@ def run_tui() -> int:
         }
 
         #new-dialog {
-            width: 96;
+            width: 118;
+            max-width: 96%;
             height: auto;
             border: round $primary;
             background: $surface;
@@ -248,18 +248,41 @@ def run_tui() -> int:
             margin-bottom: 1;
         }
 
-        #provider-cards,
+        #override-row {
+            height: 4;
+        }
+
+        #override-row Input {
+            width: 1fr;
+            margin-right: 1;
+        }
+
+        #content-selects {
+            height: 15;
+            margin-bottom: 1;
+        }
+
+        .content-column {
+            width: 1fr;
+            margin-right: 1;
+        }
+
         #platform-cards {
-            height: 14;
+            height: 16;
             margin-bottom: 1;
         }
 
         #bundle-select {
-            height: 8;
+            height: 12;
         }
 
         #package-select {
             height: 12;
+        }
+
+        #included-packages {
+            height: 2;
+            margin-bottom: 1;
         }
 
         .wizard-hidden {
@@ -276,7 +299,6 @@ def run_tui() -> int:
             options: dict[str, Any],
         ) -> None:
             super().__init__()
-            self.providers = [str(provider) for provider in options.get("providers", [])]
             self.platforms = [
                 cast(dict[str, Any], platform)
                 for platform in options.get("platforms", [])
@@ -292,8 +314,8 @@ def run_tui() -> int:
                 if isinstance(package, dict) and package.get("id")
             ]
             self.step = 0
-            self.selected_provider = self.providers[0] if self.providers else ""
             self.selected_platform_id = ""
+            self.rendered_bundled_package_ids: set[str] = set()
             self.platform_by_id = {
                 str(platform_choice.get("id")): platform_choice
                 for platform_choice in self.platforms
@@ -303,38 +325,36 @@ def run_tui() -> int:
         def compose(self) -> ComposeResult:
             with Vertical(id="new-dialog"):
                 yield Label(
-                    "[b]New Instance[/b]  [dim]1 Name -> 2 Provider -> 3 Platform -> 4 Content -> 5 Review[/dim]"
+                    "[b]New Instance[/b]  [dim]1 Name -> 2 Platform -> 3 Content -> 4 Review[/dim]"
                 )
                 with Vertical(id="step-name"):
                     yield Input(placeholder="instance name", id="new-name")
                     yield Static("Use a short lowercase name, for example dev-a or windows-test.", classes="muted")
-                with Vertical(id="step-provider"):
-                    yield Static("Choose where the VM should live. Use ↑/↓ and Enter.", classes="muted")
-                    yield DataTable(id="provider-cards")
                 with Vertical(id="step-platform"):
-                    yield Static("Choose a supported machine / OS / init / location combination.", classes="muted")
+                    yield Static("Choose a supported provider / machine / OS / location combination.", classes="muted")
                     yield DataTable(id="platform-cards")
                     yield Static("", id="platform-defaults")
                 with Vertical(id="step-content"):
                     yield Static("", id="resource-defaults")
-                    yield Input(placeholder="disk GB override", id="new-disk")
-                    yield Input(placeholder="memory MB override", id="new-memory")
-                    yield Static("Bundles", classes="muted")
-                    yield SelectionList(
-                        *(
-                            (self.bundle_label(bundle), str(bundle.get("id")))
-                            for bundle in self.bundles
-                            if bundle.get("id")
-                        ),
-                        id="bundle-select",
-                        disabled=not self.bundles,
-                    )
-                    yield Static("Additional packages", classes="muted")
-                    yield SelectionList(
-                        *((package, package) for package in self.packages),
-                        id="package-select",
-                        disabled=not self.packages,
-                    )
+                    with Horizontal(id="override-row"):
+                        yield Input(placeholder="disk GB override", id="new-disk")
+                        yield Input(placeholder="memory MB override", id="new-memory")
+                    with Horizontal(id="content-selects"):
+                        with Vertical(classes="content-column"):
+                            yield Static("Bundles", classes="muted")
+                            yield SelectionList(
+                                *(
+                                    (self.bundle_label(bundle), str(bundle.get("id")))
+                                    for bundle in self.bundles
+                                    if bundle.get("id")
+                                ),
+                                id="bundle-select",
+                                disabled=not self.bundles,
+                            )
+                        with Vertical(classes="content-column"):
+                            yield Static("Additional packages", classes="muted")
+                            yield SelectionList(id="package-select", disabled=not self.packages)
+                    yield Static("", id="included-packages", classes="muted")
                 with Vertical(id="step-review"):
                     yield Static("", id="review")
                 with Horizontal():
@@ -344,36 +364,20 @@ def run_tui() -> int:
                     yield Button("Create", id="create", variant="success")
 
         def on_mount(self) -> None:
-            self.populate_provider_cards()
             self.populate_platform_cards()
             self.update_wizard()
 
         def bundle_label(self, bundle: dict[str, Any]) -> str:
             includes = bundle.get("includes", [])
             include_text = ", ".join(str(package) for package in includes) if isinstance(includes, list) else ""
-            return f"{bundle.get('id')}  ({include_text})" if include_text else str(bundle.get("id"))
-
-        def populate_provider_cards(self) -> None:
-            table = self.query_one("#provider-cards", DataTable)
-            table.cursor_type = "row"
-            table.add_columns("Provider", "Supported platforms")
-            for provider in self.providers:
-                count = sum(1 for platform in self.platforms if platform.get("provider") == provider)
-                table.add_row(provider, f"{count} combinations", key=provider)
-            if self.providers:
-                table.move_cursor(row=0, column=0, animate=False)
+            return f"{bundle.get('id')}\n  {include_text}" if include_text else str(bundle.get("id"))
 
         def populate_platform_cards(self) -> None:
             table = self.query_one("#platform-cards", DataTable)
             table.cursor_type = "row"
             table.clear(columns=True)
-            table.add_columns("Machine", "OS", "Init", "Location", "Defaults")
-            filtered = [
-                platform_choice
-                for platform_choice in self.platforms
-                if platform_choice.get("provider") == self.selected_provider
-            ]
-            for platform_choice in filtered:
+            table.add_columns("Provider", "Machine", "OS", "Location", "Defaults")
+            for platform_choice in self.platforms:
                 defaults = (
                     platform_choice.get("defaults", {}) if isinstance(platform_choice.get("defaults"), dict) else {}
                 )
@@ -388,15 +392,15 @@ def run_tui() -> int:
                 if memory:
                     default_parts.append(f"{memory} MB")
                 table.add_row(
+                    str(platform_choice.get("provider") or "-"),
                     str(platform_choice.get("machine") or "-"),
                     str(platform_choice.get("os") or "-"),
-                    str(platform_choice.get("init") or "-"),
                     str(platform_choice.get("location") or "-"),
                     ", ".join(default_parts) if default_parts else "-",
                     key=str(platform_choice.get("id")),
                 )
-            if filtered:
-                self.selected_platform_id = str(filtered[0].get("id"))
+            if self.platforms:
+                self.selected_platform_id = str(self.platforms[0].get("id"))
                 table.move_cursor(row=0, column=0, animate=False)
             else:
                 self.selected_platform_id = ""
@@ -421,6 +425,22 @@ def run_tui() -> int:
                     packages.extend(str(package) for package in includes)
             return sorted(set(packages))
 
+        def sync_package_options(self) -> None:
+            package_list = self.query_one("#package-select", SelectionList)
+            bundled = set(self.bundled_packages())
+            if bundled == self.rendered_bundled_package_ids and package_list.option_count:
+                return
+
+            selected = [package for package in self.selected_packages() if package not in bundled]
+            package_options: list[Any] = [
+                (package, package, package in selected)
+                for package in self.packages
+                if package not in bundled
+            ]
+            package_list.set_options(package_options)
+            package_list.disabled = package_list.option_count == 0
+            self.rendered_bundled_package_ids = bundled
+
         def platform_default_lines(self, platform_choice: dict[str, Any]) -> list[str]:
             defaults = platform_choice.get("defaults", {}) if isinstance(platform_choice.get("defaults"), dict) else {}
             return [
@@ -435,13 +455,12 @@ def run_tui() -> int:
             ]
 
         def update_wizard(self) -> None:
-            for index, widget_id in enumerate(
-                ("step-name", "step-provider", "step-platform", "step-content", "step-review")
-            ):
+            for index, widget_id in enumerate(("step-name", "step-platform", "step-content", "step-review")):
                 self.query_one(f"#{widget_id}", Vertical).display = index == self.step
 
             platform_choice = self.selected_platform()
             defaults = platform_choice.get("defaults", {}) if isinstance(platform_choice.get("defaults"), dict) else {}
+            self.sync_package_options()
             self.query_one("#platform-defaults", Static).update("\n".join(self.platform_default_lines(platform_choice)))
             self.query_one("#resource-defaults", Static).update(
                 "Leave overrides empty to use platform defaults: "
@@ -459,6 +478,9 @@ def run_tui() -> int:
             package_text = ", ".join(selected_packages) if selected_packages else "(none)"
             bundled_text = ", ".join(bundled_packages) if bundled_packages else "(none)"
             bundle_text = ", ".join(selected_bundles) if selected_bundles else "(none)"
+            self.query_one("#included-packages", Static).update(
+                "Included by selected bundles (locked): " + bundled_text
+            )
             command = create_instance_args(
                 name,
                 platform_choice,
@@ -484,43 +506,33 @@ def run_tui() -> int:
             )
 
             self.query_one("#back", Button).disabled = self.step == 0
-            self.query_one("#next", Button).display = self.step < 4
-            self.query_one("#create", Button).display = self.step == 4
+            self.query_one("#next", Button).display = self.step < 3
+            self.query_one("#create", Button).display = self.step == 3
 
         def focus_current_step(self) -> None:
             if self.step == 0:
                 self.query_one("#new-name", Input).focus()
             elif self.step == 1:
-                self.query_one("#provider-cards", DataTable).focus()
-            elif self.step == 2:
                 self.query_one("#platform-cards", DataTable).focus()
-            elif self.step == 3:
+            elif self.step == 2:
                 self.query_one("#new-disk", Input).focus()
             else:
                 self.query_one("#create", Button).focus()
 
         def set_step(self, step: int) -> None:
-            self.step = max(0, min(4, step))
+            self.step = max(0, min(3, step))
             self.update_wizard()
             self.focus_current_step()
 
         def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
-            if event.data_table.id == "provider-cards":
-                self.selected_provider = str(event.row_key.value)
-                self.populate_platform_cards()
-                self.update_wizard()
-            elif event.data_table.id == "platform-cards":
+            if event.data_table.id == "platform-cards":
                 self.selected_platform_id = str(event.row_key.value)
                 self.update_wizard()
 
         def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
-            if event.data_table.id == "provider-cards":
-                self.selected_provider = str(event.row_key.value)
-                self.populate_platform_cards()
-                self.set_step(2)
-            elif event.data_table.id == "platform-cards":
+            if event.data_table.id == "platform-cards":
                 self.selected_platform_id = str(event.row_key.value)
-                self.set_step(3)
+                self.set_step(2)
 
         def on_selection_list_selected_changed(self, event: Any) -> None:
             self.update_wizard()
@@ -552,10 +564,7 @@ def run_tui() -> int:
                 if self.step == 0 and not name:
                     self.notify("Name is required", severity="error")
                     return
-                if self.step == 1 and not self.selected_provider:
-                    self.notify("Provider is required", severity="error")
-                    return
-                if self.step == 2 and not self.selected_platform():
+                if self.step == 1 and not self.selected_platform():
                     self.notify("Platform is required", severity="error")
                     return
                 self.set_step(self.step + 1)
@@ -973,7 +982,7 @@ def run_tui() -> int:
 
         def render_empty_state(self) -> None:
             hero_art = [
-                "████████        ████                ",
+                "                ████                ",
                 "            ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓ ▓▓▓▓▓▓▓▓▓▓▓▓            ",
                 "        █ ▓▓▓▓▓▓▒▒▒▒▒▒▒▒▓▒▒▒▒▒▒▓▓▓▓█▓▓▓▒▒▒▒▒▒▓▓█        ",
                 "     ▓▓▓▓▓▒▒▒▒░░ ░░ ░ ░░░░░ ░░▒▒░▒▒▓▓▓█▓▓▒░▒▒▓▓▓▓     ░▓",
