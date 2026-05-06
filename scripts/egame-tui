@@ -308,9 +308,11 @@ def run_tui() -> int:
             first_recipe = self.recipes[0] if self.recipes else ""
             recipe_options = [(recipe, recipe) for recipe in self.recipes]
             with Vertical(id="new-dialog"):
-                yield Label("[b]New Instance[/b]  [dim]1 Recipe -> 2 Options -> 3 Review[/dim]")
-                with Vertical(id="step-recipe"):
+                yield Label("[b]New Instance[/b]  [dim]1 Name -> 2 Recipe -> 3 Options -> 4 Review[/dim]")
+                with Vertical(id="step-name"):
                     yield Input(placeholder="instance name", id="new-name")
+                    yield Static("Use a short lowercase name, for example dev-a or windows-test.", classes="muted")
+                with Vertical(id="step-recipe"):
                     yield Select(
                         recipe_options,
                         prompt="recipe",
@@ -364,7 +366,7 @@ def run_tui() -> int:
             ]
 
         def update_wizard(self) -> None:
-            for index, widget_id in enumerate(("step-recipe", "step-options", "step-review")):
+            for index, widget_id in enumerate(("step-name", "step-recipe", "step-options", "step-review")):
                 self.query_one(f"#{widget_id}", Vertical).display = index == self.step
 
             recipe = self.selected_recipe()
@@ -399,8 +401,8 @@ def run_tui() -> int:
             )
 
             self.query_one("#back", Button).disabled = self.step == 0
-            self.query_one("#next", Button).display = self.step < 2
-            self.query_one("#create", Button).display = self.step == 2
+            self.query_one("#next", Button).display = self.step < 3
+            self.query_one("#create", Button).display = self.step == 3
 
         def on_select_changed(self, event: Select.Changed) -> None:
             if event.select.id == "new-recipe":
@@ -423,10 +425,13 @@ def run_tui() -> int:
                 return
             if event.button.id == "next":
                 name = self.query_one("#new-name", Input).value.strip()
-                if self.step == 0 and (not name or not self.selected_recipe()):
+                if self.step == 0 and not name:
+                    self.notify("Name is required", severity="error")
+                    return
+                if self.step == 1 and not self.selected_recipe():
                     self.notify("Name and recipe are required", severity="error")
                     return
-                self.step = min(2, self.step + 1)
+                self.step = min(3, self.step + 1)
                 self.update_wizard()
                 return
             if event.button.id != "create":
@@ -491,6 +496,18 @@ def run_tui() -> int:
         #right {
             width: 1fr;
             padding: 1;
+        }
+
+        #empty-state {
+            height: 1fr;
+            content-align: center middle;
+            border: round $primary;
+            background: black;
+            color: white;
+        }
+
+        #instance-detail {
+            height: 1fr;
         }
 
         #state-strip {
@@ -580,34 +597,36 @@ def run_tui() -> int:
                         yield Input(placeholder="Filter instances", id="filter")
                         yield DataTable(id="instances")
                     with Vertical(id="right"):
-                        yield Static("Select an instance.", id="title", classes="section-title")
-                        with Horizontal(id="state-strip"):
-                            yield Static("Provider\nunknown", id="provider-pill", classes="pill")
-                            yield Static("Provision\nunknown", id="provision-pill", classes="pill")
-                            yield Static("Packages\nunknown", id="packages-pill", classes="pill")
-                        with Horizontal(id="connect-strip"):
-                            yield Button("SSH", id="connect-ssh")
-                            yield Button("Sunshine", id="connect-sunshine")
-                            yield Button("RustDesk", id="connect-rustdesk")
-                            yield Button("Refresh", id="refresh", variant="primary")
-                            yield Button("Up", id="provider-up", variant="success")
-                            yield Button("Stop", id="provider-stop", variant="warning")
-                            yield Button("Provision", id="provision", variant="primary")
-                            yield Button("Destroy", id="provider-down", variant="error")
-                            yield Button("Delete", id="delete-instance", variant="error")
-                        with Horizontal(id="detail-grid"):
-                            with Vertical(id="packages-pane"):
-                                yield Static("Packages", classes="section-title")
-                                yield DataTable(id="packages")
-                                with Horizontal():
-                                    yield Button("Status", id="package-status")
-                                    yield Button("Select", id="package-select")
-                                    yield Button("Unselect", id="package-unselect")
-                                    yield Button("Install", id="package-install", variant="success")
-                                    yield Button("Down", id="package-down", variant="warning")
-                            with Vertical(id="ops-pane"):
-                                yield Static("Recent Ops", classes="section-title")
-                                yield Static("No operations yet.", id="ops")
+                        yield Static("Please, select an instance", id="empty-state")
+                        with Vertical(id="instance-detail"):
+                            yield Static("Select an instance.", id="title", classes="section-title")
+                            with Horizontal(id="state-strip"):
+                                yield Static("Provider\nunknown", id="provider-pill", classes="pill")
+                                yield Static("Provision\nunknown", id="provision-pill", classes="pill")
+                                yield Static("Packages\nunknown", id="packages-pill", classes="pill")
+                            with Horizontal(id="connect-strip"):
+                                yield Button("SSH", id="connect-ssh")
+                                yield Button("Sunshine", id="connect-sunshine")
+                                yield Button("RustDesk", id="connect-rustdesk")
+                                yield Button("Refresh", id="refresh", variant="primary")
+                                yield Button("Up", id="provider-up", variant="success")
+                                yield Button("Stop", id="provider-stop", variant="warning")
+                                yield Button("Provision", id="provision", variant="primary")
+                                yield Button("Destroy", id="provider-down", variant="error")
+                                yield Button("Delete", id="delete-instance", variant="error")
+                            with Horizontal(id="detail-grid"):
+                                with Vertical(id="packages-pane"):
+                                    yield Static("Packages", classes="section-title")
+                                    yield DataTable(id="packages")
+                                    with Horizontal():
+                                        yield Button("Status", id="package-status")
+                                        yield Button("Select", id="package-select")
+                                        yield Button("Unselect", id="package-unselect")
+                                        yield Button("Install", id="package-install", variant="success")
+                                        yield Button("Down", id="package-down", variant="warning")
+                                with Vertical(id="ops-pane"):
+                                    yield Static("Recent Ops", classes="section-title")
+                                    yield Static("No operations yet.", id="ops")
                 yield RichLog(id="output", markup=True, wrap=True, highlight=True)
             yield Footer()
 
@@ -647,13 +666,15 @@ def run_tui() -> int:
 
         def animate_hero(self) -> None:
             frames = [
-                "[primary]◇[/] ephemeral vm cockpit  [success]ready[/]",
-                "[primary]◈[/] ephemeral vm cockpit  [success]ready[/]",
-                "[primary]◆[/] ephemeral vm cockpit  [success]ready[/]",
-                "[primary]◈[/] ephemeral vm cockpit  [success]ready[/]",
+                "[primary]◇[/] ephemeral vm cockpit  [success]ready[/]  [dim]create -> provision -> connect[/dim]",
+                "[primary]◈[/] ephemeral vm cockpit  [success]ready[/]  [dim]create -> provision -> connect[/dim]",
+                "[primary]◆[/] ephemeral vm cockpit  [success]ready[/]  [dim]create -> provision -> connect[/dim]",
+                "[primary]◈[/] ephemeral vm cockpit  [success]ready[/]  [dim]create -> provision -> connect[/dim]",
             ]
             self.query_one("#hero", Static).update(frames[self.hero_frame % len(frames)])
             self.hero_frame += 1
+            if self.current_instance is None:
+                self.render_empty_state()
 
         def log_line(self, message: str) -> None:
             self.query_one("#output", RichLog).write(message)
@@ -723,8 +744,6 @@ def run_tui() -> int:
 
             if previous and previous in self.statuses:
                 self.current_instance = previous
-            elif not self.current_instance and rows:
-                self.current_instance = str(rows[0].get("name"))
             elif self.current_instance not in self.statuses:
                 self.current_instance = None
 
@@ -754,6 +773,9 @@ def run_tui() -> int:
                     str(row.get("recipe") or "-"),
                     key=name,
                 )
+            if self.current_instance is None:
+                table.move_cursor(row=0, column=0, animate=False, scroll=True)
+                table.focus()
 
         async def refresh_current_status(self) -> None:
             if not self.current_instance:
@@ -774,6 +796,9 @@ def run_tui() -> int:
             self.update_action_state()
 
         def render_empty_detail(self) -> None:
+            self.query_one("#empty-state", Static).display = True
+            self.query_one("#instance-detail", Vertical).display = False
+            self.render_empty_state()
             self.query_one("#provider-pill", Static).update("Provider\nunknown")
             self.query_one("#provision-pill", Static).update("Provision\nunknown")
             self.query_one("#packages-pill", Static).update("Packages\nunknown")
@@ -781,6 +806,8 @@ def run_tui() -> int:
             self.query_one("#ops", Static).update("No instance selected.")
 
         def render_detail(self) -> None:
+            self.query_one("#empty-state", Static).display = False
+            self.query_one("#instance-detail", Vertical).display = True
             status = self.current_status or {}
             instance = status.get("instance", {})
             state = status.get("state", {})
@@ -801,6 +828,21 @@ def run_tui() -> int:
             self.query_one("#packages-pill", Static).update(f"Packages\n{package_text}")
             self.render_packages(status)
             self.render_ops(status)
+
+        def render_empty_state(self) -> None:
+            frames = ["◇", "◈", "◆", "◈"]
+            frame = frames[self.hero_frame % len(frames)]
+            self.query_one("#empty-state", Static).update(
+                "\n".join(
+                    [
+                        f"[primary]{frame}[/]",
+                        "[b]Please, select an instance[/b]",
+                        "",
+                        "The instance list is focused.",
+                        "Press Enter on << New Instance >> to create one.",
+                    ]
+                )
+            )
 
         def render_packages(self, status: dict[str, Any]) -> None:
             table = self.query_one("#packages", DataTable)
