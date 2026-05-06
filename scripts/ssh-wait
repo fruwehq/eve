@@ -22,7 +22,7 @@ try_ssh() {
   if [ "$ENGINE" = "vagrant" ]; then
     (cd ".generated/$PROFILE" && vagrant ssh -c "exit 0" >/dev/null 2>&1)
   else
-    ./scripts/instance-ssh "$PROFILE" -- exit 0 >/dev/null 2>&1
+    EPHEMERAL_SSH_BATCH=1 ./scripts/instance-ssh "$PROFILE" -- exit 0 >/dev/null 2>&1
   fi
 }
 
