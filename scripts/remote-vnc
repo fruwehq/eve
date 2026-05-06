@@ -14,7 +14,6 @@ cd "$(git rev-parse --show-toplevel)"
 
 VNC_PORT="${VNC_PORT:-5901}"
 LOCAL_PORT="${VNC_LOCAL_PORT:-15900}"
-VNC_GEOMETRY="${VNC_GEOMETRY:-1440x900}"
 
 RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
 ENGINE=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^ENGINE=/{print $2}')
@@ -87,11 +86,16 @@ cleanup() {
 }
 trap cleanup EXIT
 
+VNC_VIEWER_ARGS=(-Shared -AcceptClipboard -SendClipboard -RemoteResize=0 -AlwaysCursor=1 -CursorType=System)
+if [ -n "${VNC_DESKTOP_SIZE:-}" ]; then
+    VNC_VIEWER_ARGS+=(-DesktopSize "$VNC_DESKTOP_SIZE")
+fi
+
 if [ -n "${VNC_VIEWER_CMD:-}" ]; then
     # shellcheck disable=SC2086
-    $VNC_VIEWER_CMD -Shared -AcceptClipboard -SendClipboard -RemoteResize=0 -DesktopSize "$VNC_GEOMETRY" "${VNC_AUTH_ARGS[@]}" "127.0.0.1::$LOCAL_PORT"
+    $VNC_VIEWER_CMD "${VNC_VIEWER_ARGS[@]}" "${VNC_AUTH_ARGS[@]}" "127.0.0.1::$LOCAL_PORT"
 elif command -v vncviewer >/dev/null 2>&1; then
-    vncviewer -Shared -AcceptClipboard -SendClipboard -RemoteResize=0 -DesktopSize "$VNC_GEOMETRY" "${VNC_AUTH_ARGS[@]}" "127.0.0.1::$LOCAL_PORT"
+    vncviewer "${VNC_VIEWER_ARGS[@]}" "${VNC_AUTH_ARGS[@]}" "127.0.0.1::$LOCAL_PORT"
 elif command -v open >/dev/null 2>&1; then
     open "vnc://:${VNC_PASSWORD}@127.0.0.1:${LOCAL_PORT}"
     echo "[remote-vnc] Using macOS Screen Sharing fallback. Clipboard support is limited; install TigerVNC for better VNC behavior."

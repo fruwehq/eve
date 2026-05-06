@@ -87,9 +87,9 @@ if [ ! -f "$VNC_HOME/xstartup" ] || [ "$XSTARTUP_CONTENT" != "$(cat "$VNC_HOME/x
   chmod +x "$VNC_HOME/xstartup"
 fi
 
-# Keep VNC separate from the physical/streaming display resolution. Large
-# ultrawide host values make TigerVNC resize awkwardly on macOS Retina displays.
-VNC_GEOMETRY="${VNC_GEOMETRY:-1440x900}"
+# VNC should use the same configured display size as the VM unless a VNC-only
+# override is provided by the caller.
+VNC_GEOMETRY="${VNC_GEOMETRY:-${EPHEMERAL_DISPLAY_RESOLUTION:-1920x1080}}"
 
 UNIT_PATH=/etc/systemd/system/vncserver.service
 UNIT_CONTENT=$(cat <<EOF
