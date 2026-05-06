@@ -862,49 +862,48 @@ def run_tui() -> int:
             self.render_ops(status)
 
         def render_empty_state(self) -> None:
-            nature_frames = [
+            sakura_frames = [
                 [
-                    "        /\\        /\\          .        ",
-                    "   /\\  /  \\  /\\  /  \\    .        /\\ ",
-                    "__/  \\/    \\/  \\/    \\____________/  \\",
-                    "  ^^  ^^  ||   ^^   ^^   ||   ^^  ^^  ",
-                    "~~~~  ~~~     ~~~~   ~~      ~~~   ~~~",
-                    "  ~~~~    ~~~    ~~~~    ~~~    ~~~~  ",
+                    "          [magenta]* * * * *[/]                 ",
+                    "       [magenta]* * * * * * *[/]        [white].[/]       ",
+                    "     [magenta]* * *[/][yellow] \\|/ [/][magenta]* *[/]             ",
+                    "          [yellow]\\ | /[/]          [white].[/]        ",
+                    "           [yellow]\\|/[/]                    ",
+                    "  [green]_____[/][yellow]__|__[/][green]________________________[/]",
                 ],
                 [
-                    "        /\\        /\\       .           ",
-                    "   /\\  /  \\  /\\  /  \\        .    /\\ ",
-                    "__/  \\/    \\/  \\/    \\____________/  \\",
-                    "  ^^  ^^  ||   ^^   ^^   ||   ^^  ^^  ",
-                    "~~~   ~~~~    ~~~    ~~~~     ~~   ~~~",
-                    " ~~~    ~~~~    ~~~     ~~~~    ~~~   ",
+                    "          [magenta]* * * * *[/]             [white].[/]   ",
+                    "       [magenta]* * * * * * *[/]                ",
+                    "     [magenta]* * *[/][yellow] \\|/ [/][magenta]* *[/]       [white].[/]     ",
+                    "          [yellow]\\ | /[/]                   ",
+                    "           [yellow]\\|/[/]             [white].[/]      ",
+                    "  [green]_____[/][yellow]__|__[/][green]________________________[/]",
                 ],
                 [
-                    "        /\\        /\\    .              ",
-                    "   /\\  /  \\  /\\  /  \\      .      /\\ ",
-                    "__/  \\/    \\/  \\/    \\____________/  \\",
-                    "  ^^  ^^  ||   ^^   ^^   ||   ^^  ^^  ",
-                    "~~    ~~~   ~~~~    ~~~     ~~~~   ~~ ",
-                    "   ~~~    ~~~~   ~~~    ~~~~    ~~~   ",
+                    "          [magenta]* * * * *[/]                 ",
+                    "       [magenta]* * * * * * *[/]       [white].[/]        ",
+                    "     [magenta]* * *[/][yellow] \\|/ [/][magenta]* *[/]             ",
+                    "     [white].[/]    [yellow]\\ | /[/]                  ",
+                    "           [yellow]\\|/[/]        [white].[/]           ",
+                    "  [green]_____[/][yellow]__|__[/][green]________________________[/]",
                 ],
                 [
-                    "        /\\        /\\       .           ",
-                    "   /\\  /  \\  /\\  /  \\   .        /\\  ",
-                    "__/  \\/    \\/  \\/    \\____________/  \\",
-                    "  ^^  ^^  ||   ^^   ^^   ||   ^^  ^^  ",
-                    " ~~~~    ~~~     ~~~~   ~~~      ~~~~ ",
-                    "~~~    ~~~~    ~~~     ~~~~    ~~~    ",
+                    "          [magenta]* * * * *[/]          [white].[/]      ",
+                    "       [magenta]* * * * * * *[/]                ",
+                    "     [magenta]* * *[/][yellow] \\|/ [/][magenta]* *[/]             ",
+                    "          [yellow]\\ | /[/]      [white].[/]            ",
+                    "      [white].[/]    [yellow]\\|/[/]                   ",
+                    "  [green]_____[/][yellow]__|__[/][green]________________________[/]",
                 ],
             ]
-            frame_width = 42
-            raw_frame = nature_frames[self.hero_frame % len(nature_frames)]
-            frame = [line.ljust(frame_width)[:frame_width] for line in raw_frame]
+            frame_width = 44
+            frame = sakura_frames[self.hero_frame % len(sakura_frames)]
             border = "+" + ("-" * frame_width) + "+"
             self.query_one("#empty-state", Static).update(
                 "\n".join(
                     [
                         f"[primary]{border}[/]",
-                        *[f"[primary]|{line}|[/]" for line in frame],
+                        *[f"[primary]|[/]{line}[primary]|[/]" for line in frame],
                         f"[primary]{border}[/]",
                         "[b]EPHEMERAL VM COCKPIT[/b]",
                         "",
