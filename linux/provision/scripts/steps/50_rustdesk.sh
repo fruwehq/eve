@@ -27,18 +27,24 @@ else
   log "rustdesk already installed — skipping install"
 fi
 
-if ! systemctl list-unit-files display-manager.service >/dev/null 2>&1; then
+if ! command -v lightdm >/dev/null 2>&1; then
   log "### 50_rustdesk: installing LightDM display manager"
+  printf 'shared/default-x-display-manager select lightdm\n' | sudo debconf-set-selections
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y lightdm
 fi
 
-log "### 50_rustdesk: configuring LightDM autologin"
+desktop_session="xfce"
+if has_pkg gnome-desktop; then
+  desktop_session="gnome"
+fi
+
+log "### 50_rustdesk: configuring LightDM autologin session=$desktop_session"
 sudo mkdir -p /etc/lightdm/lightdm.conf.d
 sudo tee /etc/lightdm/lightdm.conf.d/50-ephemeral-autologin.conf >/dev/null <<EOF
 [Seat:*]
 autologin-user=$USER
 autologin-user-timeout=0
-user-session=xfce
+user-session=$desktop_session
 EOF
 
 if [ "${PROVIDER:-}" = "raspberry-pi" ]; then
@@ -219,6 +225,7 @@ done
 
 # Start daemon — reads our config on launch
 sudo systemctl set-default graphical.target >/dev/null 2>&1 || true
+sudo systemctl disable --now gdm3.service >/dev/null 2>&1 || true
 sudo systemctl enable --now display-manager.service >/dev/null 2>&1 || true
 sudo systemctl enable --now lightdm.service >/dev/null 2>&1 || true
 sudo systemctl restart lightdm.service >/dev/null 2>&1 || true

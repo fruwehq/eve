@@ -71,6 +71,11 @@ instance-scoped backend roots and `TF_DATA_DIR` paths under
 `.generated/instances/<name>/tf/`, so multiple concrete instances on the same
 provider do not share local Terraform state.
 
+Desktop Linux instances default to the existing XFCE-oriented access packages.
+For GNOME trials, select `gnome-desktop`; adding `macos-desktop-theme` applies a
+best-effort dock-at-bottom, left-side window controls, dark color scheme, and
+Papirus icon setup on the next GNOME login.
+
 Providers and packages are now described by plugin manifests. Built-ins live in
 `plugins/providers/<id>/egame-plugin.yaml` and
 `plugins/packages/<id>/egame-plugin.yaml`; optional external plugins can be

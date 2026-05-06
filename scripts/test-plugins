@@ -322,7 +322,7 @@ else
   printf '  [OK] package install scripts have no hardcoded case "$PACKAGE" mapping\n'
 fi
 
-hardcoded_step_refs="$(grep -nE '\b(00_base\.sh|05_timezone\.sh|10_docker\.sh|20_dev-toolchain\.sh|30_codex-cli\.sh|40_goose\.sh|45_xpra\.sh|46_vnc\.sh|50_rustdesk\.sh|60_sunshine\.sh|70_steam\.sh|10_sunshine\.ps1|30_steam\.ps1|35_xpra\.ps1|40_rustdesk\.ps1)\b' scripts/package-provision scripts/package-provision-windows || true)"
+hardcoded_step_refs="$(grep -nE '\b(00_base\.sh|05_timezone\.sh|10_docker\.sh|20_dev-toolchain\.sh|30_codex-cli\.sh|40_goose\.sh|45_xpra\.sh|46_vnc\.sh|48_gnome_desktop\.sh|49_macos_desktop_theme\.sh|50_rustdesk\.sh|60_sunshine\.sh|70_steam\.sh|10_sunshine\.ps1|30_steam\.ps1|35_xpra\.ps1|40_rustdesk\.ps1)\b' scripts/package-provision scripts/package-provision-windows || true)"
 if [ -n "$hardcoded_step_refs" ]; then
   printf '  [FAIL] package install scripts still reference step files directly\n' >&2
   printf '%s\n' "$hardcoded_step_refs" >&2
@@ -407,7 +407,7 @@ else
 fi
 
 ubuntu_down_missing=0
-for package in claude codex-cli dev-toolchain docker goose hermes opencode rdp rustdesk ssh steam sunshine vnc vscode xpra; do
+for package in claude codex-cli dev-toolchain docker gnome-desktop goose hermes macos-desktop-theme opencode rdp rustdesk ssh steam sunshine vnc vscode xpra; do
   if [ ! -x "plugins/packages/$package/commands/ubuntu/down" ]; then
     printf '  [FAIL] built-in package missing ubuntu down hook: %s\n' "$package" >&2
     ubuntu_down_missing=$((ubuntu_down_missing + 1))
@@ -420,7 +420,7 @@ else
 fi
 
 ubuntu_status_missing=0
-for package in claude codex-cli dev-toolchain docker goose hermes opencode rdp rustdesk ssh steam sunshine vnc vscode xpra; do
+for package in claude codex-cli dev-toolchain docker gnome-desktop goose hermes macos-desktop-theme opencode rdp rustdesk ssh steam sunshine vnc vscode xpra; do
   if [ ! -x "plugins/packages/$package/commands/ubuntu/status" ]; then
     printf '  [FAIL] built-in package missing ubuntu status hook: %s\n' "$package" >&2
     ubuntu_status_missing=$((ubuntu_status_missing + 1))
@@ -471,7 +471,7 @@ else
   FAIL=$((FAIL + 1))
 fi
 
-hardcoded_down_refs="$(grep -nE '"(claude|codex-cli|dev-toolchain|docker|goose|hermes|opencode|rdp|rustdesk|ssh|steam|sunshine|vscode|vnc|xpra)"[[:space:]]*=>' scripts/package-plugin || true)"
+hardcoded_down_refs="$(grep -nE '"(claude|codex-cli|dev-toolchain|docker|gnome-desktop|goose|hermes|macos-desktop-theme|opencode|rdp|rustdesk|ssh|steam|sunshine|vscode|vnc|xpra)"[[:space:]]*=>' scripts/package-plugin || true)"
 if [ -n "$hardcoded_down_refs" ]; then
   printf '  [FAIL] package-plugin still contains hardcoded package down mappings\n' >&2
   printf '%s\n' "$hardcoded_down_refs" >&2
