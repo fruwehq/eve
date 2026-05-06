@@ -6,18 +6,19 @@ set -euo pipefail
 usage() {
   cat >&2 <<'USAGE'
 Usage:
-  scripts/package-provision --profile <profile> --package <id> [--dry-run]
+  scripts/package-provision --instance <name> --package <id> [--dry-run]
+  scripts/package-provision --profile <name> --package <id> [--dry-run]  # compatibility alias
 USAGE
 }
 
-PROFILE=""
+INSTANCE_NAME=""
 PACKAGE=""
 DRY_RUN=0
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --profile)
-      PROFILE="${2:-}"
+    --instance|--profile)
+      INSTANCE_NAME="${2:-}"
       shift 2
       ;;
     --package)
@@ -39,14 +40,14 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-if [ -z "$PROFILE" ] || [ -z "$PACKAGE" ]; then
+if [ -z "$INSTANCE_NAME" ] || [ -z "$PACKAGE" ]; then
   usage
   exit 2
 fi
 
 cd "$(git rev-parse --show-toplevel)"
 
-RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
+RESOLVED_ENV=$(./scripts/profile-resolve --profile "$INSTANCE_NAME" --emit env)
 env_value() {
   printf '%s\n' "$RESOLVED_ENV" | awk -F= -v key="$1" '$1 == key { print substr($0, index($0, "=") + 1) }'
 }
@@ -87,27 +88,27 @@ done < <(printf '%s' "$PLUGIN_INSTALL" | jq -r --arg id "$PACKAGE" '(.package_ma
 
 if [ "$DRY_RUN" -eq 1 ]; then
   jq -n \
-    --arg profile "$PROFILE" \
+    --arg instance "$INSTANCE_NAME" \
     --arg package "$PACKAGE" \
     --arg os_family "$OS_FAMILY" \
     --argjson steps "$(printf '%s\n' "${steps[@]}" | jq -R . | jq -s .)" \
     --argjson package_markers "$(printf '%s\n' "${package_markers[@]}" | jq -R . | jq -s .)" \
-    '{kind: "package-provision", profile: $profile, package: $package, os_family: $os_family, steps: $steps, package_markers: $package_markers, dry_run: true}'
+    '{kind: "package-provision", instance: $instance, profile: $instance, package: $package, os_family: $os_family, steps: $steps, package_markers: $package_markers, dry_run: true}'
   exit 0
 fi
 
-./scripts/ssh-wait "$PROFILE"
+./scripts/ssh-wait "$INSTANCE_NAME"
 
-if ! ./scripts/instance-ssh "$PROFILE" -- 'sudo -n true' >/dev/null 2>&1; then
+if ! ./scripts/instance-ssh "$INSTANCE_NAME" -- 'sudo -n true' >/dev/null 2>&1; then
   if [ "$PROVIDER" = "raspberry-pi" ] && [ -n "${RASPBERRY_PI_USER_PASSWORD:-}" ]; then
     echo "[package-provision] configuring passwordless sudo for Raspberry Pi provisioning"
     # shellcheck disable=SC2016
-    printf '%s\n' "$RASPBERRY_PI_USER_PASSWORD" | ./scripts/instance-ssh "$PROFILE" -- \
+    printf '%s\n' "$RASPBERRY_PI_USER_PASSWORD" | ./scripts/instance-ssh "$INSTANCE_NAME" -- \
       'tmp=$(mktemp); printf "%s ALL=(ALL) NOPASSWD:ALL\n" "$USER" > "$tmp"; chmod 0440 "$tmp"; sudo -S -p "" install -o root -g root -m 0440 "$tmp" /etc/sudoers.d/90-egame-provision; rm -f "$tmp"; sudo -n visudo -cf /etc/sudoers.d/90-egame-provision'
   fi
 fi
 
-if ! ./scripts/instance-ssh "$PROFILE" -- 'sudo -n true' >/dev/null 2>&1; then
+if ! ./scripts/instance-ssh "$INSTANCE_NAME" -- 'sudo -n true' >/dev/null 2>&1; then
   echo "[package-provision] Linux package install requires passwordless sudo for the SSH user." >&2
   exit 1
 fi
@@ -144,10 +145,10 @@ export TIMEZONE="$_HOST_TZ"
 EOF
 
 echo "[package-provision] uploading linux/provision scripts for package=$PACKAGE"
-./scripts/instance-ssh "$PROFILE" -- 'rm -rf ~/provision/scripts && mkdir -p ~/provision/state ~/provision/logs ~/provision/downloads'
-./scripts/instance-ssh "$PROFILE" --scp "$STAGE/scripts" 'provision/'
-./scripts/instance-ssh "$PROFILE" --scp "$STAGE/state/bundle_packages" 'provision/state/'
-./scripts/instance-ssh "$PROFILE" --scp "$STAGE/state/env" 'provision/state/'
+./scripts/instance-ssh "$INSTANCE_NAME" -- 'rm -rf ~/provision/scripts && mkdir -p ~/provision/state ~/provision/logs ~/provision/downloads'
+./scripts/instance-ssh "$INSTANCE_NAME" --scp "$STAGE/scripts" 'provision/'
+./scripts/instance-ssh "$INSTANCE_NAME" --scp "$STAGE/state/bundle_packages" 'provision/state/'
+./scripts/instance-ssh "$INSTANCE_NAME" --scp "$STAGE/state/env" 'provision/state/'
 
 remote_steps=""
 for step in "${steps[@]}"; do
@@ -156,4 +157,4 @@ done
 
 echo "[package-provision] running package=$PACKAGE steps:${remote_steps}"
 # shellcheck disable=SC2029
-./scripts/instance-ssh "$PROFILE" -- "set -e; export PROVISION_ROOT=\"\$HOME/provision\"; . \"\$HOME/provision/state/env\"; chmod +x ~/provision/scripts/steps/*.sh ~/provision/scripts/lib/*.sh; for step in$remote_steps; do echo \"[package-provision] running \$(basename \"\$step\")\"; /usr/bin/env bash \"\$step\"; done"
+./scripts/instance-ssh "$INSTANCE_NAME" -- "set -e; export PROVISION_ROOT=\"\$HOME/provision\"; . \"\$HOME/provision/state/env\"; chmod +x ~/provision/scripts/steps/*.sh ~/provision/scripts/lib/*.sh; for step in$remote_steps; do echo \"[package-provision] running \$(basename \"\$step\")\"; /usr/bin/env bash \"\$step\"; done"

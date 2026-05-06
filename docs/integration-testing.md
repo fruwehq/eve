@@ -45,9 +45,15 @@ intentionally want to keep provider resources running after the test.
 For temporary smoke entries, also delete the local instance registry entries:
 
 ```bash
-YES=1 EGAME_INTEGRATION_DELETE_INSTANCES=1 scripts/integration-test --live \
+YES=1 scripts/integration-test --live --delete-instances \
   --instance linux-smoke \
   --instance windows-smoke
+```
+
+The equivalent make target is:
+
+```bash
+YES=1 DELETE_INSTANCES=1 make integration.test INSTANCES=linux-smoke,windows-smoke
 ```
 
 ## Manual Checks

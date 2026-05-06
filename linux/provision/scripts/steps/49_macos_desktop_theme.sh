@@ -8,7 +8,7 @@ skip_unless_pkg macos-desktop-theme
 log "### 49_macos_desktop_theme: installing macOS-like GNOME defaults"
 
 apt_install \
-  gnome-shell-extension-dashtodock \
+  gnome-shell-extension-ubuntu-dock \
   gnome-tweaks \
   papirus-icon-theme
 

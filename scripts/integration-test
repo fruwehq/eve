@@ -12,7 +12,7 @@ def usage
   warn <<~USAGE
     Usage:
       scripts/integration-test --instance <name> [--instance <name> ...] [--registry <path>] [--json]
-      scripts/integration-test --live --instance <name> [--instance <name> ...] [--report <path>] [--no-cleanup]
+      scripts/integration-test --live --instance <name> [--instance <name> ...] [--report <path>] [--no-cleanup] [--delete-instances]
 
     Dry-run mode prints the commands a human or LLM should run/review.
     Live mode creates/starts, waits for SSH, provisions, checks selected packages,
@@ -100,6 +100,8 @@ until args.empty?
     report_path = args.shift
   when "--no-cleanup"
     cleanup = false
+  when "--delete-instances"
+    delete_instances = true
   when "-h", "--help"
     usage
     exit 0

@@ -20,7 +20,7 @@ resolved = if json_source
              JSON.parse($stdin.read)
            end
 actual_provider = resolved.fetch("machine").fetch("provider")
-profile = resolved.fetch("instance").fetch("name")
+instance_name = resolved.fetch("instance").fetch("name")
 
 if actual_provider != provider
   warn "provider-plugin: manifest provider #{provider} does not match resolved provider #{actual_provider}"
@@ -32,7 +32,8 @@ if ENV["EGAME_PLUGIN_DRY_RUN"] == "1" || command == "resolve"
     "kind" => "provider",
     "provider" => provider,
     "command" => command,
-    "profile" => profile,
+    "instance" => instance_name,
+    "profile" => instance_name,
     "engine" => resolved.fetch("engine"),
     "dry_run" => ENV["EGAME_PLUGIN_DRY_RUN"] == "1"
   })
@@ -48,46 +49,46 @@ make_targets = {
 case command
 when "init"
   if resolved.fetch("engine") == "metal"
-    warn "[init] instance=#{profile} uses metal hardware; no Terraform backend to initialize."
+    warn "[init] instance=#{instance_name} uses metal hardware; no Terraform backend to initialize."
     exit 0
   end
-  exec File.join(ROOT, "scripts/tf-init"), profile
+  exec File.join(ROOT, "scripts/tf-init"), instance_name
 when "plan"
   case resolved.fetch("engine")
   when "vagrant"
-    exec File.join(ROOT, "scripts/vagrant-up"), "--plan", profile
+    exec File.join(ROOT, "scripts/vagrant-up"), "--plan", instance_name
   when "metal"
-    warn "[plan] instance=#{profile} uses metal hardware; provisioning will run over SSH."
-    exec File.join(ROOT, "scripts/profile-resolve"), "--profile", profile, "--emit", "env"
+    warn "[plan] instance=#{instance_name} uses metal hardware; provisioning will run over SSH."
+    exec File.join(ROOT, "scripts/profile-resolve"), "--profile", instance_name, "--emit", "env"
   else
-    exec File.join(ROOT, "scripts/tf-plan"), profile
+    exec File.join(ROOT, "scripts/tf-plan"), instance_name
   end
 when "up"
   case resolved.fetch("engine")
   when "vagrant"
-    exec File.join(ROOT, "scripts/vagrant-up"), profile
+    exec File.join(ROOT, "scripts/vagrant-up"), instance_name
   when "metal"
-    warn "[up] instance=#{profile} uses metal hardware; nothing to create."
+    warn "[up] instance=#{instance_name} uses metal hardware; nothing to create."
     exit 0
   else
-    exec File.join(ROOT, "scripts/tf-apply"), profile
+    exec File.join(ROOT, "scripts/tf-apply"), instance_name
   end
 when "down"
   case resolved.fetch("engine")
   when "vagrant"
-    exec File.join(ROOT, "scripts/vagrant-destroy"), profile
+    exec File.join(ROOT, "scripts/vagrant-destroy"), instance_name
   when "metal"
-    warn "[down] instance=#{profile} uses metal hardware; nothing to destroy."
+    warn "[down] instance=#{instance_name} uses metal hardware; nothing to destroy."
     exit 0
   else
-    exec File.join(ROOT, "scripts/tf-destroy"), profile
+    exec File.join(ROOT, "scripts/tf-destroy"), instance_name
   end
 when *make_targets.keys
-  exec File.join(ROOT, "scripts", make_targets.fetch(command)), profile
+  exec File.join(ROOT, "scripts", make_targets.fetch(command)), instance_name
 when "ip"
-  exec File.join(ROOT, "scripts/instance-ip"), profile
+  exec File.join(ROOT, "scripts/instance-ip"), instance_name
 when "ssh"
-  exec File.join(ROOT, "scripts/instance-ssh"), profile, *extra_args
+  exec File.join(ROOT, "scripts/instance-ssh"), instance_name, *extra_args
 else
   warn "provider-plugin: unsupported command: #{command}"
   exit 2

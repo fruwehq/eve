@@ -1,10 +1,10 @@
 # Makefile
 .DEFAULT_GOAL := default
-.PHONY: ai.sandbox all aws.login catalog.list clean default down env generate help info integration.plan integration.test \
+.PHONY: ai.sandbox all aws.login catalog.list clean default doctor down env generate help info integration.plan integration.test \
 				init init.all instance.create instance.delete instance.env instance.info instance.provision \
-				instance.list instance.paths instance.state instance.status instance.validate ip lint logs plan \
+				instance.list instance.paths instance.recover instance.state instance.status instance.validate ip lint logs plan \
 				package.down package.install package.list package.reinstall package.select \
-				package.status package.unselect \
+				package.status package.uninstall package.unselect \
 				plugins.list plugins.sync plugins.validate \
 				provider.status providers.status provision \
 				provision.clear-state provision.restart provision.wait reboot \
@@ -91,6 +91,9 @@ clean: ## Remove terramate-generated terraform files and cache
 
 default: help  ## Show help
 
+doctor: ## Check local tools, plugins, providers, and state hints
+	./scripts/doctor
+
 ai.sandbox: ## Run a coding agent in Docker Sandboxes (AGENT=codex|opencode|claude|shell)
 	@if ! command -v sbx >/dev/null 2>&1; then \
 		echo "Docker Sandboxes CLI (sbx) is not installed."; \
@@ -125,10 +128,11 @@ integration.plan: ## Print integration test plan (INSTANCES=a,b)
 	for instance in $$(printf '%s' "$(INSTANCES)" | tr ',' ' '); do args="$$args --instance $$instance"; done; \
 	./scripts/integration-test $$args
 
-integration.test: ## Run live integration test (INSTANCES=a,b YES=1)
+integration.test: ## Run live integration test (INSTANCES=a,b YES=1 DELETE_INSTANCES=1)
 	@if [ -z "$(INSTANCES)" ]; then echo "Usage: make integration.test INSTANCES=<linux>,<windows> YES=1"; exit 2; fi; \
 	args=""; \
 	for instance in $$(printf '%s' "$(INSTANCES)" | tr ',' ' '); do args="$$args --instance $$instance"; done; \
+	if [ "$(DELETE_INSTANCES)" = "1" ]; then args="$$args --delete-instances"; fi; \
 	./scripts/integration-test --live $$args
 
 init: ## Initialize provider backend for an instance
@@ -183,6 +187,10 @@ instance.provision: ## Converge provisioning for an instance (FORCE=1 clears rem
 	if [ "$(FORCE)" = "1" ]; then args="$$args --force"; fi; \
 	./scripts/instance-provision $$args
 
+instance.recover: ## Mark an interrupted running operation as failed
+	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make instance.recover INSTANCE=<name>"; exit 2; fi; \
+	./scripts/instance-state --instance $(INSTANCE) --recover-running | jq .
+
 instance.state: ## Print local orchestration state for an instance
 	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make instance.state INSTANCE=<name>"; exit 2; fi; \
 	./scripts/instance-state --instance $(INSTANCE) --get | jq .
@@ -217,6 +225,8 @@ package.down: ## Remove package from an instance (PACKAGE=<id>, YES=1 for destru
 	args="--instance $(INSTANCE) --package $(PACKAGE) --command down"; \
 	if [ "$(YES)" = "1" ]; then args="$$args --yes"; fi; \
 	./scripts/package-dispatch $$args
+
+package.uninstall: package.down ## Alias for package.down
 
 package.install: ## Install selected package set for an instance (PACKAGE=<id>)
 	@if [ -z "$(INSTANCE)" ] || [ -z "$(PACKAGE)" ]; then echo "Usage: make package.install INSTANCE=<name> PACKAGE=<id>"; exit 2; fi; \

@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# Run local readiness checks for v3 orchestration.
+
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+fail=0
+
+section() {
+  printf '\n== %s ==\n' "$1"
+}
+
+check_command() {
+  local command="$1"
+  if command -v "$command" >/dev/null 2>&1; then
+    printf '  [OK] %s\n' "$command"
+  else
+    printf '  [WARN] %s not found\n' "$command"
+  fi
+}
+
+section "core tools"
+for command in bash jq ruby ssh scp; do
+  check_command "$command"
+done
+
+section "optional provider tools"
+for command in aws curl nc terraform terramate vagrant qemu-system-aarch64 qemu-system-x86_64 vmrun VBoxManage; do
+  check_command "$command"
+done
+
+section "catalog"
+if ./scripts/catalog-options --json >/dev/null; then
+  printf '  [OK] catalog-options\n'
+else
+  printf '  [FAIL] catalog-options\n' >&2
+  fail=1
+fi
+
+section "plugins"
+if ./scripts/plugin-list --validate >/dev/null; then
+  printf '  [OK] plugins.validate\n'
+else
+  printf '  [FAIL] plugins.validate\n' >&2
+  fail=1
+fi
+
+section "providers"
+./scripts/providers-status
+
+section "state"
+mkdir -p .egame/state/instances
+printf '  [OK] state directory: .egame/state/instances\n'
+printf '  [INFO] recover interrupted state with: make instance.recover INSTANCE=<name>\n'
+
+exit "$fail"

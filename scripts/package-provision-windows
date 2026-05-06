@@ -12,18 +12,19 @@ set -euo pipefail
 usage() {
   cat >&2 <<'USAGE'
 Usage:
-  scripts/package-provision-windows --profile <profile> --package <id> [--dry-run]
+  scripts/package-provision-windows --instance <name> --package <id> [--dry-run]
+  scripts/package-provision-windows --profile <name> --package <id> [--dry-run]  # compatibility alias
 USAGE
 }
 
-PROFILE=""
+INSTANCE_NAME=""
 PACKAGE=""
 DRY_RUN=0
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --profile)
-      PROFILE="${2:-}"
+    --instance|--profile)
+      INSTANCE_NAME="${2:-}"
       shift 2
       ;;
     --package)
@@ -45,14 +46,14 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-if [ -z "$PROFILE" ] || [ -z "$PACKAGE" ]; then
+if [ -z "$INSTANCE_NAME" ] || [ -z "$PACKAGE" ]; then
   usage
   exit 2
 fi
 
 cd "$(git rev-parse --show-toplevel)"
 
-RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
+RESOLVED_ENV=$(./scripts/profile-resolve --profile "$INSTANCE_NAME" --emit env)
 env_value() {
   printf '%s\n' "$RESOLVED_ENV" | awk -F= -v key="$1" '$1 == key { print substr($0, index($0, "=") + 1) }'
 }
@@ -109,22 +110,22 @@ if [ "$DRY_RUN" -eq 1 ]; then
     state_files_json="$(printf '%s\n' "${state_files[@]}" | jq -R . | jq -s .)"
   fi
   jq -n \
-    --arg profile "$PROFILE" \
+    --arg instance "$INSTANCE_NAME" \
     --arg package "$PACKAGE" \
     --arg os_family "$OS_FAMILY" \
     --argjson steps "$steps_json" \
     --argjson state_files "$state_files_json" \
     --argjson fallback "$fallback" \
-    '{kind: "package-provision-windows", profile: $profile, package: $package, os_family: $os_family, steps: $steps, state_files: $state_files, fallback: ($fallback == 1), dry_run: true}'
+    '{kind: "package-provision-windows", instance: $instance, profile: $instance, package: $package, os_family: $os_family, steps: $steps, state_files: $state_files, fallback: ($fallback == 1), dry_run: true}'
   exit 0
 fi
 
 if [ "$fallback" -eq 1 ]; then
   echo "[package-provision-windows] no granular mapping for package=$PACKAGE; falling back to full provisioning"
-  exec ./scripts/provision "$PROFILE"
+  exec ./scripts/provision "$INSTANCE_NAME"
 fi
 
-./scripts/ssh-wait "$PROFILE"
+./scripts/ssh-wait "$INSTANCE_NAME"
 
 # Stage scripts: keep lib/ and templates/ available because most Windows steps
 # dot-source helpers from lib/.  Upload only the requested step file so the
@@ -189,19 +190,19 @@ reset_cmd="if (Test-Path '$remote_step_dir') { Remove-Item -Recurse -Force '$rem
 if [ "$needs_env" -eq 1 ]; then
   reset_cmd="$reset_cmd ; New-Item -ItemType Directory -Force '$remote_state_dir' | Out-Null"
 fi
-./scripts/instance-ssh "$PROFILE" -- "$reset_cmd"
-./scripts/instance-ssh "$PROFILE" --scp "$STAGE/scripts/lib" "/C:/Users/Administrator/provision/scripts-package/"
+./scripts/instance-ssh "$INSTANCE_NAME" -- "$reset_cmd"
+./scripts/instance-ssh "$INSTANCE_NAME" --scp "$STAGE/scripts/lib" "/C:/Users/Administrator/provision/scripts-package/"
 if [ -d "$STAGE/scripts/templates" ]; then
-  ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/scripts/templates" "/C:/Users/Administrator/provision/scripts-package/"
+  ./scripts/instance-ssh "$INSTANCE_NAME" --scp "$STAGE/scripts/templates" "/C:/Users/Administrator/provision/scripts-package/"
 fi
 for step in "${steps[@]}"; do
-  ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/scripts/steps/$step" "/C:/Users/Administrator/provision/scripts-package/steps/$step"
+  ./scripts/instance-ssh "$INSTANCE_NAME" --scp "$STAGE/scripts/steps/$step" "/C:/Users/Administrator/provision/scripts-package/steps/$step"
 done
 if [ "$needs_env" -eq 1 ]; then
-  ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/state/env.json" "/C:/Users/Administrator/provision/state/env.json"
+  ./scripts/instance-ssh "$INSTANCE_NAME" --scp "$STAGE/state/env.json" "/C:/Users/Administrator/provision/state/env.json"
 fi
 
 for step in "${steps[@]}"; do
   echo "[package-provision-windows] running step=$step package=$PACKAGE"
-  ./scripts/instance-ssh "$PROFILE" -- "& 'C:\\Users\\Administrator\\provision\\scripts-package\\steps\\$step'"
+  ./scripts/instance-ssh "$INSTANCE_NAME" -- "& 'C:\\Users\\Administrator\\provision\\scripts-package\\steps\\$step'"
 done

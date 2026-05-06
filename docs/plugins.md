@@ -199,6 +199,43 @@ sources:
 `ref` is required by default. Unpinned sources require
 `EGAME_ALLOW_UNPINNED_PLUGINS=1`.
 
+External repositories should contain the same manifest shape as built-ins. A
+provider repository can expose one or more directories with
+`egame-plugin.yaml`; a package repository can do the same. Keep command
+implementations inside the plugin directory when possible so relative `exec`
+paths remain portable after `make plugins.sync`.
+
+Recommended repository layout:
+
+```text
+my-egame-plugins/
+  packages/
+    my-package/
+      egame-plugin.yaml
+      commands/ubuntu/install
+      commands/ubuntu/status
+      commands/ubuntu/down
+  providers/
+    my-provider/
+      egame-plugin.yaml
+      bin/provider-command
+```
+
+Development loop:
+
+```bash
+EGAME_PLUGIN_ROOTS=/path/to/my-egame-plugins/packages/my-package make plugins.validate
+EGAME_PLUGIN_ROOTS=/path/to/my-egame-plugins/packages/my-package \
+  ./scripts/package-dispatch --instance dev-a --package my-package --command status --dry-run
+```
+
+Before running a new external plugin against a real instance, run:
+
+```bash
+make doctor
+make instance.validate INSTANCE=<name>
+```
+
 ## Examples
 
 See:

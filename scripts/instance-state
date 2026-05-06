@@ -17,6 +17,7 @@ def usage
   warn <<~USAGE
     Usage:
       scripts/instance-state --instance <name> --get
+      scripts/instance-state --instance <name> --recover-running
       scripts/instance-state --instance <name> --operation <name> --status <status> [--desired-state <state>] [--provider-state <state>] [--provision-state <state>] [--package <id> --package-state <state>] [--error <message>]
   USAGE
 end
@@ -78,6 +79,7 @@ end
 
 instance = nil
 get = false
+recover_running = false
 operation = nil
 status = nil
 desired_state = nil
@@ -94,6 +96,8 @@ until args.empty?
     instance = args.shift
   when "--get"
     get = true
+  when "--recover-running"
+    recover_running = true
   when "--operation"
     operation = args.shift
   when "--status"
@@ -127,6 +131,31 @@ end
 state = read_state(instance)
 
 if get
+  puts JSON.pretty_generate(state)
+  exit 0
+end
+
+if recover_running
+  state = default_state(instance, Time.now.utc.iso8601).merge(state)
+  state["operation_history"] ||= []
+  last_operation = state["last_operation"]
+  if last_operation && last_operation["status"] == "running"
+    error = "Recovered interrupted operation #{last_operation.fetch("name", "unknown")}"
+    recovered = last_operation.merge("status" => "failed", "error" => error)
+    state["last_operation"] = recovered
+    state["last_error"] = error
+    state["updated_at"] = Time.now.utc.iso8601
+    state["operation_history"] = state.fetch("operation_history").map do |entry|
+      entry["id"] == recovered["id"] ? entry.merge("status" => "failed", "error" => error) : entry
+    end
+    case recovered["type"]
+    when "provider"
+      state["provider_state"] = "error"
+    when "provision"
+      state["provision_state"] = "error"
+    end
+    write_state(instance, state)
+  end
   puts JSON.pretty_generate(state)
   exit 0
 end

@@ -544,7 +544,7 @@ windows_status_contract="$(
   EGAME_PACKAGE_STATUS_SSH="$fake_capture_ssh" EGAME_FAKE_SSH_ARGS="$state_dir/fake-ssh-args.txt" EGAME_INSTANCE_NAME=win-a \
     ./scripts/package-status-windows steam 'C:\Program Files (x86)\Steam\steam.exe'
 )"
-if printf '%s\n' "$windows_status_contract" | jq -e '.kind == "package-status" and .package == "steam" and .instance == "win-a" and .os_family == "windows" and .status == "installed"' >/dev/null; then
+if printf '%s\n' "$windows_status_contract" | jq -e '.kind == "package-status" and .package == "steam" and .instance == "win-a" and .os_family == "windows" and .status == "installed" and .details == "installed"' >/dev/null; then
   printf '  [OK] windows package status helper emits status contract\n'
 else
   printf '  [FAIL] windows package status helper contract mismatch\n' >&2
@@ -608,6 +608,23 @@ if printf '%s\n' "$state_json" | jq -e '.last_operation.name == "package.down" a
 else
   printf '  [FAIL] instance state records package operation\n' >&2
   printf '%s\n' "$state_json" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+running_state="$(
+  EGAME_STATE_DIR="$state_dir" ./scripts/instance-state \
+    --instance recover-a \
+    --operation provider.up \
+    --status running \
+    --provider-state changing
+)"
+recovered_state="$(EGAME_STATE_DIR="$state_dir" ./scripts/instance-state --instance recover-a --recover-running)"
+if printf '%s\n' "$running_state" "$recovered_state" |
+  jq -s -e '.[0].last_operation.status == "running" and .[1].last_operation.status == "failed" and .[1].provider_state == "error" and (.[1].last_error | test("Recovered interrupted operation provider.up"))' >/dev/null; then
+  printf '  [OK] instance state recovers interrupted running operation\n'
+else
+  printf '  [FAIL] instance state recover-running mismatch\n' >&2
+  printf '%s\n' "$recovered_state" >&2
   FAIL=$((FAIL + 1))
 fi
 

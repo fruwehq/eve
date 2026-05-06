@@ -8,6 +8,7 @@ import asyncio
 import json
 import os
 import platform
+import re
 import shlex
 import subprocess
 import sys
@@ -131,6 +132,27 @@ def markup_for_status(status: str) -> str:
     return status
 
 
+def display_state(status: str) -> str:
+    return "new" if status == "unknown" else status
+
+
+STYLE_TAG_RE = re.compile(r"\[(?:/?(?:primary|success|warning|error|b|dim)|/)\]")
+
+
+def plain_log_line(message: str) -> str:
+    return STYLE_TAG_RE.sub("", message)
+
+
+def status_instance_name(status: dict[str, Any] | None) -> str | None:
+    if not status:
+        return None
+    instance = status.get("instance", {})
+    if not isinstance(instance, dict):
+        return None
+    name = instance.get("name")
+    return str(name) if name else None
+
+
 def aggregate_state(statuses: dict[str, dict[str, Any]]) -> str:
     counts = {"running": 0, "stopped": 0, "failed": 0, "other": 0}
     for status in statuses.values():
@@ -173,6 +195,7 @@ def run_tui() -> int:
         from textual.app import App, ComposeResult
         from textual.binding import Binding
         from textual.containers import Container, Horizontal, Vertical
+        from textual.geometry import Offset
         from textual.screen import ModalScreen
         from textual.widgets import (
             Button,
@@ -181,9 +204,9 @@ def run_tui() -> int:
             Header,
             Input,
             Label,
-            RichLog,
             SelectionList,
             Static,
+            TextArea,
         )
     except ModuleNotFoundError:
         print(
@@ -739,8 +762,19 @@ def run_tui() -> int:
             background: $boost;
         }
 
+        #output-help {
+            height: 1;
+            color: $text-muted;
+            background: $boost;
+            padding: 0 1;
+        }
+
         #output:focus {
             border-top: solid $accent;
+        }
+
+        TextArea#output {
+            background: $boost;
         }
 
         .section-title {
@@ -773,6 +807,7 @@ def run_tui() -> int:
             Binding("x", "destroy_instance", "Destroy"),
             Binding("d", "delete_instance", "Delete"),
             Binding("l", "focus_log", "Log"),
+            Binding("y", "copy_log", "Copy Log"),
             Binding("q", "quit", "Quit"),
         ]
 
@@ -788,6 +823,7 @@ def run_tui() -> int:
             self.background_tasks: set[asyncio.Task[None]] = set()
             self.hero_frame = 0
             self._rendering_instances = False
+            self._detail_refresh_seq = 0
 
         def compose(self) -> ComposeResult:
             yield Header(show_clock=True)
@@ -841,11 +877,22 @@ def run_tui() -> int:
                                         yield Button("Select", id="package-select")
                                         yield Button("Unselect", id="package-unselect")
                                         yield Button("Install", id="package-install", variant="success")
-                                        yield Button("Down", id="package-down", variant="warning")
+                                        yield Button("Uninstall", id="package-down", variant="warning")
                                 with Vertical(id="ops-pane"):
                                     yield Static("Recent Ops", classes="section-title")
                                     yield Static("No operations yet.", id="ops")
-                yield RichLog(id="output", markup=True, wrap=True, highlight=True)
+                yield Static(
+                    "Output  |  press l to focus, arrows/PageUp/PageDown to scroll, y to copy all log text",
+                    id="output-help",
+                )
+                yield TextArea(
+                    "",
+                    id="output",
+                    read_only=True,
+                    show_line_numbers=False,
+                    soft_wrap=True,
+                    show_cursor=False,
+                )
             yield Footer()
 
         async def on_mount(self) -> None:
@@ -861,6 +908,7 @@ def run_tui() -> int:
             self.set_interval(1.2, self.animate_hero)
             self.set_interval(5, self.poll_statuses)
             self.start_task(self.load_initial_data())
+            self.park_terminal_cursor()
 
         async def load_initial_data(self) -> None:
             await self.load_catalog_options()
@@ -885,20 +933,46 @@ def run_tui() -> int:
             self.hero_frame += 1
             if self.current_instance is None:
                 self.render_empty_state()
+            self.park_terminal_cursor()
 
         def log_line(self, message: str) -> None:
-            self.query_one("#output", RichLog).write(message)
+            output = self.query_one("#output", TextArea)
+            should_autoscroll = not output.has_focus or output.is_vertical_scroll_end
+            output.load_text(output.text + plain_log_line(message) + "\n")
+            if should_autoscroll:
+                output.scroll_end(animate=False, force=True)
+            self.park_terminal_cursor()
+
+        def park_terminal_cursor(self) -> None:
+            if isinstance(self.focused, (Input, TextArea)):
+                return
+            width = max(self.size.width - 1, 0)
+            height = max(self.size.height - 1, 0)
+            self.cursor_position = Offset(width, height)
 
         def start_task(self, coro: Coroutine[Any, Any, None]) -> None:
             task = asyncio.create_task(coro)
             self.background_tasks.add(task)
             task.add_done_callback(self.background_tasks.discard)
 
-        async def stream_command(self, label: str, args: list[str]) -> int:
+        async def stream_command(self, label: str, args: list[str], *, refresh_instance: str | None = None) -> int:
             if self.command_running:
                 self.notify("A command is already running", severity="warning")
                 return 1
             self.command_running = True
+            status_poll_done = asyncio.Event()
+            status_poll_task: asyncio.Task[None] | None = None
+
+            async def poll_running_status() -> None:
+                while not status_poll_done.is_set():
+                    try:
+                        await asyncio.wait_for(status_poll_done.wait(), timeout=2)
+                    except TimeoutError:
+                        if refresh_instance:
+                            await self.refresh_status_for(refresh_instance)
+
+            if refresh_instance:
+                status_poll_task = asyncio.create_task(poll_running_status())
             self.update_action_state()
             self.log_line(f"[primary]$ {command_label(args)}[/]")
             try:
@@ -922,8 +996,16 @@ def run_tui() -> int:
                     self.log_line(f"[error]{label} failed with exit {code}.[/]")
                 return int(code)
             finally:
+                status_poll_done.set()
+                if status_poll_task:
+                    status_poll_task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await status_poll_task
                 self.command_running = False
-                await self.refresh_current_status()
+                if refresh_instance:
+                    await self.refresh_status_for(refresh_instance)
+                else:
+                    await self.refresh_current_status()
                 self.update_action_state()
 
         async def poll_statuses(self) -> None:
@@ -1001,15 +1083,15 @@ def run_tui() -> int:
                 state = status.get("state", {})
                 provider_state = str(state.get("provider_state", "unknown"))
                 provision_state = str(state.get("provision_state", "unknown"))
-                display_state = provider_state if provider_state != "unknown" else ""
-                if not display_state and provision_state != "unknown":
-                    display_state = provision_state
-                if not display_state:
-                    display_state = "new"
+                display_state_text = provider_state if provider_state != "unknown" else ""
+                if not display_state_text and provision_state != "unknown":
+                    display_state_text = provision_state
+                if not display_state_text:
+                    display_state_text = "new"
                 table.add_row(
                     glyph_for_status(provider_state),
                     name,
-                    display_state,
+                    display_state_text,
                     os_id or "-",
                     key=name,
                 )
@@ -1024,24 +1106,60 @@ def run_tui() -> int:
             self._rendering_instances = False
 
         async def refresh_current_status(self) -> None:
+            self._detail_refresh_seq += 1
+            refresh_seq = self._detail_refresh_seq
+            instance_name = self.current_instance
             focused_id = self.focused.id if self.focused is not None else None
-            if not self.current_instance:
+            if not instance_name:
                 self.current_status = None
                 self.query_one("#title", Static).update("Select an instance.")
                 self.render_empty_detail()
                 self.update_action_state()
                 return
-            self.current_status = self.statuses.get(self.current_instance)
-            if not self.current_status:
+            next_status = self.statuses.get(instance_name)
+            if status_instance_name(next_status) not in {None, instance_name}:
+                next_status = None
+            if not next_status:
                 try:
-                    self.current_status = await asyncio.to_thread(instance_status, self.current_instance)
-                    self.statuses[self.current_instance] = self.current_status
+                    next_status = await asyncio.to_thread(instance_status, instance_name)
+                    if refresh_seq != self._detail_refresh_seq or instance_name != self.current_instance:
+                        return
+                    if status_instance_name(next_status) != instance_name:
+                        self.log_line(
+                            f"[error]instance-status returned {status_instance_name(next_status) or 'unknown'} "
+                            f"while {instance_name} was selected[/]"
+                        )
+                        return
+                    self.statuses[instance_name] = next_status
                 except Exception as exc:
+                    if refresh_seq != self._detail_refresh_seq or instance_name != self.current_instance:
+                        return
                     self.log_line(f"[error]instance-status failed:[/] {exc}")
                     return
+            if refresh_seq != self._detail_refresh_seq or instance_name != self.current_instance:
+                return
+            self.current_status = next_status
             self.render_detail()
             self.update_action_state()
             self.restore_focus(focused_id)
+
+        async def refresh_status_for(self, instance_name: str) -> None:
+            try:
+                status = await asyncio.to_thread(instance_status, instance_name)
+            except Exception as exc:
+                self.log_line(f"[error]instance-status failed for {instance_name}:[/] {exc}")
+                return
+            if status_instance_name(status) != instance_name:
+                self.log_line(
+                    f"[error]instance-status returned {status_instance_name(status) or 'unknown'} "
+                    f"while refreshing {instance_name}[/]"
+                )
+                return
+            self.statuses[instance_name] = status
+            if self.current_instance == instance_name:
+                self.current_status = status
+                self.render_detail()
+                self.update_action_state()
 
         def render_empty_detail(self) -> None:
             self.query_one("#empty-state", Static).display = True
@@ -1053,7 +1171,23 @@ def run_tui() -> int:
             self.query_one("#packages", DataTable).clear()
             self.query_one("#ops", Static).update("No instance selected.")
 
+        def render_loading_detail(self, instance_name: str) -> None:
+            self.query_one("#empty-state", Static).display = False
+            self.query_one("#instance-detail", Vertical).display = True
+            self.query_one("#title", Static).update(f"{instance_name}  loading status...")
+            self.query_one("#provider-pill", Static).update("Provider\nloading")
+            self.query_one("#provision-pill", Static).update("Provision\nloading")
+            self.query_one("#packages-pill", Static).update("Packages\nloading")
+            self.query_one("#packages", DataTable).clear()
+            self.query_one("#ops", Static).update("Loading status...")
+
         def render_detail(self) -> None:
+            if status_instance_name(self.current_status) != self.current_instance:
+                if self.current_instance:
+                    self.render_loading_detail(self.current_instance)
+                else:
+                    self.render_empty_detail()
+                return
             self.query_one("#empty-state", Static).display = False
             self.query_one("#instance-detail", Vertical).display = True
             status = self.current_status or {}
@@ -1064,15 +1198,17 @@ def run_tui() -> int:
             self.query_one("#title", Static).update(
                 f"{instance.get('name', '-')}  {instance.get('provider', '-')}  {instance.get('os', '-')}"
             )
-            provider_state = str(state.get("provider_state", "unknown"))
             provision_state = str(state.get("provision_state", "unknown"))
+            provider_name = str(instance.get("provider") or "-")
             package_text = (
                 f"{summary.get('installed', 0)} installed / "
                 f"{summary.get('missing', 0)} missing / "
                 f"{summary.get('failed', 0)} failed"
             )
-            self.query_one("#provider-pill", Static).update(f"Provider\n{markup_for_status(provider_state)}")
-            self.query_one("#provision-pill", Static).update(f"Provision\n{markup_for_status(provision_state)}")
+            self.query_one("#provider-pill", Static).update(f"Provider\n{provider_name}")
+            self.query_one("#provision-pill", Static).update(
+                f"Provision\n{markup_for_status(display_state(provision_state))}"
+            )
             self.query_one("#packages-pill", Static).update(f"Packages\n{package_text}")
             self.render_packages(status)
             self.render_ops(status)
@@ -1194,7 +1330,17 @@ def run_tui() -> int:
                 next_instance = None if row_key == NEW_INSTANCE_KEY else row_key
                 if next_instance != self.current_instance:
                     self.current_instance = next_instance
-                    await self.refresh_current_status()
+                    self.current_status = self.statuses.get(next_instance) if next_instance else None
+                    if next_instance is None:
+                        self.render_empty_detail()
+                        self.update_action_state()
+                    elif status_instance_name(self.current_status) == next_instance:
+                        self.render_detail()
+                        self.update_action_state()
+                    else:
+                        self.render_loading_detail(next_instance)
+                        self.update_action_state()
+                    self.start_task(self.refresh_current_status())
             elif event.data_table.id == "packages":
                 self.current_package = str(event.row_key.value)
                 self.update_action_state()
@@ -1206,7 +1352,14 @@ def run_tui() -> int:
                     self.action_new_instance()
                     return
                 self.current_instance = row_key
-                await self.refresh_current_status()
+                self.current_status = self.statuses.get(row_key)
+                if status_instance_name(self.current_status) == row_key:
+                    self.render_detail()
+                    self.update_action_state()
+                else:
+                    self.render_loading_detail(row_key)
+                    self.update_action_state()
+                self.start_task(self.refresh_current_status())
                 self.focus_top_action()
             elif event.data_table.id == "packages":
                 self.current_package = row_key
@@ -1309,22 +1462,33 @@ def run_tui() -> int:
             )
 
         async def perform_destroy_instance(self, instance: str) -> None:
-            await self.stream_command("provider.down", make_args("down", instance))
+            await self.stream_command("provider.down", make_args("down", instance), refresh_instance=instance)
 
         async def action_provider(self, command: str) -> None:
             if not self.current_instance:
                 return
-            args = make_args(command, self.current_instance)
-            await self.stream_command(f"provider.{command}", args)
+            instance = self.current_instance
+            args = make_args(command, instance)
+            await self.stream_command(f"provider.{command}", args, refresh_instance=instance)
 
         async def action_provision(self) -> None:
             if self.current_instance:
-                await self.stream_command("instance.provision", make_args("instance.provision", self.current_instance))
+                instance = self.current_instance
+                await self.stream_command(
+                    "instance.provision",
+                    make_args("instance.provision", instance),
+                    refresh_instance=instance,
+                )
 
         async def action_package(self, target: str) -> None:
             if not self.current_instance or not self.current_package:
                 return
-            await self.stream_command(target, package_make_args(target, self.current_instance, self.current_package))
+            instance = self.current_instance
+            await self.stream_command(
+                target,
+                package_make_args(target, instance, self.current_package),
+                refresh_instance=instance,
+            )
 
         def action_package_down(self) -> None:
             if not self.current_instance or not self.current_package:
@@ -1334,15 +1498,16 @@ def run_tui() -> int:
             self.push_screen(
                 ConfirmScreen(
                     "Remove package?",
-                    f"Run package.down for {package} on {instance}. This may remove configs/data.",
+                    f"Uninstall {package} from {instance}. This may remove configs/data.",
                 ),
                 lambda confirmed: self.start_task(self.perform_package_down(instance, package)) if confirmed else None,
             )
 
         async def perform_package_down(self, instance: str, package: str) -> None:
             await self.stream_command(
-                "package.down",
-                package_make_args("package.down", instance, package, "YES=1"),
+                "package.uninstall",
+                package_make_args("package.uninstall", instance, package, "YES=1"),
+                refresh_instance=instance,
             )
 
         async def action_connect(self, kind: Literal["ssh", "sunshine", "rustdesk"]) -> None:
@@ -1486,11 +1651,29 @@ def run_tui() -> int:
             self.query_one("#filter", Input).focus()
 
         def action_focus_log(self) -> None:
-            self.query_one("#output", RichLog).focus()
+            output = self.query_one("#output", TextArea)
+            output.focus()
+            output.scroll_end(animate=False, force=True)
+
+        def action_copy_log(self) -> None:
+            output = self.query_one("#output", TextArea)
+            self.copy_to_clipboard(output.text)
+            self.notify("Copied log output")
+
+        def on_key(self, event: Any) -> None:
+            if isinstance(self.focused, Input):
+                return
+            if event.key == "l":
+                event.stop()
+                self.action_focus_log()
+            elif event.key == "y":
+                event.stop()
+                self.action_copy_log()
 
         async def action_help(self) -> None:
             self.log_line(
-                "[b]Keys[/b] / filter, l log, r refresh, u up, s start, t stop, p provision, d delete, q quit. "
+                "[b]Keys[/b] / filter, l log, y copy log, r refresh, u up, s start, t stop, "
+                "p provision, d delete, q quit. "
                 "Select << New Instance >> to create an instance."
             )
 

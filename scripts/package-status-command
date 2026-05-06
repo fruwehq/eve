@@ -15,8 +15,23 @@ output="$("$SSH_HELPER" "$PROFILE" -- "$REMOTE_COMMAND" 2>&1)"
 exit_status=$?
 set -e
 
+clean_details() {
+  printf '%s\n' "$1" |
+    tr -d '\r' |
+    awk '
+      /^#< CLIXML/ { next }
+      /^<Objs / { next }
+      /^<Obj / { next }
+      /^<\/Objs>/ { next }
+      /_x000D__/ { next }
+      { print }
+    '
+}
+
+details="$(clean_details "$output")"
+
 if [ "$exit_status" -eq 0 ]; then
-  status="$(printf '%s\n' "$output" | tr -d '\r' | awk '/^(installed|missing|unknown)$/ { print; exit }')"
+  status="$(printf '%s\n' "$details" | awk '/^(installed|missing|unknown)$/ { print; exit }')"
   status="${status:-unknown}"
   case "$status" in
     installed|missing|unknown) ;;
@@ -33,5 +48,5 @@ jq -n \
   --arg instance "$PROFILE" \
   --arg os_family "$OS_FAMILY" \
   --arg status "$status" \
-  --arg details "$output" \
+  --arg details "$details" \
   '{kind: $kind, package: $package, command: $command, instance: $instance, os_family: $os_family, status: $status, details: $details}'

@@ -14,7 +14,7 @@ unless package_id && command
 end
 
 resolved = JSON.parse($stdin.read)
-profile = resolved.fetch("instance").fetch("name")
+instance_name = resolved.fetch("instance").fetch("name")
 selected = resolved.fetch("bundle_packages").include?(package_id)
 os_family = resolved.fetch("os").fetch("family")
 
@@ -57,7 +57,8 @@ if ENV["EGAME_PLUGIN_DRY_RUN"] == "1"
     "kind" => "package",
     "package" => package_id,
     "command" => command,
-    "profile" => profile,
+    "instance" => instance_name,
+    "profile" => instance_name,
     "selected" => selected,
     "os_family" => os_family,
     "status" => command == "status" ? "unknown" : nil,
@@ -73,24 +74,25 @@ when "status"
   puts JSON.generate({
     "kind" => "package",
     "package" => package_id,
-    "profile" => profile,
+    "instance" => instance_name,
+    "profile" => instance_name,
     "selected" => selected,
     "os_family" => os_family,
     "status" => "unknown"
   })
 when "install"
   if os_family == "ubuntu"
-    exec File.join(ROOT, "scripts/package-provision"), "--profile", profile, "--package", package_id
+    exec File.join(ROOT, "scripts/package-provision"), "--instance", instance_name, "--package", package_id
   end
 
   if os_family == "windows"
     # package-provision-windows handles its own fallback to full provisioning
     # for packages without a granular step mapping, and logs the fallback.
-    exec File.join(ROOT, "scripts/package-provision-windows"), "--profile", profile, "--package", package_id
+    exec File.join(ROOT, "scripts/package-provision-windows"), "--instance", instance_name, "--package", package_id
   end
 
   warn "[package-plugin] install currently delegates to full provisioning for #{os_family}"
-  exec File.join(ROOT, "scripts/provision"), profile
+  exec File.join(ROOT, "scripts/provision"), instance_name
 when "down"
   warn "package-plugin: no #{os_family} down hook for package: #{package_id}"
   exit 2

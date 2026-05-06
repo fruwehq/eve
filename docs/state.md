@@ -48,3 +48,18 @@ and 500.
 - `scripts/instance-provision` owns `provision_state`.
 - Future reconcile commands should call these dispatchers instead of mutating
   state directly.
+
+## Interrupted Operation Recovery
+
+If the host process or TUI exits while an operation is marked `running`, recover
+the local state before retrying:
+
+```bash
+make instance.recover INSTANCE=<name>
+```
+
+This marks the last running operation as `failed`, records a recovery error, and
+sets `provider_state` or `provision_state` to `error` when the interrupted
+operation belongs to that surface. It does not destroy or change remote
+resources. After recovery, run `make instance.status INSTANCE=<name>` and retry
+the relevant lifecycle/provision/package command.
