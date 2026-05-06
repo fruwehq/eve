@@ -864,46 +864,58 @@ def run_tui() -> int:
         def render_empty_state(self) -> None:
             sakura_frames = [
                 [
-                    "          [magenta]* * * * *[/]                 ",
-                    "       [magenta]* * * * * * *[/]        [white].[/]       ",
-                    "     [magenta]* * *[/][yellow] \\|/ [/][magenta]* *[/]             ",
-                    "          [yellow]\\ | /[/]          [white].[/]        ",
-                    "           [yellow]\\|/[/]                    ",
-                    "  [green]_____[/][yellow]__|__[/][green]________________________[/]",
+                    ("      .         .             .     ", "white"),
+                    ("            * * * * * *             ", "magenta"),
+                    ("         * * * * * * * * *          ", "magenta"),
+                    ("       * * * *  \\|/  * * * *        ", "magenta"),
+                    ("            \\   |   /       .       ", "yellow"),
+                    ("             \\  |  /                ", "yellow"),
+                    ("              \\ | /                 ", "yellow"),
+                    ("     ____~~~~~~\\|/~~~~~~____        ", "green"),
                 ],
                 [
-                    "          [magenta]* * * * *[/]             [white].[/]   ",
-                    "       [magenta]* * * * * * *[/]                ",
-                    "     [magenta]* * *[/][yellow] \\|/ [/][magenta]* *[/]       [white].[/]     ",
-                    "          [yellow]\\ | /[/]                   ",
-                    "           [yellow]\\|/[/]             [white].[/]      ",
-                    "  [green]_____[/][yellow]__|__[/][green]________________________[/]",
+                    ("         .               .           ", "white"),
+                    ("            * * * * * *        .    ", "magenta"),
+                    ("         * * * * * * * * *          ", "magenta"),
+                    ("       * * * *  \\|/  * * * *        ", "magenta"),
+                    ("            \\   |   /               ", "yellow"),
+                    ("        .    \\  |  /                ", "yellow"),
+                    ("              \\ | /        .        ", "yellow"),
+                    ("     ____~~~~~~\\|/~~~~~~____        ", "green"),
                 ],
                 [
-                    "          [magenta]* * * * *[/]                 ",
-                    "       [magenta]* * * * * * *[/]       [white].[/]        ",
-                    "     [magenta]* * *[/][yellow] \\|/ [/][magenta]* *[/]             ",
-                    "     [white].[/]    [yellow]\\ | /[/]                  ",
-                    "           [yellow]\\|/[/]        [white].[/]           ",
-                    "  [green]_____[/][yellow]__|__[/][green]________________________[/]",
+                    ("              .              .       ", "white"),
+                    ("            * * * * * *             ", "magenta"),
+                    ("     .   * * * * * * * * *          ", "magenta"),
+                    ("       * * * *  \\|/  * * * *    .   ", "magenta"),
+                    ("            \\   |   /               ", "yellow"),
+                    ("             \\  |  /       .        ", "yellow"),
+                    ("         .    \\ | /                ", "yellow"),
+                    ("     ____~~~~~~\\|/~~~~~~____        ", "green"),
                 ],
                 [
-                    "          [magenta]* * * * *[/]          [white].[/]      ",
-                    "       [magenta]* * * * * * *[/]                ",
-                    "     [magenta]* * *[/][yellow] \\|/ [/][magenta]* *[/]             ",
-                    "          [yellow]\\ | /[/]      [white].[/]            ",
-                    "      [white].[/]    [yellow]\\|/[/]                   ",
-                    "  [green]_____[/][yellow]__|__[/][green]________________________[/]",
+                    ("       .              .             ", "white"),
+                    ("            * * * * * *             ", "magenta"),
+                    ("         * * * * * * * * *    .     ", "magenta"),
+                    ("       * * * *  \\|/  * * * *        ", "magenta"),
+                    ("      .     \\   |   /               ", "yellow"),
+                    ("             \\  |  /                ", "yellow"),
+                    ("              \\ | /     .           ", "yellow"),
+                    ("     ____~~~~~~\\|/~~~~~~____        ", "green"),
                 ],
             ]
-            frame_width = 44
+            frame_width = 38
             frame = sakura_frames[self.hero_frame % len(sakura_frames)]
             border = "+" + ("-" * frame_width) + "+"
+            art_lines = [
+                f"[primary]|[/][{style}]{line.ljust(frame_width)[:frame_width]}[/][primary]|[/]"
+                for line, style in frame
+            ]
             self.query_one("#empty-state", Static).update(
                 "\n".join(
                     [
                         f"[primary]{border}[/]",
-                        *[f"[primary]|[/]{line}[primary]|[/]" for line in frame],
+                        *art_lines,
                         f"[primary]{border}[/]",
                         "[b]EPHEMERAL VM COCKPIT[/b]",
                         "",
