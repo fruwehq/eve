@@ -211,7 +211,6 @@ def run_tui() -> int:
             Input,
             Label,
             RichLog,
-            Select,
             SelectionList,
             Static,
         )
@@ -274,8 +273,12 @@ def run_tui() -> int:
         }
 
         Input,
-        Select,
         SelectionList {
+            margin-bottom: 1;
+        }
+
+        #recipe-cards {
+            height: 14;
             margin-bottom: 1;
         }
 
@@ -303,24 +306,17 @@ def run_tui() -> int:
             self.recipe_details = recipe_details
             self.packages = packages
             self.step = 0
+            self.selected_recipe_name = self.recipes[0] if self.recipes else ""
 
         def compose(self) -> ComposeResult:
-            first_recipe = self.recipes[0] if self.recipes else ""
-            recipe_options = [(recipe, recipe) for recipe in self.recipes]
             with Vertical(id="new-dialog"):
                 yield Label("[b]New Instance[/b]  [dim]1 Name -> 2 Recipe -> 3 Options -> 4 Review[/dim]")
                 with Vertical(id="step-name"):
                     yield Input(placeholder="instance name", id="new-name")
                     yield Static("Use a short lowercase name, for example dev-a or windows-test.", classes="muted")
                 with Vertical(id="step-recipe"):
-                    yield Select(
-                        recipe_options,
-                        prompt="recipe",
-                        allow_blank=False,
-                        value=first_recipe,
-                        id="new-recipe",
-                        disabled=not recipe_options,
-                    )
+                    yield Static("Choose a recipe. Use ↑/↓ to preview, Enter to continue.", classes="muted")
+                    yield DataTable(id="recipe-cards")
                     yield Static("", id="recipe-defaults")
                 with Vertical(id="step-options"):
                     yield Static("", id="resource-defaults")
@@ -341,11 +337,35 @@ def run_tui() -> int:
                     yield Button("Create", id="create", variant="success")
 
         def on_mount(self) -> None:
+            self.populate_recipe_cards()
             self.update_wizard()
 
+        def populate_recipe_cards(self) -> None:
+            table = self.query_one("#recipe-cards", DataTable)
+            table.cursor_type = "row"
+            table.add_columns("Recipe", "Machine", "OS", "Location", "Packages")
+            for recipe in self.recipes:
+                details = self.recipe_details.get(recipe, {})
+                packages = details.get("packages", [])
+                bundles = details.get("bundles", [])
+                package_items: list[str] = []
+                if isinstance(bundles, list):
+                    package_items.extend(f"+{bundle}" for bundle in bundles)
+                if isinstance(packages, list):
+                    package_items.extend(str(package) for package in packages)
+                table.add_row(
+                    recipe,
+                    str(details.get("machine") or "-"),
+                    str(details.get("os") or "-"),
+                    str(details.get("location") or "-"),
+                    ", ".join(package_items) if package_items else "-",
+                    key=recipe,
+                )
+            if self.recipes:
+                table.move_cursor(row=0, column=0, animate=False)
+
         def selected_recipe(self) -> str:
-            recipe_value = self.query_one("#new-recipe", Select).value
-            return recipe_value if isinstance(recipe_value, str) else ""
+            return self.selected_recipe_name
 
         def selected_packages(self) -> list[str]:
             selected = self.query_one("#package-select", SelectionList).selected
@@ -404,9 +424,30 @@ def run_tui() -> int:
             self.query_one("#next", Button).display = self.step < 3
             self.query_one("#create", Button).display = self.step == 3
 
-        def on_select_changed(self, event: Select.Changed) -> None:
-            if event.select.id == "new-recipe":
+        def focus_current_step(self) -> None:
+            if self.step == 0:
+                self.query_one("#new-name", Input).focus()
+            elif self.step == 1:
+                self.query_one("#recipe-cards", DataTable).focus()
+            elif self.step == 2:
+                self.query_one("#new-disk", Input).focus()
+            else:
+                self.query_one("#create", Button).focus()
+
+        def set_step(self, step: int) -> None:
+            self.step = max(0, min(3, step))
+            self.update_wizard()
+            self.focus_current_step()
+
+        def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
+            if event.data_table.id == "recipe-cards":
+                self.selected_recipe_name = str(event.row_key.value)
                 self.update_wizard()
+
+        def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+            if event.data_table.id == "recipe-cards":
+                self.selected_recipe_name = str(event.row_key.value)
+                self.set_step(2)
 
         def on_selection_list_selected_changed(self, event: Any) -> None:
             self.update_wizard()
@@ -424,17 +465,14 @@ def run_tui() -> int:
                 if not name:
                     self.notify("Name is required", severity="error")
                     return
-                self.step = 1
-                self.update_wizard()
-                self.query_one("#new-recipe", Select).focus()
+                self.set_step(1)
 
         def on_button_pressed(self, event: Button.Pressed) -> None:
             if event.button.id == "cancel":
                 self.dismiss(None)
                 return
             if event.button.id == "back":
-                self.step = max(0, self.step - 1)
-                self.update_wizard()
+                self.set_step(self.step - 1)
                 return
             if event.button.id == "next":
                 name = self.query_one("#new-name", Input).value.strip()
@@ -444,8 +482,7 @@ def run_tui() -> int:
                 if self.step == 1 and not self.selected_recipe():
                     self.notify("Name and recipe are required", severity="error")
                     return
-                self.step = min(3, self.step + 1)
-                self.update_wizard()
+                self.set_step(self.step + 1)
                 return
             if event.button.id != "create":
                 return
