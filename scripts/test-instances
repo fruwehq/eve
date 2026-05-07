@@ -356,6 +356,39 @@ else
   printf '  [OK] delete non-existent instance fails\n'
 fi
 
+stale_state_dir="$tmp_overlay_dir/stale-state"
+if EGAME_STATE_DIR="$stale_state_dir" ./scripts/instance-create \
+  --registry "$tmp_registry" \
+  --instance stale-dev \
+  --machine local-qemu-medium \
+  --os ubuntu-26.04-arm64 \
+  --location tokyo \
+  --bundles desktop-streaming >/dev/null &&
+  EGAME_STATE_DIR="$stale_state_dir" ./scripts/instance-state \
+    --instance stale-dev \
+    --operation package.rustdesk.status \
+    --status succeeded \
+    --package rustdesk \
+    --package-state installed >/dev/null &&
+  EGAME_STATE_DIR="$stale_state_dir" ./scripts/instance-delete --registry "$tmp_registry" --instance stale-dev >/dev/null &&
+  [ -e "$stale_state_dir/instances/stale-dev.json" ] &&
+  EGAME_STATE_DIR="$stale_state_dir" ./scripts/instance-create \
+    --registry "$tmp_registry" \
+    --instance stale-dev \
+    --machine local-qemu-medium \
+    --os ubuntu-26.04-arm64 \
+    --location tokyo \
+    --bundles desktop-streaming >/dev/null &&
+  [ ! -e "$stale_state_dir/instances/stale-dev.json" ] &&
+  EGAME_STATE_DIR="$stale_state_dir" ./scripts/instance-status --registry "$tmp_registry" --instance stale-dev --json |
+    jq -e '.packages.summary.installed == 0 and .packages.summary.unknown > 0' >/dev/null; then
+  printf '  [OK] create resets stale local instance state\n'
+else
+  printf '  [FAIL] create resets stale local instance state\n' >&2
+  EGAME_STATE_DIR="$stale_state_dir" ./scripts/instance-status --registry "$tmp_registry" --instance stale-dev --json >&2 || true
+  FAIL=$((FAIL + 1))
+fi
+
 purge_workdir="$tmp_overlay_dir/delete-work"
 purge_state="$tmp_overlay_dir/delete-state"
 if ./scripts/instance-create \

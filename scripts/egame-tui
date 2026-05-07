@@ -1414,6 +1414,7 @@ def run_tui() -> int:
             package_text = (
                 f"{summary.get('installed', 0)} installed / "
                 f"{summary.get('missing', 0)} missing / "
+                f"{summary.get('unknown', 0)} unknown / "
                 f"{summary.get('failed', 0)} failed"
             )
             self.query_one("#provider-pill", Static).update(f"Provider\n{provider_name}")
