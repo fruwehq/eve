@@ -1269,8 +1269,8 @@ def run_tui() -> int:
 
             self.animate_hero()
             self.set_interval(1.2, self.animate_hero)
-            self.set_interval(4.5, self.trigger_blink)
-            self.set_interval(5, self.poll_statuses)
+            self.set_interval(15, self.trigger_blink)
+            self.set_interval(30, self.poll_statuses)
             self.start_task(self.load_initial_data())
             self.park_terminal_cursor()
 
