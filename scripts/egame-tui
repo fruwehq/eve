@@ -2157,6 +2157,10 @@ def run_tui() -> int:
             if not self.current_instance:
                 return
             instance = self.current_instance
+            if command == "up":
+                state = self.current_status.get("state", {}) if self.current_status else {}
+                if effective_provider_state(cast(dict[str, Any], state)) == "stopped":
+                    command = "start"
             args = make_args(command, instance)
             code = await self.stream_command(f"provider.{command}", args, refresh_instance=instance)
             self.keep_instance_selected(instance)
@@ -2416,6 +2420,8 @@ def run_tui() -> int:
             self.update_busy_layout()
             self.set_button("refresh", disabled=busy)
             self.set_button("cancel-command", disabled=not busy)
+            provider_up = self.query_one("#provider-up", Button)
+            provider_up.label = "Start" if display_provider_state == "stopped" else "Up"
             self.set_button(
                 "provider-up",
                 disabled=busy or not has_instance or provider_busy or display_provider_state == "running",

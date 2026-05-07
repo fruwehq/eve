@@ -8,13 +8,80 @@ RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
 ENGINE=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^ENGINE=/{print $2}')
 PROVIDER=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^PROVIDER=/{print $2}')
 
+TM_READ_FLAGS=(
+  --disable-safeguards=git-untracked
+  --disable-safeguards=git-uncommitted
+  --disable-safeguards=git-out-of-sync
+  --disable-safeguards=outdated-code
+)
+
 tf_attr() {
   local json="$1" address="$2" attr="$3"
   printf '%s' "$json" | jq -r --arg addr "$address" --arg attr "$attr" \
-    '(.values // {} | .root_module // {} | .resources // [])
-     | map(select(.address == $addr))
-     | map(.values[$attr])
+    '[((.values // {} | .root_module // {} | .resources // [])
+       | map(select(.address == $addr))
+       | map(.values[$attr])[]?),
+      ((.resources // [])
+       | map(select((.type + "." + .name) == $addr))
+       | map(.instances[]?.attributes[$attr])[]?)]
+     | map(select(. != null and . != ""))
      | first // ""' 2>/dev/null
+}
+
+terraform_state_json() {
+  local tags="$1"
+  local state_json="" state_path="" workspace="${TF_WORKSPACE:-default}"
+
+  state_json=$(terramate run "${TM_READ_FLAGS[@]}" --quiet --tags="$tags-services" -- terraform show -json 2>/dev/null) || true
+  if [ -n "$state_json" ]; then
+    printf '%s\n' "$state_json"
+    return 0
+  fi
+
+  if [ -n "${EGAME_TF_STATE_BASE:-}" ]; then
+    state_path="${EGAME_TF_STATE_BASE}/stacks/${PROVIDER}/20-services/workspaces/${workspace}/terraform.tfstate"
+    if [ -f "$state_path" ]; then
+      cat "$state_path"
+      return 0
+    fi
+
+    state_path="${EGAME_TF_STATE_BASE}/stacks/${PROVIDER}/20-services/default.tfstate"
+    if [ -f "$state_path" ]; then
+      cat "$state_path"
+      return 0
+    fi
+  fi
+}
+
+normalize_path() {
+  local value="$1"
+  # shellcheck disable=SC2088,SC2016
+  case "$value" in
+    '$(HOME)'|'$(HOME)/'*) printf '%s' "$HOME${value#\$\(HOME\)}" ;;
+    '$HOME'|'$HOME/'*) printf '%s' "$HOME${value#\$HOME}" ;;
+    '~'|'~/'*) printf '%s' "$HOME${value#\~}" ;;
+    *) printf '%s' "$value" ;;
+  esac
+}
+
+truenas_ssh_opts() {
+  SSH_USER="${TRUENAS_SSH_USER:-terraform}"
+  SSH_OPTS=(-o StrictHostKeyChecking=no -o IdentitiesOnly=yes)
+  if [ -n "${TRUENAS_SSH_PRIVATE_KEY_FILE:-}" ]; then
+    SSH_KEY="$(normalize_path "${TRUENAS_SSH_PRIVATE_KEY_FILE}")"
+    SSH_OPTS+=(-i "$SSH_KEY")
+  fi
+  if [ -n "${TRUENAS_SSH_PORT:-}" ] && [ "${TRUENAS_SSH_PORT}" != "22" ]; then
+    SSH_OPTS+=(-p "$TRUENAS_SSH_PORT")
+  fi
+}
+
+truenas_vm_state() {
+  local vm_id="$1" output
+  truenas_ssh_opts
+  # shellcheck disable=SC2029
+  output=$(ssh "${SSH_OPTS[@]}" "${SSH_USER}@${TRUENAS_HOST}" "sudo midclt call vm.query '[[\"id\",\"=\",$vm_id]]'" 2>/dev/null) || return 1
+  printf '%s\n' "$output" | jq -r '.[0].status.state // .[0].state // empty' 2>/dev/null
 }
 
 case "$ENGINE" in
@@ -37,7 +104,7 @@ case "$ENGINE" in
     eval "$(./scripts/tf-env "$PROFILE")"
     TAGS=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^STACK_TAGS=/{print $2}')
 
-    STATE_JSON=$(terramate run --quiet --tags="$TAGS-services" -- terraform show -json 2>/dev/null) || true
+    STATE_JSON=$(terraform_state_json "$TAGS")
     if [ -z "$STATE_JSON" ]; then
       echo "[stop] No instance in state." >&2
       exit 1
@@ -86,33 +153,19 @@ case "$ENGINE" in
         fi
         ;;
       truenas)
-        RAW=$(tf_attr "$STATE_JSON" "truenas_vm.this" "state")
-        if [ "$(printf '%s' "$RAW" | tr '[:lower:]' '[:upper:]')" = "STOPPED" ]; then
+        VM_ID=$(tf_attr "$STATE_JSON" "truenas_vm.this" "id")
+        VM_NAME=$(tf_attr "$STATE_JSON" "truenas_vm.this" "name")
+        if [ -z "$VM_ID" ]; then
+          echo "[stop] TrueNAS VM id not found in state." >&2
+          exit 1
+        fi
+        LIVE_STATE=$(truenas_vm_state "$VM_ID" || true)
+        if [ "$(printf '%s' "$LIVE_STATE" | tr '[:lower:]' '[:upper:]')" = "STOPPED" ]; then
           echo "[stop] Already stopped"
           exit 0
         fi
-        VM_ID=$(terramate run --quiet --tags="$TAGS-services" -- terraform output -raw truenas_vm_id)
-        VM_NAME=$(terramate run --quiet --tags="$TAGS-services" -- terraform output -raw truenas_vm_name)
         echo "[stop] Stopping TrueNAS VM $VM_NAME (id=$VM_ID)"
-        normalize_path() {
-          local value="$1"
-          # shellcheck disable=SC2088,SC2016
-          case "$value" in
-            '$(HOME)'|'$(HOME)/'*) printf '%s' "$HOME${value#\$\(HOME\)}" ;;
-            '$HOME'|'$HOME/'*) printf '%s' "$HOME${value#\$HOME}" ;;
-            '~'|'~/'*) printf '%s' "$HOME${value#\~}" ;;
-            *) printf '%s' "$value" ;;
-          esac
-        }
-        SSH_USER="${TRUENAS_SSH_USER:-terraform}"
-        SSH_OPTS=(-o StrictHostKeyChecking=no -o IdentitiesOnly=yes)
-        if [ -n "${TRUENAS_SSH_PRIVATE_KEY_FILE:-}" ]; then
-          SSH_KEY="$(normalize_path "${TRUENAS_SSH_PRIVATE_KEY_FILE}")"
-          SSH_OPTS+=(-i "$SSH_KEY")
-        fi
-        if [ -n "${TRUENAS_SSH_PORT:-}" ] && [ "${TRUENAS_SSH_PORT}" != "22" ]; then
-          SSH_OPTS+=(-p "$TRUENAS_SSH_PORT")
-        fi
+        truenas_ssh_opts
         # shellcheck disable=SC2029
         ssh "${SSH_OPTS[@]}" "${SSH_USER}@${TRUENAS_HOST}" "sudo midclt call vm.stop $VM_ID"
         echo "[stop] VM stop initiated"
