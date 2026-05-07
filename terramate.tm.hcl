@@ -1,5 +1,5 @@
 terramate {
-  required_version = "~> 0.16.0"
+  required_version = "~> 0.17.0"
 
   config {
     git {

@@ -53,6 +53,11 @@ generate_hcl "z_ec2_instance.tf" {
       type = string
     }
 
+    variable "vm_user_name" {
+      type    = string
+      default = "ubuntu"
+    }
+
     variable "availability_zone" {
       type        = string
       description = "AWS availability zone (from profile location mapping via TF_VAR_availability_zone)"
@@ -193,7 +198,7 @@ generate_hcl "z_ec2_instance.tf" {
           manage_etc_hosts = true
 
           users = [{
-            name                = "ubuntu"
+            name                = var.vm_user_name
             sudo                = "ALL=(ALL) NOPASSWD:ALL"
             shell               = "/bin/bash"
             lock_passwd         = false

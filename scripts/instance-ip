@@ -21,6 +21,7 @@ RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
 ENGINE=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^ENGINE=/{print $2}')
 PROVIDER=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^PROVIDER=/{print $2}')
 TAGS=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^STACK_TAGS=/{print $2}')
+RESOLVED_SSH_USER=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^SSH_USER=/{print $2}')
 
 if [ "$ENGINE" = "terraform" ]; then
   eval "$(./scripts/tf-env "$PROFILE")"
@@ -133,8 +134,7 @@ case "$ENGINE:$PROVIDER" in
       IP=$(resolve_host_ip "$RASPBERRY_PI_HOST" || true)
     fi
     if [ -z "$IP" ]; then
-      SSH_USER=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^SSH_USER=/{print $2}')
-      SSH_USER="${SSH_USER:-$VM_USER_NAME}"
+      SSH_USER="${RESOLVED_SSH_USER:-$VM_USER_NAME}"
       IP=$(ssh_host_ip "$RASPBERRY_PI_HOST" "$SSH_USER" || true)
     fi
     if [ -z "$IP" ]; then
@@ -201,7 +201,7 @@ case "$ENGINE:$PROVIDER" in
 
     FOUND=""
     for IP in $CANDIDATES; do
-      HOSTNAME=$(ssh "${VM_SSH_OPTS[@]}" "ubuntu@${IP}" hostname 2>/dev/null) || continue
+      HOSTNAME=$(ssh "${VM_SSH_OPTS[@]}" "${RESOLVED_SSH_USER:-ubuntu}@${IP}" hostname 2>/dev/null) || continue
       if [ "$HOSTNAME" = "$VM_NAME" ]; then
         FOUND="$IP"
         break

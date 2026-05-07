@@ -50,20 +50,23 @@ write_display_mode_helper() {
   cat > "$HOME/.local/bin/egame-set-display-mode" <<EOF
 #!/usr/bin/env sh
 set -eu
+preferred_output="$output_name"
 export DISPLAY="\${DISPLAY:-:0}"
 export XAUTHORITY="\${XAUTHORITY:-$HOME/.Xauthority}"
 if ! xrandr --query >/dev/null 2>&1; then
   exit 0
 fi
+output_name="\$(xrandr --query | awk '/ connected/{print \$1; exit}')"
+output_name="\${output_name:-\$preferred_output}"
 EOF
   if [ -n "$modeline" ]; then
     cat >> "$HOME/.local/bin/egame-set-display-mode" <<EOF
 xrandr --newmode $modeline 2>/dev/null || true
-xrandr --addmode "$output_name" "$mode_name" 2>/dev/null || true
+xrandr --addmode "\$output_name" "$mode_name" 2>/dev/null || true
 EOF
   fi
   cat >> "$HOME/.local/bin/egame-set-display-mode" <<EOF
-xrandr --output "$output_name" --mode "$mode_name" 2>/dev/null || true
+xrandr --output "\$output_name" --mode "$mode_name" 2>/dev/null || true
 EOF
   chmod +x "$HOME/.local/bin/egame-set-display-mode"
 
@@ -222,6 +225,17 @@ cat > "$HOME/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-screensaver.xml" <<'
   </property>
 </channel>
 XEOF
+
+mkdir -p "$HOME/.config/autostart"
+cat > "$HOME/.config/autostart/rustdesk-server.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=RustDesk Server
+Exec=sh -lc 'export DISPLAY="\${DISPLAY:-:0}"; export XAUTHORITY="\${XAUTHORITY:-$HOME/.Xauthority}"; [ -x "$HOME/.local/bin/egame-set-display-mode" ] && "$HOME/.local/bin/egame-set-display-mode" || true; exec rustdesk --server'
+Hidden=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+EOF
 
 mkdir -p "$HOME/.config/rustdesk"
 sudo mkdir -p /root/.config/rustdesk

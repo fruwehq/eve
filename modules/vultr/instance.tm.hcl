@@ -23,16 +23,20 @@ generate_hcl "z_vultr_instance.tf" {
     variable "ssh_public_key_file" {
       type = string
     }
+    variable "vm_user_name" {
+      type    = string
+      default = "ubuntu"
+    }
 
     locals {
       is_windows = var.os_family == "windows"
 
-      # Linux cloud-init user-data: creates `ubuntu` user, installs SSH key, NOPASSWD sudo.
+      # Linux cloud-init user-data: creates VM user, installs SSH key, NOPASSWD sudo.
       linux_user_data = yamlencode({
         hostname         = replace(var.profile_name, "_", "-")
         manage_etc_hosts = true
         users = [{
-          name                = "ubuntu"
+          name                = var.vm_user_name
           sudo                = "ALL=(ALL) NOPASSWD:ALL"
           shell               = "/bin/bash"
           lock_passwd         = false

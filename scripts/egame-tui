@@ -295,7 +295,6 @@ def run_tui() -> int:
         from textual.app import App, ComposeResult
         from textual.binding import Binding
         from textual.containers import Container, Grid, Horizontal, Vertical
-        from textual.geometry import Offset
         from textual.screen import ModalScreen
         from textual.widgets import (
             Button,
@@ -1111,6 +1110,7 @@ def run_tui() -> int:
             self._rendering_instances = False
             self._detail_refresh_seq = 0
             self._status_refreshing: set[str] = set()
+            self._list_status_task: asyncio.Task[None] | None = None
 
         def compose(self) -> ComposeResult:
             yield Header(show_clock=True)
@@ -1249,11 +1249,9 @@ def run_tui() -> int:
             self.park_terminal_cursor()
 
         def park_terminal_cursor(self) -> None:
-            if isinstance(self.focused, (Input, TextArea)):
-                return
-            width = max(self.size.width - 1, 0)
-            height = max(self.size.height - 1, 0)
-            self.cursor_position = Offset(width, height)
+            # Let Textual own the terminal cursor. Manually moving it produced
+            # a full-width cursor row in some terminals after focus changes.
+            return
 
         def start_task(self, coro: Coroutine[Any, Any, None]) -> None:
             task = asyncio.create_task(coro)
@@ -1308,7 +1306,7 @@ def run_tui() -> int:
                         await status_poll_task
                 self.command_running = False
                 if refresh_instance:
-                    await self.refresh_status_for(refresh_instance)
+                    await self.refresh_status_for(refresh_instance, repaint_table=True)
                 else:
                     await self.refresh_current_status()
                 self.update_action_state()
@@ -1316,7 +1314,8 @@ def run_tui() -> int:
         async def poll_statuses(self) -> None:
             if self.command_running:
                 return
-            await self.refresh_instances(preserve_selection=True, quiet=True, repaint_table=False)
+            if self.current_instance:
+                await self.refresh_status_for(self.current_instance)
 
         async def refresh_instances(
             self,
@@ -1350,24 +1349,50 @@ def run_tui() -> int:
                 else:
                     self.current_instance = None
 
-            if repaint_table or previous_names != next_names:
-                self.render_instances()
-            for name in next_names:
-                self.start_task(self.refresh_status_for(name, repaint_table=True))
+            new_names = previous_names != next_names
+            if repaint_table or new_names:
+                self.render_instances(sync_cursor=True)
+            if self._list_status_task and not self._list_status_task.done():
+                self._list_status_task.cancel()
+            self._status_refreshing = set(next_names)
+            if repaint_table or new_names:
+                self.render_instances(sync_cursor=True)
+            self._list_status_task = asyncio.create_task(self.refresh_list_statuses(next_names))
+            self.background_tasks.add(self._list_status_task)
+            self._list_status_task.add_done_callback(self.background_tasks.discard)
             if self.current_instance and self.current_instance not in self.statuses:
                 self.render_loading_detail(self.current_instance)
                 self.update_action_state()
             await self.refresh_current_status(allow_fetch=False)
             self.query_one("#summary", Static).update(aggregate_state(self.statuses))
 
+        async def refresh_list_statuses(self, instance_names: list[str]) -> None:
+            updated: dict[str, dict[str, Any]] = {}
+            try:
+                for name in instance_names:
+                    try:
+                        updated[name] = await asyncio.to_thread(instance_status, name)
+                    except Exception as exc:
+                        updated[name] = {"instance": {"name": name}, "state": {"last_error": str(exc)}}
+                self.statuses.update(updated)
+                self._status_refreshing.difference_update(instance_names)
+                self.render_instances(sync_cursor=True)
+                self.query_one("#summary", Static).update(aggregate_state(self.statuses))
+                if self.current_instance and self.current_instance in updated:
+                    self.current_status = updated[self.current_instance]
+                    self.render_detail()
+                    self.update_action_state()
+            except asyncio.CancelledError:
+                self._status_refreshing.difference_update(instance_names)
+                raise
+
         def focus_instance_list_if_empty(self) -> None:
             if self.current_instance is None:
                 self.query_one("#instances", DataTable).focus()
 
-        def render_instances(self) -> None:
+        def render_instances(self, *, sync_cursor: bool = False, focus_empty: bool = False) -> None:
             table = self.query_one("#instances", DataTable)
             self._rendering_instances = True
-            focused_id = self.focused.id if self.focused is not None else None
             table_has_focus = self.focused is table
             table.clear()
             table.add_row("+", "<< New Instance >>", "", "", key=NEW_INSTANCE_KEY)
@@ -1405,13 +1430,10 @@ def run_tui() -> int:
                     key=name,
                 )
                 row_index += 1
-            if table_has_focus or self.current_instance is None:
+            if sync_cursor and (table_has_focus or self.current_instance is None):
                 table.move_cursor(row=current_row, column=0, animate=False, scroll=True)
-            if self.current_instance is None:
+            if focus_empty and self.current_instance is None:
                 table.focus()
-            elif focused_id:
-                with suppress(Exception):
-                    self.query_one(f"#{focused_id}").focus()
             self._rendering_instances = False
 
         async def refresh_current_status(self, *, allow_fetch: bool = True) -> None:
@@ -1477,15 +1499,13 @@ def run_tui() -> int:
 
         async def refresh_status_for(self, instance_name: str, *, repaint_table: bool = False) -> None:
             self._status_refreshing.add(instance_name)
-            if repaint_table:
-                self.render_instances()
             try:
                 status = await asyncio.to_thread(instance_status, instance_name)
             except Exception as exc:
                 self.log_line(f"[error]instance-status failed for {instance_name}:[/] {exc}")
                 self._status_refreshing.discard(instance_name)
                 if repaint_table:
-                    self.render_instances()
+                    self.render_instances(sync_cursor=True)
                 return
             if status_instance_name(status) != instance_name:
                 self.log_line(
@@ -1494,7 +1514,7 @@ def run_tui() -> int:
                 )
                 self._status_refreshing.discard(instance_name)
                 if repaint_table:
-                    self.render_instances()
+                    self.render_instances(sync_cursor=True)
                 return
             with suppress(Exception):
                 live_state = await asyncio.to_thread(provider_live_status, instance_name)
@@ -1503,7 +1523,7 @@ def run_tui() -> int:
             self.statuses[instance_name] = status
             self._status_refreshing.discard(instance_name)
             if repaint_table:
-                self.render_instances()
+                self.render_instances(sync_cursor=True)
                 self.query_one("#summary", Static).update(aggregate_state(self.statuses))
             if self.current_instance == instance_name:
                 self.current_status = status

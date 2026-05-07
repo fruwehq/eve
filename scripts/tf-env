@@ -73,6 +73,7 @@ print_kv TF_VAR_os_family "$(getv OS_FAMILY)"
 print_kv TF_VAR_os_id "$(getv OS_ID)"
 print_kv TF_VAR_profile_name "$PROFILE"
 print_kv TF_VAR_ssh_public_key_file "$(normalize_path "${SSH_PUBLIC_KEY_FILE:-}")"
+print_kv TF_VAR_vm_user_name "$(getv SSH_USER)"
 
 case "$PROVIDER" in
   aws)

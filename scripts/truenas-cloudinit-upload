@@ -2,12 +2,13 @@
 set -euo pipefail
 
 # Generate a NoCloud cloud-init seed ISO and upload it to TrueNAS via SCP.
-# Usage: truenas-cloudinit-upload <vm_name> <ssh_public_key_file> <truenas_host> <iso_path>
+# Usage: truenas-cloudinit-upload <vm_name> <ssh_public_key_file> <truenas_host> <iso_path> [vm_user_name]
 
 VM_NAME="${1:?vm_name required}"
 SSH_PUBLIC_KEY_FILE="${2:?ssh_public_key_file required}"
 TRUENAS_HOST="${3:?truenas_host required}"
 ISO_PATH="${4:?iso_path required}"
+VM_USER_NAME="${5:-ubuntu}"
 
 normalize_path() {
   local value="$1"
@@ -52,7 +53,7 @@ cat > "$TMPDIR/cidata/user-data" <<EOF
 #cloud-config
 hostname: $VM_NAME
 users:
-  - name: ubuntu
+  - name: $VM_USER_NAME
     ssh_authorized_keys:
       - $SSH_PUBLIC_KEY
     sudo: ALL=(ALL) NOPASSWD:ALL

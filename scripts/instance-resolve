@@ -312,7 +312,7 @@ def emit_env(resolved)
                   elsif provider == "raspberry-pi"
                     env_or("VM_USER_NAME", "")
                   else
-                    "ubuntu"
+                    env_or("VM_USER_NAME", "ubuntu")
                   end,
     "CLOUD_IMAGE_URL" => (os["cloud_image_url"] || ""),
     "RASPBERRY_PI_HOST" => env_or("RASPBERRY_PI_HOST", locp["host"] || ""),

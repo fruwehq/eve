@@ -55,6 +55,11 @@ generate_hcl "z_gcp_instance.tf" {
       type = string
     }
 
+    variable "vm_user_name" {
+      type    = string
+      default = "ubuntu"
+    }
+
     data "google_compute_image" "ubuntu" {
       family  = var.image_family
       project = var.image_project
@@ -73,7 +78,7 @@ generate_hcl "z_gcp_instance.tf" {
           manage_etc_hosts = true
 
           users = [{
-            name                = "ubuntu"
+            name                = var.vm_user_name
             sudo                = "ALL=(ALL) NOPASSWD:ALL"
             shell               = "/bin/bash"
             lock_passwd         = false
@@ -119,7 +124,7 @@ generate_hcl "z_gcp_instance.tf" {
       }
 
       metadata = {
-        ssh-keys  = "ubuntu:${local.ssh_public_key}"
+        ssh-keys  = "${var.vm_user_name}:${local.ssh_public_key}"
         user-data = data.cloudinit_config.ubuntu.rendered
       }
 

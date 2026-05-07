@@ -144,8 +144,20 @@ fi
 # app-sunshine@autostart.service and can race or duplicate CPU-heavy encoders.
 rm -f "$HOME/.config/autostart/sunshine.desktop"
 
-if [ "${PROVIDER:-}" = "raspberry-pi" ]; then
-  cat > "$HOME/.config/sunshine/apps.json" <<'EOF'
+mkdir -p "$HOME/.local/bin"
+if [ ! -x "$HOME/.local/bin/egame-set-display-mode" ]; then
+  cat > "$HOME/.local/bin/egame-set-display-mode" <<'EOF'
+#!/usr/bin/env sh
+exit 0
+EOF
+  chmod +x "$HOME/.local/bin/egame-set-display-mode"
+fi
+
+write_sunshine_apps() {
+  local include_steam=0
+  { has_pkg steam || command -v steam >/dev/null 2>&1; } && include_steam=1
+  if [ "$include_steam" -eq 1 ]; then
+    cat > "$HOME/.config/sunshine/apps.json" <<'EOF'
 {
   "env": {
     "PATH": "$(PATH):$(HOME)/.local/bin"
@@ -153,12 +165,56 @@ if [ "${PROVIDER:-}" = "raspberry-pi" ]; then
   "apps": [
     {
       "name": "Desktop",
-      "image-path": "desktop.png"
+      "image-path": "desktop.png",
+      "prep-cmd": [
+        {
+          "do": "$(HOME)/.local/bin/egame-set-display-mode",
+          "undo": ""
+        }
+      ]
+    },
+    {
+      "name": "Steam",
+      "cmd": "steam -bigpicture",
+      "detached": [
+        "setsid steam -bigpicture >/tmp/egame-steam.log 2>&1"
+      ],
+      "image-path": "steam.png",
+      "prep-cmd": [
+        {
+          "do": "$(HOME)/.local/bin/egame-set-display-mode",
+          "undo": ""
+        }
+      ]
     }
   ]
 }
 EOF
-fi
+  else
+    cat > "$HOME/.config/sunshine/apps.json" <<'EOF'
+{
+  "env": {
+    "PATH": "$(PATH):$(HOME)/.local/bin"
+  },
+  "apps": [
+    {
+      "name": "Desktop",
+      "image-path": "desktop.png",
+      "prep-cmd": [
+        {
+          "do": "$(HOME)/.local/bin/egame-set-display-mode",
+          "undo": ""
+        }
+      ]
+    }
+  ]
+}
+EOF
+  fi
+}
+
+log "### 60_sunshine: writing controlled Sunshine app list"
+write_sunshine_apps
 
 XDG_RUNTIME_DIR="/run/user/$(id -u)"
 export XDG_RUNTIME_DIR

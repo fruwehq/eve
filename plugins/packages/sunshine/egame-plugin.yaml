@@ -8,7 +8,7 @@ commands:
   down: {exec: scripts/package-plugin, args: [sunshine, down]}
 supports: {os_families: [ubuntu, windows]}
 down: {destructive: true}
-env: [EPHEMERAL_SUNSHINE_PASSWORD, SUNSHINE_VERSION, SUNSHINE_MAX_BITRATE_KBPS]
+env: [EPHEMERAL_DISPLAY_FPS, EPHEMERAL_DISPLAY_RESOLUTION, EPHEMERAL_SUNSHINE_PASSWORD, SUNSHINE_VERSION, SUNSHINE_MAX_BITRATE_KBPS]
 actions:
   - id: sunshine
     label: Sunshine
