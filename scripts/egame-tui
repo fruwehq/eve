@@ -247,7 +247,10 @@ def should_apply_live_provider_state(status: dict[str, Any], live_state: str) ->
     state = status.get("state", {})
     if not isinstance(state, dict):
         return True
-    if live_state == "absent" and effective_provider_state(state) == "running":
+    local_state = effective_provider_state(state)
+    if live_state == "absent" and local_state == "running":
+        return False
+    if live_state == "error" and local_state in {"stopped", "absent"}:
         return False
     return live_state in {"running", "stopped", "absent", "error"}
 
@@ -257,7 +260,7 @@ def status_with_provider_state(status: dict[str, Any], provider_state: str) -> d
     state = next_status.setdefault("state", {})
     if isinstance(state, dict):
         state["provider_state"] = provider_state
-        if provider_state == "running" and state.get("last_error"):
+        if provider_state in {"running", "stopped", "absent"} and state.get("last_error"):
             state["last_error"] = None
     return next_status
 
