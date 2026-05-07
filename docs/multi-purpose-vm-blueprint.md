@@ -172,11 +172,8 @@ packages:
   - id: steam
 
 bundles:
-  - id: desktop-rustdesk-vnc
-    includes: [rustdesk]
-
   - id: desktop-streaming
-    includes: [rustdesk, sunshine]
+    includes: [rustdesk, sunshine, vnc, rdp, waypipe]
 
   - id: dev-ai
     includes: [docker, dev-toolchain, goose, codex-cli]
@@ -211,7 +208,7 @@ instances:
     machine: aws-cheap-x86
     os: ubuntu-26.04-amd64
     init: ssh-ubuntu-cloud-init
-    bundles: [desktop-rustdesk-vnc, dev-ai]
+    bundles: [desktop-streaming, dev-ai]
     location: tokyo
 
   - name: vultr-windows-gaming
@@ -263,7 +260,7 @@ Given your current Terramate/Terraform layout:
 
 ## Phase 3: GUI and remote access bundles
 
-- Add `desktop-rustdesk-vnc` and `desktop-streaming` (Sunshine+RustDesk).
+- Add `desktop-streaming` for Sunshine, RustDesk, VNC, RDP, and Waypipe.
 - Add Linux GUI package bundles.
 
 ## Phase 4: Local provider

@@ -30,14 +30,14 @@ profiles:
     machine: local-qemu-medium
     os: ubuntu-26.04-arm64
     init: ssh-ubuntu-cloud-init
-    bundles: [dev-ai-arm64]
+    bundles: [dev-ai]
     location: tokyo
 
   - name: vultr-windows-gaming
     machine: vultr-vcg-a40-2c
     os: windows-server-2025
     init: ssh-windows-powershell7
-    bundles: [desktop-streaming, gaming-streaming]
+    bundles: [gaming-streaming]
     location: tokyo
 YAML
 export EGAME_CATALOG_LOCAL="$profile_catalog"
@@ -381,7 +381,7 @@ fi
 package_list="$(
   EGAME_INSTANCE_REGISTRY="$FIXTURE" make --no-print-directory package.list INSTANCE=dev-a EMIT=json
 )"
-if printf '%s\n' "$package_list" | jq -e '.instance == "dev-a" and (.packages[] | select(.id == "docker" and .selected == true and .supported == true and .plugin == "docker" and (.selected_by | index("bundle:dev-ai-arm64")))) and (.packages[] | select(.id == "steam" and .selected == false and .selected_by == []))' >/dev/null; then
+if printf '%s\n' "$package_list" | jq -e '.instance == "dev-a" and (.packages[] | select(.id == "docker" and .selected == true and .supported == true and .plugin == "docker" and (.selected_by | index("bundle:dev-ai")))) and (.packages[] | select(.id == "steam" and .selected == false and .selected_by == []))' >/dev/null; then
   printf '  [OK] package list shows selected and available packages\n'
 else
   printf '  [FAIL] package list shows selected and available packages\n' >&2

@@ -70,13 +70,13 @@ if ./scripts/instance-create \
   --os ubuntu-26.04-arm64 \
   --init ssh-ubuntu-cloud-init \
   --location tokyo \
-  --bundles desktop-rustdesk-vnc,dev-ai-arm64 \
-  --packages waypipe \
+  --bundles desktop-streaming,dev-ai \
+  --packages gnome-desktop \
   --disk-gb 64 \
   --memory-mb 4096 >/dev/null; then
   if ./scripts/instance-resolve --registry "$tmp_registry" --instance test-dev --validate >/dev/null &&
     ./scripts/instance-resolve --registry "$tmp_registry" --instance test-dev --emit json |
-      jq -e '.composition.packages == ["waypipe"] and (.bundle_packages | index("waypipe")) and .package_sources.waypipe == ["direct"]' >/dev/null; then
+      jq -e '.composition.packages == ["gnome-desktop"] and (.bundle_packages | index("gnome-desktop")) and .package_sources["gnome-desktop"] == ["direct"]' >/dev/null; then
     printf '  [OK] create valid instance\n'
   else
     printf '  [FAIL] created instance did not validate\n' >&2
@@ -93,8 +93,8 @@ if ./scripts/instance-create \
   --machine local-qemu-medium \
   --os ubuntu-26.04-arm64 \
   --location tokyo \
-  --bundles dev-ai-arm64 \
-  --packages waypipe \
+  --bundles dev-ai \
+  --packages gnome-desktop \
   --disk-gb 32 >/dev/null; then
   if ./scripts/instance-resolve --registry "$tmp_registry" --instance direct-dev --validate >/dev/null &&
     ./scripts/instance-resolve --registry "$tmp_registry" --instance direct-dev --emit json |
@@ -102,8 +102,8 @@ if ./scripts/instance-create \
         .composition.machine == "local-qemu-medium" and
         .composition.os == "ubuntu-26.04-arm64" and
         .composition.init == "ssh-ubuntu-cloud-init" and
-        (.bundle_packages | index("waypipe")) and
-        .package_sources.waypipe == ["direct"]
+        (.bundle_packages | index("gnome-desktop")) and
+        .package_sources["gnome-desktop"] == ["direct"]
       ' >/dev/null; then
     printf '  [OK] create direct composition instance with inferred init\n'
   else
@@ -150,12 +150,12 @@ else
   FAIL=$((FAIL + 1))
 fi
 
-if EGAME_INSTANCE_REGISTRY="$tmp_registry" make package.unselect INSTANCE=test-dev PACKAGE=waypipe >/dev/null &&
+if EGAME_INSTANCE_REGISTRY="$tmp_registry" make package.unselect INSTANCE=test-dev PACKAGE=gnome-desktop >/dev/null &&
   ! ./scripts/instance-resolve --registry "$tmp_registry" --instance test-dev --emit json |
-    jq -e '.bundle_packages | index("waypipe")' >/dev/null &&
-  EGAME_INSTANCE_REGISTRY="$tmp_registry" make package.select INSTANCE=test-dev PACKAGE=waypipe >/dev/null &&
+    jq -e '.bundle_packages | index("gnome-desktop")' >/dev/null &&
+  EGAME_INSTANCE_REGISTRY="$tmp_registry" make package.select INSTANCE=test-dev PACKAGE=gnome-desktop >/dev/null &&
   ./scripts/instance-resolve --registry "$tmp_registry" --instance test-dev --emit json |
-    jq -e '.composition.packages == ["waypipe"] and (.bundle_packages | index("waypipe")) and .package_sources.waypipe == ["direct"]' >/dev/null; then
+    jq -e '.composition.packages == ["gnome-desktop"] and (.bundle_packages | index("gnome-desktop")) and .package_sources["gnome-desktop"] == ["direct"]' >/dev/null; then
   printf '  [OK] package selection updates direct instance packages\n'
 else
   printf '  [FAIL] package selection updates direct instance packages\n' >&2
@@ -163,12 +163,12 @@ else
   FAIL=$((FAIL + 1))
 fi
 
-if EGAME_INSTANCE_REGISTRY="$tmp_registry" make bundle.unselect INSTANCE=test-dev BUNDLE=dev-ai-arm64 >/dev/null &&
+if EGAME_INSTANCE_REGISTRY="$tmp_registry" make bundle.unselect INSTANCE=test-dev BUNDLE=dev-ai >/dev/null &&
   ./scripts/instance-resolve --registry "$tmp_registry" --instance test-dev --emit json |
-    jq -e '(.composition.bundles == ["desktop-rustdesk-vnc"]) and (.bundle_packages | index("docker") | not)' >/dev/null &&
-  EGAME_INSTANCE_REGISTRY="$tmp_registry" make bundle.select INSTANCE=test-dev BUNDLE=desktop-streaming >/dev/null &&
+    jq -e '(.composition.bundles == ["desktop-streaming"]) and (.bundle_packages | index("docker") | not)' >/dev/null &&
+  EGAME_INSTANCE_REGISTRY="$tmp_registry" make bundle.select INSTANCE=test-dev BUNDLE=desktop-gnome >/dev/null &&
   ./scripts/instance-resolve --registry "$tmp_registry" --instance test-dev --emit json |
-    jq -e '(.composition.bundles | index("desktop-streaming")) and (.bundle_packages | index("sunshine")) and .package_sources.sunshine == ["bundle:desktop-streaming"]' >/dev/null; then
+    jq -e '(.composition.bundles | index("desktop-gnome")) and (.bundle_packages | index("gnome-desktop")) and (.package_sources["gnome-desktop"] | index("direct")) and (.package_sources["gnome-desktop"] | index("bundle:desktop-gnome"))' >/dev/null; then
   printf '  [OK] bundle selection updates instance bundles\n'
 else
   printf '  [FAIL] bundle selection updates instance bundles\n' >&2
@@ -198,11 +198,11 @@ fi
 
 cat >"$tmp_local_catalog" <<'YAML'
 bundles:
-  - id: desktop-rustdesk-vnc
+  - id: desktop-streaming
     includes: [rustdesk, vnc, waypipe]
 YAML
 if EGAME_CATALOG_LOCAL="$tmp_local_catalog" ./scripts/instance-resolve --registry "$FIXTURE" --instance dev-a --emit json |
-  jq -e '(.bundle_packages | index("waypipe")) and .package_sources.waypipe == ["bundle:desktop-rustdesk-vnc"]' >/dev/null; then
+  jq -e '(.bundle_packages | index("waypipe")) and .package_sources.waypipe == ["bundle:desktop-streaming"]' >/dev/null; then
   printf '  [OK] instance resolver honors EGAME_CATALOG_LOCAL\n'
 else
   printf '  [FAIL] instance resolver honors EGAME_CATALOG_LOCAL\n' >&2
@@ -211,7 +211,7 @@ fi
 
 cat >"$tmp_local_catalog" <<'YAML'
 bundles:
-  - id: desktop-rustdesk-vnc
+  - id: desktop-streaming
     includes: [xpra]
 YAML
 if EGAME_CATALOG_LOCAL="$tmp_local_catalog" \
@@ -228,14 +228,14 @@ fi
 
 cat >"$tmp_local_catalog" <<'YAML'
 bundles:
-  - id: desktop-rustdesk-vnc
-    includes: [goose]
+  - id: desktop-streaming
+    includes: [steam]
 YAML
 if EGAME_CATALOG_LOCAL="$tmp_local_catalog" \
   ./scripts/instance-resolve --registry "$FIXTURE" --instance qemu-a --validate 2>"$invalid_output"; then
   printf '  [FAIL] instance resolver accepted unsupported package architecture\n' >&2
   FAIL=$((FAIL + 1))
-elif grep -q 'Package plugin goose does not support architecture arm64' "$invalid_output"; then
+elif grep -q 'Package plugin steam does not support architecture arm64' "$invalid_output"; then
   printf '  [OK] instance resolver enforces package architecture support\n'
 else
   printf '  [FAIL] instance resolver package architecture support mismatch\n' >&2

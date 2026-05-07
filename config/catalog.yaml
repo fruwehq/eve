@@ -190,38 +190,20 @@ packages:
 # Bundle catalog (composable package groups)
 # -----------------------------------------------------------------------------
 bundles:
-  - id: desktop-rustdesk-vnc
-    includes: [rustdesk, vnc]
-
   - id: desktop-gnome
     includes: [gnome-desktop, rustdesk]
 
   - id: desktop-gnome-mac
     includes: [gnome-desktop, macos-desktop-theme, rustdesk]
 
-  - id: desktop-vnc
-    includes: [vnc]
-
   - id: desktop-streaming
-    includes: [sunshine, rustdesk]
+    includes: [sunshine, rustdesk, vnc, rdp, waypipe]
 
   - id: remote-xpra
     includes: [xpra]
 
-  - id: remote-waypipe
-    includes: [waypipe]
-
-  - id: remote-rdp
-    includes: [rdp]
-
   - id: dev-ai
     includes: [docker, dev-toolchain, goose, claude, codex-cli, hermes, opencode, vscode]
-
-  - id: dev-ai-arm64
-    # goose currently does not publish a Linux aarch64 archive, so ARM local/Pi
-    # environments use the rest of the AI/dev tooling until upstream support
-    # exists.
-    includes: [docker, dev-toolchain, claude, codex-cli, hermes, opencode, vscode]
 
   - id: gaming-streaming
     includes: [sunshine, steam, rustdesk]
