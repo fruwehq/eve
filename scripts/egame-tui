@@ -1163,6 +1163,7 @@ def run_tui() -> int:
             self.instance_ips: dict[str, str] = {}
             self.background_tasks: set[asyncio.Task[None]] = set()
             self.hero_frame = 0
+            self._eye_blinking = False
             self._rendering_instances = False
             self._detail_refresh_seq = 0
             self._status_refreshing: set[str] = set()
@@ -1268,7 +1269,8 @@ def run_tui() -> int:
 
             self.animate_hero()
             self.set_interval(1.2, self.animate_hero)
-            self.set_interval(5, self.poll_statuses)
+            self.set_interval(15, self.trigger_blink)
+            self.set_interval(30, self.poll_statuses)
             self.start_task(self.load_initial_data())
             self.park_terminal_cursor()
 
@@ -1283,6 +1285,18 @@ def run_tui() -> int:
             except Exception as exc:
                 self.log_line(f"[warning]catalog-options failed:[/] {exc}")
                 self.catalog_options = {"providers": [], "platforms": [], "bundles": [], "packages": []}
+
+        def trigger_blink(self) -> None:
+            if self.current_instance is not None:
+                return
+            self._eye_blinking = True
+            self.render_empty_state()
+            self.set_timer(0.18, self._end_blink)
+
+        def _end_blink(self) -> None:
+            self._eye_blinking = False
+            if self.current_instance is None:
+                self.render_empty_state()
 
         def animate_hero(self) -> None:
             frames = [
@@ -1678,13 +1692,67 @@ def run_tui() -> int:
             hair = "#ff8fb1"
             skin = "#f5c8a9"
             brow = "#5a3d5a"
-            eye = "#ffffff"
             dress = [
                 "#7fd3e3", "#82cde2", "#84c6e0", "#87c0df",
                 "#8ab9dd", "#8db3dc", "#8faddb", "#92a6da",
                 "#95a0d9", "#9799d8", "#9a93d7", "#9d8cd6",
             ]
-            hero_art_rows: list[list[tuple[str | None, str]]] = [
+            blinking = self._eye_blinking
+
+            container_width = self.query_one("#empty-state", Static).size.width
+            if container_width <= 0:
+                container_width = self.size.width if self.size else 80
+            if container_width >= 60:
+                hero_art_rows = self._large_hero_rows(hair, skin, brow, dress, blinking)
+            elif container_width >= 32:
+                hero_art_rows = self._compact_hero_rows(hair, skin, brow, dress, blinking)
+            else:
+                hero_art_rows = []
+
+            def render_segment(color: str | None, text: str) -> str:
+                return f"[{color}]{text}[/]" if color and text else text
+
+            lines: list[str] = []
+            if hero_art_rows:
+                lines.append(
+                    "\n".join(
+                        "".join(render_segment(color, text) for color, text in row)
+                        for row in hero_art_rows
+                    )
+                )
+            lines += [
+                "[b]EPHEMERAL VM COCKPIT[/b]",
+                "",
+                "[b]Please, select an instance[/b]",
+                "Highlight an instance to preview and manage it.",
+                "Press Enter on << New Instance >> to create a VM.",
+            ]
+            self.query_one("#empty-state", Static).update("\n".join(lines))
+
+        def _large_hero_rows(
+            self,
+            hair: str,
+            skin: str,
+            brow: str,
+            dress: list[str],
+            blinking: bool,
+        ) -> list[list[tuple[str | None, str]]]:
+            eye = "#ffffff"
+            if blinking:
+                eye_8_l: tuple[str, str] = (skin, "      ")
+                eye_8_r: tuple[str, str] = (skin, "     ")
+                eye_9_l: tuple[str, str] = (brow, "‿‿‿‿‿‿")
+                eye_9_r: tuple[str, str] = (brow, "‿‿‿‿‿‿")
+                eye_10_l: tuple[str, str] = (skin, "      ")
+                eye_10_r: tuple[str, str] = (skin, "   ")
+            else:
+                eye_8_l = (eye, " ▓ █░░")
+                eye_8_r = (eye, "░▓ █ ")
+                eye_9_l = (eye, "░▓░▓█ ")
+                eye_9_r = (eye, "░█▓ ▓░")
+                eye_10_l = (eye, " █▓█  ")
+                eye_10_r = (eye, "█▓█")
+            return [
                 [(hair, "               ████                ")],
                 [(hair, "           ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓ ▓▓▓▓▓▓▓▓▓▓▓▓            ")],
                 [(hair, "       █ ▓▓▓▓▓▓▒▒▒▒▒▒▒▒▓▒▒▒▒▒▒▓▓▓▓█▓▓▓▒▒▒▒▒▒▓▓█        ")],
@@ -1693,9 +1761,9 @@ def run_tui() -> int:
                 [(hair, " ▓▓▓▒▒▒░░▒▒▒▓▓▓██▓▓▓▓██▓██▓▒▒░▒▒▓▓▓█▓▓▓▒▒░▒▓██████     ")],
                 [(hair, " █▓▓▓▒▒▓▓▓▓▓▓▓▓██▓██▓▒▒▓▓▓██▓▓▓▒▒▓▓▓█▓▓▒▒░▒▒▒▓▓▓▓      ")],
                 [(hair, "░  █▓▓▓▓▓"), (brow, "████"), (hair, "▓"), (skin, "▒░░░░  ░░░"), (hair, "▒▓▓▓▓▓▓▓▒▒▓█▓▓▓▒▒░ ▒▒▒▒▓▓▓      ")],
-                [(hair, " █▓██ "), (eye, " ▓ █░░"), (skin, "       "), (eye, "░▓ █ "), (hair, "███▓██▓▓▓▓█▓▓▒▒░  ░▒▓▓▓█        ")],
-                [(hair, " █▓██▓"), (eye, "░▓░▓█ "), (skin, "        "), (eye, "░█▓ ▓░"), (hair, "▓██▓▓▓▓▓█▓▓▓▒▒░░▒▒▒▓▓█        ")],
-                [(hair, " █▓██ "), (eye, " █▓█  "), (skin, "         "), (eye, "█▓█"), (skin, "  "), (hair, "██▓▓▓▒▒▓█▓▓▓▒▒▒▒░▒▒▓▓▓        ")],
+                [(hair, " █▓██ "), eye_8_l, (skin, "       "), eye_8_r, (hair, "███▓██▓▓▓▓█▓▓▒▒░  ░▒▓▓▓█        ")],
+                [(hair, " █▓██▓"), eye_9_l, (skin, "        "), eye_9_r, (hair, "▓██▓▓▓▓▓█▓▓▓▒▒░░▒▒▒▓▓█        ")],
+                [(hair, " █▓██ "), eye_10_l, (skin, "         "), eye_10_r, (skin, "  "), (hair, "██▓▓▓▒▒▓█▓▓▓▒▒▒▒░▒▒▓▓▓        ")],
                 [(hair, " █▓▓█"), (skin, "░░░               ░░"), (hair, "█▓▓▒▒▒▓▓▓█▓▓▓▓▓▓▓▓██           ")],
                 [(hair, "   █▓█ █"), (skin, "▒░░        ░░"), (hair, "█▓▓▒▓█▓▓▓▒▒▒▓▓███▓▓▓██             ")],
                 [(hair, "    ██  "), (skin, "░░▓▓▒▒░░░▒▒"), (hair, "▓██▓▒▒▓▓█▓▓▓▓▒░▒▓▓▓▓█▓▓▓▓            ")],
@@ -1717,25 +1785,39 @@ def run_tui() -> int:
                 [(dress[11], "            ███                                         ")],
             ]
 
-            def render_segment(color: str | None, text: str) -> str:
-                return f"[{color}]{text}[/]" if color and text else text
-
-            hero_art = "\n".join(
-                "".join(render_segment(color, text) for color, text in row)
-                for row in hero_art_rows
-            )
-            self.query_one("#empty-state", Static).update(
-                "\n".join(
-                    [
-                        hero_art,
-                        "[b]EPHEMERAL VM COCKPIT[/b]",
-                        "",
-                        "[b]Please, select an instance[/b]",
-                        "Highlight an instance to preview and manage it.",
-                        "Press Enter on << New Instance >> to create a VM.",
-                    ]
-                )
-            )
+        def _compact_hero_rows(
+            self,
+            hair: str,
+            skin: str,
+            brow: str,
+            dress: list[str],
+            blinking: bool,
+        ) -> list[list[tuple[str | None, str]]]:
+            eye = "#ffffff"
+            if blinking:
+                eye_4_l: tuple[str, str] = (skin, "    ")
+                eye_4_r: tuple[str, str] = (skin, "    ")
+                eye_5_l: tuple[str, str] = (brow, "‿‿‿‿")
+                eye_5_r: tuple[str, str] = (brow, "‿‿‿‿")
+            else:
+                eye_4_l = (eye, "██▓▓")
+                eye_4_r = (eye, "▓▓██")
+                eye_5_l = (eye, "██▒▒")
+                eye_5_r = (eye, "▒▒██")
+            return [
+                [(hair, "            ████            ")],
+                [(hair, "         ▓▓▓▓▓▓▓▓▓▓         ")],
+                [(hair, "      ▓▓▓▓"), (brow, "▒▒▒▒▒▒▒▒"), (hair, "▓▓▓▓      ")],
+                [(hair, "     ▓▓"), (skin, "░░░░░░░░░░░░░░"), (hair, "▓▓     ")],
+                [(hair, "     ▓▓"), (skin, "░░"), eye_4_l, (skin, "░░"), eye_4_r, (skin, "░░"), (hair, "▓▓     ")],
+                [(hair, "     ▓▓"), (skin, "░░"), eye_5_l, (skin, "░░"), eye_5_r, (skin, "░░"), (hair, "▓▓     ")],
+                [(hair, "     ▓▓"), (skin, "▒▒░░░░░░░░░░▒▒"), (hair, "▓▓     ")],
+                [(hair, "      ▓▓"), (skin, "░░░░░░░░░░░░"), (hair, "▓▓      ")],
+                [(hair, "        ▓▓"), (skin, "░░░░░░░░"), (hair, "▓▓        ")],
+                [(hair, "         ▓▓"), (skin, "██████"), (hair, "▓▓         ")],
+                [(hair, "    ▓▓"), (dress[2], "████████████████"), (hair, "▓▓    ")],
+                [(hair, "     ▓▓"), (dress[8], "██████████████"), (hair, "▓▓     ")],
+            ]
 
         def selected_bundle_ids(self, status: dict[str, Any]) -> set[str]:
             instance = status.get("instance", {})
