@@ -1,8 +1,8 @@
 # Makefile
 .DEFAULT_GOAL := default
-.PHONY: ai.sandbox all aws.login bundle.select bundle.unselect catalog.list clean default doctor down env generate help info integration.packages integration.plan integration.test \
+.PHONY: ai.sandbox aws.login bundle.select bundle.unselect catalog.list clean default doctor down env generate help info integration.packages integration.plan integration.test \
 				init init.all instance.create instance.delete instance.env instance.info instance.provision \
-				instance.list instance.paths instance.recover instance.state instance.status instance.validate ip lint logs plan \
+				instance.list instance.observe instance.paths instance.recover instance.state instance.status instance.validate ip lint logs plan \
 				package.action package.down package.install package.list package.reinstall package.select \
 				package.status package.uninstall package.unselect \
 				plugins.list plugins.sync plugins.validate \
@@ -73,8 +73,6 @@ export TRUENAS_VM_ZVOL_PREFIX
 export VAGRANT_SHOW_CONSOLE
 export VM_USER_NAME
 export VULTR_API_KEY
-
-all: init up ssh.wait provision provision.wait ## Full setup: up and provision the instance
 
 aws.login: ## Refresh AWS CLI login session for the selected profile
 	aws login --profile $(AWS_PROFILE)
@@ -181,6 +179,10 @@ instance.info: ## Print resolved concrete instance data as JSON
 
 instance.list: ## List local concrete instances
 	@./scripts/instance-list
+
+instance.observe: ## Refresh cached observed status/IP for an instance
+	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make instance.observe INSTANCE=<name>"; exit 2; fi; \
+	./scripts/instance-observe --instance $(INSTANCE) | jq .
 
 instance.paths: ## Print resolved local artifact paths for an instance (EMIT=env|json)
 	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make instance.paths INSTANCE=<name> [EMIT=env|json]"; exit 2; fi; \
@@ -392,9 +394,11 @@ up: ## Create and start provider resources for an instance
 	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make up INSTANCE=<name>"; exit 2; fi; \
 	./scripts/instance-run up $(INSTANCE)
 
-upload: ## scp ./upload/* to the instance (skips files that already exist remotely)
+upload: ## Upload ./upload folders to the instance (UPLOADS=a,b optional)
 	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make upload INSTANCE=<name>"; exit 2; fi; \
-	./scripts/instance-run upload $(INSTANCE)
+	args=""; \
+	if [ -n "$(UPLOADS)" ]; then for upload_name in $$(printf '%s' "$(UPLOADS)" | tr ',' ' '); do args="$$args $$upload_name"; done; fi; \
+	./scripts/instance-run upload $(INSTANCE) $$args
 
 validate: ## Validate an instance from .egame/instances.yaml
 	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make validate INSTANCE=<name>"; exit 2; fi; \

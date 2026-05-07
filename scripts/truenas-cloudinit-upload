@@ -8,7 +8,11 @@ VM_NAME="${1:?vm_name required}"
 SSH_PUBLIC_KEY_FILE="${2:?ssh_public_key_file required}"
 TRUENAS_HOST="${3:?truenas_host required}"
 ISO_PATH="${4:?iso_path required}"
-VM_USER_NAME="${5:-ubuntu}"
+VM_USER_NAME="${5:-}"
+if [ -z "$VM_USER_NAME" ]; then
+  echo "truenas-cloudinit-upload: vm_user_name is required" >&2
+  exit 2
+fi
 
 normalize_path() {
   local value="$1"

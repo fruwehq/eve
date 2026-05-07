@@ -3,16 +3,16 @@ kind: provider
 id: local-qemu
 display_name: Local QEMU
 commands:
-  resolve: {exec: scripts/provider-plugin, args: [local-qemu, resolve]}
-  init: {exec: scripts/provider-plugin, args: [local-qemu, init]}
-  plan: {exec: scripts/provider-plugin, args: [local-qemu, plan]}
-  up: {exec: scripts/provider-plugin, args: [local-qemu, up]}
-  down: {exec: scripts/provider-plugin, args: [local-qemu, down]}
-  start: {exec: scripts/provider-plugin, args: [local-qemu, start]}
-  stop: {exec: scripts/provider-plugin, args: [local-qemu, stop]}
-  status: {exec: scripts/provider-plugin, args: [local-qemu, status]}
-  ip: {exec: scripts/provider-plugin, args: [local-qemu, ip]}
-  ssh: {exec: scripts/provider-plugin, args: [local-qemu, ssh]}
+  resolve: {exec: commands/provider-command, args: [resolve]}
+  init: {exec: commands/provider-command, args: [init]}
+  plan: {exec: commands/provider-command, args: [plan]}
+  up: {exec: commands/provider-command, args: [up]}
+  down: {exec: commands/provider-command, args: [down]}
+  start: {exec: commands/provider-command, args: [start]}
+  stop: {exec: commands/provider-command, args: [stop]}
+  status: {exec: commands/provider-command, args: [status]}
+  ip: {exec: commands/provider-command, args: [ip]}
+  ssh: {exec: commands/provider-command, args: [ssh]}
 supports:
   engines: [vagrant]
   kinds: [vm]

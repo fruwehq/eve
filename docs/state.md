@@ -24,6 +24,29 @@ Package entries under `package_state` use:
 
 Package state updates must pass both `--package` and `--package-state`.
 
+## Observed State Cache
+
+`observed_state` stores the latest best-effort facts read from the provider or
+guest without changing lifecycle intent:
+
+- `provider_status`: normalized live status such as `running`, `stopped`,
+  `absent`, `unreachable`, or `unknown`
+- `provider_status_raw`: short provider status output
+- `ip`: last known instance IP address
+- `control_reachable`: whether the provider control path was reachable
+- `control_summary`: provider control-path summary text
+- `observed_at` / `expires_at`: cache timestamps
+- `refresh_error`: last observation error, separate from lifecycle errors
+
+Refresh it with:
+
+```bash
+make instance.observe INSTANCE=<name>
+```
+
+Observation refreshes set `EGAME_DISABLE_STATE=1` while calling provider
+commands, so they do not append lifecycle operations to `operation_history`.
+
 ## Operation Entries
 
 Every write records `last_operation` and appends to `operation_history`.

@@ -251,6 +251,26 @@ else
   FAIL=$((FAIL + 1))
 fi
 
+provider_command_boundary_failed=0
+while IFS= read -r provider_manifest; do
+  provider_dir="$(dirname "$provider_manifest")"
+  if ! [ -x "$provider_dir/commands/provider-command" ]; then
+    printf '  [FAIL] provider command wrapper missing or not executable: %s\n' "$provider_dir/commands/provider-command" >&2
+    provider_command_boundary_failed=1
+  fi
+  if grep -q 'scripts/provider-plugin' "$provider_manifest"; then
+    printf '  [FAIL] provider manifest still points at central provider-plugin: %s\n' "$provider_manifest" >&2
+    provider_command_boundary_failed=1
+  fi
+done <<EOF
+$(find plugins/providers -name egame-plugin.yaml -print | sort)
+EOF
+if [ "$provider_command_boundary_failed" -eq 0 ]; then
+  printf '  [OK] provider manifests route through plugin-local command wrappers\n'
+else
+  FAIL=$((FAIL + 1))
+fi
+
 package_status="$(
   EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-package-dispatch-test" \
     ./scripts/package-dispatch --registry "$FIXTURE" --instance dev-a --package docker --command status --dry-run

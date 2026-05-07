@@ -3,16 +3,16 @@ kind: provider
 id: raspberry-pi
 display_name: Raspberry Pi Metal
 commands:
-  resolve: {exec: scripts/provider-plugin, args: [raspberry-pi, resolve]}
-  init: {exec: scripts/provider-plugin, args: [raspberry-pi, init]}
-  plan: {exec: scripts/provider-plugin, args: [raspberry-pi, plan]}
-  up: {exec: scripts/provider-plugin, args: [raspberry-pi, up]}
-  down: {exec: scripts/provider-plugin, args: [raspberry-pi, down]}
-  start: {exec: scripts/provider-plugin, args: [raspberry-pi, start]}
-  stop: {exec: scripts/provider-plugin, args: [raspberry-pi, stop]}
-  status: {exec: scripts/provider-plugin, args: [raspberry-pi, status]}
-  ip: {exec: scripts/provider-plugin, args: [raspberry-pi, ip]}
-  ssh: {exec: scripts/provider-plugin, args: [raspberry-pi, ssh]}
+  resolve: {exec: commands/provider-command, args: [resolve]}
+  init: {exec: commands/provider-command, args: [init]}
+  plan: {exec: commands/provider-command, args: [plan]}
+  up: {exec: commands/provider-command, args: [up]}
+  down: {exec: commands/provider-command, args: [down]}
+  start: {exec: commands/provider-command, args: [start]}
+  stop: {exec: commands/provider-command, args: [stop]}
+  status: {exec: commands/provider-command, args: [status]}
+  ip: {exec: commands/provider-command, args: [ip]}
+  ssh: {exec: commands/provider-command, args: [ssh]}
 supports:
   engines: [metal]
   kinds: [metal]

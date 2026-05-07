@@ -34,6 +34,7 @@ export EGAME_CATALOG_LOCAL="$TMPCATALOG"
 export EGAME_INSTANCE_REGISTRY="tests/fixtures/instances.yaml"
 export EGAME_INSTANCE_WORKDIR="$TMPWORK/work"
 export EGAME_STATE_DIR="$TMPSTATE/state"
+export VM_USER_NAME="egame-test"
 
 PROFILE="aws-ubuntu-dev-headless"
 FAIL=0

@@ -3,16 +3,16 @@ kind: provider
 id: truenas
 display_name: TrueNAS SCALE
 commands:
-  resolve: {exec: scripts/provider-plugin, args: [truenas, resolve]}
-  init: {exec: scripts/provider-plugin, args: [truenas, init]}
-  plan: {exec: scripts/provider-plugin, args: [truenas, plan]}
-  up: {exec: scripts/provider-plugin, args: [truenas, up]}
-  down: {exec: scripts/provider-plugin, args: [truenas, down]}
-  start: {exec: scripts/provider-plugin, args: [truenas, start]}
-  stop: {exec: scripts/provider-plugin, args: [truenas, stop]}
-  status: {exec: scripts/provider-plugin, args: [truenas, status]}
-  ip: {exec: scripts/provider-plugin, args: [truenas, ip]}
-  ssh: {exec: scripts/provider-plugin, args: [truenas, ssh]}
+  resolve: {exec: commands/provider-command, args: [resolve]}
+  init: {exec: commands/provider-command, args: [init]}
+  plan: {exec: commands/provider-command, args: [plan]}
+  up: {exec: commands/provider-command, args: [up]}
+  down: {exec: commands/provider-command, args: [down]}
+  start: {exec: commands/provider-command, args: [start]}
+  stop: {exec: commands/provider-command, args: [stop]}
+  status: {exec: commands/provider-command, args: [status]}
+  ip: {exec: commands/provider-command, args: [ip]}
+  ssh: {exec: commands/provider-command, args: [ssh]}
 supports:
   engines: [terraform]
   kinds: [vm]

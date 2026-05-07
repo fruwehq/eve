@@ -661,11 +661,83 @@ else
 fi
 
 state_target="$(EGAME_STATE_DIR="$tmp_overlay_dir/state" make --no-print-directory instance.state INSTANCE=aws-gpu-a 2>/dev/null)"
-if printf '%s\n' "$state_target" | jq -e '.last_operation.name == "provider.status"' >/dev/null; then
+if printf '%s\n' "$state_target" | jq -e '.last_operation.name == "provider.status" and (.observed_state | type == "object")' >/dev/null; then
   printf '  [OK] make target exposes local instance state\n'
 else
   printf '  [FAIL] instance.state make target output mismatch\n' >&2
   printf '%s\n' "$state_target" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+observed_state="$(
+  EGAME_STATE_DIR="$tmp_overlay_dir/state-observed" ./scripts/instance-state \
+    --instance observed-a \
+    --observed-json '{"provider_status":"running","ip":"10.0.0.10","observed_at":"2026-01-01T00:00:00Z"}'
+)"
+if printf '%s\n' "$observed_state" |
+  jq -e '.observed_state.provider_status == "running" and .observed_state.ip == "10.0.0.10" and (.operation_history | length == 0) and .last_operation == null' >/dev/null; then
+  printf '  [OK] instance state records observed facts without operations\n'
+else
+  printf '  [FAIL] instance state observed-state update mismatch\n' >&2
+  printf '%s\n' "$observed_state" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+tmp_observe_bin="$tmp_overlay_dir/bin-observe"
+mkdir -p "$tmp_observe_bin"
+cat >"$tmp_observe_bin/make" <<'SH'
+#!/usr/bin/env sh
+shift
+target="$1"
+case "$target" in
+  provider.status)
+    printf 'Profile:        dev-a\n'
+    printf 'Engine:         terraform\n'
+    printf 'Provider:       aws\n'
+    printf 'OS:             ubuntu\n'
+    printf 'Control:        reachable (stub)\n'
+    printf 'Status:         running\n'
+    ;;
+  ip)
+    printf '10.0.0.42\n'
+    ;;
+  *)
+    printf 'unexpected target: %s\n' "$target" >&2
+    exit 2
+    ;;
+esac
+SH
+chmod +x "$tmp_observe_bin/make"
+observed_refresh="$(
+  PATH="$tmp_observe_bin:$PATH" EGAME_STATE_DIR="$tmp_overlay_dir/state-observe-refresh" \
+    ./scripts/instance-observe --instance dev-a
+)"
+if printf '%s\n' "$observed_refresh" |
+  jq -e '.observed_state.provider_status == "running" and .observed_state.ip == "10.0.0.42" and .observed_state.control_reachable == true and .observed_state.refresh_error == null and (.operation_history | length == 0)' >/dev/null; then
+  printf '  [OK] instance.observe refreshes observed state without lifecycle history\n'
+else
+  printf '  [FAIL] instance.observe output mismatch\n' >&2
+  printf '%s\n' "$observed_refresh" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+tmp_upload_dir="$tmp_overlay_dir/upload"
+mkdir -p "$tmp_upload_dir/direct-a"
+printf 'hello\n' >"$tmp_upload_dir/direct-a/file.txt"
+upload_reject_out="$(
+  EGAME_INSTANCE_REGISTRY="$FIXTURE" EGAME_INSTANCE_WORKDIR="$tmp_overlay_dir/upload-work" EGAME_UPLOAD_DIR="$tmp_upload_dir" \
+    ./scripts/instance-run upload dev-a ../bad 2>&1 || true
+)"
+upload_missing_out="$(
+  EGAME_INSTANCE_REGISTRY="$FIXTURE" EGAME_INSTANCE_WORKDIR="$tmp_overlay_dir/upload-work" EGAME_UPLOAD_DIR="$tmp_upload_dir" \
+    ./scripts/instance-run upload dev-a missing-a 2>&1 || true
+)"
+if printf '%s\n' "$upload_reject_out" | grep -q 'invalid upload name' &&
+  printf '%s\n' "$upload_missing_out" | grep -q 'not a direct folder under upload'; then
+  printf '  [OK] upload selection rejects unsafe or missing folders\n'
+else
+  printf '  [FAIL] upload selection validation mismatch\n' >&2
+  printf '%s\n%s\n' "$upload_reject_out" "$upload_missing_out" >&2
   FAIL=$((FAIL + 1))
 fi
 
@@ -674,7 +746,7 @@ status_target="$(
     make --no-print-directory instance.status INSTANCE=aws-gpu-a EMIT=json 2>/dev/null
 )"
 if printf '%s\n' "$status_target" |
-  jq -e '.instance.name == "aws-gpu-a" and .instance.provider == "aws" and .instance.engine == "terraform" and .state.last_operation.name == "provider.status" and .packages.summary.unknown >= 1 and (.packages.selected[] | select(.id == "docker" and .state.status == "unknown")) and (.paths.INSTANCE_TF_STATE_BASE | test("aws-gpu-a/tf/state$"))' >/dev/null; then
+  jq -e '.instance.name == "aws-gpu-a" and .instance.provider == "aws" and .instance.engine == "terraform" and .state.last_operation.name == "provider.status" and (.observed_state | type == "object") and .packages.summary.unknown >= 1 and (.packages.selected[] | select(.id == "docker" and .state.status == "unknown")) and (.paths.INSTANCE_TF_STATE_BASE | test("aws-gpu-a/tf/state$"))' >/dev/null; then
   printf '  [OK] instance.status combines metadata, state, packages, and paths\n'
 else
   printf '  [FAIL] instance.status combined output mismatch\n' >&2

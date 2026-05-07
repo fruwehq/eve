@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+provider_dir="$(cd "$(dirname "$0")/.." && pwd)"
+provider_id="$(basename "$provider_dir")"
+root="$(git rev-parse --show-toplevel)"
+
+exec "$root/scripts/provider-plugin" "$provider_id" "$@"

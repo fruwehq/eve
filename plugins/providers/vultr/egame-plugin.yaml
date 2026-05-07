@@ -3,16 +3,16 @@ kind: provider
 id: vultr
 display_name: Vultr
 commands:
-  resolve: {exec: scripts/provider-plugin, args: [vultr, resolve]}
-  init: {exec: scripts/provider-plugin, args: [vultr, init]}
-  plan: {exec: scripts/provider-plugin, args: [vultr, plan]}
-  up: {exec: scripts/provider-plugin, args: [vultr, up]}
-  down: {exec: scripts/provider-plugin, args: [vultr, down]}
-  start: {exec: scripts/provider-plugin, args: [vultr, start]}
-  stop: {exec: scripts/provider-plugin, args: [vultr, stop]}
-  status: {exec: scripts/provider-plugin, args: [vultr, status]}
-  ip: {exec: scripts/provider-plugin, args: [vultr, ip]}
-  ssh: {exec: scripts/provider-plugin, args: [vultr, ssh]}
+  resolve: {exec: commands/provider-command, args: [resolve]}
+  init: {exec: commands/provider-command, args: [init]}
+  plan: {exec: commands/provider-command, args: [plan]}
+  up: {exec: commands/provider-command, args: [up]}
+  down: {exec: commands/provider-command, args: [down]}
+  start: {exec: commands/provider-command, args: [start]}
+  stop: {exec: commands/provider-command, args: [stop]}
+  status: {exec: commands/provider-command, args: [status]}
+  ip: {exec: commands/provider-command, args: [ip]}
+  ssh: {exec: commands/provider-command, args: [ssh]}
 supports:
   engines: [terraform]
   kinds: [vm]

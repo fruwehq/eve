@@ -71,6 +71,24 @@ def instance_status(instance: str) -> dict[str, Any]:
     return load_json([str(ROOT / "scripts/instance-status"), "--instance", instance, "--json"])
 
 
+def instance_observe(instance: str) -> dict[str, Any]:
+    return load_json([str(ROOT / "scripts/instance-observe"), "--instance", instance])
+
+
+def provider_status_table() -> str:
+    code, out, err = run_command(["make", "--no-print-directory", "providers.status"])
+    if code != 0:
+        raise RuntimeError(err.strip() or out.strip() or f"make providers.status exited {code}")
+    return out.strip()
+
+
+def upload_folders() -> list[str]:
+    upload_dir = Path(os.environ.get("EGAME_UPLOAD_DIR", ROOT / "upload"))
+    if not upload_dir.exists():
+        return []
+    return sorted(path.name for path in upload_dir.iterdir() if path.is_dir())
+
+
 def instance_ip(instance: str) -> str:
     code, out, err = run_command(
         ["make", "--no-print-directory", "ip", f"INSTANCE={instance}"],
@@ -79,19 +97,6 @@ def instance_ip(instance: str) -> str:
     if code != 0:
         raise RuntimeError(err.strip() or out.strip() or f"make ip exited {code}")
     return out.strip()
-
-
-def provider_live_status(instance: str) -> str | None:
-    code, out, err = run_command(
-        ["make", "--no-print-directory", "provider.status", f"INSTANCE={instance}"],
-        env={"EGAME_DISABLE_STATE": "1"},
-    )
-    if code != 0:
-        raise RuntimeError(err.strip() or out.strip() or f"make provider.status exited {code}")
-    for line in out.splitlines():
-        if line.startswith("Status:"):
-            return normalize_provider_state(line.split(":", 1)[1].strip())
-    return None
 
 
 def normalize_provider_state(status: str) -> str:
@@ -266,6 +271,21 @@ def status_with_provider_state(status: dict[str, Any], provider_state: str) -> d
     return next_status
 
 
+def status_with_observed_state(status: dict[str, Any], state_doc: dict[str, Any]) -> dict[str, Any]:
+    next_status = copy.deepcopy(status)
+    observed = state_doc.get("observed_state", {})
+    if isinstance(observed, dict):
+        next_status["observed_state"] = observed
+        state = next_status.setdefault("state", {})
+        if isinstance(state, dict):
+            state["observed_state"] = observed
+    provider_status = str(observed.get("provider_status", "")) if isinstance(observed, dict) else ""
+    provider_state = "error" if provider_status == "unreachable" else provider_status
+    if provider_state and should_apply_live_provider_state(next_status, provider_state):
+        next_status = status_with_provider_state(next_status, provider_state)
+    return next_status
+
+
 def action_allowed_for_instance(action: dict[str, Any], package_id: str, os_family: str) -> bool:
     target = str(action.get("target") or "")
     if package_id == "rdp" and target == "rdp.open":
@@ -420,6 +440,68 @@ def run_tui() -> int:
         def on_button_pressed(self, event: Button.Pressed) -> None:
             button_id = event.button.id or ""
             self.dismiss(None if button_id == "cancel" else button_id)
+
+    class UploadScreen(ModalScreen[list[str] | None]):
+        CSS = """
+        UploadScreen {
+            align: center middle;
+        }
+
+        #upload-dialog {
+            width: 72;
+            height: 20;
+            border: round $primary;
+            background: $surface;
+            padding: 1 2;
+        }
+
+        #upload-list {
+            height: 10;
+            margin: 1 0;
+        }
+
+        #upload-actions {
+            height: 3;
+            width: 40;
+            background: transparent;
+        }
+
+        #upload-actions Button {
+            width: 1fr;
+            min-width: 12;
+        }
+        """
+
+        def __init__(self, folders: list[str]) -> None:
+            super().__init__()
+            self.folders = folders
+
+        def compose(self) -> ComposeResult:
+            with Vertical(id="upload-dialog"):
+                yield Label("[b]Upload folders[/b]")
+                yield Static("Choose direct subfolders from upload/. Space toggles, Enter starts upload.")
+                yield SelectionList(
+                    *[Selection(folder, folder, False) for folder in self.folders],
+                    id="upload-list",
+                )
+                with Horizontal(id="upload-actions"):
+                    yield Button("Cancel", id="cancel")
+                    yield Button("Upload", id="confirm", variant="primary")
+
+        def on_mount(self) -> None:
+            self.query_one("#upload-list", SelectionList).focus()
+
+        def on_key(self, event: Any) -> None:
+            if event.key != "enter":
+                return
+            event.stop()
+            self.dismiss(list(self.query_one("#upload-list", SelectionList).selected))
+
+        def on_button_pressed(self, event: Button.Pressed) -> None:
+            if event.button.id == "cancel":
+                self.dismiss(None)
+                return
+            self.dismiss(list(self.query_one("#upload-list", SelectionList).selected))
 
     class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
         CSS = """
@@ -1006,6 +1088,12 @@ def run_tui() -> int:
             margin-bottom: 1;
         }
 
+        .provider-health {
+            height: 8;
+            margin-top: 1;
+            color: $text-muted;
+        }
+
         #right {
             width: 1fr;
             padding: 1;
@@ -1030,7 +1118,7 @@ def run_tui() -> int:
         }
 
         #action-groups {
-            height: 17;
+            height: 29;
             margin-bottom: 1;
         }
 
@@ -1068,7 +1156,13 @@ def run_tui() -> int:
             height: 8;
         }
 
-        #lifecycle-strip,
+        #lifecycle-strip {
+            grid-size: 4 4;
+            grid-columns: 1fr 1fr 1fr 1fr;
+            grid-rows: 3 3 3 3;
+            height: 15;
+        }
+
         #package-actions {
             grid-size: 3 2;
             grid-columns: 1fr 1fr 1fr;
@@ -1164,8 +1258,8 @@ def run_tui() -> int:
             Binding("s", "provider('start')", "Start"),
             Binding("t", "provider('stop')", "Stop"),
             Binding("p", "provision", "Provision"),
-            Binding("x", "destroy_instance", "Destroy"),
-            Binding("d", "delete_instance", "Delete"),
+            Binding("x", "down_instance", "Down"),
+            Binding("d", "delete_instance", "Delete Local"),
             Binding("c", "cancel_command", "Cancel"),
             Binding("ctrl+c", "cancel_command", "Cancel", priority=True),
             Binding("l", "focus_log", "Log"),
@@ -1209,6 +1303,7 @@ def run_tui() -> int:
                         yield Static("Instances", classes="section-title")
                         yield Input(placeholder="Filter instances", id="filter")
                         yield DataTable(id="instances")
+                        yield Static("Providers\nchecking...", id="provider-health", classes="provider-health")
                     with Vertical(id="right"):
                         yield Static(
                             "\n".join(
@@ -1231,13 +1326,20 @@ def run_tui() -> int:
                                 yield Static("Packages\nunknown", id="packages-pill", classes="pill")
                             with Vertical(id="action-groups"):
                                 with Vertical(id="instance-actions-group", classes="action-group"):
-                                    yield Static("Instance Controls", classes="action-title")
+                                    yield Static("Instance Controls + Debug", classes="action-title")
                                     with Grid(id="lifecycle-strip"):
                                         yield Button("Up", id="provider-up", variant="success")
                                         yield Button("Stop", id="provider-stop", variant="warning")
+                                        yield Button("Reboot", id="reboot", variant="warning")
                                         yield Button("Provision", id="provision", variant="primary")
                                         yield Button("Logs", id="logs")
                                         yield Button("Refresh", id="refresh", variant="primary")
+                                        yield Button("Status", id="provider-status")
+                                        yield Button("Plan", id="provider-plan")
+                                        yield Button("Init", id="provider-init")
+                                        yield Button("Update", id="update-tools")
+                                        yield Button("Upload", id="upload")
+                                        yield Button("Password", id="show-password")
                                         yield Button("Cancel", id="cancel-command", variant="error")
                                 with Vertical(id="package-actions-group", classes="action-group"):
                                     yield Static("Package Actions", classes="action-title")
@@ -1259,13 +1361,15 @@ def run_tui() -> int:
                                         yield Button("Add Extra", id="package-select")
                                         yield Button("Remove Extra", id="package-unselect")
                                         yield Button("Install", id="package-install", variant="success")
+                                        yield Button("Reinstall", id="package-reinstall", variant="warning")
                                         yield Button("Uninstall", id="package-down", variant="warning")
                                 with Vertical(id="ops-pane"):
                                     yield Static("Recent Ops", classes="section-title")
                                     yield Static("No operations yet.", id="ops")
                             with Grid(id="danger-strip"):
-                                yield Button("Destroy", id="provider-down", variant="error")
-                                yield Button("Delete", id="delete-instance", variant="error")
+                                yield Button("Down", id="provider-down", variant="error")
+                                yield Button("Recover", id="instance-recover")
+                                yield Button("Delete Local", id="delete-instance", variant="error")
                 yield Static(
                     "Output  |  press l to focus, arrows/PageUp/PageDown to scroll, y to copy all log text",
                     id="output-help",
@@ -1298,12 +1402,33 @@ def run_tui() -> int:
             self.set_interval(15, self.trigger_blink)
             self.set_interval(30, self.poll_statuses)
             self.start_task(self.load_initial_data())
+            self.start_task(self.load_provider_health())
             self.park_terminal_cursor()
 
         async def load_initial_data(self) -> None:
             await self.load_catalog_options()
             await self.action_refresh()
             self.call_after_refresh(self.focus_instance_list_if_empty)
+
+        async def load_provider_health(self) -> None:
+            health = self.query_one("#provider-health", Static)
+            try:
+                text = await asyncio.to_thread(provider_status_table)
+            except Exception as exc:
+                health.update(f"Providers\n[error]{exc}[/]")
+                return
+            lines = text.splitlines()
+            if len(lines) > 2:
+                compact = []
+                for row in lines[2:]:
+                    parts = row.split(None, 3)
+                    if len(parts) >= 3:
+                        name, configured, reachable = parts[:3]
+                        marker = "[success]●[/]" if reachable == "yes" else ("[warning]○[/]" if configured == "yes" else "[dim]-[/]")
+                        compact.append(f"{marker} {name} {configured}/{reachable}")
+                health.update("Providers\n" + "\n".join(compact[:6]))
+            else:
+                health.update("Providers\n" + text)
 
         async def load_catalog_options(self) -> None:
             try:
@@ -1492,9 +1617,8 @@ def run_tui() -> int:
                     try:
                         status = await asyncio.to_thread(instance_status, name)
                         with suppress(Exception):
-                            live_state = await asyncio.to_thread(provider_live_status, name)
-                            if live_state and should_apply_live_provider_state(status, live_state):
-                                status = status_with_provider_state(status, live_state)
+                            state_doc = await asyncio.to_thread(instance_observe, name)
+                            status = status_with_observed_state(status, state_doc)
                         updated[name] = status
                     except Exception as exc:
                         updated[name] = {"instance": {"name": name}, "state": {"last_error": str(exc)}}
@@ -1600,12 +1724,11 @@ def run_tui() -> int:
             if refresh_seq != self._detail_refresh_seq or instance_name != self.current_instance:
                 return
             try:
-                live_state = await asyncio.to_thread(provider_live_status, instance_name)
-                if live_state and should_apply_live_provider_state(next_status, live_state):
-                    next_status = status_with_provider_state(next_status, live_state)
-                    self.statuses[instance_name] = next_status
+                state_doc = await asyncio.to_thread(instance_observe, instance_name)
+                next_status = status_with_observed_state(next_status, state_doc)
+                self.statuses[instance_name] = next_status
             except Exception as exc:
-                self.log_line(f"[warning]provider.status failed:[/] {exc}")
+                self.log_line(f"[warning]instance.observe failed:[/] {exc}")
                 if refresh_seq != self._detail_refresh_seq or instance_name != self.current_instance:
                     return
             self.current_status = next_status
@@ -1643,9 +1766,8 @@ def run_tui() -> int:
                     self.render_instances(sync_cursor=True)
                 return
             with suppress(Exception):
-                live_state = await asyncio.to_thread(provider_live_status, instance_name)
-                if live_state and should_apply_live_provider_state(status, live_state):
-                    status = status_with_provider_state(status, live_state)
+                state_doc = await asyncio.to_thread(instance_observe, instance_name)
+                status = status_with_observed_state(status, state_doc)
             self.statuses[instance_name] = status
             self._status_refreshing.discard(instance_name)
             if repaint_table:
@@ -2024,7 +2146,23 @@ def run_tui() -> int:
             elif button_id == "provider-stop":
                 await self.action_provider("stop")
             elif button_id == "provider-down":
-                self.action_destroy_instance()
+                self.action_down_instance()
+            elif button_id == "provider-status":
+                await self.action_provider("status")
+            elif button_id == "provider-plan":
+                await self.action_provider("plan")
+            elif button_id == "provider-init":
+                await self.action_provider("init")
+            elif button_id == "reboot":
+                self.action_confirm_instance_command("Reboot instance?", "reboot", "reboot")
+            elif button_id == "update-tools":
+                self.action_confirm_instance_command("Update instance tools?", "update", "update")
+            elif button_id == "show-password":
+                await self.action_instance_command("show-password", "show-password")
+            elif button_id == "upload":
+                self.action_upload()
+            elif button_id == "instance-recover":
+                self.action_confirm_instance_command("Recover local operation state?", "instance.recover", "instance.recover")
             elif button_id == "provision":
                 await self.action_provision()
             elif button_id == "logs":
@@ -2043,6 +2181,8 @@ def run_tui() -> int:
                 await self.action_package("package.unselect")
             elif button_id == "package-install":
                 await self.action_package("package.install")
+            elif button_id == "package-reinstall":
+                self.action_package_reinstall()
             elif button_id == "package-down":
                 self.action_package_down()
             elif button_id == "bundle-select":
@@ -2138,20 +2278,53 @@ def run_tui() -> int:
                 self.current_instance = None
             await self.refresh_instances(preserve_selection=True)
 
-        def action_destroy_instance(self) -> None:
+        def action_down_instance(self) -> None:
             if not self.current_instance:
                 return
             instance = self.current_instance
             self.push_screen(
                 ConfirmScreen(
-                    "Destroy provider resources?",
+                    "Provider down?",
                     f"This runs provider down for {instance}. Cloud/local VM resources will be destroyed.",
                 ),
-                lambda confirmed: self.start_task(self.perform_destroy_instance(instance)) if confirmed else None,
+                lambda confirmed: self.start_task(self.perform_down_instance(instance)) if confirmed else None,
             )
 
-        async def perform_destroy_instance(self, instance: str) -> None:
+        async def perform_down_instance(self, instance: str) -> None:
             await self.stream_command("provider.down", make_args("down", instance), refresh_instance=instance)
+
+        def action_confirm_instance_command(self, title: str, label: str, target: str) -> None:
+            if not self.current_instance:
+                return
+            instance = self.current_instance
+            self.push_screen(
+                ConfirmScreen(title, f"Run {label} for {instance}?"),
+                lambda confirmed: self.start_task(self.action_instance_command(label, target)) if confirmed else None,
+            )
+
+        async def action_instance_command(self, label: str, target: str) -> None:
+            if not self.current_instance:
+                return
+            instance = self.current_instance
+            await self.stream_command(label, make_args(target, instance), refresh_instance=instance)
+
+        def action_upload(self) -> None:
+            if not self.current_instance:
+                return
+            instance = self.current_instance
+            folders = upload_folders()
+            if not folders:
+                self.notify("No direct upload/ subfolders found", severity="warning")
+                self.log_line("[warning]No direct upload/ subfolders found.[/]")
+                return
+            self.push_screen(
+                UploadScreen(folders),
+                lambda selected: self.start_task(self.perform_upload(instance, selected)) if selected else None,
+            )
+
+        async def perform_upload(self, instance: str, selected: list[str]) -> None:
+            uploads = ",".join(selected)
+            await self.stream_command("upload", make_args("upload", instance, f"UPLOADS={uploads}"), refresh_instance=instance)
 
         async def action_provider(self, command: str) -> None:
             if not self.current_instance:
@@ -2245,6 +2418,26 @@ def run_tui() -> int:
             await self.stream_command(
                 "package.uninstall",
                 package_make_args("package.uninstall", instance, package, "YES=1"),
+                refresh_instance=instance,
+            )
+
+        def action_package_reinstall(self) -> None:
+            if not self.current_instance or not self.current_package:
+                return
+            instance = self.current_instance
+            package = self.current_package
+            self.push_screen(
+                ConfirmScreen(
+                    "Reinstall package?",
+                    f"Reinstall {package} on {instance}. This may remove configs/data first.",
+                ),
+                lambda confirmed: self.start_task(self.perform_package_reinstall(instance, package)) if confirmed else None,
+            )
+
+        async def perform_package_reinstall(self, instance: str, package: str) -> None:
+            await self.stream_command(
+                "package.reinstall",
+                package_make_args("package.reinstall", instance, package, "YES=1"),
                 refresh_instance=instance,
             )
 
@@ -2392,12 +2585,20 @@ def run_tui() -> int:
                 "provider-up",
                 "refresh",
                 "provider-stop",
+                "reboot",
                 "provision",
+                "provider-status",
+                "provider-plan",
+                "provider-init",
+                "update-tools",
+                "upload",
+                "show-password",
                 "logs",
                 *(f"pkg-action-{index}" for index in range(PACKAGE_ACTION_BUTTONS)),
                 "bundle-select",
                 "bundle-unselect",
                 "provider-down",
+                "instance-recover",
                 "delete-instance",
             ):
                 button = self.query_one(f"#{button_id}", Button)
@@ -2420,6 +2621,9 @@ def run_tui() -> int:
             self.update_busy_layout()
             self.set_button("refresh", disabled=busy)
             self.set_button("cancel-command", disabled=not busy)
+            self.set_button("provider-status", disabled=busy or not has_instance)
+            self.set_button("provider-plan", disabled=busy or not has_instance or provider_busy)
+            self.set_button("provider-init", disabled=busy or not has_instance or provider_busy)
             provider_up = self.query_one("#provider-up", Button)
             provider_up.label = "Start" if display_provider_state == "stopped" else "Up"
             self.set_button(
@@ -2436,6 +2640,10 @@ def run_tui() -> int:
                 ),
             )
             self.set_button(
+                "reboot",
+                disabled=busy or not has_instance or provider_busy or not provider_available,
+            )
+            self.set_button(
                 "provision",
                 disabled=(
                     busy
@@ -2446,10 +2654,14 @@ def run_tui() -> int:
                 ),
             )
             self.set_button("logs", disabled=busy or not has_instance or not provider_available)
+            self.set_button("update-tools", disabled=busy or not has_instance or not provider_available)
+            self.set_button("upload", disabled=busy or not has_instance or not provider_available)
+            self.set_button("show-password", disabled=busy or not has_instance or not provider_available)
             self.set_button(
                 "provider-down",
                 disabled=busy or not has_instance or provider_busy or display_provider_state in {"absent", "unknown"},
             )
+            self.set_button("instance-recover", disabled=busy or not has_instance)
             self.set_button("delete-instance", disabled=busy or not has_instance)
             self.set_button("connect-ssh", disabled=busy or not has_instance or not provider_available)
             for index in range(PACKAGE_ACTION_BUTTONS):
@@ -2479,6 +2691,7 @@ def run_tui() -> int:
                 disabled=busy or not has_instance or not has_package or not directly_selected,
             )
             self.set_button("package-install", disabled=package_disabled)
+            self.set_button("package-reinstall", disabled=package_disabled)
             self.set_button("package-down", disabled=package_disabled)
 
             has_bundle = self.current_bundle is not None
@@ -2537,8 +2750,7 @@ def run_tui() -> int:
                 return False
             current = buttons.index(self.focused)
             columns = 5 if parent.id == "remote-strip" else (
-                3 if parent.id in {
-                    "lifecycle-strip",
+                4 if parent.id == "lifecycle-strip" else 3 if parent.id in {
                     "package-actions",
                     "bundle-actions",
                     "danger-strip",

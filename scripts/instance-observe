@@ -1,0 +1,134 @@
+#!/usr/bin/env ruby
+# Refresh cached observed state for an instance without recording lifecycle ops.
+
+require "json"
+require "open3"
+require "time"
+
+ROOT = File.expand_path("..", __dir__)
+DEFAULT_TTL_SECONDS = 30
+
+def usage
+  warn <<~USAGE
+    Usage:
+      scripts/instance-observe --instance <name> [--ttl <seconds>]
+  USAGE
+end
+
+def run_command(env, *cmd)
+  Open3.capture3(env, *cmd, chdir: ROOT)
+end
+
+def normalize_provider_status(value)
+  normalized = value.to_s.strip.downcase
+  case normalized
+  when "running"
+    "running"
+  when "stopped"
+    "stopped"
+  when "not created", "not-created", "absent"
+    "absent"
+  when "unreachable", "error", "failed"
+    "unreachable"
+  else
+    normalized.empty? ? "unknown" : normalized
+  end
+end
+
+def parse_status_output(output)
+  observed = {}
+  output.each_line do |line|
+    key, value = line.split(":", 2).map { |part| part&.strip }
+    next unless key && value
+
+    case key
+    when "Status"
+      observed["provider_status"] = normalize_provider_status(value)
+    when "IP"
+      observed["ip"] = value unless value.empty?
+    when "Control"
+      observed["control_reachable"] = value.start_with?("reachable")
+      observed["control_summary"] = value
+    end
+  end
+  observed
+end
+
+instance = nil
+ttl = DEFAULT_TTL_SECONDS
+
+args = ARGV.dup
+until args.empty?
+  case args.shift
+  when "--instance"
+    instance = args.shift
+  when "--ttl"
+    ttl = Integer(args.shift)
+  when "-h", "--help"
+    usage
+    exit 0
+  else
+    usage
+    exit 2
+  end
+end
+
+unless instance
+  usage
+  exit 2
+end
+
+now = Time.now.utc
+observed = {
+  "observed_at" => now.iso8601,
+  "expires_at" => (now + ttl).iso8601
+}
+env = ENV.to_h.merge("EGAME_DISABLE_STATE" => "1")
+
+stdout, stderr, status = run_command(
+  env,
+  "make",
+  "--no-print-directory",
+  "provider.status",
+  "INSTANCE=#{instance}"
+)
+
+if status.success?
+  observed.merge!(parse_status_output(stdout))
+  observed["provider_status_raw"] = stdout.strip
+  observed["refresh_error"] = nil
+
+  if observed["provider_status"] == "running" && !observed["ip"]
+    ip_out, ip_err, ip_status = run_command(
+      env,
+      "make",
+      "--no-print-directory",
+      "ip",
+      "INSTANCE=#{instance}"
+    )
+    if ip_status.success? && !ip_out.strip.empty?
+      observed["ip"] = ip_out.strip
+    else
+      observed["refresh_error"] = (ip_err.strip.empty? ? ip_out.strip : ip_err.strip)
+    end
+  end
+else
+  error = stderr.strip.empty? ? stdout.strip : stderr.strip
+  observed["refresh_error"] = error
+  observed["control_reachable"] = false if error.match?(/unreachable|timed out|timeout|connect/i)
+end
+
+observed["provider_status"] ||= "unknown"
+
+state_out, state_status = Open3.capture2e(
+  File.join(ROOT, "scripts/instance-state"),
+  "--instance", instance,
+  "--observed-json", JSON.generate(observed),
+  chdir: ROOT
+)
+unless state_status.success?
+  warn state_out
+  exit state_status.exitstatus || 1
+end
+
+puts state_out

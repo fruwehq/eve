@@ -309,10 +309,8 @@ def emit_env(resolved)
     "LOCATION_ZONE" => (locp["zone"] || ""),
     "SSH_USER" => if os["family"] == "windows"
                     "Administrator"
-                  elsif provider == "raspberry-pi"
-                    env_or("VM_USER_NAME", "")
                   else
-                    env_or("VM_USER_NAME", "ubuntu")
+                    env_or("VM_USER_NAME", "")
                   end,
     "CLOUD_IMAGE_URL" => (os["cloud_image_url"] || ""),
     "RASPBERRY_PI_HOST" => env_or("RASPBERRY_PI_HOST", locp["host"] || ""),

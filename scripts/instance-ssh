@@ -64,6 +64,11 @@ if [ "$ENGINE" = "metal" ]; then
   esac
 else
   SSH_USER=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^SSH_USER=/{print $2}')
+  OS_FAMILY=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^OS_FAMILY=/{print $2}')
+  if [ "$OS_FAMILY" != "windows" ] && [ -z "$SSH_USER" ]; then
+    ./scripts/env-require VM_USER_NAME
+    SSH_USER="$VM_USER_NAME"
+  fi
   IP=$(./scripts/instance-ip "$PROFILE")
   [ -n "$IP" ] || { echo "instance-ssh: could not resolve IP for $PROFILE" >&2; exit 1; }
 fi

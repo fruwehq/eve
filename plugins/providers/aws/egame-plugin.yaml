@@ -3,16 +3,16 @@ kind: provider
 id: aws
 display_name: AWS EC2
 commands:
-  resolve: {exec: scripts/provider-plugin, args: [aws, resolve]}
-  init: {exec: scripts/provider-plugin, args: [aws, init]}
-  plan: {exec: scripts/provider-plugin, args: [aws, plan]}
-  up: {exec: scripts/provider-plugin, args: [aws, up]}
-  down: {exec: scripts/provider-plugin, args: [aws, down]}
-  start: {exec: scripts/provider-plugin, args: [aws, start]}
-  stop: {exec: scripts/provider-plugin, args: [aws, stop]}
-  status: {exec: scripts/provider-plugin, args: [aws, status]}
-  ip: {exec: scripts/provider-plugin, args: [aws, ip]}
-  ssh: {exec: scripts/provider-plugin, args: [aws, ssh]}
+  resolve: {exec: commands/provider-command, args: [resolve]}
+  init: {exec: commands/provider-command, args: [init]}
+  plan: {exec: commands/provider-command, args: [plan]}
+  up: {exec: commands/provider-command, args: [up]}
+  down: {exec: commands/provider-command, args: [down]}
+  start: {exec: commands/provider-command, args: [start]}
+  stop: {exec: commands/provider-command, args: [stop]}
+  status: {exec: commands/provider-command, args: [status]}
+  ip: {exec: commands/provider-command, args: [ip]}
+  ssh: {exec: commands/provider-command, args: [ssh]}
 supports:
   engines: [terraform]
   kinds: [vm]

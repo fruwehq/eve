@@ -335,6 +335,11 @@ The target starts an Xpra server on the VM, launches the requested app, and atta
 - [jq](https://jqlang.github.io/jq/download/) — JSON processing for profile resolution (`brew install jq` on macOS)
 - `make`
 
+For managed Linux guests, set `VM_USER_NAME` in `.env.local`. v3.1 no longer
+falls back to image-default users such as `ubuntu` on normal orchestration
+paths; provider init/cloud-init creates or enables the configured user, and
+later SSH/provision/package commands use that identity.
+
 ### AWS
 
 1. **AWS CLI** — [install](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html)
@@ -361,7 +366,7 @@ The target starts an Xpra server on the VM, launches the requested app, and atta
 1. **SSH key** — generate a keypair for Terraform to use
 2. **TrueNAS user** — create a Terraform user with SSH access and `terraform` group
 3. **API key** — generate one in TrueNAS → API Keys (used for cloud-init ISO upload)
- 4. **Required env vars** (in `.env.local`) — runtime errors out clearly if any are unset:
+4. **Required env vars** (in `.env.local`) — runtime errors out clearly if any are unset:
     - `TRUENAS_HOST` — e.g. `192.168.0.52` or `truenas.home.arpa`
     - `TRUENAS_SSH_USER` — e.g. `terraform` (required; no built-in default)
     - `TRUENAS_SSH_PRIVATE_KEY_FILE` — path to private key

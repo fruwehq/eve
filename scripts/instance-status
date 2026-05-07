@@ -85,6 +85,7 @@ begin
       "bundles" => resolved.dig("composition", "bundles") || []
     },
     "state" => state,
+    "observed_state" => state.fetch("observed_state", {}),
     "packages" => {
       "summary" => package_summary.sort.to_h,
       "selected" => selected_packages,
@@ -104,6 +105,14 @@ begin
            state.fetch("desired_state"),
            state.fetch("provider_state"),
            state.fetch("provision_state")
+    observed = state.fetch("observed_state", {})
+    unless observed.empty?
+      printf "Observed: provider=%s ip=%s at=%s\n",
+             observed.fetch("provider_status", "unknown"),
+             observed.fetch("ip", "-"),
+             observed.fetch("observed_at", "unknown")
+      printf "Refresh error: %s\n", observed["refresh_error"] if observed["refresh_error"]
+    end
     printf "Last operation: %s\n", state["last_operation"] ? "#{state.dig("last_operation", "name")} #{state.dig("last_operation", "status")}" : "none"
     printf "Last error: %s\n", state["last_error"] || "none"
     printf "Selected package states: installed=%d missing=%d unknown=%d failed=%d\n",

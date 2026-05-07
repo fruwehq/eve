@@ -8,6 +8,7 @@ cd "$ROOT"
 
 TARGET="${1:?Usage: scripts/instance-run <make-target> [instance]}"
 INSTANCE_NAME="${2:-${INSTANCE:-}}"
+EXTRA_ARGS=("${@:3}")
 
 if [ -z "$INSTANCE_NAME" ]; then
   echo "instance-run: INSTANCE is required" >&2
@@ -99,7 +100,7 @@ case "$TARGET" in
     exec ./scripts/ssh-wait "$INSTANCE_NAME"
     ;;
   upload)
-    exec ./scripts/upload "$INSTANCE_NAME"
+    exec ./scripts/upload "$INSTANCE_NAME" "${EXTRA_ARGS[@]}"
     ;;
 esac
 

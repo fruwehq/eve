@@ -255,8 +255,7 @@ emit_env() {
     "LOCATION_ZONE=" + ($locp.zone // ""),
     "SSH_USER=" + (
       if (.os.family == "windows") then "Administrator"
-      elif ($provider == "raspberry-pi") then env_or("VM_USER_NAME"; "")
-      else env_or("VM_USER_NAME"; "ubuntu")
+      else env_or("VM_USER_NAME"; "")
       end
     ),
     "CLOUD_IMAGE_URL=" + (.os.cloud_image_url // ""),

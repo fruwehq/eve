@@ -18,6 +18,7 @@ def usage
     Usage:
       scripts/instance-state --instance <name> --get
       scripts/instance-state --instance <name> --recover-running
+      scripts/instance-state --instance <name> --observed-json <json>
       scripts/instance-state --instance <name> --operation <name> --status <status> [--desired-state <state>] [--provider-state <state>] [--provision-state <state>] [--package <id> --package-state <state>] [--error <message>]
   USAGE
 end
@@ -37,6 +38,7 @@ def default_state(instance, now = nil)
     "provider_state" => "unknown",
     "provision_state" => "unknown",
     "package_state" => {},
+    "observed_state" => {},
     "operation_history" => [],
     "last_operation" => nil,
     "last_error" => nil
@@ -48,9 +50,17 @@ end
 
 def read_state(instance)
   path = state_path(instance)
-  return default_state(instance) unless File.exist?(path)
+  state = if File.exist?(path)
+            JSON.parse(File.read(path))
+          else
+            {}
+          end
 
-  JSON.parse(File.read(path))
+  default_state(instance).merge(state).tap do |merged|
+    merged["package_state"] ||= {}
+    merged["observed_state"] ||= {}
+    merged["operation_history"] ||= []
+  end
 end
 
 def write_state(instance, state)
@@ -87,6 +97,7 @@ provider_state = nil
 provision_state = nil
 package = nil
 package_state = nil
+observed_json = nil
 error = nil
 
 args = ARGV.dup
@@ -112,6 +123,8 @@ until args.empty?
     package = args.shift
   when "--package-state"
     package_state = args.shift
+  when "--observed-json"
+    observed_json = args.shift
   when "--error"
     error = args.shift
   when "-h", "--help"
@@ -131,6 +144,24 @@ end
 state = read_state(instance)
 
 if get
+  puts JSON.pretty_generate(state)
+  exit 0
+end
+
+if observed_json
+  begin
+    observed = JSON.parse(observed_json)
+    raise "observed_json must be an object" unless observed.is_a?(Hash)
+  rescue StandardError => e
+    warn "instance-state: #{e.message}"
+    exit 2
+  end
+
+  now = Time.now.utc.iso8601
+  state = default_state(instance, now).merge(state)
+  state["observed_state"] = state.fetch("observed_state", {}).merge(observed)
+  state["updated_at"] = now
+  write_state(instance, state)
   puts JSON.pretty_generate(state)
   exit 0
 end
