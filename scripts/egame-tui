@@ -13,6 +13,7 @@ import shlex
 import signal
 import subprocess
 import sys
+import time
 from collections.abc import Coroutine
 from contextlib import suppress
 from pathlib import Path
@@ -1517,11 +1518,11 @@ def run_tui() -> int:
         def render_instances(self, *, sync_cursor: bool = False, focus_empty: bool = False) -> None:
             table = self.query_one("#instances", DataTable)
             self._rendering_instances = True
-            table_has_focus = self.focused is table
             table.clear()
             table.add_row("+", "<< New Instance >>", "", "", key=NEW_INSTANCE_KEY)
             filter_text = self.query_one("#filter", Input).value.strip().lower()
             current_row = 0
+            current_visible = self.current_instance is None
             row_index = 1
             for row in self.instances:
                 name = str(row.get("name", ""))
@@ -1536,6 +1537,7 @@ def run_tui() -> int:
                     continue
                 if name == self.current_instance:
                     current_row = row_index
+                    current_visible = True
                 status = self.statuses.get(name, {})
                 state = status.get("state", {})
                 provider_state = effective_provider_state(cast(dict[str, Any], state))
@@ -1554,7 +1556,7 @@ def run_tui() -> int:
                     key=name,
                 )
                 row_index += 1
-            if sync_cursor and (table_has_focus or self.current_instance is None):
+            if sync_cursor and current_visible:
                 table.move_cursor(row=current_row, column=0, animate=False, scroll=True)
             if focus_empty and self.current_instance is None:
                 table.focus()
@@ -2156,7 +2158,38 @@ def run_tui() -> int:
                 return
             instance = self.current_instance
             args = make_args(command, instance)
-            await self.stream_command(f"provider.{command}", args, refresh_instance=instance)
+            code = await self.stream_command(f"provider.{command}", args, refresh_instance=instance)
+            self.keep_instance_selected(instance)
+            if code == 0:
+                await self.refresh_provider_until(
+                    instance,
+                    {"up": "running", "start": "running", "stop": "stopped", "down": "absent"}.get(command),
+                )
+                self.keep_instance_selected(instance)
+
+        def keep_instance_selected(self, instance: str) -> None:
+            if not any(str(row.get("name", "")) == instance for row in self.instances):
+                return
+            self.current_instance = instance
+            self.current_status = self.statuses.get(instance)
+            if status_instance_name(self.current_status) == instance:
+                self.render_detail()
+            else:
+                self.render_loading_detail(instance)
+            self.render_instances(sync_cursor=True)
+            self.update_action_state()
+
+        async def refresh_provider_until(self, instance: str, expected_state: str | None) -> None:
+            if not expected_state:
+                return
+            deadline = time.monotonic() + 20
+            while time.monotonic() < deadline:
+                await self.refresh_status_for(instance, repaint_table=True)
+                status = self.statuses.get(instance, {})
+                state = status.get("state", {})
+                if isinstance(state, dict) and effective_provider_state(state) == expected_state:
+                    return
+                await asyncio.sleep(2)
 
         async def action_provision(self) -> None:
             if self.current_instance:
