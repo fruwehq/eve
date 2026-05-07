@@ -75,6 +75,9 @@ begin
                 support_allowed.call(supports, "os_versions", os_version) &&
                 support_allowed.call(supports, "#{os_family}_versions", os_version)
     installable = plugin.dig("install", os_family).is_a?(Hash)
+    actions = plugin.fetch("actions", [])
+    actions = [] if plugin.fetch("id") == "rdp" && os_family != "windows"
+
     {
       "id" => plugin.fetch("id"),
       "display_name" => plugin.fetch("display_name"),
@@ -85,7 +88,7 @@ begin
       "installable" => installable,
       "source" => plugin.fetch("source"),
       "path" => plugin.fetch("path"),
-      "actions" => plugin.fetch("actions", [])
+      "actions" => actions
     }
   end.sort_by { |package| package["id"] }
 

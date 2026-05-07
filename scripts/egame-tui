@@ -205,6 +205,13 @@ def provider_actions_available(state: dict[str, Any]) -> bool:
     )
 
 
+def action_allowed_for_instance(action: dict[str, Any], package_id: str, os_family: str) -> bool:
+    target = str(action.get("target") or "")
+    if package_id == "rdp" and target == "rdp.open":
+        return os_family == "windows"
+    return True
+
+
 def aggregate_state(statuses: dict[str, dict[str, Any]]) -> str:
     counts = {"running": 0, "stopped": 0, "failed": 0, "other": 0}
     for status in statuses.values():
@@ -890,12 +897,13 @@ def run_tui() -> int:
         }
 
         #action-groups {
-            height: auto;
+            height: 9;
             margin-bottom: 1;
         }
 
         .action-group {
             width: 1fr;
+            height: 1fr;
             margin-right: 1;
         }
 
@@ -913,8 +921,17 @@ def run_tui() -> int:
             grid-size: 3;
             grid-columns: 1fr 1fr 1fr;
             grid-gutter: 1;
-            height: auto;
             background: transparent;
+        }
+
+        #remote-strip {
+            height: 7;
+        }
+
+        #lifecycle-strip,
+        #package-actions,
+        #bundle-actions {
+            height: 5;
         }
 
         #detail-grid {
@@ -922,6 +939,7 @@ def run_tui() -> int:
         }
 
         #danger-strip {
+            height: 3;
             margin-top: 1;
         }
 
@@ -941,10 +959,6 @@ def run_tui() -> int:
 
         #packages {
             height: 1fr;
-        }
-
-        #package-actions {
-            margin-bottom: 1;
         }
 
         #ops-pane {
@@ -1385,8 +1399,8 @@ def run_tui() -> int:
             self.statuses[instance_name] = status
             if self.current_instance == instance_name:
                 self.current_status = status
-                provider_state = str(status.get("state", {}).get("provider_state", "unknown"))
-                if provider_state == "running":
+                state = status.get("state", {})
+                if isinstance(state, dict) and provider_actions_available(state):
                     with suppress(Exception):
                         self.instance_ips[instance_name] = await asyncio.to_thread(instance_ip, instance_name) or "-"
                 else:
@@ -1437,9 +1451,8 @@ def run_tui() -> int:
             )
             provision_state = str(state.get("provision_state", "unknown"))
             provider_name = str(instance.get("provider") or "-")
-            provider_state = str(state.get("provider_state", "unknown"))
             ip_text = self.instance_ips.get(str(instance.get("name") or ""), "-")
-            if provider_state != "running":
+            if not provider_actions_available(cast(dict[str, Any], state)):
                 ip_text = "-"
             package_text = package_summary_label(cast(dict[str, Any], summary))
             self.query_one("#provider-pill", Static).update(f"Provider\n{provider_name}")
@@ -1896,6 +1909,7 @@ def run_tui() -> int:
                 return []
             package_rows = self.current_status.get("packages", {}).get("all", [])
             provision_state = str(self.current_status.get("state", {}).get("provision_state", "unknown"))
+            os_family = str(self.current_status.get("instance", {}).get("os_family", ""))
             actions: list[dict[str, str]] = []
             for package in package_rows:
                 if not isinstance(package, dict):
@@ -1910,6 +1924,8 @@ def run_tui() -> int:
                     continue
                 for action in package.get("actions", []):
                     if not isinstance(action, dict):
+                        continue
+                    if not action_allowed_for_instance(action, package_id, os_family):
                         continue
                     action_id = str(action.get("id") or "")
                     label = str(action.get("label") or "")
@@ -2042,8 +2058,46 @@ def run_tui() -> int:
             self.copy_to_clipboard(output.text)
             self.notify("Copied log output")
 
+        def focus_button_relative(self, key: str) -> bool:
+            if not isinstance(self.focused, Button):
+                return False
+            parent = self.focused.parent
+            if parent is None:
+                return False
+            buttons = [
+                child
+                for child in parent.children
+                if isinstance(child, Button) and child.display and not child.disabled
+            ]
+            if len(buttons) < 2 or self.focused not in buttons:
+                return False
+            current = buttons.index(self.focused)
+            columns = 3 if parent.id in {
+                "remote-strip",
+                "lifecycle-strip",
+                "package-actions",
+                "bundle-actions",
+                "danger-strip",
+            } else len(buttons)
+            delta = {
+                "left": -1,
+                "right": 1,
+                "up": -columns,
+                "down": columns,
+            }.get(key)
+            if delta is None:
+                return False
+            target = max(0, min(len(buttons) - 1, current + delta))
+            if target == current:
+                return False
+            buttons[target].focus()
+            return True
+
         def on_key(self, event: Any) -> None:
             if isinstance(self.focused, Input):
+                return
+            if event.key in {"left", "right", "up", "down"} and self.focus_button_relative(event.key):
+                event.stop()
                 return
             if event.key == "l":
                 event.stop()

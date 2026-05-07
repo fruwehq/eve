@@ -101,7 +101,7 @@ mark_selected_packages_installed() {
     return
   fi
 
-  selected_packages="$(./scripts/instance-resolve --instance "$INSTANCE_NAME" --emit json | jq -r '.bundle_packages[]')"
+  selected_packages="$(./scripts/package-list --instance "$INSTANCE_NAME" --json | jq -r '.packages[] | select(.selected == true and .installable == true) | .id')"
   for package in $selected_packages; do
     ./scripts/instance-state \
       --instance "$INSTANCE_NAME" \
