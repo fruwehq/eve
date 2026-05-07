@@ -199,13 +199,22 @@ case "$ENGINE:$PROVIDER" in
     esac
     [ -n "$SSH_PUBLIC_KEY_FILE" ] && VM_SSH_KEY="${SSH_PUBLIC_KEY_FILE%.pub}" && VM_SSH_OPTS+=(-i "$VM_SSH_KEY")
 
+    SSH_USERS="$RESOLVED_SSH_USER"
+    if [ "$RESOLVED_SSH_USER" != "ubuntu" ]; then
+      SSH_USERS="$SSH_USERS ubuntu"
+    fi
+
     FOUND=""
     for IP in $CANDIDATES; do
-      HOSTNAME=$(ssh "${VM_SSH_OPTS[@]}" "${RESOLVED_SSH_USER:-ubuntu}@${IP}" hostname 2>/dev/null) || continue
-      if [ "$HOSTNAME" = "$VM_NAME" ]; then
-        FOUND="$IP"
-        break
-      fi
+      for VM_USER in $SSH_USERS; do
+        [ -n "$VM_USER" ] || continue
+        HOSTNAME=$(ssh "${VM_SSH_OPTS[@]}" "${VM_USER}@${IP}" hostname 2>/dev/null) || continue
+        if [ "$HOSTNAME" = "$VM_NAME" ]; then
+          FOUND="$IP"
+          break
+        fi
+      done
+      [ -n "$FOUND" ] && break
     done
     if [ -z "$FOUND" ]; then
       echo "instance-ip: no TrueNAS ARP candidate matched hostname '$VM_NAME'" >&2

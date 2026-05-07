@@ -1447,7 +1447,12 @@ def run_tui() -> int:
             try:
                 for name in instance_names:
                     try:
-                        updated[name] = await asyncio.to_thread(instance_status, name)
+                        status = await asyncio.to_thread(instance_status, name)
+                        with suppress(Exception):
+                            live_state = await asyncio.to_thread(provider_live_status, name)
+                            if live_state and should_apply_live_provider_state(status, live_state):
+                                status = status_with_provider_state(status, live_state)
+                        updated[name] = status
                     except Exception as exc:
                         updated[name] = {"instance": {"name": name}, "state": {"last_error": str(exc)}}
                 self.statuses.update(updated)
