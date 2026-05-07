@@ -10,6 +10,7 @@ import json
 import os
 import re
 import shlex
+import signal
 import subprocess
 import sys
 from collections.abc import Coroutine
@@ -1141,6 +1142,7 @@ def run_tui() -> int:
             Binding("p", "provision", "Provision"),
             Binding("x", "destroy_instance", "Destroy"),
             Binding("d", "delete_instance", "Delete"),
+            Binding("c", "cancel_command", "Cancel"),
             Binding("l", "focus_log", "Log"),
             Binding("y", "copy_log", "Copy Log"),
             Binding("q", "quit", "Quit"),
@@ -1156,6 +1158,7 @@ def run_tui() -> int:
             self.current_package: str | None = None
             self.current_status: dict[str, Any] | None = None
             self.command_running = False
+            self.current_process: asyncio.subprocess.Process | None = None
             self.current_remote_actions: list[dict[str, Any]] = []
             self.instance_ips: dict[str, str] = {}
             self.background_tasks: set[asyncio.Task[None]] = set()
@@ -1208,6 +1211,7 @@ def run_tui() -> int:
                                         yield Button("Provision", id="provision", variant="primary")
                                         yield Button("Logs", id="logs")
                                         yield Button("Refresh", id="refresh", variant="primary")
+                                        yield Button("Cancel", id="cancel-command", variant="error")
                                 with Vertical(id="package-actions-group", classes="action-group"):
                                     yield Static("Package Actions", classes="action-title")
                                     with Grid(id="remote-strip"):
@@ -1332,7 +1336,8 @@ def run_tui() -> int:
                         await asyncio.wait_for(status_poll_done.wait(), timeout=2)
                     except TimeoutError:
                         if refresh_instance:
-                            await self.refresh_status_for(refresh_instance)
+                            with suppress(TimeoutError):
+                                await asyncio.wait_for(self.refresh_status_for(refresh_instance), timeout=8)
 
             if refresh_instance:
                 status_poll_task = asyncio.create_task(poll_running_status())
@@ -1345,7 +1350,9 @@ def run_tui() -> int:
                     env={**os.environ, **(env or {})},
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.STDOUT,
+                    start_new_session=True,
                 )
+                self.current_process = proc
                 assert proc.stdout is not None
                 while True:
                     line = await proc.stdout.readline()
@@ -1364,12 +1371,21 @@ def run_tui() -> int:
                     status_poll_task.cancel()
                     with suppress(asyncio.CancelledError):
                         await status_poll_task
+                self.current_process = None
                 self.command_running = False
-                if refresh_instance:
-                    await self.refresh_status_for(refresh_instance, repaint_table=True)
-                else:
-                    await self.refresh_current_status()
                 self.update_action_state()
+                try:
+                    if refresh_instance:
+                        await asyncio.wait_for(
+                            self.refresh_status_for(refresh_instance, repaint_table=True),
+                            timeout=8,
+                        )
+                    else:
+                        await asyncio.wait_for(self.refresh_current_status(), timeout=8)
+                except TimeoutError:
+                    self.log_line("[warning]Status refresh timed out; press Refresh to retry.[/]")
+                finally:
+                    self.update_action_state()
 
         async def poll_statuses(self) -> None:
             if self.command_running:
@@ -1882,6 +1898,8 @@ def run_tui() -> int:
             button_id = event.button.id or ""
             if button_id == "refresh":
                 await self.action_refresh()
+            elif button_id == "cancel-command":
+                await self.action_cancel_command()
             elif button_id == "provider-up":
                 await self.action_provider("up")
             elif button_id == "provider-stop":
@@ -1915,6 +1933,20 @@ def run_tui() -> int:
 
         async def action_refresh(self) -> None:
             await self.refresh_instances(preserve_selection=True)
+
+        async def action_cancel_command(self) -> None:
+            proc = self.current_process
+            if not self.command_running or proc is None or proc.returncode is not None:
+                return
+            self.log_line("[warning]Cancelling current command...[/]")
+            with suppress(ProcessLookupError):
+                os.killpg(proc.pid, signal.SIGTERM)
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=5)
+            except TimeoutError:
+                self.log_line("[warning]Command did not stop; killing it.[/]")
+                with suppress(ProcessLookupError):
+                    os.killpg(proc.pid, signal.SIGKILL)
 
         def action_new_instance(self) -> None:
             self.push_screen(
@@ -2232,6 +2264,7 @@ def run_tui() -> int:
 
             busy = self.command_running
             self.set_button("refresh", disabled=busy)
+            self.set_button("cancel-command", disabled=not busy)
             self.set_button(
                 "provider-up",
                 disabled=busy or not has_instance or provider_busy or display_provider_state == "running",
