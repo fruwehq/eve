@@ -1692,18 +1692,20 @@ def run_tui() -> int:
             hair = "#ff8fb1"
             skin = "#f5c8a9"
             brow = "#5a3d5a"
-            eye = skin if self._eye_blinking else "#ffffff"
             dress = [
                 "#7fd3e3", "#82cde2", "#84c6e0", "#87c0df",
                 "#8ab9dd", "#8db3dc", "#8faddb", "#92a6da",
                 "#95a0d9", "#9799d8", "#9a93d7", "#9d8cd6",
             ]
+            blinking = self._eye_blinking
 
-            width = self.size.width if self.size else 80
-            if width >= 70:
-                hero_art_rows = self._large_hero_rows(hair, skin, brow, eye, dress)
-            elif width >= 38:
-                hero_art_rows = self._compact_hero_rows(hair, skin, brow, eye, dress)
+            container_width = self.query_one("#empty-state", Static).size.width
+            if container_width <= 0:
+                container_width = self.size.width if self.size else 80
+            if container_width >= 60:
+                hero_art_rows = self._large_hero_rows(hair, skin, brow, dress, blinking)
+            elif container_width >= 32:
+                hero_art_rows = self._compact_hero_rows(hair, skin, brow, dress, blinking)
             else:
                 hero_art_rows = []
 
@@ -1732,9 +1734,24 @@ def run_tui() -> int:
             hair: str,
             skin: str,
             brow: str,
-            eye: str,
             dress: list[str],
+            blinking: bool,
         ) -> list[list[tuple[str | None, str]]]:
+            eye = "#ffffff"
+            if blinking:
+                eye_8_l: tuple[str, str] = (skin, "      ")
+                eye_8_r: tuple[str, str] = (skin, "     ")
+                eye_9_l: tuple[str, str] = (brow, "‿‿‿‿‿‿")
+                eye_9_r: tuple[str, str] = (brow, "‿‿‿‿‿‿")
+                eye_10_l: tuple[str, str] = (skin, "      ")
+                eye_10_r: tuple[str, str] = (skin, "   ")
+            else:
+                eye_8_l = (eye, " ▓ █░░")
+                eye_8_r = (eye, "░▓ █ ")
+                eye_9_l = (eye, "░▓░▓█ ")
+                eye_9_r = (eye, "░█▓ ▓░")
+                eye_10_l = (eye, " █▓█  ")
+                eye_10_r = (eye, "█▓█")
             return [
                 [(hair, "               ████                ")],
                 [(hair, "           ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓ ▓▓▓▓▓▓▓▓▓▓▓▓            ")],
@@ -1744,9 +1761,9 @@ def run_tui() -> int:
                 [(hair, " ▓▓▓▒▒▒░░▒▒▒▓▓▓██▓▓▓▓██▓██▓▒▒░▒▒▓▓▓█▓▓▓▒▒░▒▓██████     ")],
                 [(hair, " █▓▓▓▒▒▓▓▓▓▓▓▓▓██▓██▓▒▒▓▓▓██▓▓▓▒▒▓▓▓█▓▓▒▒░▒▒▒▓▓▓▓      ")],
                 [(hair, "░  █▓▓▓▓▓"), (brow, "████"), (hair, "▓"), (skin, "▒░░░░  ░░░"), (hair, "▒▓▓▓▓▓▓▓▒▒▓█▓▓▓▒▒░ ▒▒▒▒▓▓▓      ")],
-                [(hair, " █▓██ "), (eye, " ▓ █░░"), (skin, "       "), (eye, "░▓ █ "), (hair, "███▓██▓▓▓▓█▓▓▒▒░  ░▒▓▓▓█        ")],
-                [(hair, " █▓██▓"), (eye, "░▓░▓█ "), (skin, "        "), (eye, "░█▓ ▓░"), (hair, "▓██▓▓▓▓▓█▓▓▓▒▒░░▒▒▒▓▓█        ")],
-                [(hair, " █▓██ "), (eye, " █▓█  "), (skin, "         "), (eye, "█▓█"), (skin, "  "), (hair, "██▓▓▓▒▒▓█▓▓▓▒▒▒▒░▒▒▓▓▓        ")],
+                [(hair, " █▓██ "), eye_8_l, (skin, "       "), eye_8_r, (hair, "███▓██▓▓▓▓█▓▓▒▒░  ░▒▓▓▓█        ")],
+                [(hair, " █▓██▓"), eye_9_l, (skin, "        "), eye_9_r, (hair, "▓██▓▓▓▓▓█▓▓▓▒▒░░▒▒▒▓▓█        ")],
+                [(hair, " █▓██ "), eye_10_l, (skin, "         "), eye_10_r, (skin, "  "), (hair, "██▓▓▓▒▒▓█▓▓▓▒▒▒▒░▒▒▓▓▓        ")],
                 [(hair, " █▓▓█"), (skin, "░░░               ░░"), (hair, "█▓▓▒▒▒▓▓▓█▓▓▓▓▓▓▓▓██           ")],
                 [(hair, "   █▓█ █"), (skin, "▒░░        ░░"), (hair, "█▓▓▒▓█▓▓▓▒▒▒▓▓███▓▓▓██             ")],
                 [(hair, "    ██  "), (skin, "░░▓▓▒▒░░░▒▒"), (hair, "▓██▓▒▒▓▓█▓▓▓▓▒░▒▓▓▓▓█▓▓▓▓            ")],
@@ -1773,16 +1790,27 @@ def run_tui() -> int:
             hair: str,
             skin: str,
             brow: str,
-            eye: str,
             dress: list[str],
+            blinking: bool,
         ) -> list[list[tuple[str | None, str]]]:
+            eye = "#ffffff"
+            if blinking:
+                eye_4_l: tuple[str, str] = (skin, "    ")
+                eye_4_r: tuple[str, str] = (skin, "    ")
+                eye_5_l: tuple[str, str] = (brow, "‿‿‿‿")
+                eye_5_r: tuple[str, str] = (brow, "‿‿‿‿")
+            else:
+                eye_4_l = (eye, "██▓▓")
+                eye_4_r = (eye, "▓▓██")
+                eye_5_l = (eye, "██▒▒")
+                eye_5_r = (eye, "▒▒██")
             return [
                 [(hair, "            ████            ")],
                 [(hair, "         ▓▓▓▓▓▓▓▓▓▓         ")],
                 [(hair, "      ▓▓▓▓"), (brow, "▒▒▒▒▒▒▒▒"), (hair, "▓▓▓▓      ")],
                 [(hair, "     ▓▓"), (skin, "░░░░░░░░░░░░░░"), (hair, "▓▓     ")],
-                [(hair, "     ▓▓"), (skin, "░░"), (eye, "██▓▓"), (skin, "░░"), (eye, "▓▓██"), (skin, "░░"), (hair, "▓▓     ")],
-                [(hair, "     ▓▓"), (skin, "░░"), (eye, "██▒▒"), (skin, "░░"), (eye, "▒▒██"), (skin, "░░"), (hair, "▓▓     ")],
+                [(hair, "     ▓▓"), (skin, "░░"), eye_4_l, (skin, "░░"), eye_4_r, (skin, "░░"), (hair, "▓▓     ")],
+                [(hair, "     ▓▓"), (skin, "░░"), eye_5_l, (skin, "░░"), eye_5_r, (skin, "░░"), (hair, "▓▓     ")],
                 [(hair, "     ▓▓"), (skin, "▒▒░░░░░░░░░░▒▒"), (hair, "▓▓     ")],
                 [(hair, "      ▓▓"), (skin, "░░░░░░░░░░░░"), (hair, "▓▓      ")],
                 [(hair, "        ▓▓"), (skin, "░░░░░░░░"), (hair, "▓▓        ")],
