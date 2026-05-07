@@ -17,14 +17,77 @@ printf '%-15s %s\n' "Provider:" "$PROVIDER"
 printf '%-15s %s\n' "OS:" "$OS_FAMILY"
 
 VM_STATUS="unknown"
+TM_READ_FLAGS=(
+  --disable-safeguards=git-untracked
+  --disable-safeguards=git-uncommitted
+  --disable-safeguards=git-out-of-sync
+  --disable-safeguards=outdated-code
+)
+
+resolved_value() {
+  printf "%s\n" "$RESOLVED_ENV" | awk -F= -v key="$1" '$1 == key { print substr($0, index($0, "=") + 1) }'
+}
+
+truenas_control_reachable() {
+  local host port
+  host="${TRUENAS_HOST:-$(resolved_value TRUENAS_HOST)}"
+  port="${TRUENAS_SSH_PORT:-$(resolved_value TRUENAS_SSH_PORT)}"
+  port="${port:-22}"
+
+  if [ -z "$host" ]; then
+    printf '%-15s %s\n' "Control:" "unreachable (missing TRUENAS_HOST)"
+    return 1
+  fi
+
+  if command -v nc >/dev/null 2>&1; then
+    if nc -z -w 2 "$host" "$port" >/dev/null 2>&1; then
+      printf '%-15s %s\n' "Control:" "reachable (TrueNAS SSH $host:$port)"
+      return 0
+    fi
+    printf '%-15s %s\n' "Control:" "unreachable (TrueNAS SSH $host:$port)"
+    return 1
+  fi
+
+  printf '%-15s %s\n' "Control:" "unknown (nc not found; TrueNAS SSH $host:$port)"
+  return 0
+}
 
 tf_attr() {
   local json="$1" address="$2" attr="$3"
   printf '%s' "$json" | jq -r --arg addr "$address" --arg attr "$attr" \
-    '(.values // {} | .root_module // {} | .resources // [])
-     | map(select(.address == $addr))
-     | map(.values[$attr])
+    '[((.values // {} | .root_module // {} | .resources // [])
+       | map(select(.address == $addr))
+       | map(.values[$attr])[]?),
+      ((.resources // [])
+       | map(select((.type + "." + .name) == $addr))
+       | map(.instances[]?.attributes[$attr])[]?)]
+     | map(select(. != null and . != ""))
      | first // ""' 2>/dev/null
+}
+
+terraform_state_json() {
+  local tags="$1"
+  local state_json="" state_path="" workspace="${TF_WORKSPACE:-default}"
+
+  state_json=$(terramate run "${TM_READ_FLAGS[@]}" --quiet --tags="$tags-services" -- terraform show -json 2>/dev/null) || true
+  if [ -n "$state_json" ]; then
+    printf '%s\n' "$state_json"
+    return 0
+  fi
+
+  if [ -n "${EGAME_TF_STATE_BASE:-}" ]; then
+    state_path="${EGAME_TF_STATE_BASE}/stacks/${PROVIDER}/20-services/workspaces/${workspace}/terraform.tfstate"
+    if [ -f "$state_path" ]; then
+      cat "$state_path"
+      return 0
+    fi
+
+    state_path="${EGAME_TF_STATE_BASE}/stacks/${PROVIDER}/20-services/default.tfstate"
+    if [ -f "$state_path" ]; then
+      cat "$state_path"
+      return 0
+    fi
+  fi
 }
 
 case "$ENGINE" in
@@ -70,7 +133,7 @@ case "$ENGINE" in
   terraform)
     eval "$(./scripts/tf-env "$PROFILE")"
     TAGS=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^STACK_TAGS=/{print $2}')
-    STATE_JSON=$(terramate run --quiet --tags="$TAGS-services" -- terraform show -json 2>/dev/null) || true
+    STATE_JSON=$(terraform_state_json "$TAGS")
 
     if [ -z "$STATE_JSON" ]; then
       VM_STATUS="not created"
@@ -121,6 +184,12 @@ case "$ENGINE" in
           VM_STATUS="unsupported provider ($PROVIDER)"
           ;;
       esac
+
+      if [ "$PROVIDER" = "truenas" ] && [ "$VM_STATUS" != "not created" ] && [ "$VM_STATUS" != "unsupported provider ($PROVIDER)" ]; then
+        if ! truenas_control_reachable; then
+          VM_STATUS="unreachable"
+        fi
+      fi
 
       if [ "$VM_STATUS" = "running" ]; then
         IP=$(./scripts/instance-ip "$PROFILE" 2>/dev/null || true)
