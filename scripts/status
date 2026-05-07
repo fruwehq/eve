@@ -81,7 +81,7 @@ truenas_live_vm_state() {
 
   # shellcheck disable=SC2029
   output=$(ssh "${SSH_OPTS[@]}" "$user@$host" "sudo midclt call vm.query '[[\"id\",\"=\",$vm_id]]'" 2>/dev/null) || return 1
-  printf '%s\n' "$output" | jq -r '.[0].state // empty' 2>/dev/null
+  printf '%s\n' "$output" | jq -r '.[0].status.state // .[0].state // empty' 2>/dev/null
 }
 
 tf_attr() {
