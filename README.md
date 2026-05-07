@@ -4,6 +4,8 @@
 >
 > See: [docs/multi-purpose-vm-blueprint.md](docs/multi-purpose-vm-blueprint.md)
 >
+> Next boundary cleanup: [docs/v3.1-provider-plugin-boundaries-plan.md](docs/v3.1-provider-plugin-boundaries-plan.md)
+>
 > Planned runtime notes: [docs/raspberry-pi-provider.md](docs/raspberry-pi-provider.md)
 
 ## v3 instance workflow
