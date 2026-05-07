@@ -215,6 +215,38 @@ def validate_package_actions!(plugin)
     unless action["id"].match?(/\A[a-z][a-z0-9-]*\z/)
       raise "#{path}: #{field}.id must match [a-z][a-z0-9-]*"
     end
+    validate_package_action_prompt!(action["prompt"], path, "#{field}.prompt") if action.key?("prompt")
+  end
+end
+
+def validate_package_action_prompt!(prompt, path, field)
+  raise "#{path}: #{field} must be a map" unless prompt.is_a?(Hash)
+
+  %w[title message env choices].each do |key|
+    raise "#{path}: #{field}.#{key} is required" unless prompt.key?(key)
+  end
+  %w[title message env].each do |key|
+    value = prompt[key]
+    raise "#{path}: #{field}.#{key} must be a string" unless value.is_a?(String) && !value.empty?
+  end
+  unless prompt["env"].match?(/\A[A-Z][A-Z0-9_]*\z/)
+    raise "#{path}: #{field}.env must be an environment variable name"
+  end
+
+  choices = prompt["choices"]
+  raise "#{path}: #{field}.choices must be a list" unless choices.is_a?(Array)
+  raise "#{path}: #{field}.choices must not be empty" if choices.empty?
+
+  choices.each_with_index do |choice, index|
+    choice_field = "#{field}.choices[#{index}]"
+    raise "#{path}: #{choice_field} must be a map" unless choice.is_a?(Hash)
+    %w[value label].each do |key|
+      value = choice[key]
+      raise "#{path}: #{choice_field}.#{key} must be a string" unless value.is_a?(String) && !value.empty?
+    end
+    if choice.key?("variant") && !%w[default primary success warning error].include?(choice["variant"])
+      raise "#{path}: #{choice_field}.variant must be one of default, primary, success, warning, error"
+    end
   end
 end
 

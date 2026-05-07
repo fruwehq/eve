@@ -140,6 +140,14 @@ else
 fi
 
 if ./scripts/package-list --registry "$FIXTURE" --instance dev-a --json | \
+  jq -e '.packages[] | select(.id == "vnc") | (.actions[] | select(.id == "vnc" and .prompt.env == "VNC_VIEWER" and [.prompt.choices[].value] == ["auto", "system", "tigervnc"]))' >/dev/null; then
+  printf '  [OK] package-list exposes UI prompt metadata for package actions\n'
+else
+  printf '  [FAIL] package-list exposes UI prompt metadata for package actions\n' >&2
+  FAIL=$((FAIL + 1))
+fi
+
+if ./scripts/package-list --registry "$FIXTURE" --instance dev-a --json | \
   jq -e '.packages[] | select(.id == "rdp") | .actions == []' >/dev/null; then
   printf '  [OK] package-list hides Windows-only RDP action on Ubuntu\n'
 else

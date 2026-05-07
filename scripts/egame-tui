@@ -15,7 +15,7 @@ import sys
 from collections.abc import Coroutine
 from contextlib import suppress
 from pathlib import Path
-from typing import Any, ClassVar, cast
+from typing import Any, ClassVar, Literal, cast
 
 ROOT = Path(__file__).resolve().parents[1]
 NEW_INSTANCE_KEY = "__new_instance__"
@@ -362,6 +362,59 @@ def run_tui() -> int:
 
         def on_button_pressed(self, event: Button.Pressed) -> None:
             self.dismiss(event.button.id == "confirm")
+
+    class ChoiceScreen(ModalScreen[str | None]):
+        CSS = """
+        ChoiceScreen {
+            align: center middle;
+        }
+
+        #choice-dialog {
+            width: 72;
+            height: 13;
+            border: round $primary;
+            background: $surface;
+            padding: 1 2;
+        }
+
+        #choice-message {
+            margin-bottom: 1;
+        }
+
+        #choice-actions {
+            height: 3;
+            background: transparent;
+        }
+
+        #choice-actions Button {
+            width: 1fr;
+            min-width: 14;
+        }
+        """
+
+        def __init__(
+            self,
+            title: str,
+            message: str,
+            choices: list[tuple[str, str, Literal["default", "primary", "success", "warning", "error"]]],
+        ) -> None:
+            super().__init__()
+            self.dialog_title = title
+            self.message = message
+            self.choices = choices
+
+        def compose(self) -> ComposeResult:
+            with Vertical(id="choice-dialog"):
+                yield Label(f"[b]{self.dialog_title}[/b]")
+                yield Static(self.message, id="choice-message")
+                with Horizontal(id="choice-actions"):
+                    for choice_id, label, variant in self.choices:
+                        yield Button(label, id=choice_id, variant=variant)
+                    yield Button("Cancel", id="cancel")
+
+        def on_button_pressed(self, event: Button.Pressed) -> None:
+            button_id = event.button.id or ""
+            self.dismiss(None if button_id == "cancel" else button_id)
 
     class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
         CSS = """
@@ -1103,7 +1156,7 @@ def run_tui() -> int:
             self.current_package: str | None = None
             self.current_status: dict[str, Any] | None = None
             self.command_running = False
-            self.current_remote_actions: list[dict[str, str]] = []
+            self.current_remote_actions: list[dict[str, Any]] = []
             self.instance_ips: dict[str, str] = {}
             self.background_tasks: set[asyncio.Task[None]] = set()
             self.hero_frame = 0
@@ -1258,7 +1311,14 @@ def run_tui() -> int:
             self.background_tasks.add(task)
             task.add_done_callback(self.background_tasks.discard)
 
-        async def stream_command(self, label: str, args: list[str], *, refresh_instance: str | None = None) -> int:
+        async def stream_command(
+            self,
+            label: str,
+            args: list[str],
+            *,
+            refresh_instance: str | None = None,
+            env: dict[str, str] | None = None,
+        ) -> int:
             if self.command_running:
                 self.notify("A command is already running", severity="warning")
                 return 1
@@ -1282,7 +1342,7 @@ def run_tui() -> int:
                 proc = await asyncio.create_subprocess_exec(
                     *args,
                     cwd=ROOT,
-                    env=os.environ.copy(),
+                    env={**os.environ, **(env or {})},
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.STDOUT,
                 )
@@ -2024,6 +2084,47 @@ def run_tui() -> int:
             package = action["package"]
             action_id = action["id"]
             label = action["label"]
+            prompt = action.get("prompt")
+            if isinstance(prompt, dict):
+                choices: list[tuple[str, str, Literal["default", "primary", "success", "warning", "error"]]] = []
+                for choice in prompt.get("choices", []):
+                    if not isinstance(choice, dict):
+                        continue
+                    value = str(choice.get("value") or "")
+                    choice_label = str(choice.get("label") or "")
+                    variant = cast(
+                        Literal["default", "primary", "success", "warning", "error"],
+                        str(choice.get("variant") or "default"),
+                    )
+                    if value and choice_label:
+                        choices.append((value, choice_label, variant))
+                env_name = str(prompt.get("env") or "")
+                if not choices or not env_name:
+                    self.log_line(f"[error]{label} has invalid prompt metadata.[/]")
+                    return
+                self.push_screen(
+                    ChoiceScreen(
+                        str(prompt.get("title") or label),
+                        str(prompt.get("message") or "Choose an option."),
+                        choices,
+                    ),
+                    lambda viewer: self.start_task(
+                        self.perform_package_remote(instance, package, action_id, label, {env_name: viewer})
+                    )
+                    if viewer
+                    else None,
+                )
+                return
+            await self.perform_package_remote(instance, package, action_id, label)
+
+        async def perform_package_remote(
+            self,
+            instance: str,
+            package: str,
+            action_id: str,
+            label: str,
+            env: dict[str, str] | None = None,
+        ) -> None:
             code = await self.stream_command(
                 f"package.action.{package}.{action_id}",
                 [
@@ -2035,6 +2136,7 @@ def run_tui() -> int:
                     f"ACTION={action_id}",
                 ],
                 refresh_instance=instance,
+                env=env,
             )
             if code == 0:
                 self.log_line(f"[success]{label} completed.[/]")
@@ -2053,13 +2155,13 @@ def run_tui() -> int:
                 return False
             return self.current_bundle in self.selected_bundle_ids(self.current_status)
 
-        def installed_package_actions(self) -> list[dict[str, str]]:
+        def installed_package_actions(self) -> list[dict[str, Any]]:
             if not self.current_status:
                 return []
             package_rows = self.current_status.get("packages", {}).get("all", [])
             provision_state = str(self.current_status.get("state", {}).get("provision_state", "unknown"))
             os_family = str(self.current_status.get("instance", {}).get("os_family", ""))
-            actions: list[dict[str, str]] = []
+            actions: list[dict[str, Any]] = []
             for package in package_rows:
                 if not isinstance(package, dict):
                     continue
@@ -2079,7 +2181,11 @@ def run_tui() -> int:
                     action_id = str(action.get("id") or "")
                     label = str(action.get("label") or "")
                     if package_id and action_id and label:
-                        actions.append({"package": package_id, "id": action_id, "label": label})
+                        next_action = dict(action)
+                        next_action["package"] = package_id
+                        next_action["id"] = action_id
+                        next_action["label"] = label
+                        actions.append(next_action)
             return actions[:PACKAGE_ACTION_BUTTONS]
 
         def set_button(self, button_id: str, *, disabled: bool) -> None:

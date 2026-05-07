@@ -13,6 +13,18 @@ actions:
   - id: vnc
     label: VNC
     target: vnc.open
+    prompt:
+      title: Open VNC
+      message: Choose the viewer for this VNC session.
+      env: VNC_VIEWER
+      choices:
+        - value: auto
+          label: Auto
+          variant: primary
+        - value: system
+          label: macOS
+        - value: tigervnc
+          label: TigerVNC
 install:
   ubuntu:
     steps: [00_base.sh, 05_timezone.sh, 46_vnc.sh]
