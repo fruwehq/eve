@@ -211,6 +211,9 @@ bundles:
   - id: remote-waypipe
     includes: [waypipe]
 
+  - id: remote-rdp
+    includes: [rdp]
+
   - id: dev-ai
     includes: [docker, dev-toolchain, goose, claude, codex-cli, hermes, opencode, vscode]
 

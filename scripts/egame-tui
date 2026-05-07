@@ -356,6 +356,11 @@ def run_tui() -> int:
         .muted {
             color: $text-muted;
         }
+
+        #wizard-steps {
+            height: 1;
+            margin-bottom: 1;
+        }
         """
 
         def __init__(
@@ -393,9 +398,7 @@ def run_tui() -> int:
 
         def compose(self) -> ComposeResult:
             with Vertical(id="new-dialog"):
-                yield Label(
-                    "[b]New Instance[/b]  [dim]1 Name -> 2 Platform -> 3 Content -> 4 Review[/dim]"
-                )
+                yield Label("", id="wizard-steps")
                 with Vertical(id="step-name"):
                     yield Input(placeholder="instance name", id="new-name")
                     yield Static("Use a short lowercase name, for example dev-a or windows-test.", classes="muted")
@@ -433,6 +436,17 @@ def run_tui() -> int:
             includes = bundle.get("includes", [])
             include_text = ", ".join(str(package) for package in includes) if isinstance(includes, list) else ""
             return f"{bundle.get('id')}\n  {include_text}" if include_text else str(bundle.get("id"))
+
+        def wizard_step_label(self) -> str:
+            parts = []
+            for index, label in enumerate(("1 Name", "2 Platform", "3 Content", "4 Review")):
+                if index == self.step:
+                    parts.append(f"[b][primary]▶ {label}[/][/b]")
+                elif index < self.step:
+                    parts.append(f"[success]{label}[/]")
+                else:
+                    parts.append(f"[dim]{label}[/]")
+            return "[b]New Instance[/b]  " + " [dim]->[/] ".join(parts)
 
         def populate_platform_cards(self) -> None:
             table = self.query_one("#platform-cards", DataTable)
@@ -555,11 +569,11 @@ def run_tui() -> int:
             signature = (
                 self.selected_platform_id,
                 tuple(sorted((bundle_id, reason or "") for bundle_id, reason in reasons.items())),
-                tuple(sorted(selected)),
             )
             if signature == self.rendered_bundle_signature and bundle_list.option_count:
                 return
 
+            highlighted = bundle_list.highlighted
             bundle_options: list[Any] = []
             for bundle in self.bundles:
                 bundle_id = str(bundle.get("id") or "")
@@ -575,6 +589,8 @@ def run_tui() -> int:
                     )
                 )
             bundle_list.set_options(bundle_options)
+            if isinstance(highlighted, int) and bundle_options:
+                bundle_list.highlighted = min(highlighted, len(bundle_options) - 1)
             bundle_list.disabled = bundle_list.option_count == 0
             self.rendered_bundle_signature = signature
 
@@ -587,7 +603,6 @@ def run_tui() -> int:
                 self.selected_platform_id,
                 tuple(sorted(bundled)),
                 tuple(sorted((package_id, reason or "") for package_id, reason in reasons.items())),
-                tuple(sorted(selected)),
             )
             if (
                 bundled == self.rendered_bundled_package_ids
@@ -596,6 +611,7 @@ def run_tui() -> int:
             ):
                 return
 
+            highlighted = package_list.highlighted
             package_options: list[Any] = [
                 Selection(
                     self.package_option_label(package, reasons.get(package)),
@@ -607,6 +623,8 @@ def run_tui() -> int:
                 if package not in bundled
             ]
             package_list.set_options(package_options)
+            if isinstance(highlighted, int) and package_options:
+                package_list.highlighted = min(highlighted, len(package_options) - 1)
             package_list.disabled = package_list.option_count == 0
             self.rendered_bundled_package_ids = bundled
             self.rendered_package_signature = signature
@@ -625,6 +643,7 @@ def run_tui() -> int:
             ]
 
         def update_wizard(self) -> None:
+            self.query_one("#wizard-steps", Label).update(self.wizard_step_label())
             for index, widget_id in enumerate(("step-name", "step-platform", "step-content", "step-review")):
                 self.query_one(f"#{widget_id}", Vertical).display = index == self.step
 
