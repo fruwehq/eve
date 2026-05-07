@@ -2,6 +2,7 @@
 # Emit catalog-backed choices for direct instance creation.
 
 require "json"
+require "open3"
 require "yaml"
 
 ROOT = File.expand_path("..", __dir__)
@@ -33,6 +34,13 @@ def load_any(path)
   return {} unless File.exist?(path)
 
   YAML.safe_load(File.read(path), permitted_classes: [], aliases: true) || {}
+end
+
+def run_json(*cmd)
+  out, status = Open3.capture2e(*cmd)
+  raise out unless status.success?
+
+  JSON.parse(out)
 end
 
 def merge_entries(target, entries, key)
@@ -98,6 +106,11 @@ CATALOG_PATHS.each do |path|
   merge_entries(catalog["locations"], doc["locations"], "name")
 end
 
+package_plugins = run_json(File.join(ROOT, "scripts/plugin-list"), "--kind", "package", "--json")
+package_plugin_by_id = package_plugins.fetch("plugins", []).to_h do |plugin|
+  [plugin.fetch("id"), plugin]
+end
+
 providers = catalog["machines"].map { |machine| machine["provider"] }.compact.uniq.sort
 platforms = []
 
@@ -146,7 +159,18 @@ bundles = catalog["bundles"].map do |bundle|
 end
 
 packages = catalog["packages"].map do |package|
-  { "id" => package["id"] }
+  plugin = package_plugin_by_id[package["id"]] || {}
+  supports = plugin["supports"].is_a?(Hash) ? plugin["supports"] : {}
+  actions = plugin["actions"].is_a?(Array) ? plugin["actions"] : []
+  install = plugin["install"].is_a?(Hash) ? plugin["install"] : nil
+
+  {
+    "id" => package["id"],
+    "display_name" => plugin["display_name"] || package["id"],
+    "supports" => supports,
+    "installable" => !install.nil?,
+    "actions" => actions
+  }
 end
 
 doc = {

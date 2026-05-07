@@ -220,6 +220,7 @@ def run_tui() -> int:
             Static,
             TextArea,
         )
+        from textual.widgets.selection_list import Selection
     except ModuleNotFoundError:
         print(
             "Textual is required for the TUI.\n"
@@ -372,14 +373,18 @@ def run_tui() -> int:
             ]
             self.bundle_map = {str(bundle.get("id")): bundle for bundle in self.bundles if bundle.get("id")}
             self.packages = [
-                str(package.get("id"))
+                cast(dict[str, Any], package)
                 for package in options.get("packages", [])
                 if isinstance(package, dict) and package.get("id")
             ]
+            self.package_map = {str(package.get("id")): package for package in self.packages if package.get("id")}
+            self.package_ids = sorted(self.package_map)
             self.step = 0
             self.selected_platform_id = ""
             self.highlighted_bundle_id = ""
+            self.rendered_bundle_signature: tuple[Any, ...] | None = None
             self.rendered_bundled_package_ids: set[str] = set()
+            self.rendered_package_signature: tuple[Any, ...] | None = None
             self.platform_by_id = {
                 str(platform_choice.get("id")): platform_choice
                 for platform_choice in self.platforms
@@ -402,19 +407,11 @@ def run_tui() -> int:
                     with Horizontal(id="content-selects"):
                         with Vertical(classes="content-column"):
                             yield Static("Bundles", classes="muted")
-                            yield SelectionList(
-                                *(
-                                    (self.bundle_label(bundle), str(bundle.get("id")))
-                                    for bundle in self.bundles
-                                    if bundle.get("id")
-                                ),
-                                id="bundle-select",
-                                disabled=not self.bundles,
-                            )
+                            yield SelectionList(id="bundle-select", disabled=not self.bundles)
                             yield Static("", id="bundle-preview", classes="muted")
                         with Vertical(classes="content-column"):
                             yield Static("Additional packages", classes="muted")
-                            yield SelectionList(id="package-select", disabled=not self.packages)
+                            yield SelectionList(id="package-select", disabled=not self.package_ids)
                     yield Static("", id="included-packages", classes="muted")
                     yield Static("", id="resource-defaults")
                     with Horizontal(id="override-row"):
@@ -473,17 +470,60 @@ def run_tui() -> int:
         def selected_platform(self) -> dict[str, Any]:
             return self.platform_by_id.get(self.selected_platform_id, {})
 
+        def support_values(self, package_id: str, key: str) -> list[str]:
+            package = self.package_map.get(package_id, {})
+            supports = package.get("supports", {}) if isinstance(package.get("supports"), dict) else {}
+            values = supports.get(key, [])
+            if isinstance(values, list):
+                return [str(value) for value in values]
+            return []
+
+        def support_reason(self, package_id: str) -> str | None:
+            platform_choice = self.selected_platform()
+            if not platform_choice:
+                return None
+
+            checks = [
+                ("os_families", str(platform_choice.get("os_family") or ""), "OS family"),
+                ("arches", str(platform_choice.get("arch") or ""), "architecture"),
+                ("os_ids", str(platform_choice.get("os") or ""), "OS"),
+                ("os_versions", str(platform_choice.get("os_version") or ""), "OS version"),
+            ]
+            os_family = str(platform_choice.get("os_family") or "")
+            os_version = str(platform_choice.get("os_version") or "")
+            if os_family and os_version:
+                checks.append((f"{os_family}_versions", os_version, f"{os_family} version"))
+
+            for key, actual, label in checks:
+                allowed = self.support_values(package_id, key)
+                if allowed and actual and actual not in allowed:
+                    return f"requires {label} {'/'.join(allowed)}"
+            return None
+
+        def package_supported(self, package_id: str) -> bool:
+            return self.support_reason(package_id) is None
+
+        def bundle_support_reason(self, bundle_id: str) -> str | None:
+            for package_id in self.bundle_includes(bundle_id):
+                reason = self.support_reason(package_id)
+                if reason:
+                    return f"{package_id}: {reason}"
+            return None
+
+        def supported_selected_bundles(self) -> list[str]:
+            return [bundle_id for bundle_id in self.selected_bundles() if not self.bundle_support_reason(bundle_id)]
+
         def selected_packages(self) -> list[str]:
             selected = self.query_one("#package-select", SelectionList).selected
-            return [str(package) for package in selected]
+            return [str(package) for package in selected if self.package_supported(str(package))]
 
         def selected_bundles(self) -> list[str]:
             selected = self.query_one("#bundle-select", SelectionList).selected
-            return [str(bundle) for bundle in selected]
+            return [str(bundle) for bundle in selected if not self.bundle_support_reason(str(bundle))]
 
         def bundled_packages(self) -> list[str]:
             packages: list[str] = []
-            for bundle_id in self.selected_bundles():
+            for bundle_id in self.supported_selected_bundles():
                 bundle = self.bundle_map.get(bundle_id, {})
                 includes = bundle.get("includes", [])
                 if isinstance(includes, list):
@@ -497,21 +537,79 @@ def run_tui() -> int:
                 return [str(package) for package in includes]
             return []
 
+        def bundle_option_label(self, bundle: dict[str, Any], reason: str | None) -> str:
+            label = self.bundle_label(bundle)
+            if reason:
+                return f"{label}\n  unsupported on this platform: {reason}"
+            return label
+
+        def package_option_label(self, package_id: str, reason: str | None) -> str:
+            if reason:
+                return f"{package_id}  ({reason})"
+            return package_id
+
+        def sync_bundle_options(self) -> None:
+            bundle_list = self.query_one("#bundle-select", SelectionList)
+            selected = set(self.selected_bundles())
+            reasons = {str(bundle.get("id")): self.bundle_support_reason(str(bundle.get("id"))) for bundle in self.bundles}
+            signature = (
+                self.selected_platform_id,
+                tuple(sorted((bundle_id, reason or "") for bundle_id, reason in reasons.items())),
+                tuple(sorted(selected)),
+            )
+            if signature == self.rendered_bundle_signature and bundle_list.option_count:
+                return
+
+            bundle_options: list[Any] = []
+            for bundle in self.bundles:
+                bundle_id = str(bundle.get("id") or "")
+                if not bundle_id:
+                    continue
+                reason = reasons.get(bundle_id)
+                bundle_options.append(
+                    Selection(
+                        self.bundle_option_label(bundle, reason),
+                        bundle_id,
+                        bundle_id in selected and reason is None,
+                        disabled=reason is not None,
+                    )
+                )
+            bundle_list.set_options(bundle_options)
+            bundle_list.disabled = bundle_list.option_count == 0
+            self.rendered_bundle_signature = signature
+
         def sync_package_options(self) -> None:
             package_list = self.query_one("#package-select", SelectionList)
             bundled = set(self.bundled_packages())
-            if bundled == self.rendered_bundled_package_ids and package_list.option_count:
+            selected = set(self.selected_packages())
+            reasons = {package_id: self.support_reason(package_id) for package_id in self.package_ids}
+            signature = (
+                self.selected_platform_id,
+                tuple(sorted(bundled)),
+                tuple(sorted((package_id, reason or "") for package_id, reason in reasons.items())),
+                tuple(sorted(selected)),
+            )
+            if (
+                bundled == self.rendered_bundled_package_ids
+                and signature == self.rendered_package_signature
+                and package_list.option_count
+            ):
                 return
 
-            selected = [package for package in self.selected_packages() if package not in bundled]
             package_options: list[Any] = [
-                (package, package, package in selected)
-                for package in self.packages
+                Selection(
+                    self.package_option_label(package, reasons.get(package)),
+                    package,
+                    package in selected and reasons.get(package) is None,
+                    disabled=reasons.get(package) is not None,
+                )
+                for package in self.package_ids
                 if package not in bundled
             ]
             package_list.set_options(package_options)
             package_list.disabled = package_list.option_count == 0
             self.rendered_bundled_package_ids = bundled
+            self.rendered_package_signature = signature
 
         def platform_default_lines(self, platform_choice: dict[str, Any]) -> list[str]:
             defaults = platform_choice.get("defaults", {}) if isinstance(platform_choice.get("defaults"), dict) else {}
@@ -532,6 +630,7 @@ def run_tui() -> int:
 
             platform_choice = self.selected_platform()
             defaults = platform_choice.get("defaults", {}) if isinstance(platform_choice.get("defaults"), dict) else {}
+            self.sync_bundle_options()
             self.sync_package_options()
             self.query_one("#platform-defaults", Static).update("\n".join(self.platform_default_lines(platform_choice)))
             self.query_one("#resource-defaults", Static).update(
@@ -553,10 +652,13 @@ def run_tui() -> int:
             bundled_text = ", ".join(bundled_packages) if bundled_packages else "(none)"
             bundle_text = ", ".join(selected_bundles) if selected_bundles else "(none)"
             if highlighted_bundle_id:
+                support_note = self.bundle_support_reason(highlighted_bundle_id)
                 preview_text = (
                     f"Highlighted bundle: {highlighted_bundle_id}\n"
                     f"Includes: {', '.join(highlighted_includes) if highlighted_includes else '(none)'}"
                 )
+                if support_note:
+                    preview_text += f"\nUnsupported on this platform: {support_note}"
             else:
                 preview_text = "Highlight a bundle to preview included packages before selecting it."
             self.query_one("#bundle-preview", Static).update(preview_text)
