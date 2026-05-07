@@ -64,84 +64,90 @@ runs as the VM user through `systemd --user`, and `DOCKER_HOST` points at the
 user socket under `/run/user/<uid>/docker.sock`.
 
 Experimental Wayland app forwarding is available through the `waypipe` package
-and the `desktop-streaming` bundle. Waypipe needs a local Wayland display on the
-Mac; XQuartz only provides X11, so `DISPLAY=/.../org.xquartz:0` is not enough.
+and the `desktop-streaming` bundle. Waypipe is only the transport/proxy: on
+macOS it also needs a local Wayland compositor to render the remote window.
+XQuartz only provides X11, so `DISPLAY=/.../org.xquartz:0` is not enough.
 
 ```bash
 make package.select INSTANCE=dev-a PACKAGE=waypipe
 make package.install INSTANCE=dev-a PACKAGE=waypipe
 ```
 
-Current macOS experiments:
+Recommended macOS experiment: **Cocoa-Way + waypipe-darwin**.
 
-1. **waypipe-darwin + a local Wayland compositor**
-
-   `waypipe-darwin` provides a Darwin build of Waypipe, but it still expects
-   `WAYLAND_DISPLAY` to point at a local Wayland socket. Install it first:
+1. Install the local compositor and Waypipe transport on the Mac:
 
    ```bash
    brew tap J-x-Z/tap
-   brew install waypipe-darwin
+   brew install cocoa-way waypipe-darwin
    ```
 
-   Then start a macOS Wayland compositor. `WAYLAND_DISPLAY` must point at the
-   socket created by that compositor. It is usually either:
-
-   - a socket name such as `wayland-0`, resolved under `XDG_RUNTIME_DIR`
-   - an absolute socket path such as `/tmp/wawona-wayland-0`
-
-   Discover likely sockets with:
+2. Start Cocoa-Way in one terminal and keep it running:
 
    ```bash
-   find "${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}" -maxdepth 1 -type s -name 'wayland-*' -print
+   cocoa-way
    ```
 
-   If the command prints `/some/dir/wayland-0`, either set both variables:
+3. In another Mac terminal, point Waypipe at Cocoa-Way's socket:
 
    ```bash
-   export XDG_RUNTIME_DIR=/some/dir
-   export WAYLAND_DISPLAY=wayland-0
+   export XDG_RUNTIME_DIR="$(find /var/folders /tmp -type d -name cocoa-way 2>/dev/null | head -n 1)"
+   export WAYLAND_DISPLAY=wayland-1
+   echo "$XDG_RUNTIME_DIR"
+   ls -l "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY"
    ```
 
-   or use the absolute socket path directly:
+   The last command should show a socket such as
+   `/.../cocoa-way/wayland-1`. If it does not, Cocoa-Way is not running or the
+   socket directory was not found.
+
+4. Install a tiny Wayland test app on the remote Linux instance:
 
    ```bash
-   export WAYLAND_DISPLAY=/some/dir/wayland-0
+   make package.select INSTANCE=dev-a PACKAGE=waypipe
+   make package.install INSTANCE=dev-a PACKAGE=waypipe
    ```
 
-   Then run a small app:
+   Or manually on Ubuntu/Debian:
 
    ```bash
-   test -n "${WAYLAND_DISPLAY:-}" && echo "$WAYLAND_DISPLAY"
-   make package.action INSTANCE=dev-a PACKAGE=waypipe ACTION=waypipe APP=foot
+   sudo apt update
+   sudo apt install -y waypipe zenity
    ```
 
-2. **Wawona + waypipe-darwin**
-
-   Wawona is an experimental Wayland stack for macOS. Build or install it from
-   its repository, start the compositor, then discover the socket it created:
+5. Run the first hello-world test from the Mac terminal that exported
+   `XDG_RUNTIME_DIR` and `WAYLAND_DISPLAY`:
 
    ```bash
-   find "${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}" -maxdepth 1 -type s -name 'wayland-*' -print
-   export WAYLAND_DISPLAY=/path/printed/by/find
-   make package.action INSTANCE=dev-a PACKAGE=waypipe ACTION=waypipe APP=foot
+   waypipe --no-gpu ssh -o StreamLocalBindUnlink=yes user@remote-host \
+     env GDK_BACKEND=wayland zenity --info --text="Hello Waypipe"
    ```
 
-   If the command still says `WAYLAND_DISPLAY is not set`, the compositor is not
-   exporting a socket into the shell that launched `make`, or you have not
-   pointed `WAYLAND_DISPLAY` at the socket.
+   `StreamLocalBindUnlink=yes` helps when stale local socket files otherwise
+   cause "remote port forwarding failed" errors. `--no-gpu` is useful when a
+   window opens black, crashes, or behaves strangely; remove it after the small
+   test works.
 
-3. **wprs**
-
-   wprs is a separate experimental Wayland remote-display project. Treat it as
-   an alternative research path rather than a drop-in `make remote.waypipe`
-   backend today. Try it from its own repository first; once a local Wayland
-   socket exists, the same check applies:
+6. Try a Weston sample or a real app:
 
    ```bash
-   test -n "${WAYLAND_DISPLAY:-}" && echo "$WAYLAND_DISPLAY"
-   make package.action INSTANCE=dev-a PACKAGE=waypipe ACTION=waypipe APP=foot
+   sudo apt install -y weston
+   waypipe ssh -o StreamLocalBindUnlink=yes user@remote-host weston-flower
+
+   waypipe ssh -o StreamLocalBindUnlink=yes user@remote-host \
+     env GDK_BACKEND=wayland gedit
+   waypipe --no-gpu ssh -o StreamLocalBindUnlink=yes user@remote-host \
+     env GDK_BACKEND=wayland gedit
    ```
+
+The repo action uses the same local compositor requirement:
+
+```bash
+make package.action INSTANCE=dev-a PACKAGE=waypipe ACTION=waypipe APP=foot
+```
+
+Wawona and wprs are still interesting research paths, but they are not the
+recommended first macOS setup today.
 
 This is a trial path, not a stable replacement for Xpra yet. For reliable
 day-to-day Linux GUI access on macOS, prefer RustDesk, VNC, Sunshine/Moonlight,

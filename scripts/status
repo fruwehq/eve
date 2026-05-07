@@ -28,6 +28,17 @@ resolved_value() {
   printf "%s\n" "$RESOLVED_ENV" | awk -F= -v key="$1" '$1 == key { print substr($0, index($0, "=") + 1) }'
 }
 
+normalize_path() {
+  local value="$1"
+  # shellcheck disable=SC2088,SC2016
+  case "$value" in
+    '$(HOME)'|'$(HOME)/'*) printf '%s' "$HOME${value#\$\(HOME\)}" ;;
+    '$HOME'|'$HOME/'*) printf '%s' "$HOME${value#\$HOME}" ;;
+    '~'|'~/'*) printf '%s' "$HOME${value#\~}" ;;
+    *) printf '%s' "$value" ;;
+  esac
+}
+
 truenas_control_reachable() {
   local host port
   host="${TRUENAS_HOST:-$(resolved_value TRUENAS_HOST)}"
@@ -50,6 +61,27 @@ truenas_control_reachable() {
 
   printf '%-15s %s\n' "Control:" "unknown (nc not found; TrueNAS SSH $host:$port)"
   return 0
+}
+
+truenas_live_vm_state() {
+  local vm_id="$1" host port user ssh_key output
+  [ -n "$vm_id" ] || return 1
+  host="${TRUENAS_HOST:-$(resolved_value TRUENAS_HOST)}"
+  port="${TRUENAS_SSH_PORT:-$(resolved_value TRUENAS_SSH_PORT)}"
+  port="${port:-22}"
+  user="${TRUENAS_SSH_USER:-$(resolved_value TRUENAS_SSH_USER)}"
+  [ -n "$host" ] && [ -n "$user" ] || return 1
+
+  SSH_OPTS=(-o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=5)
+  if [ -n "${TRUENAS_SSH_PRIVATE_KEY_FILE:-}" ]; then
+    ssh_key="$(normalize_path "$TRUENAS_SSH_PRIVATE_KEY_FILE")"
+    SSH_OPTS+=(-i "$ssh_key")
+  fi
+  [ -n "$port" ] && [ "$port" != "22" ] && SSH_OPTS+=(-p "$port")
+
+  # shellcheck disable=SC2029
+  output=$(ssh "${SSH_OPTS[@]}" "$user@$host" "sudo midclt call vm.query '[[\"id\",\"=\",$vm_id]]'" 2>/dev/null) || return 1
+  printf '%s\n' "$output" | jq -r '.[0].state // empty' 2>/dev/null
 }
 
 tf_attr() {
@@ -186,7 +218,16 @@ case "$ENGINE" in
       esac
 
       if [ "$PROVIDER" = "truenas" ] && [ "$VM_STATUS" != "not created" ] && [ "$VM_STATUS" != "unsupported provider ($PROVIDER)" ]; then
-        if ! truenas_control_reachable; then
+        if truenas_control_reachable; then
+          VM_ID=$(tf_attr "$STATE_JSON" "truenas_vm.this" "id")
+          LIVE_STATE=$(truenas_live_vm_state "$VM_ID" || true)
+          case "$LIVE_STATE" in
+            [Rr][Uu][Nn][Nn][Ii][Nn][Gg]) VM_STATUS="running" ;;
+            [Ss][Tt][Oo][Pp][Pp][Ee][Dd]) VM_STATUS="stopped" ;;
+            "") ;;
+            *) VM_STATUS="$LIVE_STATE" ;;
+          esac
+        else
           VM_STATUS="unreachable"
         fi
       fi

@@ -19,7 +19,7 @@ cd "$(git rev-parse --show-toplevel)"
 
 if ! command -v waypipe >/dev/null 2>&1; then
   echo "remote-waypipe: local waypipe is not installed." >&2
-  echo "  macOS experiment: brew tap J-x-Z/tap && brew install waypipe-darwin" >&2
+  echo "  macOS: brew tap J-x-Z/tap && brew install cocoa-way waypipe-darwin" >&2
   exit 2
 fi
 
@@ -28,8 +28,9 @@ if [ -z "${WAYLAND_DISPLAY:-}" ]; then
   if [ -n "${DISPLAY:-}" ]; then
     echo "  DISPLAY=$DISPLAY is an X11/XQuartz display, not a Wayland socket." >&2
   fi
-  echo "  Start a local Wayland compositor first, then retry with WAYLAND_DISPLAY set." >&2
-  echo "  macOS experiments include Wawona or another Darwin Wayland compositor." >&2
+  echo "  Start Cocoa-Way first: cocoa-way" >&2
+  printf '%s\n' "  Then export XDG_RUNTIME_DIR=\"\$(find /var/folders /tmp -type d -name cocoa-way 2>/dev/null | head -n 1)\"" >&2
+  echo "  And export WAYLAND_DISPLAY=wayland-1 before retrying." >&2
   exit 2
 fi
 
@@ -48,7 +49,7 @@ if [ "$ENGINE" = "vagrant" ]; then
   tmp_config="$(mktemp "${TMPDIR:-/tmp}/egame-waypipe-ssh.XXXXXX")"
   trap 'rm -f "$tmp_config"' EXIT
   (cd "$(egame_instance_workdir "$PROFILE")" && vagrant ssh-config >"$tmp_config")
-  exec waypipe ssh -F "$tmp_config" default "${APP[@]}"
+  exec waypipe ssh -o StreamLocalBindUnlink=yes -F "$tmp_config" default "${APP[@]}"
 fi
 
 SSH_USER=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^SSH_USER=/{print $2}')
@@ -66,7 +67,7 @@ else
   PRIV_KEY="${SSH_PRIVATE_KEY_FILE:-}"
 fi
 
-SSH_OPTS=(-o StrictHostKeyChecking=no -o ServerAliveInterval=10 -o WarnWeakCrypto=no-pq-kex)
+SSH_OPTS=(-o StrictHostKeyChecking=no -o ServerAliveInterval=10 -o WarnWeakCrypto=no-pq-kex -o StreamLocalBindUnlink=yes)
 [ -n "$PRIV_KEY" ] && SSH_OPTS+=(-i "$PRIV_KEY" -o IdentitiesOnly=yes)
 
 exec waypipe ssh "${SSH_OPTS[@]}" "$SSH_USER@$IP" "${APP[@]}"

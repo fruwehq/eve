@@ -13,6 +13,6 @@ if command -v waypipe >/dev/null 2>&1; then
 fi
 
 apt_update_once
-apt_install waypipe weston xwayland foot x11-apps
+apt_install waypipe weston xwayland foot x11-apps zenity
 
 log "### 47_waypipe: done"
