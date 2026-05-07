@@ -180,6 +180,31 @@ def package_source_label(selected_by: Any) -> str:
     return "; ".join(labels) if labels else "selected"
 
 
+def package_summary_label(summary: dict[str, Any]) -> str:
+    parts: list[str] = []
+    for key, label in (
+        ("failed", "failed"),
+        ("installed", "installed"),
+        ("missing", "missing"),
+        ("unknown", "unknown"),
+        ("removed", "removed"),
+        ("reinstalled", "reinstalled"),
+    ):
+        count = int(summary.get(key, 0) or 0)
+        if count:
+            parts.append(f"{count} {label}")
+    return " / ".join(parts) if parts else "none selected"
+
+
+def provider_actions_available(state: dict[str, Any]) -> bool:
+    provider_state = str(state.get("provider_state", "unknown"))
+    desired_state = str(state.get("desired_state", "unknown"))
+    provision_state = str(state.get("provision_state", "unknown"))
+    return provider_state == "running" or (
+        provider_state == "error" and desired_state == "running" and provision_state == "provisioned"
+    )
+
+
 def aggregate_state(statuses: dict[str, dict[str, Any]]) -> str:
     counts = {"running": 0, "stopped": 0, "failed": 0, "other": 0}
     for status in statuses.values():
@@ -206,7 +231,7 @@ def run_tui() -> int:
     try:
         from textual.app import App, ComposeResult
         from textual.binding import Binding
-        from textual.containers import Container, Horizontal, Vertical
+        from textual.containers import Container, Grid, Horizontal, Vertical
         from textual.geometry import Offset
         from textual.screen import ModalScreen
         from textual.widgets import (
@@ -865,7 +890,7 @@ def run_tui() -> int:
         }
 
         #action-groups {
-            height: 5;
+            height: auto;
             margin-bottom: 1;
         }
 
@@ -879,8 +904,16 @@ def run_tui() -> int:
             color: $text-muted;
         }
 
-        #remote-strip, #lifecycle-strip, #danger-strip {
-            height: 3;
+        #remote-strip,
+        #lifecycle-strip,
+        #package-actions,
+        #bundle-actions,
+        #danger-strip {
+            layout: grid;
+            grid-size: 3;
+            grid-columns: 1fr 1fr 1fr;
+            grid-gutter: 1;
+            height: auto;
             background: transparent;
         }
 
@@ -903,8 +936,6 @@ def run_tui() -> int:
         }
 
         #bundle-actions {
-            height: 3;
-            background: transparent;
             margin-bottom: 1;
         }
 
@@ -913,8 +944,7 @@ def run_tui() -> int:
         }
 
         #package-actions {
-            height: 3;
-            background: transparent;
+            margin-bottom: 1;
         }
 
         #ops-pane {
@@ -957,8 +987,8 @@ def run_tui() -> int:
         }
 
         Button {
-            min-width: 11;
-            margin-right: 1;
+            width: 1fr;
+            min-width: 9;
         }
         """
 
@@ -1030,14 +1060,14 @@ def run_tui() -> int:
                                 yield Static("Packages\nunknown", id="packages-pill", classes="pill")
                             with Horizontal(id="action-groups"):
                                 with Vertical(classes="action-group"):
-                                    yield Static("Remote Access", classes="action-title")
-                                    with Horizontal(id="remote-strip"):
+                                    yield Static("Package Actions", classes="action-title")
+                                    with Grid(id="remote-strip"):
                                         yield Button("SSH", id="connect-ssh")
                                         for index in range(PACKAGE_ACTION_BUTTONS):
                                             yield Button("", id=f"pkg-action-{index}")
                                 with Vertical(classes="action-group"):
                                     yield Static("Instance Controls", classes="action-title")
-                                    with Horizontal(id="lifecycle-strip"):
+                                    with Grid(id="lifecycle-strip"):
                                         yield Button("Up", id="provider-up", variant="success")
                                         yield Button("Stop", id="provider-stop", variant="warning")
                                         yield Button("Provision", id="provision", variant="primary")
@@ -1047,12 +1077,12 @@ def run_tui() -> int:
                                 with Vertical(id="packages-pane"):
                                     yield Static("Bundles", classes="section-title")
                                     yield DataTable(id="bundles")
-                                    with Horizontal(id="bundle-actions"):
+                                    with Grid(id="bundle-actions"):
                                         yield Button("Add Bundle", id="bundle-select")
                                         yield Button("Remove Bundle", id="bundle-unselect")
                                     yield Static("Packages", classes="section-title")
                                     yield DataTable(id="packages")
-                                    with Horizontal(id="package-actions"):
+                                    with Grid(id="package-actions"):
                                         yield Button("Status", id="package-status")
                                         yield Button("Add Extra", id="package-select")
                                         yield Button("Remove Extra", id="package-unselect")
@@ -1061,7 +1091,7 @@ def run_tui() -> int:
                                 with Vertical(id="ops-pane"):
                                     yield Static("Recent Ops", classes="section-title")
                                     yield Static("No operations yet.", id="ops")
-                            with Horizontal(id="danger-strip"):
+                            with Grid(id="danger-strip"):
                                 yield Button("Destroy", id="provider-down", variant="error")
                                 yield Button("Delete", id="delete-instance", variant="error")
                 yield Static(
@@ -1411,12 +1441,7 @@ def run_tui() -> int:
             ip_text = self.instance_ips.get(str(instance.get("name") or ""), "-")
             if provider_state != "running":
                 ip_text = "-"
-            package_text = (
-                f"{summary.get('installed', 0)} installed / "
-                f"{summary.get('missing', 0)} missing / "
-                f"{summary.get('unknown', 0)} unknown / "
-                f"{summary.get('failed', 0)} failed"
-            )
+            package_text = package_summary_label(cast(dict[str, Any], summary))
             self.query_one("#provider-pill", Static).update(f"Provider\n{provider_name}")
             self.query_one("#ip-pill", Static).update(f"IP\n{ip_text or '-'}")
             self.query_one("#provision-pill", Static).update(
@@ -1929,6 +1954,7 @@ def run_tui() -> int:
             state = self.current_status.get("state", {}) if self.current_status else {}
             provider_state = str(state.get("provider_state", "unknown"))
             provision_state = str(state.get("provision_state", "unknown"))
+            provider_available = provider_actions_available(cast(dict[str, Any], state))
             provider_busy = provider_state == "changing"
             provider_absent = provider_state == "absent"
             self.current_remote_actions = self.installed_package_actions()
@@ -1958,20 +1984,20 @@ def run_tui() -> int:
                     or provision_state == "provisioning"
                 ),
             )
-            self.set_button("logs", disabled=busy or not has_instance or provider_state != "running")
+            self.set_button("logs", disabled=busy or not has_instance or not provider_available)
             self.set_button(
                 "provider-down",
                 disabled=busy or not has_instance or provider_busy or provider_state in {"absent", "unknown"},
             )
             self.set_button("delete-instance", disabled=busy or not has_instance)
-            self.set_button("connect-ssh", disabled=busy or not has_instance or provider_state != "running")
+            self.set_button("connect-ssh", disabled=busy or not has_instance or not provider_available)
             for index in range(PACKAGE_ACTION_BUTTONS):
                 button = self.query_one(f"#pkg-action-{index}", Button)
                 if index < len(self.current_remote_actions):
                     action = self.current_remote_actions[index]
                     button.label = action["label"]
                     button.display = True
-                    button.disabled = busy or not has_instance or provider_state != "running"
+                    button.disabled = busy or not has_instance or not provider_available
                 else:
                     button.label = ""
                     button.display = False

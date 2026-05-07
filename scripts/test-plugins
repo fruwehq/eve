@@ -739,6 +739,26 @@ fi
 
 EGAME_STATE_DIR="$state_dir" \
   EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-provider-dispatch-test" \
+  ./scripts/instance-state \
+    --instance dev-a \
+    --operation provider.up \
+    --status succeeded \
+    --desired-state running \
+    --provider-state running >/dev/null
+EGAME_STATE_DIR="$state_dir" \
+  EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-provider-dispatch-test" \
+  ./scripts/provider-dispatch --registry "$FIXTURE" --instance dev-a --command ip >/dev/null 2>&1 || true
+failed_ip_state="$(EGAME_STATE_DIR="$state_dir" ./scripts/instance-state --instance dev-a --get)"
+if printf '%s\n' "$failed_ip_state" | jq -e '.last_operation.name == "provider.ip" and .last_operation.status == "failed" and .provider_state == "running" and .last_error' >/dev/null; then
+  printf '  [OK] provider dispatch read failures preserve lifecycle state\n'
+else
+  printf '  [FAIL] provider dispatch read failure state mismatch\n' >&2
+  printf '%s\n' "$failed_ip_state" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+EGAME_STATE_DIR="$state_dir" \
+  EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-provider-dispatch-test" \
   ./scripts/provider-dispatch --registry "$FIXTURE" --instance dev-a --command bogus >/dev/null 2>&1 || true
 failed_provider_state="$(EGAME_STATE_DIR="$state_dir" ./scripts/instance-state --instance dev-a --get)"
 if printf '%s\n' "$failed_provider_state" | jq -e '.last_operation.name == "provider.bogus" and .last_operation.status == "failed" and .provider_state == "error" and .last_error' >/dev/null; then

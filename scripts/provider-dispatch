@@ -41,7 +41,11 @@ end
 
 def provider_state_for(command, status)
   return "changing" if status == "running" && %w[up down start stop].include?(command)
-  return "error" if status == "failed"
+  if status == "failed"
+    return nil if %w[resolve status ip ssh].include?(command)
+
+    return "error"
+  end
   return nil unless status == "succeeded"
 
   {
