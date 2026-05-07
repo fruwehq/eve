@@ -2,7 +2,7 @@
 set -eu
 
 CATALOG_PATH="config/catalog.yaml"
-LOCAL_CATALOG_PATH="config/catalog.local.yaml"
+LOCAL_CATALOG_PATH="${EGAME_CATALOG_LOCAL:-config/catalog.local.yaml}"
 PROFILE=""
 VALIDATE=0
 EMIT=""
@@ -16,6 +16,7 @@ Usage:
 Notes:
   - Base catalog: config/catalog.yaml
   - Optional local overlay: config/catalog.local.yaml (if present)
+  - EGAME_CATALOG_LOCAL can point at a generated overlay for INSTANCE workflows.
 
 Examples:
   scripts/profile-resolve --profile aws-ubuntu-dev-headless --validate
@@ -141,7 +142,8 @@ CATALOG_JSON="$(ruby -rjson -ryaml -e '
 jq_get='def by_name($arr; $key; $val): ($arr // [] | map(select(.[$key] == $val)) | .[0]);
 
 . as $root |
-by_name($root.profiles; "name"; $profile) as $p |
+by_name($root.profiles; "name"; $profile) as $profile_override |
+($profile_override) as $p |
 if $p == null then
   error("Profile not found: \($profile)")
 else
@@ -161,26 +163,21 @@ else
     error("One or more bundles not found in profile: \($p.name)")
   else . end |
 
-  ($bundle_objs | map(.includes // []) | flatten | unique) as $bundle_packages |
+  (($p.packages // []) | unique) as $direct_packages |
+  ($bundle_objs | map(.includes // []) | flatten | . + $direct_packages | unique) as $bundle_packages |
   ($root.packages // [] | map(.id)) as $package_catalog |
   if ($bundle_packages | all(. as $pkg | $package_catalog | index($pkg) != null) | not) then
-    error("Bundle references unknown package id")
+    error("Profile references unknown package id")
   else . end |
 
   if (($i.os_family // "") != "" and ($i.os_family != ($o.family // ""))) then
     error("Init/OS mismatch: init \($i.id) expects \($i.os_family), got OS family \($o.family)")
   else . end |
 
-  if (($i.provider // "") != "" and ($i.provider != ($m.provider // ""))) then
+  if ((($i.providers // []) | length) > 0 and (($i.providers // []) | index($m.provider // "") == null)) then
+    error("Init/provider mismatch: init \($i.id) expects provider \($i.providers | join(", ")), got machine provider \($m.provider)")
+  elif (($i.provider // "") != "" and ($i.provider != ($m.provider // ""))) then
     error("Init/provider mismatch: init \($i.id) expects provider \($i.provider), got machine provider \($m.provider)")
-  else . end |
-
-  if (($bundle_packages | index("steam")) != null and ($o.ui_mode // "") != "desktop") then
-    error("Compatibility: steam requires desktop UI mode")
-  else . end |
-
-  if (($bundle_packages | index("sunshine")) != null and ($o.ui_mode // "") != "desktop") then
-    error("Compatibility: sunshine requires desktop UI mode")
   else . end |
 
   if (($bundle_packages | index("codex-cli")) != null and ($bundle_packages | index("dev-toolchain")) == null) then
@@ -189,10 +186,6 @@ else
 
   if (($bundle_packages | index("goose")) != null and ($bundle_packages | index("dev-toolchain")) == null) then
     error("Compatibility: goose requires dev-toolchain in bundles")
-  else . end |
-
-  if ((["aws","local-virtualbox","local-vmware","raspberry-pi","truenas","vultr"] | index($m.provider)) == null) then
-    error("Unsupported provider in machine catalog: \($m.provider)")
   else . end |
 
   if ($l[($m.provider // "")] == null) then
@@ -238,7 +231,6 @@ emit_env() {
     "LOCATION_NAME=" + .location.name,
     "OS_ID=" + .os.id,
     "OS_FAMILY=" + .os.family,
-    "OS_UI_MODE=" + .os.ui_mode,
     "INIT_ID=" + .init.id,
     "BUNDLE_PACKAGES=" + (.bundle_packages | join(",")),
     "VM_MEMORY_MB=" + ((.machine.defaults.memory_mb // 0) | tostring),
@@ -251,15 +243,20 @@ emit_env() {
     "VM_DISK_GB=" + ((.machine.defaults.disk_gb // 30) | tostring),
     "VM_POOL=" + (.machine.defaults.pool // $locp.pool // "main"),
     "VM_PLAN=" + (.machine.defaults.plan // ""),
+    "VM_MACHINE_TYPE=" + (.machine.defaults.machine_type // ""),
+    "VM_DISK_TYPE=" + (.machine.defaults.disk_type // ""),
     "VM_INSTANCE_TYPE=" + (.machine.defaults.instance_type // ""),
     "VM_ROOT_VOLUME_TYPE=" + (.machine.defaults.root_volume_type // ""),
+    "GCP_IMAGE_FAMILY=" + (.os.gcp_image_family // ""),
+    "GCP_IMAGE_PROJECT=" + (.os.gcp_image_project // ""),
     "VULTR_OS_ID=" + ((.os.vultr_os_id // 0) | tostring),
     "LOCATION_REGION=" + ($locp.region // ""),
     "LOCATION_AVAILABILITY_ZONE=" + ($locp.availability_zone // ""),
+    "LOCATION_ZONE=" + ($locp.zone // ""),
     "SSH_USER=" + (
       if (.os.family == "windows") then "Administrator"
       elif ($provider == "raspberry-pi") then env_or("VM_USER_NAME"; "")
-      else "ubuntu"
+      else env_or("VM_USER_NAME"; "ubuntu")
       end
     ),
     "CLOUD_IMAGE_URL=" + (.os.cloud_image_url // ""),
@@ -283,11 +280,18 @@ emit_vagrant() {
   fi
   echo "$RESOLVED_JSON" | jq -r '
     . as $r |
-    (if $r.machine.provider == "local-vmware" then "vmware_desktop" else "virtualbox" end) as $provider |
-    ($r.os.vagrant_box // "bento/ubuntu-24.04") as $box |
+    (if $r.machine.provider == "local-qemu" then "qemu"
+     else error("Vagrant emit only supports local-qemu, got " + $r.machine.provider)
+     end) as $provider |
+    ($r.os.vagrant_box // "cloud-image/ubuntu-26.04") as $box |
+    ($r.os.arch // "amd64") as $arch |
+    (if ($r.os.arch // "amd64") == "arm64" then "aarch64" else "x86_64" end) as $qemu_arch |
     $r.profile.name as $name |
     (($r.machine.defaults.cpus // 2) | tostring) as $cpus |
-    (($r.machine.defaults.memory_mb // 4096) | tostring) as $memory |
+    (($r.machine.defaults.memory_mb // 4096)) as $memory_mb |
+    ($memory_mb | tostring) as $memory |
+    (((($memory_mb / 1024) | floor) | tostring) + "G") as $qemu_memory |
+    (((($r.machine.defaults.disk_gb // 30) | tostring) + "G")) as $qemu_disk |
     ($r.bundle_packages | join(" ")) as $pkg_list |
 
     { docker: ($r.bundle_packages | index("docker") != null), dev: ($r.bundle_packages | index("dev-toolchain") != null) } as $flags |
@@ -337,14 +341,24 @@ emit_vagrant() {
 
     "Vagrant.configure(\"2\") do |config|\n" +
     "  config.vm.box = \"" + $box + "\"\n" +
+    "  config.vm.box_architecture = \"" + $arch + "\"\n" +
     "  config.vm.hostname = \"" + $name + "\"\n" +
     "\n" +
-    "  config.vm.provider \"" + $provider + "\" do |v|\n" +
-    "    v.cpus = " + $cpus + "\n" +
-    "    v.memory = " + $memory + "\n" +
-    "    # Set VAGRANT_SHOW_CONSOLE=1 to open the hypervisor console window.\n" +
-    "    v.gui = ENV[\"VAGRANT_SHOW_CONSOLE\"] == \"1\"\n" +
-    "  end\n" +
+    (if $provider == "qemu" then
+      "  config.vm.provider \"qemu\" do |qe|\n" +
+      "    qe.arch = \"" + $qemu_arch + "\"\n" +
+      "    qe.smp = \"" + $cpus + "\"\n" +
+      "    qe.memory = \"" + $qemu_memory + "\"\n" +
+      "    qe.disk_resize = \"" + $qemu_disk + "\"\n" +
+      "  end\n"
+    else
+      "  config.vm.provider \"" + $provider + "\" do |v|\n" +
+      "    v.cpus = " + $cpus + "\n" +
+      "    v.memory = " + $memory + "\n" +
+      "    # Set VAGRANT_SHOW_CONSOLE=1 to open the hypervisor console window.\n" +
+      "    v.gui = ENV[\"VAGRANT_SHOW_CONSOLE\"] == \"1\"\n" +
+      "  end\n"
+    end) +
     "\n" +
     $port_forwards +
     (if $port_forwards != "" then "\n" else "" end) +

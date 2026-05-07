@@ -1,0 +1,423 @@
+#!/usr/bin/env ruby
+# Resolve a concrete local VM instance from the instance registry plus catalog.
+
+require "json"
+require "open3"
+require "yaml"
+
+ROOT = File.expand_path("..", __dir__)
+CATALOG_PATH = File.join(ROOT, "config/catalog.yaml")
+LOCAL_CATALOG_PATH = ENV["EGAME_CATALOG_LOCAL"] && !ENV["EGAME_CATALOG_LOCAL"].empty? \
+                     ? File.expand_path(ENV["EGAME_CATALOG_LOCAL"], Dir.pwd) \
+                     : File.join(ROOT, "config/catalog.local.yaml")
+DEFAULT_REGISTRY_PATH = File.join(ROOT, ".egame/instances.yaml")
+
+def usage
+  warn <<~USAGE
+    Usage:
+      scripts/instance-resolve --instance <name> [--emit env|json] [--validate] [--registry <path>]
+  USAGE
+end
+
+def load_any(path)
+  return {} unless File.exist?(path)
+
+  case File.extname(path).downcase
+  when ".json"
+    JSON.parse(File.read(path))
+  else
+    YAML.safe_load(File.read(path), permitted_classes: [], aliases: true) || {}
+  end
+end
+
+def deep_merge(left, right)
+  return right if left.nil?
+  return left if right.nil?
+
+  if left.is_a?(Hash) && right.is_a?(Hash)
+    left.merge(right) { |_key, a, b| deep_merge(a, b) }
+  else
+    right
+  end
+end
+
+def merge_by_key(base_arr, over_arr, key)
+  out = (base_arr || []).map(&:dup)
+  (over_arr || []).each do |entry|
+    next unless entry.is_a?(Hash)
+
+    idx = out.index { |candidate| candidate.is_a?(Hash) && candidate[key] == entry[key] }
+    if idx
+      out[idx] = deep_merge(out[idx], entry)
+    else
+      out << entry
+    end
+  end
+  out
+end
+
+def load_catalog
+  base = load_any(CATALOG_PATH)
+  over = load_any(LOCAL_CATALOG_PATH)
+  merged = deep_merge(base, over)
+
+  %w[machines oses inits packages bundles locations].each do |section|
+    key = case section
+          when "oses", "inits", "packages", "bundles" then "id"
+          else "name"
+          end
+    merged[section] = merge_by_key(base[section], over[section], key)
+  end
+
+  merged
+end
+
+def by_key(root, section, key, value)
+  (root[section] || []).find { |entry| entry.is_a?(Hash) && entry[key] == value }
+end
+
+def run_json(*cmd)
+  out, status = Open3.capture2e(*cmd)
+  raise out unless status.success?
+
+  JSON.parse(out)
+end
+
+def provider_plugins
+  plugin_doc = run_json(File.join(ROOT, "scripts/plugin-list"), "--kind", "provider", "--json")
+  plugin_doc.fetch("plugins")
+end
+
+def package_plugins
+  plugin_doc = run_json(File.join(ROOT, "scripts/plugin-list"), "--kind", "package", "--json")
+  plugin_doc.fetch("plugins")
+end
+
+def env_or(name, fallback)
+  value = ENV[name]
+  value && !value.empty? ? value : fallback
+end
+
+def resolve_bundle_packages(catalog, bundle_ids)
+  bundle_ids.flat_map do |bundle_id|
+    bundle = by_key(catalog, "bundles", "id", bundle_id)
+    raise "Bundle not found: #{bundle_id}" unless bundle
+
+    bundle["includes"] || []
+  end.uniq.sort
+end
+
+def resolve_package_sources(catalog, bundle_ids, direct_packages)
+  sources = Hash.new { |hash, key| hash[key] = [] }
+  bundle_ids.each do |bundle_id|
+    bundle = by_key(catalog, "bundles", "id", bundle_id)
+    raise "Bundle not found: #{bundle_id}" unless bundle
+
+    (bundle["includes"] || []).each { |package_id| sources[package_id] << "bundle:#{bundle_id}" }
+  end
+  direct_packages.each { |package_id| sources[package_id] << "direct" }
+  sources.transform_values(&:uniq)
+end
+
+def init_available_for_provider?(init, provider)
+  providers = init["providers"].is_a?(Array) ? init["providers"] : []
+  return providers.include?(provider) unless providers.empty?
+
+  init["provider"].nil? || init["provider"] == provider
+end
+
+def compatible_inits(catalog, machine, os)
+  return [] unless machine && os
+
+  provider = machine["provider"]
+  (catalog["inits"] || []).select do |init|
+    next false unless init.is_a?(Hash)
+    next false if init["os_family"] && init["os_family"] != os["family"]
+
+    init_available_for_provider?(init, provider)
+  end
+end
+
+def resolve_init!(catalog, composition, machine, os)
+  if composition["init"] && !composition["init"].to_s.empty?
+    return by_key(catalog, "inits", "id", composition["init"])
+  end
+
+  candidates = compatible_inits(catalog, machine, os)
+  if candidates.length == 1
+    composition["init"] = candidates.first.fetch("id")
+    return candidates.first
+  end
+
+  if candidates.empty?
+    raise "No init supports machine #{composition["machine"]} with OS #{composition["os"]}"
+  end
+
+  ids = candidates.map { |candidate| candidate["id"] }.join(", ")
+  raise "Multiple inits support machine #{composition["machine"]} with OS #{composition["os"]}; choose one of: #{ids}"
+end
+
+def validate!(catalog, composition, machine, os, init, location, bundle_packages)
+  raise "Machine not found: #{composition["machine"]}" unless machine
+  raise "OS not found: #{composition["os"]}" unless os
+  raise "Init not found: #{composition["init"]}" unless init
+  raise "Location not found: #{composition["location"]}" unless location
+
+  if init["os_family"] && init["os_family"] != os["family"]
+    raise "Init/OS mismatch: init #{init["id"]} expects #{init["os_family"]}, got #{os["family"]}"
+  end
+
+  unless init_available_for_provider?(init, machine["provider"])
+    expected = init["providers"].is_a?(Array) ? init["providers"].join(", ") : init["provider"]
+    raise "Init/provider mismatch: init #{init["id"]} expects provider #{expected}, got machine provider #{machine["provider"]}"
+  end
+
+  provider = machine["provider"]
+  raise "Location #{location["name"]} has no mapping for provider #{provider}" unless location[provider]
+
+  supports = machine["supports"].is_a?(Hash) ? machine["supports"] : {}
+  supported_arches = supports["arches"].is_a?(Array) ? supports["arches"] : []
+  if !supported_arches.empty? && !supported_arches.include?(os["arch"])
+    raise "Machine/OS mismatch: machine #{machine["name"]} does not support architecture #{os["arch"]}"
+  end
+  supported_os_ids = supports["os_ids"].is_a?(Array) ? supports["os_ids"] : []
+  if !supported_os_ids.empty? && !supported_os_ids.include?(os["id"])
+    raise "Machine/OS mismatch: machine #{machine["name"]} does not support OS #{os["id"]}"
+  end
+
+  case provider
+  when "aws"
+    unless os.key?("aws_ami_name_pattern") || os.key?("aws_ami_id") || os.key?("aws_ssm_parameter")
+      raise "OS/provider mismatch: OS #{os["id"]} has no AWS image selector"
+    end
+  when "gcp"
+    unless os.key?("gcp_image_project") && os.key?("gcp_image_family")
+      raise "OS/provider mismatch: OS #{os["id"]} has no GCP image selector"
+    end
+  when "vultr"
+    raise "OS/provider mismatch: OS #{os["id"]} has no Vultr OS id" unless os.key?("vultr_os_id")
+  when "local-qemu"
+    raise "OS/provider mismatch: OS #{os["id"]} has no Vagrant box" unless os.key?("vagrant_box")
+  when "truenas"
+    raise "OS/provider mismatch: OS #{os["id"]} has no cloud image URL" unless os.key?("cloud_image_url")
+  when "raspberry-pi"
+    raise "OS/provider mismatch: OS #{os["id"]} has no metal image" unless os.key?("metal_image")
+  end
+
+  package_catalog = (catalog["packages"] || []).map { |pkg| pkg["id"] }
+  unknown_package = bundle_packages.find { |pkg| !package_catalog.include?(pkg) }
+  raise "Bundle references unknown package id: #{unknown_package}" if unknown_package
+
+  if bundle_packages.include?("codex-cli") && !bundle_packages.include?("dev-toolchain")
+    raise "Compatibility: codex-cli requires dev-toolchain in bundles"
+  end
+
+  if bundle_packages.include?("goose") && !bundle_packages.include?("dev-toolchain")
+    raise "Compatibility: goose requires dev-toolchain in bundles"
+  end
+
+end
+
+def engine_for(machine)
+  provider = machine["provider"]
+  if machine["kind"] == "metal"
+    "metal"
+  elsif provider.start_with?("local-")
+    "vagrant"
+  else
+    "terraform"
+  end
+end
+
+def validate_provider_plugin!(machine, engine)
+  provider = machine["provider"]
+  plugin = provider_plugins.find { |entry| entry.fetch("id") == provider }
+  raise "Provider plugin not found: #{provider}" unless plugin
+
+  supports = plugin.fetch("supports", {})
+  supported_engines = supports.fetch("engines", [])
+  unless supported_engines.empty? || supported_engines.include?(engine)
+    raise "Provider plugin #{provider} does not support engine #{engine}"
+  end
+
+  machine_kind = machine["kind"] || "vm"
+  supported_kinds = supports.fetch("kinds", [])
+  unless supported_kinds.empty? || supported_kinds.include?(machine_kind)
+    raise "Provider plugin #{provider} does not support machine kind #{machine_kind}"
+  end
+end
+
+def validate_package_support_value!(plugin_id, supports, value, field, label)
+  allowed = supports[field] || []
+  return if allowed.empty? || allowed.include?(value.to_s)
+
+  raise "Package plugin #{plugin_id} does not support #{label} #{value}"
+end
+
+def validate_package_plugins!(bundle_packages, os)
+  plugins = package_plugins
+  bundle_packages.each do |package_id|
+    plugin = plugins.find { |entry| entry.fetch("id") == package_id }
+    raise "Package plugin not found: #{package_id}" unless plugin
+
+    supports = plugin.fetch("supports", {})
+    os_family = os.fetch("family")
+    validate_package_support_value!(package_id, supports, os_family, "os_families", "os family")
+    validate_package_support_value!(package_id, supports, os.fetch("arch", ""), "arches", "architecture")
+    validate_package_support_value!(package_id, supports, os.fetch("id"), "os_ids", "OS")
+    validate_package_support_value!(package_id, supports, os.fetch("version", ""), "os_versions", "OS version")
+    validate_package_support_value!(package_id, supports, os.fetch("version", ""), "#{os_family}_versions", "#{os_family} version")
+  end
+end
+
+def emit_env(resolved)
+  provider = resolved.dig("machine", "provider")
+  locp = resolved.dig("location", provider) || {}
+  os = resolved["os"]
+  machine_defaults = resolved.dig("machine", "defaults") || {}
+
+  lines = {
+    "INSTANCE_NAME" => resolved.dig("instance", "name"),
+    "PROFILE_NAME" => resolved.dig("instance", "name"),
+    "ENGINE" => resolved["engine"],
+    "PROVIDER" => provider,
+    "STACK_TAGS" => resolved["stack_tags"],
+    "LOCATION_NAME" => resolved.dig("location", "name"),
+    "OS_ID" => os["id"],
+    "OS_FAMILY" => os["family"],
+    "INIT_ID" => resolved.dig("init", "id"),
+    "BUNDLE_PACKAGES" => resolved["bundle_packages"].join(","),
+    "VM_MEMORY_MB" => (machine_defaults["memory_mb"] || 0).to_s,
+    "VM_CPU_CORES" => (machine_defaults["cpu_cores"] || machine_defaults["cpus"] || 0).to_s,
+    "VM_CPU_MODE" => (machine_defaults["cpu_mode"] || ""),
+    "VM_VCPUS" => (machine_defaults["vcpus"] || 1).to_s,
+    "VM_AUTOSTART" => (machine_defaults.fetch("autostart", true)).to_s,
+    "VM_STATE" => (machine_defaults["state"] || "STOPPED"),
+    "VM_NIC_ATTACH" => (machine_defaults["network"] || locp["bridge"] || "br0"),
+    "VM_DISK_GB" => (machine_defaults["disk_gb"] || 30).to_s,
+    "VM_POOL" => (machine_defaults["pool"] || locp["pool"] || "main"),
+    "VM_PLAN" => (machine_defaults["plan"] || ""),
+    "VM_MACHINE_TYPE" => (machine_defaults["machine_type"] || ""),
+    "VM_DISK_TYPE" => (machine_defaults["disk_type"] || ""),
+    "VM_INSTANCE_TYPE" => (machine_defaults["instance_type"] || ""),
+    "VM_ROOT_VOLUME_TYPE" => (machine_defaults["root_volume_type"] || ""),
+    "GCP_IMAGE_FAMILY" => (os["gcp_image_family"] || ""),
+    "GCP_IMAGE_PROJECT" => (os["gcp_image_project"] || ""),
+    "VULTR_OS_ID" => (os["vultr_os_id"] || 0).to_s,
+    "LOCATION_REGION" => (locp["region"] || ""),
+    "LOCATION_AVAILABILITY_ZONE" => (locp["availability_zone"] || ""),
+    "LOCATION_ZONE" => (locp["zone"] || ""),
+    "SSH_USER" => if os["family"] == "windows"
+                    "Administrator"
+                  elsif provider == "raspberry-pi"
+                    env_or("VM_USER_NAME", "")
+                  else
+                    env_or("VM_USER_NAME", "ubuntu")
+                  end,
+    "CLOUD_IMAGE_URL" => (os["cloud_image_url"] || ""),
+    "RASPBERRY_PI_HOST" => env_or("RASPBERRY_PI_HOST", locp["host"] || ""),
+    "TRUENAS_HOST" => env_or("TRUENAS_HOST", locp["host"] || ""),
+    "TRUENAS_SSH_PORT" => env_or("TRUENAS_SSH_PORT", (locp["ssh_port"] || 22).to_s),
+    "TRUENAS_SSH_USER" => env_or("TRUENAS_SSH_USER", locp["ssh_user"] || ""),
+    "VM_USER_NAME" => env_or("VM_USER_NAME", "")
+  }
+
+  lines.each { |key, value| puts "#{key}=#{value}" }
+end
+
+instance_name = nil
+emit = nil
+validate = false
+registry_path = ENV["EGAME_INSTANCE_REGISTRY"] && !ENV["EGAME_INSTANCE_REGISTRY"].empty? \
+                ? File.expand_path(ENV["EGAME_INSTANCE_REGISTRY"], Dir.pwd) \
+                : DEFAULT_REGISTRY_PATH
+
+args = ARGV.dup
+until args.empty?
+  case args.shift
+  when "--instance"
+    instance_name = args.shift
+  when "--emit"
+    emit = args.shift
+  when "--validate"
+    validate = true
+  when "--registry"
+    registry_path = File.expand_path(args.shift, Dir.pwd)
+  when "-h", "--help"
+    usage
+    exit 0
+  else
+    usage
+    exit 2
+  end
+end
+
+unless instance_name
+  usage
+  exit 2
+end
+
+begin
+  catalog = load_catalog
+  registry = load_any(registry_path)
+  instance = (registry["instances"] || []).find { |entry| entry["name"] == instance_name }
+  raise "Instance not found: #{instance_name} (registry: #{registry_path})" unless instance
+
+  instance_overrides = instance.reject do |key, _value|
+    %w[name overrides created_at updated_at state].include?(key)
+  end
+  composition = instance_overrides
+  composition["name"] = instance["name"]
+
+  machine = by_key(catalog, "machines", "name", composition["machine"])
+  os = by_key(catalog, "oses", "id", composition["os"])
+  location = by_key(catalog, "locations", "name", composition["location"])
+
+  if machine
+    machine = deep_merge(machine, {
+      "defaults" => deep_merge(machine.fetch("defaults", nil) || {}, instance["overrides"] || {})
+    })
+  end
+  init = resolve_init!(catalog, composition, machine, os)
+
+  direct_packages = composition["packages"] || []
+  package_sources = resolve_package_sources(catalog, composition["bundles"] || [], direct_packages)
+  bundle_packages = (resolve_bundle_packages(catalog, composition["bundles"] || []) + direct_packages).uniq.sort
+  validate!(catalog, composition, machine, os, init, location, bundle_packages)
+
+  provider = machine["provider"]
+  engine = engine_for(machine)
+  validate_provider_plugin!(machine, engine)
+  validate_package_plugins!(bundle_packages, os)
+  resolved = {
+    "instance" => instance,
+    "composition" => composition,
+    "machine" => machine,
+    "os" => os,
+    "init" => init,
+    "location" => location,
+    "bundle_packages" => bundle_packages,
+    "package_sources" => package_sources,
+    "provider_plugin" => provider,
+    "package_plugins" => bundle_packages.map { |package_id| { "id" => package_id, "plugin" => package_id } },
+    "engine" => engine,
+    "stack_tags" => provider
+  }
+
+  puts "Instance validated: #{instance_name}" if validate
+
+  case emit
+  when nil
+    exit 0
+  when "json"
+    puts JSON.generate(resolved)
+  when "env"
+    emit_env(resolved)
+  else
+    warn "Unsupported --emit format: #{emit}"
+    exit 2
+  end
+rescue StandardError => e
+  warn "instance-resolve: #{e.message}"
+  exit 1
+end

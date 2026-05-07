@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+# Run an instance-oriented command through generated profile compatibility data.
+
+set -euo pipefail
+
+ROOT="$(git rev-parse --show-toplevel)"
+cd "$ROOT"
+
+TARGET="${1:?Usage: scripts/instance-run <make-target> [instance]}"
+INSTANCE_NAME="${2:-${INSTANCE:-}}"
+
+if [ -z "$INSTANCE_NAME" ]; then
+  echo "instance-run: INSTANCE is required" >&2
+  echo "Usage: make $TARGET INSTANCE=<name>" >&2
+  exit 2
+fi
+
+path_args=(--instance "$INSTANCE_NAME" --emit env)
+if [ -n "${EGAME_INSTANCE_REGISTRY:-}" ]; then
+  path_args+=(--registry "$EGAME_INSTANCE_REGISTRY")
+fi
+INSTANCE_PATHS="$(./scripts/instance-paths "${path_args[@]}")"
+extract_path() {
+  printf '%s\n' "$INSTANCE_PATHS" | awk -F= -v key="$1" '$1 == key { print substr($0, index($0, "=") + 1) }'
+}
+OVERLAY="$(extract_path INSTANCE_OVERLAY_PATH)"
+
+overlay_args=(--instance "$INSTANCE_NAME" --output "$OVERLAY")
+if [ -n "${EGAME_INSTANCE_REGISTRY:-}" ]; then
+  overlay_args+=(--registry "$EGAME_INSTANCE_REGISTRY")
+fi
+
+./scripts/instance-profile-overlay "${overlay_args[@]}"
+
+echo "[instance-run] target=$TARGET instance=$INSTANCE_NAME overlay=$OVERLAY" >&2
+
+export EGAME_CATALOG_LOCAL="$OVERLAY"
+export EGAME_INSTANCE_NAME="$INSTANCE_NAME"
+
+case "$TARGET" in
+  init|plan|up|down|start|stop|status|ip|ssh)
+    exec ./scripts/provider-dispatch --instance "$INSTANCE_NAME" --command "$TARGET"
+    ;;
+  provision)
+    exec ./scripts/instance-provision --instance "$INSTANCE_NAME"
+    ;;
+  env)
+    exec ./scripts/instance-resolve --instance "$INSTANCE_NAME" --emit env
+    ;;
+  info)
+    exec ./scripts/instance-resolve --instance "$INSTANCE_NAME" --emit json
+    ;;
+  validate)
+    exec ./scripts/instance-resolve --instance "$INSTANCE_NAME" --validate
+    ;;
+  logs)
+    exec ./scripts/logs "$INSTANCE_NAME"
+    ;;
+  provision.clear-state)
+    OS_FAMILY="$(./scripts/instance-resolve --instance "$INSTANCE_NAME" --emit env | awk -F= '/^OS_FAMILY=/{print $2}')"
+    case "$OS_FAMILY" in
+      ubuntu)
+        exec ./scripts/instance-ssh "$INSTANCE_NAME" -- 'rm -rf ~/provision/state ~/provision/logs ~/provision/downloads'
+        ;;
+      windows)
+        exec ./scripts/instance-ssh "$INSTANCE_NAME" -- 'if (Test-Path "C:\Users\Administrator\provision\state") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\state" }; if (Test-Path "C:\Users\Administrator\provision\logs") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\logs" }; if (Test-Path "C:\Users\Administrator\provision\downloads") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\downloads" }'
+        ;;
+      *)
+        echo "[provision.clear-state] unknown os_family: $OS_FAMILY" >&2
+        exit 2
+        ;;
+    esac
+    ;;
+  provision.wait)
+    exec ./scripts/wait-for-provision "$INSTANCE_NAME"
+    ;;
+  update)
+    exec ./scripts/update-tools "$INSTANCE_NAME"
+    ;;
+  reboot)
+    OS_FAMILY="$(./scripts/instance-resolve --instance "$INSTANCE_NAME" --emit env | awk -F= '/^OS_FAMILY=/{print $2}')"
+    case "$OS_FAMILY" in
+      windows) exec ./scripts/instance-ssh "$INSTANCE_NAME" -- 'shutdown /r /t 0' ;;
+      *) exec ./scripts/instance-ssh "$INSTANCE_NAME" -- 'sudo reboot' ;;
+    esac
+    ;;
+  show-password)
+    exec ./scripts/instance-password "$INSTANCE_NAME"
+    ;;
+  ssh.run)
+    if [ -t 0 ]; then
+      echo "Usage: echo '<command>' | make ssh.run INSTANCE=<name>" >&2
+      exit 2
+    fi
+    cmd="$(cat)"
+    exec ./scripts/instance-ssh "$INSTANCE_NAME" -- "$cmd"
+    ;;
+  ssh.wait)
+    exec ./scripts/ssh-wait "$INSTANCE_NAME"
+    ;;
+  upload)
+    exec ./scripts/upload "$INSTANCE_NAME"
+    ;;
+esac
+
+echo "instance-run: unsupported target: $TARGET" >&2
+exit 2

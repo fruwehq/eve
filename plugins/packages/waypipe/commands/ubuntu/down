@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+set -eu
+
+exec ./scripts/package-down-command waypipe 'sudo apt-get remove -y waypipe weston xwayland foot x11-apps zenity || true'

@@ -1,15 +1,18 @@
 # v2 catalog
 # Single source of truth for machine composition:
-# machine + os + init + packages/bundles + location + profile
+# machine + os + init + packages/bundles + location
 version: 1
 
 # -----------------------------------------------------------------------------
 # Reusable YAML anchors (to reduce repetition)
 # -----------------------------------------------------------------------------
-x-local-medium: &local_medium
-  cpus: 4
-  memory_mb: 8192
-  disk_gb: 100
+x-local-qemu-medium: &local_qemu_medium
+  cpus: 2
+  memory_mb: 4096
+  # QEMU/cloud-image boxes start with a small root disk. The full local dev
+  # desktop smoke stack needs more room than the default image provides, but
+  # should stay modest enough not to starve the host.
+  disk_gb: 64
 
 x-ttl-default: &ttl_default
   ttl_hours: 168
@@ -24,6 +27,8 @@ machines:
   - name: aws-cheap-x86
     provider: aws
     kind: vm
+    supports:
+      arches: [amd64]
     defaults:
       instance_type: t3.large
       disk_gb: 80
@@ -32,47 +37,66 @@ machines:
   - name: aws-gpu-g5
     provider: aws
     kind: vm
+    supports:
+      arches: [amd64]
     defaults:
       instance_type: g5.2xlarge
       disk_gb: 200
 
+  - name: gcp-cheap-x86
+    provider: gcp
+    kind: vm
+    supports:
+      arches: [amd64]
+    defaults:
+      machine_type: e2-small
+      disk_gb: 20
+      disk_type: pd-balanced
+
   - name: vultr-vcg-a40-1c # 1 vCPU, 5 GB RAM, 90 GB NVMe, 3 TB/mo, $0.075/hr, 1/24 NVIDIA A40 (2 GB VRAM)
     provider: vultr
     kind: vm
+    supports:
+      arches: [amd64]
     defaults:
       plan: vcg-a40-1c-5g-2vram
 
   - name: vultr-vcg-a40-2c # 2 vCPUs, 10 GB RAM, 180 GB NVMe, 4 TB/mo, $0.144/hr, 1/12 NVIDIA A40 (4 GB VRAM)
     provider: vultr
     kind: vm
+    supports:
+      arches: [amd64]
     defaults:
       plan: vcg-a40-2c-10g-4vram
 
   - name: vultr-vcg-a40-4c # 4 vCPUs, 20 GB RAM, 360 GB NVMe, 5 TB/mo, $0.288/hr, 1/6 NVIDIA A40 (8 GB VRAM)
     provider: vultr
     kind: vm
+    supports:
+      arches: [amd64]
     defaults:
       plan: vcg-a40-4c-20g-8vram
 
   - name: vultr-vcg-a40-6c # 6 vCPUs, 30 GB RAM, 550 GB NVMe, 6 TB/mo, $0.432/hr, 1/4 NVIDIA A40 (12 GB VRAM)
     provider: vultr
     kind: vm
+    supports:
+      arches: [amd64]
     defaults:
       plan: vcg-a40-6c-30g-12vram
 
-  - name: local-virtualbox-medium
-    provider: local-virtualbox
+  - name: local-qemu-medium
+    provider: local-qemu
     kind: vm
-    defaults: *local_medium
-
-  - name: local-vmware-medium
-    provider: local-vmware
-    kind: vm
-    defaults: *local_medium
+    supports:
+      arches: [arm64]
+    defaults: *local_qemu_medium
 
   - name: raspberry-pi-5
     provider: raspberry-pi
     kind: metal
+    supports:
+      arches: [arm64]
     defaults:
       # CPU / memory / disk are physical attributes of the Pi, not knobs this
       # repo can set. Only architecture is recorded so provisioning can pick
@@ -82,10 +106,15 @@ machines:
   - name: truenas-scale-medium
     provider: truenas
     kind: vm
+    supports:
+      arches: [amd64]
     defaults:
       cpu_cores: 4
       cpu_mode: HOST-PASSTHROUGH
-      vcpus: 2
+      # TrueNAS `vcpus` is socket count, while `cpu_cores` is cores per socket.
+      # Keep the default topology at 1 socket * 4 cores so QEMU/KVM exposes 4
+      # CPUs instead of the previous 2 * 4 = 8 CPU topology.
+      vcpus: 1
       memory_mb: 8192
       disk_gb: 30
       network: br0
@@ -96,40 +125,27 @@ machines:
 # OS catalog (explicit image/version/flavor)
 # -----------------------------------------------------------------------------
 oses:
-  - id: ubuntu-24.04-server-amd64
+  - id: ubuntu-26.04-amd64
     family: ubuntu
-    version: "24.04"
+    version: "26.04"
     arch: amd64
-    ui_mode: headless
-    vagrant_box: bento/ubuntu-24.04
-    # Vultr OS ID (from `vultr-cli os list`). Override in catalog.local.yaml if stale.
-    vultr_os_id: 2284 # Ubuntu 24.04 LTS x64
-    cloud_image_url: https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.img
+    vagrant_box: cloud-image/ubuntu-26.04
+    cloud_image_url: https://cloud-images.ubuntu.com/releases/26.04/release/ubuntu-26.04-server-cloudimg-amd64.img
+    aws_ami_name_pattern: ubuntu/images/hvm-ssd-gp3/ubuntu-resolute-26.04-amd64-server-*
+    gcp_image_project: ubuntu-os-cloud
+    gcp_image_family: ubuntu-2604-lts-amd64
 
-  - id: ubuntu-24.04-desktop-amd64
+  - id: ubuntu-26.04-arm64
     family: ubuntu
-    version: "24.04"
-    arch: amd64
-    ui_mode: desktop
-    vagrant_box: bento/ubuntu-24.04
-    vultr_os_id: 2284 # Ubuntu 24.04 LTS x64
-    cloud_image_url: https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.img
-
-  - id: ubuntu-24.04-desktop-arm64
-    family: ubuntu
-    version: "24.04"
+    version: "26.04"
     arch: arm64
-    ui_mode: desktop
-    # No cloud_image_url: arm64 metal targets (e.g. Raspberry Pi) are flashed
-    # by hand via Raspberry Pi Imager. Provisioning installs the GUI/streaming
-    # stack on top of a server install — same pattern as the *-desktop-amd64
-    # entries that point at the server cloud image.
+    vagrant_box: cloud-image/ubuntu-26.04
+    metal_image: ubuntu-26.04-arm64
 
   - id: windows-server-2025
     family: windows
     version: "2025"
     arch: amd64
-    ui_mode: desktop
     vultr_os_id: 2514 # Windows 2025 Standard x64
 
 # -----------------------------------------------------------------------------
@@ -138,20 +154,15 @@ oses:
 inits:
   - id: ssh-ubuntu-cloud-init
     os_family: ubuntu
-    features: [ssh, hardening, nonroot-user]
+    providers: [aws, gcp, local-qemu, truenas]
 
   - id: ssh-ubuntu-metal
     os_family: ubuntu
-    features: [ssh, hardening]
+    providers: [raspberry-pi]
 
   - id: ssh-windows-powershell7
     os_family: windows
-    features: [ssh, hardening]
-
-  - id: ssm-aws-linux
-    os_family: ubuntu
-    provider: aws
-    features: [ssm, ssh-optional]
+    providers: [vultr]
 
 # -----------------------------------------------------------------------------
 # Workload package catalog
@@ -161,41 +172,40 @@ packages:
   - id: codex-cli
   - id: dev-toolchain
   - id: docker
+  - id: gnome-desktop
   - id: goose
   - id: hermes
+  - id: macos-desktop-theme
   - id: opencode
   - id: rdp
   - id: rustdesk
-  - id: ssh
   - id: steam
   - id: sunshine
   - id: vscode
   - id: vnc
+  - id: waypipe
   - id: xpra
 
 # -----------------------------------------------------------------------------
 # Bundle catalog (composable package groups)
 # -----------------------------------------------------------------------------
 bundles:
-  - id: access-headless
-    includes: [ssh]
+  - id: desktop-gnome
+    includes: [gnome-desktop, rustdesk]
 
-  - id: access-gui-safe
-    includes: [ssh, rustdesk, vnc]
+  - id: desktop-gnome-mac
+    includes: [gnome-desktop, macos-desktop-theme, rustdesk]
 
-  - id: access-gui-vnc
-    includes: [ssh, vnc]
+  - id: desktop-streaming
+    includes: [sunshine, rustdesk, vnc, rdp, waypipe]
 
-  - id: access-gui-streaming
-    includes: [ssh, sunshine, rustdesk]
+  - id: remote-xpra
+    includes: [xpra]
 
-  - id: remote-apps
-    includes: [ssh, xpra]
-
-  - id: dev-sandbox-core
+  - id: dev-ai
     includes: [docker, dev-toolchain, goose, claude, codex-cli, hermes, opencode, vscode]
 
-  - id: gaming-core
+  - id: gaming-streaming
     includes: [sunshine, steam, rustdesk]
 
 # -----------------------------------------------------------------------------
@@ -206,11 +216,12 @@ locations:
     aws:
       region: ap-northeast-1
       availability_zone: ap-northeast-1b
+    gcp:
+      region: asia-northeast1
+      zone: asia-northeast1-b
     vultr:
       region: nrt
-    local-virtualbox:
-      host: local
-    local-vmware:
+    local-qemu:
       host: local
     raspberry-pi:
       # Host comes from RASPBERRY_PI_HOST env var (required at runtime).
@@ -224,80 +235,3 @@ locations:
       # Used by module defaults if machine.network is omitted
       bridge: br0
       pool: main
-
-# -----------------------------------------------------------------------------
-# Profile catalog (composition entries)
-# -----------------------------------------------------------------------------
-profiles:
-  - name: aws-ubuntu-dev-headless
-    machine: aws-cheap-x86
-    os: ubuntu-24.04-server-amd64
-    init: ssh-ubuntu-cloud-init
-    bundles: [access-headless, dev-sandbox-core]
-    location: tokyo
-    lifecycle: *ttl_default
-
-  - name: aws-ubuntu-dev-gui
-    machine: aws-cheap-x86
-    os: ubuntu-24.04-desktop-amd64
-    init: ssh-ubuntu-cloud-init
-    bundles: [access-gui-safe, dev-sandbox-core]
-    location: tokyo
-
-  - name: vultr-windows-gaming
-    machine: vultr-vcg-a40-2c
-    os: windows-server-2025
-    init: ssh-windows-powershell7
-    bundles: [access-gui-streaming, gaming-core]
-    location: tokyo
-
-  - name: local-vbox-ubuntu-dev
-    machine: local-virtualbox-medium
-    os: ubuntu-24.04-server-amd64
-    init: ssh-ubuntu-cloud-init
-    bundles: [access-headless, dev-sandbox-core]
-    location: tokyo
-
-  - name: local-vbox-ubuntu-all
-    machine: local-virtualbox-medium
-    os: ubuntu-24.04-desktop-amd64
-    init: ssh-ubuntu-cloud-init
-    bundles: [access-gui-streaming, access-gui-safe, dev-sandbox-core, gaming-core, remote-apps]
-    location: tokyo
-
-  - name: local-vmware-ubuntu-dev-gui
-    machine: local-vmware-medium
-    os: ubuntu-24.04-desktop-amd64
-    init: ssh-ubuntu-cloud-init
-    bundles: [access-gui-safe, dev-sandbox-core, remote-apps]
-    location: tokyo
-
-  - name: local-vmware-ubuntu-all
-    machine: local-vmware-medium
-    os: ubuntu-24.04-desktop-amd64
-    init: ssh-ubuntu-cloud-init
-    bundles: [access-gui-streaming, access-gui-safe, dev-sandbox-core, gaming-core, remote-apps]
-    location: tokyo
-
-  - name: truenas-ubuntu-dev-headless
-    machine: truenas-scale-medium
-    os: ubuntu-24.04-server-amd64
-    init: ssh-ubuntu-cloud-init
-    bundles: [access-headless, dev-sandbox-core]
-    location: tokyo
-    lifecycle: *ttl_default
-
-  - name: truenas-ubuntu-all
-    machine: truenas-scale-medium
-    os: ubuntu-24.04-desktop-amd64
-    init: ssh-ubuntu-cloud-init
-    bundles: [access-gui-streaming, access-gui-safe, dev-sandbox-core, gaming-core, remote-apps]
-    location: tokyo
-    lifecycle: *ttl_default
-
-  - name: rpi-ubuntu-all
-    machine: raspberry-pi-5
-    os: ubuntu-24.04-desktop-arm64
-    init: ssh-ubuntu-metal
-    bundles: [access-gui-streaming, access-gui-safe, dev-sandbox-core, gaming-core, remote-apps]
-    location: tokyo

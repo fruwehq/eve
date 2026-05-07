@@ -31,13 +31,35 @@ skip_unless_pkg() {
   fi
 }
 
+apt_wait() {
+  if command -v cloud-init >/dev/null 2>&1; then
+    timeout 600 cloud-init status --wait >/dev/null 2>&1 || true
+  fi
+
+  local waited=0
+  local max_wait=600
+  while sudo fuser /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock /var/cache/apt/archives/lock >/dev/null 2>&1; do
+    if [ "$waited" -eq 0 ]; then
+      log "waiting for apt/dpkg lock"
+    fi
+    if [ "$waited" -ge "$max_wait" ]; then
+      log "apt/dpkg lock still held after ${max_wait}s"
+      return 1
+    fi
+    sleep 5
+    waited=$((waited + 5))
+  done
+}
+
 apt_install() {
+  apt_wait
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "$@"
 }
 
 apt_update_once() {
   local stamp="$STATE_DIR/apt_updated"
   [ -f "$stamp" ] && return 0
+  apt_wait
   sudo DEBIAN_FRONTEND=noninteractive apt-get update -y
   touch "$stamp"
 }
@@ -53,8 +75,4 @@ download() {
 request_reboot() {
   touch "$REBOOT_FLAG"
   log "reboot requested"
-}
-
-is_desktop() {
-  [ "${OS_UI_MODE:-headless}" = "desktop" ]
 }

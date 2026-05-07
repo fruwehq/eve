@@ -5,11 +5,6 @@ set -euo pipefail
 
 skip_unless_pkg vnc
 
-if ! is_desktop; then
-  log "### 46_vnc: headless OS — skipping"
-  exit 0
-fi
-
 log "### 46_vnc: installing TigerVNC server and tools"
 
 if command -v tigervncserver >/dev/null 2>&1; then
@@ -45,7 +40,7 @@ fi
 mkdir -p "$VNC_HOME"
 
 # Suppress the colord polkit prompt that appears on every XFCE/VNC session.
-# Ubuntu 24.04 (polkit 124) silently ignores the legacy .pkla format — use the
+# Ubuntu 26.04 (polkit 124+) silently ignores the legacy .pkla format — use the
 # JavaScript rule format under /etc/polkit-1/rules.d/ instead.
 POLKIT_RULE=/etc/polkit-1/rules.d/45-allow-colord.rules
 if ! sudo test -f "$POLKIT_RULE"; then
@@ -92,7 +87,9 @@ if [ ! -f "$VNC_HOME/xstartup" ] || [ "$XSTARTUP_CONTENT" != "$(cat "$VNC_HOME/x
   chmod +x "$VNC_HOME/xstartup"
 fi
 
-VNC_GEOMETRY="${EPHEMERAL_DISPLAY_RESOLUTION:-1920x1080}"
+# VNC should use the same configured display size as the VM unless a VNC-only
+# override is provided by the caller.
+VNC_GEOMETRY="${VNC_GEOMETRY:-${EPHEMERAL_DISPLAY_RESOLUTION:-1920x1080}}"
 
 UNIT_PATH=/etc/systemd/system/vncserver.service
 UNIT_CONTENT=$(cat <<EOF

@@ -1,0 +1,105 @@
+#!/usr/bin/env ruby
+# Synchronize external plugin repositories into .egame/plugins.
+
+require "fileutils"
+require "yaml"
+
+ROOT = File.expand_path("..", __dir__)
+DEFAULT_SOURCES = File.join(ROOT, ".egame/plugin-sources.yaml")
+DEFAULT_DEST = File.join(ROOT, ".egame/plugins")
+
+def usage
+  warn <<~USAGE
+    Usage:
+      scripts/plugins-sync [--sources <path>] [--dest <path>]
+
+    Source file shape:
+      sources:
+        - id: example
+          url: https://github.com/org/egame-plugin-example.git
+          ref: <tag-or-sha>
+  USAGE
+end
+
+sources_path = DEFAULT_SOURCES
+dest_root = DEFAULT_DEST
+
+args = ARGV.dup
+until args.empty?
+  case args.shift
+  when "--sources"
+    sources_path = File.expand_path(args.shift, Dir.pwd)
+  when "--dest"
+    dest_root = File.expand_path(args.shift, Dir.pwd)
+  when "-h", "--help"
+    usage
+    exit 0
+  else
+    usage
+    exit 2
+  end
+end
+
+unless File.exist?(sources_path)
+  puts "No plugin sources configured: #{sources_path}"
+  exit 0
+end
+
+doc = YAML.safe_load(File.read(sources_path), permitted_classes: [], aliases: true) || {}
+unless doc.is_a?(Hash)
+  warn "plugins-sync: sources file must be a map"
+  exit 2
+end
+
+sources = doc["sources"] || []
+unless sources.is_a?(Array)
+  warn "plugins-sync: sources must be a list"
+  exit 2
+end
+
+normalized_sources = sources.each_with_index.map do |source, index|
+  unless source.is_a?(Hash)
+    warn "plugins-sync: source #{index + 1} must be a map"
+    exit 2
+  end
+
+  id = source["id"]
+  url = source["url"]
+  ref = source["ref"]
+  ref = "" if ref.nil?
+
+  unless id.is_a?(String) && url.is_a?(String) && ref.is_a?(String)
+    warn "plugins-sync: source #{index + 1} id, url, and ref must be strings"
+    exit 2
+  end
+
+  unless id.match?(/\A[a-z][a-z0-9-]*\z/) && !url.empty?
+    warn "plugins-sync: source #{index + 1} needs id matching [a-z][a-z0-9-]* and non-empty url"
+    exit 2
+  end
+
+  if ref.empty? && ENV["EGAME_ALLOW_UNPINNED_PLUGINS"] != "1"
+    warn "plugins-sync: source #{id} is missing ref; set EGAME_ALLOW_UNPINNED_PLUGINS=1 to allow this"
+    exit 1
+  end
+
+  { "id" => id, "url" => url, "ref" => ref }
+end
+
+normalized_sources.each do |source|
+  id = source.fetch("id")
+  url = source.fetch("url")
+  ref = source.fetch("ref")
+  dest = File.join(dest_root, id)
+  FileUtils.mkdir_p(dest_root)
+
+  if Dir.exist?(File.join(dest, ".git"))
+    system("git", "-C", dest, "fetch", "--tags", "--prune") || exit(1)
+  else
+    system("git", "clone", url, dest) || exit(1)
+  end
+
+  system("git", "-C", dest, "checkout", ref) || exit(1) unless ref.empty?
+end
+
+puts "Plugin sources synchronized: #{normalized_sources.length}"

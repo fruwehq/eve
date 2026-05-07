@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+set -eu
+
+exec ./scripts/package-status-command dev-toolchain 'if command -v gcc >/dev/null 2>&1 && command -v make >/dev/null 2>&1 && command -v rustup >/dev/null 2>&1; then echo installed; else echo missing; fi'

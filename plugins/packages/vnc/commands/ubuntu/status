@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+set -eu
+
+exec ./scripts/package-status-command vnc 'if command -v vncserver >/dev/null 2>&1 || command -v tigervncserver >/dev/null 2>&1; then echo installed; else echo missing; fi'

@@ -1,0 +1,271 @@
+#!/usr/bin/env ruby
+# Manual/AI-assisted live integration runner for concrete v3 instances.
+
+require "fileutils"
+require "json"
+require "open3"
+require "time"
+
+ROOT = File.expand_path("..", __dir__)
+
+def usage
+  warn <<~USAGE
+    Usage:
+      scripts/integration-test --instance <name> [--instance <name> ...] [--registry <path>] [--json] [--all-packages]
+      scripts/integration-test --live --instance <name> [--instance <name> ...] [--report <path>] [--no-cleanup] [--delete-instances] [--all-packages]
+
+    Dry-run mode prints the commands a human or LLM should run/review.
+    Live mode creates/starts, waits for SSH, provisions, checks selected packages,
+    and writes a JSON report. Live mode requires YES=1 and runs provider down
+    after each instance unless --no-cleanup or EGAME_INTEGRATION_CLEANUP=0 is set.
+    Set EGAME_INTEGRATION_DELETE_INSTANCES=1 for temporary smoke entries.
+    --all-packages additionally installs and status-checks every package plugin
+    supported by the selected instance OS/architecture.
+  USAGE
+end
+
+def run_capture(env, *cmd)
+  out, status = Open3.capture2e(env, *cmd, chdir: ROOT)
+  {
+    "command" => cmd.join(" "),
+    "status" => status.success? ? "passed" : "failed",
+    "exit_code" => status.exitstatus,
+    "output" => out.strip
+  }
+end
+
+def run_stream(env, *cmd)
+  output = +""
+  status = nil
+
+  Open3.popen2e(env, *cmd, chdir: ROOT) do |_stdin, stdout_err, wait_thr|
+    stdout_err.each_line do |line|
+      output << line
+      print line
+      $stdout.flush
+    end
+    status = wait_thr.value
+  end
+
+  {
+    "command" => cmd.join(" "),
+    "status" => status&.success? ? "passed" : "failed",
+    "exit_code" => status&.exitstatus,
+    "output" => output.strip
+  }
+end
+
+def validate_step_result!(result)
+  name = result.fetch("name")
+  return unless name.start_with?("package.status.")
+  return unless result.fetch("status") == "passed"
+
+  payload = JSON.parse(result.fetch("output"))
+  package_status = payload.fetch("status")
+  result["package_status"] = package_status
+  return if package_status == "installed"
+
+  result["status"] = "failed"
+  result["failure_reason"] = "expected package status installed, got #{package_status}"
+rescue JSON::ParserError, KeyError => e
+  result["status"] = "failed"
+  result["failure_reason"] = "invalid package status JSON: #{e.message}"
+end
+
+def run_json(env, *cmd)
+  result = run_capture(env, *cmd)
+  raise result["output"] unless result["status"] == "passed"
+
+  JSON.parse(result.fetch("output"))
+end
+
+instances = []
+registry_path = ENV["EGAME_INSTANCE_REGISTRY"]
+live = false
+json = false
+report_path = nil
+cleanup = ENV.fetch("EGAME_INTEGRATION_CLEANUP", "1") != "0"
+delete_instances = ENV["EGAME_INTEGRATION_DELETE_INSTANCES"] == "1"
+all_packages = ENV["EGAME_INTEGRATION_ALL_PACKAGES"] == "1"
+
+args = ARGV.dup
+until args.empty?
+  case args.shift
+  when "--instance"
+    instances << args.shift
+  when "--registry"
+    registry_path = File.expand_path(args.shift, Dir.pwd)
+  when "--live"
+    live = true
+  when "--json"
+    json = true
+  when "--report"
+    report_path = args.shift
+  when "--no-cleanup"
+    cleanup = false
+  when "--delete-instances"
+    delete_instances = true
+  when "--all-packages"
+    all_packages = true
+  when "-h", "--help"
+    usage
+    exit 0
+  else
+    usage
+    exit 2
+  end
+end
+
+if instances.empty? && ENV["EGAME_INTEGRATION_INSTANCES"]
+  instances = ENV.fetch("EGAME_INTEGRATION_INSTANCES").split(",").map(&:strip).reject(&:empty?)
+end
+
+if instances.empty?
+  usage
+  exit 2
+end
+
+if live && ENV["YES"] != "1"
+  warn "integration-test: live mode can create billable or local VMs; rerun with YES=1"
+  exit 2
+end
+
+env = ENV.to_h
+env["EGAME_INSTANCE_REGISTRY"] = registry_path if registry_path
+
+plans = instances.map do |instance|
+  resolved_cmd = [File.join(ROOT, "scripts/instance-resolve"), "--instance", instance, "--emit", "json"]
+  resolved_cmd += ["--registry", registry_path] if registry_path
+  resolved = run_json(env, *resolved_cmd)
+  packages = resolved.fetch("bundle_packages")
+  os_family = resolved.fetch("os").fetch("family")
+  package_list_cmd = [File.join(ROOT, "scripts/package-list"), "--instance", instance, "--json"]
+  package_list_cmd += ["--registry", registry_path] if registry_path
+  package_doc = run_json(env, *package_list_cmd)
+  package_smoke_packages = if all_packages
+                             package_doc.fetch("packages")
+                                        .select { |package| package["supported"] && package["installable"] }
+                                        .map { |package| package.fetch("id") }
+                           else
+                             []
+                           end
+  status_packages = (packages + package_smoke_packages).uniq
+
+  {
+    "instance" => instance,
+    "os_family" => os_family,
+    "provider" => resolved.fetch("machine").fetch("provider"),
+    "machine" => resolved.fetch("composition").fetch("machine"),
+    "os" => resolved.fetch("os").fetch("id"),
+    "selected_packages" => packages,
+    "package_smoke" => all_packages ? "all-supported" : "selected-only",
+    "package_smoke_packages" => package_smoke_packages,
+    "commands" => [
+      "make instance.validate INSTANCE=#{instance}",
+      "make up INSTANCE=#{instance}",
+      "make ssh.wait INSTANCE=#{instance}",
+      "make instance.provision INSTANCE=#{instance}",
+      "make instance.status INSTANCE=#{instance} EMIT=json",
+      *package_smoke_packages.map { |package| "make package.install INSTANCE=#{instance} PACKAGE=#{package}" },
+      *status_packages.map { |package| "make package.status INSTANCE=#{instance} PACKAGE=#{package}" }
+    ],
+    "manual_checks" => [
+      "Confirm SSH command execution works.",
+      "Review make instance.status INSTANCE=#{instance} for provider/provision/package state.",
+      "Package status confirms the package probe reports installed; GUI/remote-access packages still need their package action or manual connection smoke.",
+      (os_family == "windows" ? "Confirm Sunshine/RustDesk access and a smooth 3D app or game launch." : "Confirm AI/dev package commands run inside the safer Linux environment."),
+      "Destroy or stop the instance when testing is complete if it is billable."
+    ]
+  }
+end
+
+unless live
+  if json
+    puts JSON.pretty_generate({ "live" => false, "plans" => plans })
+  else
+    plans.each do |plan|
+      puts "Instance: #{plan.fetch("instance")} (#{plan.fetch("os_family")}, #{plan.fetch("provider")})"
+      puts "Commands:"
+      plan.fetch("commands").each { |command| puts "  #{command}" }
+      puts "Manual checks:"
+      plan.fetch("manual_checks").each { |check| puts "  - #{check}" }
+      puts
+    end
+  end
+  exit 0
+end
+
+report = {
+  "started_at" => Time.now.utc.iso8601,
+  "live" => true,
+  "instances" => []
+}
+
+plans.each do |plan|
+  instance = plan.fetch("instance")
+  entry = plan.reject { |key, _| key == "commands" }
+  entry["steps"] = []
+  entry["cleanup"] = []
+
+  commands = [
+    ["validate", "make", "--no-print-directory", "instance.validate", "INSTANCE=#{instance}"],
+    ["up", "make", "--no-print-directory", "up", "INSTANCE=#{instance}"],
+    ["ssh.wait", "make", "--no-print-directory", "ssh.wait", "INSTANCE=#{instance}"],
+    ["provision", "make", "--no-print-directory", "instance.provision", "INSTANCE=#{instance}"],
+    ["status", "make", "--no-print-directory", "instance.status", "INSTANCE=#{instance}", "EMIT=json"]
+  ]
+  plan.fetch("package_smoke_packages").each do |package|
+    commands << ["package.install.#{package}", "make", "--no-print-directory", "package.install", "INSTANCE=#{instance}", "PACKAGE=#{package}"]
+  end
+  (plan.fetch("selected_packages") + plan.fetch("package_smoke_packages")).uniq.each do |package|
+    commands << ["package.status.#{package}", "make", "--no-print-directory", "package.status", "INSTANCE=#{instance}", "PACKAGE=#{package}"]
+  end
+
+  commands.each do |name, *cmd|
+    puts
+    puts "== #{instance}: #{name} =="
+    puts "$ #{cmd.join(" ")}"
+    result = run_stream(env, *cmd)
+    result["name"] = name
+    validate_step_result!(result)
+    entry.fetch("steps") << result
+    break if result["status"] != "passed"
+  end
+
+  if cleanup
+    cleanup_commands = [
+      ["cleanup.down", "make", "--no-print-directory", "down", "INSTANCE=#{instance}"]
+    ]
+    if delete_instances
+      cleanup_commands << [
+        "cleanup.delete",
+        "make",
+        "--no-print-directory",
+        "instance.delete",
+        "INSTANCE=#{instance}",
+        "PURGE=1"
+      ]
+    end
+
+    cleanup_commands.each do |name, *cmd|
+      puts
+      puts "== #{instance}: #{name} =="
+      puts "$ #{cmd.join(" ")}"
+      result = run_stream(env, *cmd)
+      result["name"] = name
+      entry.fetch("cleanup") << result
+    end
+  end
+
+  steps_passed = entry.fetch("steps").all? { |step| step["status"] == "passed" }
+  cleanup_passed = entry.fetch("cleanup").all? { |step| step["status"] == "passed" }
+  entry["status"] = steps_passed && cleanup_passed ? "passed" : "failed"
+  report.fetch("instances") << entry
+end
+
+report["finished_at"] = Time.now.utc.iso8601
+report_path ||= File.join(ROOT, "tmp", "integration-report-#{Time.now.utc.strftime("%Y%m%dT%H%M%SZ")}.json")
+FileUtils.mkdir_p(File.dirname(report_path))
+File.write(report_path, JSON.pretty_generate(report) + "\n")
+puts report_path
+exit(report.fetch("instances").all? { |entry| entry["status"] == "passed" } ? 0 : 1)

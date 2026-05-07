@@ -1,0 +1,201 @@
+#!/usr/bin/env ruby
+# Dispatch an instance provider command through the configured provider plugin.
+
+require "json"
+require "open3"
+
+ROOT = File.expand_path("..", __dir__)
+
+def usage
+  warn <<~USAGE
+    Usage:
+      scripts/provider-dispatch --instance <name> --command <command> [--registry <path>] [--dry-run] [-- <args...>]
+  USAGE
+end
+
+def run_json(*cmd)
+  out, status = Open3.capture2e(*cmd)
+  raise out unless status.success?
+
+  JSON.parse(out)
+end
+
+def command_vector(plugin, spec)
+  exec_path = spec.fetch("exec")
+  unless exec_path.start_with?("/")
+    plugin_exec = File.join(File.dirname(plugin.fetch("path")), exec_path)
+    root_exec = File.join(ROOT, exec_path)
+    exec_path = File.exist?(plugin_exec) ? plugin_exec : root_exec
+  end
+  [exec_path, *(spec["args"] || [])]
+end
+
+def desired_state_for(command)
+  {
+    "up" => "running",
+    "start" => "running",
+    "stop" => "stopped",
+    "down" => "absent"
+  }[command]
+end
+
+def provider_state_for(command, status)
+  return "changing" if status == "running" && %w[up down start stop].include?(command)
+  if status == "failed"
+    return nil if %w[resolve status ip ssh].include?(command)
+
+    return "error"
+  end
+  return nil unless status == "succeeded"
+
+  {
+    "init" => "initialized",
+    "plan" => "planned",
+    "up" => "running",
+    "start" => "running",
+    "stop" => "stopped",
+    "down" => "absent"
+  }[command]
+end
+
+def record_state(instance_name, operation, status, error = nil, desired_state = nil, provider_state = nil)
+  return if ENV["EGAME_DISABLE_STATE"] == "1"
+
+  cmd = [
+    File.join(ROOT, "scripts/instance-state"),
+    "--instance", instance_name,
+    "--operation", operation,
+    "--status", status
+  ]
+  cmd += ["--desired-state", desired_state] if desired_state
+  cmd += ["--provider-state", provider_state] if provider_state
+  cmd += ["--error", error] if error
+  system(*cmd, out: File::NULL, err: File::NULL)
+end
+
+instance_name = nil
+command = nil
+registry_path = ENV["EGAME_INSTANCE_REGISTRY"] ? File.expand_path(ENV["EGAME_INSTANCE_REGISTRY"], Dir.pwd) : nil
+dry_run = ENV["EGAME_PROVIDER_DRY_RUN"] == "1"
+extra_args = []
+
+args = ARGV.dup
+until args.empty?
+  arg = args.shift
+  case arg
+  when "--instance"
+    instance_name = args.shift
+  when "--command"
+    command = args.shift
+  when "--registry"
+    registry_path = File.expand_path(args.shift, Dir.pwd)
+  when "--dry-run"
+    dry_run = true
+  when "--"
+    extra_args = args
+    args = []
+  when "-h", "--help"
+    usage
+    exit 0
+  else
+    usage
+    exit 2
+  end
+end
+
+unless instance_name && command
+  usage
+  exit 2
+end
+
+INTERACTIVE_COMMANDS = %w[ssh].freeze
+
+begin
+  resolve_cmd = [File.join(ROOT, "scripts/instance-resolve"), "--instance", instance_name, "--emit", "json"]
+  resolve_cmd += ["--registry", registry_path] if registry_path
+  resolved = run_json(*resolve_cmd)
+
+  provider = resolved.fetch("machine").fetch("provider")
+  plugin_doc = run_json(File.join(ROOT, "scripts/plugin-list"), "--kind", "provider", "--json")
+  plugin = plugin_doc.fetch("plugins").find { |entry| entry["id"] == provider }
+  raise "provider plugin not found: #{provider}" unless plugin
+
+  spec = plugin.fetch("commands")[command]
+  raise "provider plugin #{provider} has no command: #{command}" unless spec
+
+  paths_cmd = [File.join(ROOT, "scripts/instance-paths"), "--instance", instance_name, "--emit", "json"]
+  paths_cmd += ["--registry", registry_path] if registry_path
+  paths = run_json(*paths_cmd)
+  overlay = paths.fetch("INSTANCE_OVERLAY_PATH")
+  overlay_cmd = [File.join(ROOT, "scripts/instance-profile-overlay"), "--instance", instance_name, "--output", overlay]
+  overlay_cmd += ["--registry", registry_path] if registry_path
+  overlay_out, overlay_status = Open3.capture2e(*overlay_cmd)
+  raise overlay_out unless overlay_status.success?
+
+  env = ENV.to_h.merge(
+    "EGAME_CATALOG_LOCAL" => overlay,
+    "EGAME_INSTANCE_NAME" => instance_name,
+    "EGAME_PROVIDER_PLUGIN" => provider
+  )
+  env["EGAME_INSTANCE_REGISTRY"] = registry_path if registry_path
+  env["EGAME_PLUGIN_DRY_RUN"] = "1" if dry_run
+
+  cmd = command_vector(plugin, spec) + extra_args
+  desired_state = desired_state_for(command)
+
+  if INTERACTIVE_COMMANDS.include?(command) && !dry_run
+    env["EGAME_RESOLVED_JSON"] = JSON.generate(resolved)
+    exec(env, *cmd, chdir: ROOT)
+  end
+
+  record_state(
+    instance_name,
+    "provider.#{command}",
+    "running",
+    nil,
+    desired_state,
+    provider_state_for(command, "running")
+  ) unless dry_run
+
+  exit_status = 0
+  Open3.popen3(env, *cmd, chdir: ROOT) do |stdin, stdout, stderr, wait_thr|
+    stdin.write(JSON.generate(resolved))
+    stdin.close
+    out_t = Thread.new { IO.copy_stream(stdout, $stdout) }
+    err_t = Thread.new { IO.copy_stream(stderr, $stderr) }
+    out_t.join
+    err_t.join
+    exit_status = wait_thr.value.exitstatus || 1
+  end
+  if exit_status.zero?
+    record_state(
+      instance_name,
+      "provider.#{command}",
+      "succeeded",
+      nil,
+      desired_state,
+      provider_state_for(command, "succeeded")
+    ) unless dry_run
+  else
+    record_state(
+      instance_name,
+      "provider.#{command}",
+      "failed",
+      "exit #{exit_status}",
+      desired_state,
+      provider_state_for(command, "failed")
+    ) unless dry_run
+  end
+  exit(exit_status)
+rescue StandardError => e
+  record_state(
+    instance_name,
+    "provider.#{command || "unknown"}",
+    "failed",
+    e.message,
+    desired_state_for(command),
+    provider_state_for(command, "failed")
+  ) if instance_name && !dry_run
+  warn "provider-dispatch: #{e.message}"
+  exit 1
+end

@@ -1,0 +1,95 @@
+#!/usr/bin/env ruby
+# Built-in provider plugin compatibility wrapper around existing profile scripts.
+
+require "json"
+
+ROOT = File.expand_path("..", __dir__)
+provider = ARGV.shift
+command = ARGV.shift
+extra_args = ARGV
+
+unless provider && command
+  warn "Usage: scripts/provider-plugin <provider> <command> [args...]"
+  exit 2
+end
+
+json_source = ENV["EGAME_RESOLVED_JSON"]
+resolved = if json_source
+             JSON.parse(json_source)
+           else
+             JSON.parse($stdin.read)
+           end
+actual_provider = resolved.fetch("machine").fetch("provider")
+instance_name = resolved.fetch("instance").fetch("name")
+
+if actual_provider != provider
+  warn "provider-plugin: manifest provider #{provider} does not match resolved provider #{actual_provider}"
+  exit 1
+end
+
+if ENV["EGAME_PLUGIN_DRY_RUN"] == "1" || command == "resolve"
+  puts JSON.generate({
+    "kind" => "provider",
+    "provider" => provider,
+    "command" => command,
+    "instance" => instance_name,
+    "profile" => instance_name,
+    "engine" => resolved.fetch("engine"),
+    "dry_run" => ENV["EGAME_PLUGIN_DRY_RUN"] == "1"
+  })
+  exit 0
+end
+
+make_targets = {
+  "start" => "start",
+  "stop" => "stop",
+  "status" => "status"
+}
+
+case command
+when "init"
+  if resolved.fetch("engine") == "metal"
+    warn "[init] instance=#{instance_name} uses metal hardware; no Terraform backend to initialize."
+    exit 0
+  end
+  exec File.join(ROOT, "scripts/tf-init"), instance_name
+when "plan"
+  case resolved.fetch("engine")
+  when "vagrant"
+    exec File.join(ROOT, "scripts/vagrant-up"), "--plan", instance_name
+  when "metal"
+    warn "[plan] instance=#{instance_name} uses metal hardware; provisioning will run over SSH."
+    exec File.join(ROOT, "scripts/profile-resolve"), "--profile", instance_name, "--emit", "env"
+  else
+    exec File.join(ROOT, "scripts/tf-plan"), instance_name
+  end
+when "up"
+  case resolved.fetch("engine")
+  when "vagrant"
+    exec File.join(ROOT, "scripts/vagrant-up"), instance_name
+  when "metal"
+    warn "[up] instance=#{instance_name} uses metal hardware; nothing to create."
+    exit 0
+  else
+    exec File.join(ROOT, "scripts/tf-apply"), instance_name
+  end
+when "down"
+  case resolved.fetch("engine")
+  when "vagrant"
+    exec File.join(ROOT, "scripts/vagrant-destroy"), instance_name
+  when "metal"
+    warn "[down] instance=#{instance_name} uses metal hardware; nothing to destroy."
+    exit 0
+  else
+    exec File.join(ROOT, "scripts/tf-destroy"), instance_name
+  end
+when *make_targets.keys
+  exec File.join(ROOT, "scripts", make_targets.fetch(command)), instance_name
+when "ip"
+  exec File.join(ROOT, "scripts/instance-ip"), instance_name
+when "ssh"
+  exec File.join(ROOT, "scripts/instance-ssh"), instance_name, *extra_args
+else
+  warn "provider-plugin: unsupported command: #{command}"
+  exit 2
+end

@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# Run a remote Wayland app through waypipe.
+#
+# Usage:
+#   scripts/remote-waypipe <profile-or-instance> [app [args...]]
+
+set -euo pipefail
+
+PROFILE="${1:?Usage: scripts/remote-waypipe <profile-or-instance> [app [args...]]}"
+shift || true
+APP=("$@")
+if [ "${#APP[@]}" -eq 0 ]; then
+  APP=(foot)
+fi
+
+cd "$(git rev-parse --show-toplevel)"
+# shellcheck source=lib/instance-workdir.sh
+. ./scripts/lib/instance-workdir.sh
+
+if ! command -v waypipe >/dev/null 2>&1; then
+  echo "remote-waypipe: local waypipe is not installed." >&2
+  echo "  macOS: brew tap J-x-Z/tap && brew install cocoa-way waypipe-darwin" >&2
+  exit 2
+fi
+
+if [ -z "${WAYLAND_DISPLAY:-}" ]; then
+  echo "remote-waypipe: WAYLAND_DISPLAY is not set on the local machine." >&2
+  if [ -n "${DISPLAY:-}" ]; then
+    echo "  DISPLAY=$DISPLAY is an X11/XQuartz display, not a Wayland socket." >&2
+  fi
+  echo "  Start Cocoa-Way first: cocoa-way" >&2
+  printf '%s\n' "  Then export XDG_RUNTIME_DIR=\"\$(find /var/folders /tmp -type d -name cocoa-way 2>/dev/null | head -n 1)\"" >&2
+  echo "  And export WAYLAND_DISPLAY=wayland-1 before retrying." >&2
+  exit 2
+fi
+
+RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
+ENGINE=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^ENGINE=/{print $2}')
+PROVIDER=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^PROVIDER=/{print $2}')
+OS_FAMILY=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^OS_FAMILY=/{print $2}')
+
+if [ "$OS_FAMILY" != "ubuntu" ]; then
+  echo "remote-waypipe: waypipe is currently implemented for Ubuntu instances only." >&2
+  exit 2
+fi
+
+if [ "$ENGINE" = "vagrant" ]; then
+  ./scripts/vagrant-up --plan "$PROFILE" >/dev/null
+  tmp_config="$(mktemp "${TMPDIR:-/tmp}/egame-waypipe-ssh.XXXXXX")"
+  trap 'rm -f "$tmp_config"' EXIT
+  (cd "$(egame_instance_workdir "$PROFILE")" && vagrant ssh-config >"$tmp_config")
+  exec waypipe ssh -o StreamLocalBindUnlink=yes -F "$tmp_config" default "${APP[@]}"
+fi
+
+SSH_USER=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^SSH_USER=/{print $2}')
+if [ "$ENGINE" = "metal" ] && [ "$PROVIDER" = "raspberry-pi" ] && [ -n "${RASPBERRY_PI_IP:-}" ]; then
+  IP="$RASPBERRY_PI_IP"
+else
+  IP=$(./scripts/instance-ip "$PROFILE")
+fi
+[ -n "$IP" ] || { echo "remote-waypipe: could not resolve IP for $PROFILE" >&2; exit 1; }
+
+KEY_FILE="${SSH_PUBLIC_KEY_FILE:-}"
+if [ -n "$KEY_FILE" ] && [ "${KEY_FILE%.pub}" != "$KEY_FILE" ]; then
+  PRIV_KEY="${KEY_FILE%.pub}"
+else
+  PRIV_KEY="${SSH_PRIVATE_KEY_FILE:-}"
+fi
+
+SSH_OPTS=(-o StrictHostKeyChecking=no -o ServerAliveInterval=10 -o WarnWeakCrypto=no-pq-kex -o StreamLocalBindUnlink=yes)
+[ -n "$PRIV_KEY" ] && SSH_OPTS+=(-i "$PRIV_KEY" -o IdentitiesOnly=yes)
+
+exec waypipe ssh "${SSH_OPTS[@]}" "$SSH_USER@$IP" "${APP[@]}"

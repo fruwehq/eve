@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+# Validate external plugin synchronization without network access.
+
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+tmp_root="$(mktemp -d "${TMPDIR:-/tmp}/egame-plugins-sync-test.XXXXXX")"
+trap 'rm -rf "$tmp_root"' EXIT
+
+source_repo="$tmp_root/source-repo"
+dest_root="$tmp_root/plugins"
+sources_file="$tmp_root/plugin-sources.yaml"
+unpinned_sources_file="$tmp_root/plugin-sources-unpinned.yaml"
+bad_sources_file="$tmp_root/plugin-sources-bad.yaml"
+sync_err="$tmp_root/sync.err"
+unpinned_err="$tmp_root/unpinned.err"
+bad_err="$tmp_root/bad.err"
+
+mkdir -p "$source_repo/packages/sample"
+cat >"$source_repo/packages/sample/egame-plugin.yaml" <<'YAML'
+api_version: egame.plugin/v1
+kind: package
+id: sample
+display_name: Sample Synced Package
+commands:
+  install: {exec: scripts/package-plugin, args: [sample, install]}
+  status: {exec: scripts/package-plugin, args: [sample, status]}
+  down: {exec: scripts/package-plugin, args: [sample, down]}
+supports: {os_families: [ubuntu]}
+down: {destructive: false}
+env: []
+YAML
+
+git -C "$source_repo" init -q
+git -C "$source_repo" add packages/sample/egame-plugin.yaml
+git -C "$source_repo" -c user.email=egame@example.invalid -c user.name=egame commit -q -m "sample plugin"
+ref="$(git -C "$source_repo" rev-parse HEAD)"
+
+cat >"$sources_file" <<YAML
+sources:
+  - id: local
+    url: $source_repo
+    ref: $ref
+YAML
+
+if ./scripts/plugins-sync --sources "$sources_file" --dest "$dest_root" >/dev/null 2>"$sync_err" &&
+  [ -f "$dest_root/local/packages/sample/egame-plugin.yaml" ] &&
+  [ "$(git -C "$dest_root/local" rev-parse HEAD)" = "$ref" ]; then
+  printf '  [OK] plugins-sync clones pinned local source\n'
+else
+  printf '  [FAIL] plugins-sync clones pinned local source\n' >&2
+  cat "$sync_err" >&2
+  exit 1
+fi
+
+cat >"$unpinned_sources_file" <<YAML
+sources:
+  - id: unpinned
+    url: $source_repo
+YAML
+
+if ./scripts/plugins-sync --sources "$unpinned_sources_file" --dest "$tmp_root/unpinned-dest" >/dev/null 2>"$unpinned_err"; then
+  printf '  [FAIL] plugins-sync accepted unpinned source without override\n' >&2
+  exit 1
+elif [ -e "$tmp_root/unpinned-dest/unpinned" ]; then
+  printf '  [FAIL] plugins-sync mutated destination for unpinned source\n' >&2
+  exit 1
+else
+  printf '  [OK] plugins-sync rejects unpinned source before mutation\n'
+fi
+
+cat >"$bad_sources_file" <<'YAML'
+sources: not-a-list
+YAML
+
+if ./scripts/plugins-sync --sources "$bad_sources_file" --dest "$tmp_root/bad-dest" >/dev/null 2>"$bad_err"; then
+  printf '  [FAIL] plugins-sync accepted malformed sources list\n' >&2
+  exit 1
+elif grep -q "sources must be a list" "$bad_err" && [ ! -e "$tmp_root/bad-dest" ]; then
+  printf '  [OK] plugins-sync rejects malformed source file before mutation\n'
+else
+  printf '  [FAIL] plugins-sync rejects malformed source file before mutation\n' >&2
+  cat "$bad_err" >&2
+  exit 1
+fi

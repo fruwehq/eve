@@ -47,10 +47,11 @@ KEY=$("${SSH_CMD[@]}" "$KEY_CMD" | tr -d '\r' || true)
 case "$ACTION" in
   connect)
     RUSTDESK_CLI=""
-    for candidate in \
-      rustdesk \
-      /Applications/RustDesk.app/Contents/MacOS/rustdesk \
-      /usr/bin/rustdesk; do
+    if [ "$(uname -s)" = "Darwin" ] && [ -x /Applications/RustDesk.app/Contents/MacOS/rustdesk ]; then
+      RUSTDESK_CLI=/Applications/RustDesk.app/Contents/MacOS/rustdesk
+    fi
+    for candidate in rustdesk /usr/bin/rustdesk; do
+      [ -z "$RUSTDESK_CLI" ] || break
       if command -v "$candidate" >/dev/null 2>&1 || [ -x "$candidate" ]; then
         RUSTDESK_CLI="$candidate"
         break

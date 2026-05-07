@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+set -eu
+
+exec ./scripts/package-down-command dev-toolchain 'rustup self uninstall -y || true; sudo apt-get remove -y build-essential pkg-config libssl-dev || true'

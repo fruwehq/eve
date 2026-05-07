@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+set -eu
+
+exec ./scripts/package-down-command sunshine 'systemctl --user disable --now sunshine || true; sudo systemctl disable --now sunshine || true; sudo apt-get remove -y sunshine || true'

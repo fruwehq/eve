@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+set -eu
+
+exec ./scripts/package-status-command opencode 'if command -v opencode >/dev/null 2>&1 || [ -x "$HOME/.local/bin/opencode" ]; then echo installed; else echo missing; fi'

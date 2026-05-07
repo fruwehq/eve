@@ -18,7 +18,14 @@ fi
 TAGS=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^STACK_TAGS=/{print $2}')
 echo "[tf-destroy] profile=$PROFILE tags=$TAGS"
 
+TM_RUN_FLAGS=(
+  --disable-safeguards=git-untracked
+  --disable-safeguards=git-uncommitted
+  --disable-safeguards=git-out-of-sync
+  --disable-safeguards=outdated-code
+)
+
 terramate generate
 
 eval "$(./scripts/tf-env "$PROFILE")"
-terramate run --tags="$TAGS" --reverse -- terraform destroy -auto-approve
+terramate run "${TM_RUN_FLAGS[@]}" --tags="$TAGS" --reverse -- terraform destroy -auto-approve

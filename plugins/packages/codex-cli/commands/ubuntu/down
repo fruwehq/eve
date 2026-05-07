@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+set -eu
+
+exec ./scripts/package-down-command codex-cli 'npm uninstall -g @openai/codex || true; rm -f ~/.local/bin/codex'

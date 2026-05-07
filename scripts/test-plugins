@@ -1,0 +1,822 @@
+#!/usr/bin/env bash
+# Validate v3 plugin manifests and dry-run dispatch contracts.
+
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+FIXTURE="tests/fixtures/instances.yaml"
+PLUGIN_FIXTURE="tests/fixtures/plugins/packages/dummy"
+LOCAL_EXEC_PLUGIN_FIXTURE="tests/fixtures/plugins/packages/local-exec"
+OVERRIDE_PLUGIN_FIXTURE="tests/fixtures/plugins/packages/docker-override"
+EXAMPLE_PACKAGE_PLUGIN="examples/plugins/packages/hello-package"
+EXAMPLE_PROVIDER_PLUGIN="examples/plugins/providers/echo-provider"
+BAD_PLUGIN_FIXTURE="tests/fixtures/plugins/packages/bad"
+BAD_INSTALL_UBUNTU_FIXTURE="tests/fixtures/plugins/packages/bad-install-ubuntu"
+BAD_INSTALL_WINDOWS_STATE_FIXTURE="tests/fixtures/plugins/packages/bad-install-windows-state"
+BAD_INSTALL_NON_STRING_FIXTURE="tests/fixtures/plugins/packages/bad-install-non-string"
+BAD_PACKAGE_SUPPORTS_FIXTURE="tests/fixtures/plugins/packages/bad-supports"
+BAD_PROVIDER_SUPPORTS_FIXTURE="tests/fixtures/plugins/providers/bad-supports"
+WIN_ONLY_PLUGIN_FIXTURE="tests/fixtures/plugins/packages/win-only"
+profile_catalog_dir="$(mktemp -d "${TMPDIR:-/tmp}/egame-plugin-profiles.XXXXXX")"
+profile_catalog="$profile_catalog_dir/catalog.local.yaml"
+state_dir=""
+waypipe_bin_dir=""
+FAIL=0
+
+trap 'rm -rf "$profile_catalog_dir"; if [ -n "$state_dir" ]; then rm -rf "$state_dir"; fi; if [ -n "$waypipe_bin_dir" ]; then rm -rf "$waypipe_bin_dir"; fi' EXIT
+
+cat >"$profile_catalog" <<'YAML'
+profiles:
+  - name: local-qemu-ubuntu-dev-gui
+    machine: local-qemu-medium
+    os: ubuntu-26.04-arm64
+    init: ssh-ubuntu-cloud-init
+    bundles: [dev-ai]
+    location: tokyo
+
+  - name: vultr-windows-gaming
+    machine: vultr-vcg-a40-2c
+    os: windows-server-2025
+    init: ssh-windows-powershell7
+    bundles: [gaming-streaming]
+    location: tokyo
+YAML
+export EGAME_CATALOG_LOCAL="$profile_catalog"
+
+check() {
+  local label="$1"
+  shift
+  if "$@"; then
+    printf '  [OK] %s\n' "$label"
+  else
+    printf '  [FAIL] %s\n' "$label" >&2
+    FAIL=$((FAIL + 1))
+  fi
+}
+
+aws_provider_listed() {
+  ./scripts/plugin-list --kind provider --json |
+    jq -e '.plugins[] | select(.id == "aws" and .kind == "provider")' >/dev/null
+}
+
+docker_package_listed() {
+  ./scripts/plugin-list --kind package --json |
+    jq -e '.plugins[] | select(.id == "docker" and .kind == "package")' >/dev/null
+}
+
+instance_maps_plugins() {
+  ./scripts/instance-resolve --registry "$FIXTURE" --instance dev-a --emit json |
+    jq -e '.provider_plugin == "local-qemu" and (.package_plugins[] | select(.id == "docker" and .plugin == "docker"))' >/dev/null
+}
+
+dummy_plugin_listed() {
+  EGAME_PLUGIN_ROOTS="$PLUGIN_FIXTURE" ./scripts/plugin-list --kind package --json |
+    jq -e '.plugins[] | select(.id == "dummy" and .kind == "package")' >/dev/null
+}
+
+local_exec_plugin_listed() {
+  EGAME_PLUGIN_ROOTS="$LOCAL_EXEC_PLUGIN_FIXTURE" ./scripts/plugin-list --kind package --json |
+    jq -e '.plugins[] | select(.id == "local-exec" and .kind == "package")' >/dev/null
+}
+
+override_plugin_replaces_builtin() {
+  EGAME_PLUGIN_ALLOW_OVERRIDE=1 EGAME_PLUGIN_ROOTS="$OVERRIDE_PLUGIN_FIXTURE" ./scripts/plugin-list --kind package --json |
+    jq -e '[.plugins[] | select(.id == "docker")] | length == 1 and .[0].display_name == "Docker Override Test Package"' >/dev/null
+}
+
+check "built-in plugins validate" ./scripts/plugin-list --validate
+
+check "aws provider plugin listed" aws_provider_listed
+
+check "docker package plugin listed" docker_package_listed
+
+check "instance resolver maps provider and package plugins" instance_maps_plugins
+
+check "external dummy plugin listed" dummy_plugin_listed
+
+check "external plugin-local exec listed" local_exec_plugin_listed
+
+check "external plugin override replaces built-in" override_plugin_replaces_builtin
+
+if EGAME_PLUGIN_ROOTS="$EXAMPLE_PACKAGE_PLUGIN:$EXAMPLE_PROVIDER_PLUGIN" ./scripts/plugin-list --validate >/dev/null; then
+  printf '  [OK] documented example plugins validate\n'
+else
+  printf '  [FAIL] documented example plugins validate\n' >&2
+  EGAME_PLUGIN_ROOTS="$EXAMPLE_PACKAGE_PLUGIN:$EXAMPLE_PROVIDER_PLUGIN" ./scripts/plugin-list --validate >&2 || true
+  FAIL=$((FAIL + 1))
+fi
+
+if EGAME_PLUGIN_ROOTS="$BAD_PLUGIN_FIXTURE" ./scripts/plugin-list --json >/dev/null 2>&1; then
+  printf '  [FAIL] invalid external plugin rejected\n' >&2
+  FAIL=$((FAIL + 1))
+else
+  printf '  [OK] invalid external plugin rejected\n'
+fi
+
+# A built-in install block (steam) must validate cleanly.  This exercises
+# the new package-install schema check on real manifests.
+if ./scripts/plugin-list --kind package --json | \
+  jq -e '.plugins[] | select(.id == "steam") | (.install.ubuntu.steps | length > 0) and (.install.windows.steps | length > 0)' >/dev/null; then
+  printf '  [OK] built-in package install metadata validates\n'
+else
+  printf '  [FAIL] built-in package install metadata validates\n' >&2
+  FAIL=$((FAIL + 1))
+fi
+
+if ./scripts/plugin-list --kind package --json | \
+  jq -e '.plugins[] | select(.id == "sunshine") | [.actions[].id] == ["sunshine", "pair-moonlight", "moonlight"]' >/dev/null; then
+  printf '  [OK] package remote action metadata validates\n'
+else
+  printf '  [FAIL] package remote action metadata validates\n' >&2
+  FAIL=$((FAIL + 1))
+fi
+
+if ./scripts/package-list --registry "$FIXTURE" --instance dev-a --json | \
+  jq -e '.packages[] | select(.id == "rustdesk") | (.actions[] | select(.id == "rustdesk" and .target == "rustdesk.connect"))' >/dev/null; then
+  printf '  [OK] package-list exposes package actions to callers\n'
+else
+  printf '  [FAIL] package-list exposes package actions to callers\n' >&2
+  FAIL=$((FAIL + 1))
+fi
+
+if ./scripts/package-list --registry "$FIXTURE" --instance dev-a --json | \
+  jq -e '.packages[] | select(.id == "vnc") | (.actions[] | select(.id == "vnc" and .prompt.env == "VNC_VIEWER" and [.prompt.choices[].value] == ["auto", "system", "tigervnc"]))' >/dev/null; then
+  printf '  [OK] package-list exposes UI prompt metadata for package actions\n'
+else
+  printf '  [FAIL] package-list exposes UI prompt metadata for package actions\n' >&2
+  FAIL=$((FAIL + 1))
+fi
+
+if ./scripts/package-list --registry "$FIXTURE" --instance dev-a --json | \
+  jq -e '.packages[] | select(.id == "rdp") | .actions == []' >/dev/null; then
+  printf '  [OK] package-list hides Windows-only RDP action on Ubuntu\n'
+else
+  printf '  [FAIL] package-list hides Windows-only RDP action on Ubuntu\n' >&2
+  ./scripts/package-list --registry "$FIXTURE" --instance dev-a --json >&2 || true
+  FAIL=$((FAIL + 1))
+fi
+
+if EGAME_INSTANCE_REGISTRY="$FIXTURE" ./scripts/package-action --instance dev-a --package rustdesk --action rustdesk-info --dry-run | \
+  jq -e '.kind == "package-action" and .package == "rustdesk" and .action == "rustdesk-info" and .target == "rustdesk.info" and .dry_run == true' >/dev/null; then
+  printf '  [OK] package action dry-run resolves manifest target\n'
+else
+  printf '  [FAIL] package action dry-run resolves manifest target\n' >&2
+  FAIL=$((FAIL + 1))
+fi
+
+waypipe_bin_dir="$(mktemp -d "${TMPDIR:-/tmp}/egame-waypipe-bin.XXXXXX")"
+printf '#!/usr/bin/env sh\nexit 99\n' >"$waypipe_bin_dir/waypipe"
+chmod +x "$waypipe_bin_dir/waypipe"
+waypipe_err="$(env PATH="$waypipe_bin_dir:$PATH" WAYLAND_DISPLAY= DISPLAY=/tmp/org.xquartz:0 ./scripts/remote-waypipe dev-a 2>&1 >/dev/null || true)"
+if printf '%s' "$waypipe_err" | grep -q "X11/XQuartz display, not a Wayland socket"; then
+  printf '  [OK] remote-waypipe rejects XQuartz without local Wayland\n'
+else
+  printf '  [FAIL] remote-waypipe rejects XQuartz without local Wayland\n' >&2
+  printf '%s\n' "$waypipe_err" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+bad_install_ubuntu_err="$(EGAME_PLUGIN_ROOTS="$BAD_INSTALL_UBUNTU_FIXTURE" ./scripts/plugin-list --validate 2>&1 || true)"
+if printf '%s' "$bad_install_ubuntu_err" | grep -q "install.ubuntu.steps must be a non-empty list"; then
+  printf '  [OK] plugin with empty install.ubuntu.steps rejected\n'
+else
+  printf '  [FAIL] plugin with empty install.ubuntu.steps rejected\n' >&2
+  printf '%s\n' "$bad_install_ubuntu_err" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+bad_install_windows_err="$(EGAME_PLUGIN_ROOTS="$BAD_INSTALL_WINDOWS_STATE_FIXTURE" ./scripts/plugin-list --validate 2>&1 || true)"
+if printf '%s' "$bad_install_windows_err" | grep -q "install.windows.state_files contains unsupported entries"; then
+  printf '  [OK] plugin with unsupported install.windows.state_files rejected\n'
+else
+  printf '  [FAIL] plugin with unsupported install.windows.state_files rejected\n' >&2
+  printf '%s\n' "$bad_install_windows_err" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+bad_install_non_string_err="$(EGAME_PLUGIN_ROOTS="$BAD_INSTALL_NON_STRING_FIXTURE" ./scripts/plugin-list --validate 2>&1 || true)"
+if printf '%s' "$bad_install_non_string_err" | grep -q "install.ubuntu.steps must be a list of strings"; then
+  printf '  [OK] plugin with non-string install.ubuntu.steps entry rejected\n'
+else
+  printf '  [FAIL] plugin with non-string install.ubuntu.steps entry rejected\n' >&2
+  printf '%s\n' "$bad_install_non_string_err" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+bad_provider_supports_err="$(EGAME_PLUGIN_ROOTS="$BAD_PROVIDER_SUPPORTS_FIXTURE" ./scripts/plugin-list --validate 2>&1 || true)"
+if printf '%s' "$bad_provider_supports_err" | grep -q "supports.engines must be a list"; then
+  printf '  [OK] provider plugin with malformed supports.engines rejected\n'
+else
+  printf '  [FAIL] provider plugin with malformed supports.engines rejected\n' >&2
+  printf '%s\n' "$bad_provider_supports_err" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+bad_package_supports_err="$(EGAME_PLUGIN_ROOTS="$BAD_PACKAGE_SUPPORTS_FIXTURE" ./scripts/plugin-list --validate 2>&1 || true)"
+if printf '%s' "$bad_package_supports_err" | grep -q "supports.os_families must be a list"; then
+  printf '  [OK] package plugin with malformed supports.os_families rejected\n'
+else
+  printf '  [FAIL] package plugin with malformed supports.os_families rejected\n' >&2
+  printf '%s\n' "$bad_package_supports_err" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+provider_matrix_failed=0
+for provider_case in \
+  "dev-a:local-qemu:vagrant" \
+  "qemu-a:local-qemu:vagrant" \
+  "aws-gpu-a:aws:terraform" \
+  "truenas-all-a:truenas:terraform" \
+  "rpi-all-a:raspberry-pi:metal"; do
+  IFS=: read -r provider_instance provider_id provider_engine <<EOF
+$provider_case
+EOF
+  for provider_command in resolve init plan up down start stop status ip ssh; do
+    provider_dry_run="$(
+      EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-provider-dispatch-test" \
+        ./scripts/provider-dispatch --registry "$FIXTURE" --instance "$provider_instance" --command "$provider_command" --dry-run
+    )"
+    if ! printf '%s\n' "$provider_dry_run" |
+      jq -e --arg provider "$provider_id" --arg command "$provider_command" --arg engine "$provider_engine" \
+        '.kind == "provider" and .provider == $provider and .command == $command and .engine == $engine and .dry_run == true' >/dev/null; then
+      printf '  [FAIL] provider dispatch dry-run mismatch: instance=%s command=%s\n' "$provider_instance" "$provider_command" >&2
+      printf '%s\n' "$provider_dry_run" >&2
+      provider_matrix_failed=$((provider_matrix_failed + 1))
+    fi
+  done
+done
+if [ "$provider_matrix_failed" -eq 0 ]; then
+  printf '  [OK] provider dispatch dry-run matrix\n'
+else
+  FAIL=$((FAIL + 1))
+fi
+
+package_status="$(
+  EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-package-dispatch-test" \
+    ./scripts/package-dispatch --registry "$FIXTURE" --instance dev-a --package docker --command status --dry-run
+)"
+if printf '%s\n' "$package_status" | jq -e '.package == "docker" and .command == "status" and .selected == true and .status == "unknown"' >/dev/null; then
+  printf '  [OK] package status dry-run\n'
+else
+  printf '  [FAIL] package status dry-run\n' >&2
+  printf '%s\n' "$package_status" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+unsupported_package_err="$(
+  EGAME_PLUGIN_ROOTS="$WIN_ONLY_PLUGIN_FIXTURE" \
+    EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-package-dispatch-test" \
+    ./scripts/package-dispatch --registry "$FIXTURE" --instance dev-a --package win-only --command status --dry-run 2>&1 >/dev/null || true
+)"
+if printf '%s\n' "$unsupported_package_err" | grep -q "package plugin win-only does not support os family ubuntu"; then
+  printf '  [OK] package dispatch rejects unsupported os family\n'
+else
+  printf '  [FAIL] package dispatch rejects unsupported os family\n' >&2
+  printf '%s\n' "$unsupported_package_err" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+unsupported_version_err="$(
+  EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-package-dispatch-test" \
+    ./scripts/package-dispatch --registry "$FIXTURE" --instance truenas-all-a --package xpra --command status --dry-run 2>&1 >/dev/null || true
+)"
+if printf '%s\n' "$unsupported_version_err" | grep -q "package plugin xpra does not support ubuntu version 26.04"; then
+  printf '  [OK] package dispatch rejects unsupported os version\n'
+else
+  printf '  [FAIL] package dispatch rejects unsupported os version\n' >&2
+  printf '%s\n' "$unsupported_version_err" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+package_install="$(
+  EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-package-dispatch-test" \
+    ./scripts/package-provision --profile local-qemu-ubuntu-dev-gui --package docker --dry-run
+)"
+if printf '%s\n' "$package_install" | jq -e '.kind == "package-provision" and .package == "docker" and .steps == ["00_base.sh", "05_timezone.sh", "10_docker.sh"] and .dry_run == true' >/dev/null; then
+  printf '  [OK] ubuntu package install maps to granular provision steps\n'
+else
+  printf '  [FAIL] ubuntu package install maps to granular provision steps\n' >&2
+  printf '%s\n' "$package_install" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+codex_install="$(
+  ./scripts/package-provision --profile local-qemu-ubuntu-dev-gui --package codex-cli --dry-run
+)"
+if printf '%s\n' "$codex_install" | jq -e '.package == "codex-cli" and .steps == ["00_base.sh", "05_timezone.sh", "20_dev-toolchain.sh", "30_codex-cli.sh"] and .package_markers == ["dev-toolchain", "codex-cli"]' >/dev/null; then
+  printf '  [OK] package install includes dependency package markers\n'
+else
+  printf '  [FAIL] package install includes dependency package markers\n' >&2
+  printf '%s\n' "$codex_install" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+windows_steam_install="$(
+  ./scripts/package-provision-windows --profile vultr-windows-gaming --package steam --dry-run
+)"
+if printf '%s\n' "$windows_steam_install" | jq -e '.kind == "package-provision-windows" and .package == "steam" and .os_family == "windows" and .steps == ["30_steam.ps1"] and .state_files == [] and .fallback == false and .dry_run == true' >/dev/null; then
+  printf '  [OK] windows steam install maps to steam step\n'
+else
+  printf '  [FAIL] windows steam install maps to steam step\n' >&2
+  printf '%s\n' "$windows_steam_install" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+windows_rustdesk_install="$(
+  ./scripts/package-provision-windows --profile vultr-windows-gaming --package rustdesk --dry-run
+)"
+if printf '%s\n' "$windows_rustdesk_install" | jq -e '.package == "rustdesk" and .steps == ["40_rustdesk.ps1"] and .state_files == ["env.json"] and .fallback == false' >/dev/null; then
+  printf '  [OK] windows rustdesk install maps to rustdesk step\n'
+else
+  printf '  [FAIL] windows rustdesk install maps to rustdesk step\n' >&2
+  printf '%s\n' "$windows_rustdesk_install" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+if printf '%s\n' "$windows_rustdesk_install" | jq -e '.state_files | index("env.json")' >/dev/null; then
+  printf '  [OK] windows rustdesk install uploads env.json so rendezvous/key/password are configured\n'
+else
+  printf '  [FAIL] windows rustdesk install uploads env.json so rendezvous/key/password are configured\n' >&2
+  printf '%s\n' "$windows_rustdesk_install" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+windows_xpra_install="$(
+  ./scripts/package-provision-windows --profile vultr-windows-gaming --package xpra --dry-run
+)"
+if printf '%s\n' "$windows_xpra_install" | jq -e '.package == "xpra" and .steps == ["35_xpra.ps1"] and .state_files == [] and .fallback == false' >/dev/null; then
+  printf '  [OK] windows xpra install maps to xpra step\n'
+else
+  printf '  [FAIL] windows xpra install maps to xpra step\n' >&2
+  printf '%s\n' "$windows_xpra_install" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+windows_sunshine_install="$(
+  ./scripts/package-provision-windows --profile vultr-windows-gaming --package sunshine --dry-run
+)"
+if printf '%s\n' "$windows_sunshine_install" | jq -e '.package == "sunshine" and .steps == [] and .state_files == [] and .fallback == true' >/dev/null; then
+  printf '  [OK] windows sunshine install falls back to full provisioning\n'
+else
+  printf '  [FAIL] windows sunshine install falls back to full provisioning\n' >&2
+  printf '%s\n' "$windows_sunshine_install" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+windows_unmapped_install="$(
+  ./scripts/package-provision-windows --profile vultr-windows-gaming --package docker --dry-run
+)"
+if printf '%s\n' "$windows_unmapped_install" | jq -e '.package == "docker" and .steps == [] and .state_files == [] and .fallback == true' >/dev/null; then
+  printf '  [OK] windows package without granular mapping falls back\n'
+else
+  printf '  [FAIL] windows package without granular mapping falls back\n' >&2
+  printf '%s\n' "$windows_unmapped_install" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+manifest_steam_steps="$(
+  ./scripts/plugin-list --kind package --json | \
+    jq -r '.plugins[] | select(.id == "steam") | .install.ubuntu.steps | join(",")'
+)"
+if [ "$manifest_steam_steps" = "00_base.sh,05_timezone.sh,70_steam.sh" ]; then
+  printf '  [OK] steam plugin manifest declares ubuntu install steps\n'
+else
+  printf '  [FAIL] steam plugin manifest declares ubuntu install steps (got: %s)\n' "$manifest_steam_steps" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+# shellcheck disable=SC2016 # The single-quoted strings below are literal
+# patterns/messages -- $PACKAGE refers to the variable name in the scripts
+# under test, not in this shell.
+hardcoded_hits="$(grep -nE 'case[[:space:]]+"?\$PACKAGE"?' scripts/package-provision scripts/package-provision-windows || true)"
+if [ -n "$hardcoded_hits" ]; then
+  # shellcheck disable=SC2016
+  printf '  [FAIL] package install scripts still contain a case "$PACKAGE" mapping\n' >&2
+  printf '%s\n' "$hardcoded_hits" >&2
+  FAIL=$((FAIL + 1))
+else
+  # shellcheck disable=SC2016
+  printf '  [OK] package install scripts have no hardcoded case "$PACKAGE" mapping\n'
+fi
+
+hardcoded_step_refs="$(grep -nE '\b(00_base\.sh|05_timezone\.sh|10_docker\.sh|20_dev-toolchain\.sh|30_codex-cli\.sh|40_goose\.sh|45_xpra\.sh|46_vnc\.sh|47_waypipe\.sh|48_gnome_desktop\.sh|49_macos_desktop_theme\.sh|50_rustdesk\.sh|60_sunshine\.sh|70_steam\.sh|10_sunshine\.ps1|30_steam\.ps1|35_xpra\.ps1|40_rustdesk\.ps1)\b' scripts/package-provision scripts/package-provision-windows || true)"
+if [ -n "$hardcoded_step_refs" ]; then
+  printf '  [FAIL] package install scripts still reference step files directly\n' >&2
+  printf '%s\n' "$hardcoded_step_refs" >&2
+  FAIL=$((FAIL + 1))
+else
+  printf '  [OK] package install scripts read step files from plugin manifests only\n'
+fi
+
+package_list="$(
+  EGAME_INSTANCE_REGISTRY="$FIXTURE" make --no-print-directory package.list INSTANCE=dev-a EMIT=json
+)"
+if printf '%s\n' "$package_list" | jq -e '.instance == "dev-a" and (.packages[] | select(.id == "docker" and .selected == true and .supported == true and .plugin == "docker" and (.selected_by | index("bundle:dev-ai")))) and (.packages[] | select(.id == "steam" and .selected == false and .selected_by == []))' >/dev/null; then
+  printf '  [OK] package list shows selected and available packages\n'
+else
+  printf '  [FAIL] package list shows selected and available packages\n' >&2
+  printf '%s\n' "$package_list" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+if EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-package-dispatch-test" \
+  ./scripts/package-dispatch --registry "$FIXTURE" --instance dev-a --package docker --command down --dry-run >/dev/null 2>&1; then
+  printf '  [FAIL] destructive package down requires confirmation\n' >&2
+  FAIL=$((FAIL + 1))
+else
+  printf '  [OK] destructive package down requires confirmation\n'
+fi
+
+dummy_reinstall="$(
+  EGAME_PLUGIN_ROOTS="$PLUGIN_FIXTURE" \
+    EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-package-dispatch-test" \
+    ./scripts/package-dispatch --registry "$FIXTURE" --instance dev-a --package dummy --command reinstall --dry-run
+)"
+if printf '%s\n' "$dummy_reinstall" | jq -s -e 'map(.command) == ["down", "install"]' >/dev/null; then
+  printf '  [OK] package reinstall defaults to down then install\n'
+else
+  printf '  [FAIL] package reinstall defaults to down then install\n' >&2
+  printf '%s\n' "$dummy_reinstall" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+dummy_hook="$(
+  EGAME_PLUGIN_ROOTS="$PLUGIN_FIXTURE" \
+    EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-package-dispatch-test" \
+    EGAME_DISABLE_STATE=1 \
+    ./scripts/package-dispatch --registry "$FIXTURE" --instance dev-a --package dummy --command status
+)"
+if printf '%s\n' "$dummy_hook" | jq -e '.kind == "package-hook" and .package == "dummy" and .instance == "dev-a" and .command == "status" and .status == "installed"' >/dev/null; then
+  printf '  [OK] package plugin command folder hook runs\n'
+else
+  printf '  [FAIL] package plugin command folder hook runs\n' >&2
+  printf '%s\n' "$dummy_hook" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+local_exec_output="$(
+  EGAME_PLUGIN_ROOTS="$LOCAL_EXEC_PLUGIN_FIXTURE" \
+    EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-package-dispatch-test" \
+    EGAME_DISABLE_STATE=1 \
+    ./scripts/package-dispatch --registry "$FIXTURE" --instance dev-a --package local-exec --command status
+)"
+if printf '%s\n' "$local_exec_output" | jq -e '.kind == "package-local-exec" and .package == "local-exec" and .instance == "dev-a" and .command == "status"' >/dev/null; then
+  printf '  [OK] external plugin-local exec dispatch runs\n'
+else
+  printf '  [FAIL] external plugin-local exec dispatch runs\n' >&2
+  printf '%s\n' "$local_exec_output" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+override_output="$(
+  EGAME_PLUGIN_ALLOW_OVERRIDE=1 \
+    EGAME_PLUGIN_ROOTS="$OVERRIDE_PLUGIN_FIXTURE" \
+    EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-package-dispatch-test" \
+    EGAME_DISABLE_STATE=1 \
+    ./scripts/package-dispatch --registry "$FIXTURE" --instance dev-a --package docker --command status
+)"
+if printf '%s\n' "$override_output" | jq -e '.kind == "package-override" and .package == "docker" and .instance == "dev-a" and .command == "status"' >/dev/null; then
+  printf '  [OK] external plugin override dispatch runs\n'
+else
+  printf '  [FAIL] external plugin override dispatch runs\n' >&2
+  printf '%s\n' "$override_output" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+ubuntu_down_missing=0
+for package in claude codex-cli dev-toolchain docker gnome-desktop goose hermes macos-desktop-theme opencode rdp rustdesk steam sunshine vnc vscode waypipe xpra; do
+  if [ ! -x "plugins/packages/$package/commands/ubuntu/down" ]; then
+    printf '  [FAIL] built-in package missing ubuntu down hook: %s\n' "$package" >&2
+    ubuntu_down_missing=$((ubuntu_down_missing + 1))
+  fi
+done
+if [ "$ubuntu_down_missing" -eq 0 ]; then
+  printf '  [OK] built-in ubuntu packages have down hooks\n'
+else
+  FAIL=$((FAIL + 1))
+fi
+
+ubuntu_status_missing=0
+for package in claude codex-cli dev-toolchain docker gnome-desktop goose hermes macos-desktop-theme opencode rdp rustdesk steam sunshine vnc vscode waypipe xpra; do
+  if [ ! -x "plugins/packages/$package/commands/ubuntu/status" ]; then
+    printf '  [FAIL] built-in package missing ubuntu status hook: %s\n' "$package" >&2
+    ubuntu_status_missing=$((ubuntu_status_missing + 1))
+  fi
+done
+if [ "$ubuntu_status_missing" -eq 0 ]; then
+  printf '  [OK] built-in ubuntu packages have status hooks\n'
+else
+  FAIL=$((FAIL + 1))
+fi
+
+windows_down_missing=0
+for package in rustdesk steam sunshine xpra; do
+  if [ ! -x "plugins/packages/$package/commands/windows/down" ]; then
+    printf '  [FAIL] built-in package missing windows down hook: %s\n' "$package" >&2
+    windows_down_missing=$((windows_down_missing + 1))
+  fi
+done
+if [ "$windows_down_missing" -eq 0 ]; then
+  printf '  [OK] built-in windows packages have down hooks\n'
+else
+  FAIL=$((FAIL + 1))
+fi
+
+windows_status_missing=0
+for package in rustdesk steam sunshine xpra; do
+  if [ ! -x "plugins/packages/$package/commands/windows/status" ]; then
+    printf '  [FAIL] built-in package missing windows status hook: %s\n' "$package" >&2
+    windows_status_missing=$((windows_status_missing + 1))
+  fi
+done
+if [ "$windows_status_missing" -eq 0 ]; then
+  printf '  [OK] built-in windows packages have status hooks\n'
+else
+  FAIL=$((FAIL + 1))
+fi
+
+builtin_docker_down_dry_run="$(
+  EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-package-dispatch-test" \
+    ./scripts/package-dispatch --registry "$FIXTURE" --instance dev-a --package docker --command down --dry-run --yes
+)"
+if printf '%s\n' "$builtin_docker_down_dry_run" |
+  jq -e '.kind == "package-down" and .package == "docker" and .instance == "dev-a" and .os_family == "ubuntu" and .dry_run == true and (.command | test("docker-ce"))' >/dev/null; then
+  printf '  [OK] built-in package down dry-run exposes removal command\n'
+else
+  printf '  [FAIL] built-in package down dry-run contract mismatch\n' >&2
+  printf '%s\n' "$builtin_docker_down_dry_run" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+hardcoded_down_refs="$(grep -nE '"(claude|codex-cli|dev-toolchain|docker|gnome-desktop|goose|hermes|macos-desktop-theme|opencode|rdp|rustdesk|steam|sunshine|vscode|vnc|waypipe|xpra)"[[:space:]]*=>' scripts/package-plugin || true)"
+if [ -n "$hardcoded_down_refs" ]; then
+  printf '  [FAIL] package-plugin still contains hardcoded package down mappings\n' >&2
+  printf '%s\n' "$hardcoded_down_refs" >&2
+  FAIL=$((FAIL + 1))
+else
+  printf '  [OK] package down implementations live in plugin hooks\n'
+fi
+
+state_dir="$(mktemp -d "${TMPDIR:-/tmp}/egame-state-test.XXXXXX")"
+tmp_err="$state_dir/error.txt"
+fake_ssh="$state_dir/fake-instance-ssh"
+fake_capture_ssh="$state_dir/fake-capture-instance-ssh"
+fake_down_ssh="$state_dir/fake-instance-down-ssh"
+cat >"$fake_ssh" <<'SH'
+#!/usr/bin/env sh
+set -eu
+printf 'installed\n'
+SH
+chmod +x "$fake_ssh"
+cat >"$fake_down_ssh" <<'SH'
+#!/usr/bin/env sh
+set -eu
+exit 0
+SH
+chmod +x "$fake_down_ssh"
+cat >"$fake_capture_ssh" <<'SH'
+#!/usr/bin/env sh
+set -eu
+printf '%s\n' "$*" >"${EGAME_FAKE_SSH_ARGS:?}"
+printf '#< CLIXML\n'
+printf 'installed\n'
+SH
+chmod +x "$fake_capture_ssh"
+
+status_contract="$(
+  EGAME_PACKAGE_STATUS_SSH="$fake_ssh" EGAME_INSTANCE_NAME=dev-a \
+    ./scripts/package-status-command docker 'ignored remote command'
+)"
+if printf '%s\n' "$status_contract" | jq -e '.kind == "package-status" and .package == "docker" and .instance == "dev-a" and .os_family == "ubuntu" and .status == "installed"' >/dev/null; then
+  printf '  [OK] package status helper emits status contract\n'
+else
+  printf '  [FAIL] package status helper contract mismatch\n' >&2
+  printf '%s\n' "$status_contract" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+windows_status_contract="$(
+  EGAME_PACKAGE_STATUS_SSH="$fake_capture_ssh" EGAME_FAKE_SSH_ARGS="$state_dir/fake-ssh-args.txt" EGAME_INSTANCE_NAME=win-a \
+    ./scripts/package-status-windows steam 'C:\Program Files (x86)\Steam\steam.exe'
+)"
+if printf '%s\n' "$windows_status_contract" | jq -e '.kind == "package-status" and .package == "steam" and .instance == "win-a" and .os_family == "windows" and .status == "installed" and .details == "installed"' >/dev/null; then
+  printf '  [OK] windows package status helper emits status contract\n'
+else
+  printf '  [FAIL] windows package status helper contract mismatch\n' >&2
+  printf '%s\n' "$windows_status_contract" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+if grep -q -- "-EncodedCommand" "$state_dir/fake-ssh-args.txt" && ! grep -F -q -- "\$paths" "$state_dir/fake-ssh-args.txt"; then
+  printf '  [OK] windows package status helper protects powershell variables from ssh shell expansion\n'
+else
+  printf '  [FAIL] windows package status helper should use encoded powershell command\n' >&2
+  cat "$state_dir/fake-ssh-args.txt" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+down_contract="$(
+  EGAME_PACKAGE_DOWN_SSH="$fake_down_ssh" EGAME_INSTANCE_NAME=dev-a \
+    ./scripts/package-down-command docker 'sudo apt-get remove -y docker-ce || true'
+)"
+if printf '%s\n' "$down_contract" | jq -e '.kind == "package-down" and .package == "docker" and .instance == "dev-a" and .os_family == "ubuntu" and .status == "removed"' >/dev/null; then
+  printf '  [OK] package down helper emits removal contract\n'
+else
+  printf '  [FAIL] package down helper contract mismatch\n' >&2
+  printf '%s\n' "$down_contract" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+windows_down_contract="$(
+  EGAME_PACKAGE_DOWN_SSH="$fake_down_ssh" EGAME_INSTANCE_NAME=win-a \
+    ./scripts/package-down-windows steam 'winget uninstall --id Valve.Steam --silent; exit 0'
+)"
+if printf '%s\n' "$windows_down_contract" | jq -e '.kind == "package-down" and .package == "steam" and .instance == "win-a" and .os_family == "windows" and .status == "removed"' >/dev/null; then
+  printf '  [OK] windows package down helper emits removal contract\n'
+else
+  printf '  [FAIL] windows package down helper contract mismatch\n' >&2
+  printf '%s\n' "$windows_down_contract" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+empty_state="$(EGAME_STATE_DIR="$state_dir" ./scripts/instance-state --instance fresh-a --get)"
+if printf '%s\n' "$empty_state" | jq -e '.instance == "fresh-a" and .desired_state == "unknown" and .provider_state == "unknown" and .provision_state == "unknown" and .package_state == {} and .operation_history == []' >/dev/null; then
+  printf '  [OK] instance state get returns default state shape\n'
+else
+  printf '  [FAIL] instance state default shape mismatch\n' >&2
+  printf '%s\n' "$empty_state" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+state_json="$(
+  EGAME_STATE_DIR="$state_dir" ./scripts/instance-state \
+    --instance dev-a \
+    --operation package.down \
+    --status succeeded \
+    --desired-state running \
+    --provider-state running \
+    --package docker \
+    --package-state removed
+)"
+if printf '%s\n' "$state_json" | jq -e '.last_operation.name == "package.down" and .last_operation.type == "package" and .last_operation.id == 1 and .desired_state == "running" and .provider_state == "running" and .package_state.docker.status == "removed" and (.operation_history | length == 1)' >/dev/null; then
+  printf '  [OK] instance state records package operation\n'
+else
+  printf '  [FAIL] instance state records package operation\n' >&2
+  printf '%s\n' "$state_json" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+running_state="$(
+  EGAME_STATE_DIR="$state_dir" ./scripts/instance-state \
+    --instance recover-a \
+    --operation provider.up \
+    --status running \
+    --provider-state changing
+)"
+recovered_state="$(EGAME_STATE_DIR="$state_dir" ./scripts/instance-state --instance recover-a --recover-running)"
+if printf '%s\n' "$running_state" "$recovered_state" |
+  jq -s -e '.[0].last_operation.status == "running" and .[1].last_operation.status == "failed" and .[1].provider_state == "error" and (.[1].last_error | test("Recovered interrupted operation provider.up"))' >/dev/null; then
+  printf '  [OK] instance state recovers interrupted running operation\n'
+else
+  printf '  [FAIL] instance state recover-running mismatch\n' >&2
+  printf '%s\n' "$recovered_state" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+EGAME_STATE_DIR="$state_dir" ./scripts/instance-state \
+  --instance recover-read-a \
+  --operation provider.up \
+  --status succeeded \
+  --desired-state running \
+  --provider-state running >/dev/null
+EGAME_STATE_DIR="$state_dir" ./scripts/instance-state \
+  --instance recover-read-a \
+  --operation provider.ip \
+  --status running >/dev/null
+recovered_read_state="$(EGAME_STATE_DIR="$state_dir" ./scripts/instance-state --instance recover-read-a --recover-running)"
+if printf '%s\n' "$recovered_read_state" |
+  jq -e '.last_operation.name == "provider.ip" and .last_operation.status == "failed" and .provider_state == "running" and (.last_error | test("Recovered interrupted operation provider.ip"))' >/dev/null; then
+  printf '  [OK] instance state recover preserves read-only provider state\n'
+else
+  printf '  [FAIL] instance state read-only recover mismatch\n' >&2
+  printf '%s\n' "$recovered_read_state" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+if EGAME_STATE_DIR="$state_dir" ./scripts/instance-state \
+  --instance dev-a \
+  --operation provider.status \
+  --status succeeded \
+  --provider-state nonsense >/dev/null 2>"$tmp_err"; then
+  printf '  [FAIL] instance state accepted invalid provider_state\n' >&2
+  FAIL=$((FAIL + 1))
+elif grep -q 'provider_state must be one of:' "$tmp_err"; then
+  printf '  [OK] instance state rejects invalid provider_state\n'
+else
+  printf '  [FAIL] instance state invalid provider_state error mismatch\n' >&2
+  cat "$tmp_err" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+if EGAME_STATE_DIR="$state_dir" ./scripts/instance-state \
+  --instance dev-a \
+  --operation package.status \
+  --status succeeded \
+  --package docker \
+  --package-state bogus >/dev/null 2>"$tmp_err"; then
+  printf '  [FAIL] instance state accepted invalid package_state\n' >&2
+  FAIL=$((FAIL + 1))
+elif grep -q 'package_state must be one of:' "$tmp_err"; then
+  printf '  [OK] instance state rejects invalid package_state\n'
+else
+  printf '  [FAIL] instance state invalid package_state error mismatch\n' >&2
+  cat "$tmp_err" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+if EGAME_STATE_DIR="$state_dir" ./scripts/instance-state \
+  --instance dev-a \
+  --operation package.status \
+  --status succeeded \
+  --package docker >/dev/null 2>"$tmp_err"; then
+  printf '  [FAIL] instance state accepted package without package_state\n' >&2
+  FAIL=$((FAIL + 1))
+elif grep -q 'package and package_state must be provided together' "$tmp_err"; then
+  printf '  [OK] instance state rejects incomplete package update\n'
+else
+  printf '  [FAIL] instance state incomplete package update error mismatch\n' >&2
+  cat "$tmp_err" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+EGAME_STATE_DIR="$state_dir" \
+  EGAME_PACKAGE_STATUS_SSH="$fake_ssh" \
+  EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-package-dispatch-test" \
+  ./scripts/package-dispatch --registry "$FIXTURE" --instance dev-a --package docker --command status >/dev/null
+recorded_state="$(EGAME_STATE_DIR="$state_dir" ./scripts/instance-state --instance dev-a --get)"
+if printf '%s\n' "$recorded_state" | jq -e '.last_operation.name == "package.status" and .last_operation.status == "succeeded" and .package_state.docker.status == "installed" and ([.operation_history[-2].status, .operation_history[-1].status] == ["running", "succeeded"])' >/dev/null; then
+  printf '  [OK] package dispatch records state\n'
+else
+  printf '  [FAIL] package dispatch records state\n' >&2
+  printf '%s\n' "$recorded_state" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+EGAME_PLUGIN_ROOTS="$PLUGIN_FIXTURE" \
+  EGAME_STATE_DIR="$state_dir" \
+  EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-package-dispatch-test" \
+  ./scripts/package-dispatch --registry "$FIXTURE" --instance dev-a --package dummy --command status >/dev/null
+hook_status_state="$(EGAME_STATE_DIR="$state_dir" ./scripts/instance-state --instance dev-a --get)"
+if printf '%s\n' "$hook_status_state" | jq -e '.package_state.dummy.status == "installed"' >/dev/null; then
+  printf '  [OK] package dispatch records hook status contract\n'
+else
+  printf '  [FAIL] package dispatch hook status mismatch\n' >&2
+  printf '%s\n' "$hook_status_state" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+EGAME_STATE_DIR="$state_dir" \
+  EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-package-dispatch-test" \
+  ./scripts/package-dispatch --registry "$FIXTURE" --instance dev-a --package missing-package --command status >/dev/null 2>&1 || true
+failed_package_state="$(EGAME_STATE_DIR="$state_dir" ./scripts/instance-state --instance dev-a --get)"
+if printf '%s\n' "$failed_package_state" | jq -e '.last_operation.name == "package.status" and .last_operation.status == "failed" and .last_error and .package_state["missing-package"].status == "failed"' >/dev/null; then
+  printf '  [OK] package dispatch records failed package state\n'
+else
+  printf '  [FAIL] package dispatch failed state mismatch\n' >&2
+  printf '%s\n' "$failed_package_state" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+EGAME_STATE_DIR="$state_dir" \
+  EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-provider-dispatch-test" \
+  ./scripts/instance-state \
+    --instance dev-a \
+    --operation provider.up \
+    --status succeeded \
+    --desired-state running \
+    --provider-state running >/dev/null
+EGAME_STATE_DIR="$state_dir" \
+  EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-provider-dispatch-test" \
+  ./scripts/provider-dispatch --registry "$FIXTURE" --instance dev-a --command ip >/dev/null 2>&1 || true
+failed_ip_state="$(EGAME_STATE_DIR="$state_dir" ./scripts/instance-state --instance dev-a --get)"
+if printf '%s\n' "$failed_ip_state" | jq -e '.last_operation.name == "provider.ip" and .last_operation.status == "failed" and .provider_state == "running" and .last_error' >/dev/null; then
+  printf '  [OK] provider dispatch read failures preserve lifecycle state\n'
+else
+  printf '  [FAIL] provider dispatch read failure state mismatch\n' >&2
+  printf '%s\n' "$failed_ip_state" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+EGAME_STATE_DIR="$state_dir" \
+  EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-provider-dispatch-test" \
+  ./scripts/provider-dispatch --registry "$FIXTURE" --instance dev-a --command bogus >/dev/null 2>&1 || true
+failed_provider_state="$(EGAME_STATE_DIR="$state_dir" ./scripts/instance-state --instance dev-a --get)"
+if printf '%s\n' "$failed_provider_state" | jq -e '.last_operation.name == "provider.bogus" and .last_operation.status == "failed" and .provider_state == "error" and .last_error' >/dev/null; then
+  printf '  [OK] provider dispatch records failed provider state\n'
+else
+  printf '  [FAIL] provider dispatch failed state mismatch\n' >&2
+  printf '%s\n' "$failed_provider_state" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+[ "$FAIL" -eq 0 ]

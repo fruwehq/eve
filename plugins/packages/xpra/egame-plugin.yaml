@@ -1,0 +1,28 @@
+api_version: egame.plugin/v1
+kind: package
+id: xpra
+display_name: Xpra
+commands:
+  install: {exec: scripts/package-plugin, args: [xpra, install]}
+  status: {exec: scripts/package-plugin, args: [xpra, status]}
+  down: {exec: scripts/package-plugin, args: [xpra, down]}
+supports:
+  os_families: [ubuntu, windows]
+  arches: [amd64]
+  ubuntu_versions: ["22.04", "24.04"]
+down: {destructive: true}
+env: []
+actions:
+  - id: xpra-desktop
+    label: Xpra Desktop
+    target: xpra.desktop
+  - id: xpra-attach
+    label: Xpra Attach
+    target: xpra.attach
+install:
+  ubuntu:
+    steps: [00_base.sh, 05_timezone.sh, 45_xpra.sh]
+  windows:
+    steps: [35_xpra.ps1]
+    state_files: []
+    fallback: false

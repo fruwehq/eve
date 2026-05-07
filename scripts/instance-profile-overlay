@@ -1,0 +1,89 @@
+#!/usr/bin/env ruby
+# Emit a catalog overlay that exposes one concrete instance as a profile.
+
+require "fileutils"
+require "json"
+require "open3"
+require "yaml"
+
+ROOT = File.expand_path("..", __dir__)
+
+def usage
+  warn <<~USAGE
+    Usage:
+      scripts/instance-profile-overlay --instance <name> [--registry <path>] [--output <path>]
+  USAGE
+end
+
+instance_name = nil
+registry_path = ENV["EGAME_INSTANCE_REGISTRY"] && !ENV["EGAME_INSTANCE_REGISTRY"].empty? \
+                ? File.expand_path(ENV["EGAME_INSTANCE_REGISTRY"], Dir.pwd) \
+                : nil
+output_path = nil
+
+args = ARGV.dup
+until args.empty?
+  case args.shift
+  when "--instance"
+    instance_name = args.shift
+  when "--registry"
+    registry_path = File.expand_path(args.shift, Dir.pwd)
+  when "--output"
+    output_path = File.expand_path(args.shift, Dir.pwd)
+  when "-h", "--help"
+    usage
+    exit 0
+  else
+    usage
+    exit 2
+  end
+end
+
+unless instance_name
+  usage
+  exit 2
+end
+
+cmd = [File.join(ROOT, "scripts/instance-resolve"), "--instance", instance_name, "--emit", "json"]
+cmd += ["--registry", registry_path] if registry_path
+
+resolved_json, status = Open3.capture2e(*cmd)
+unless status.success?
+  warn resolved_json
+  exit(status.exitstatus || 1)
+end
+
+resolved = JSON.parse(resolved_json)
+composition = resolved.fetch("composition")
+machine = resolved.fetch("machine")
+machine_name = "instance-#{instance_name}-machine"
+
+overlay_machine = Marshal.load(Marshal.dump(machine))
+overlay_machine["name"] = machine_name
+
+overlay_profile = {
+  "name" => instance_name,
+  "machine" => machine_name,
+  "os" => composition.fetch("os"),
+  "init" => composition.fetch("init"),
+  "bundles" => composition.fetch("bundles", []),
+  "location" => composition.fetch("location")
+}
+overlay_profile["packages"] = composition["packages"] if composition.key?("packages")
+overlay_profile["lifecycle"] = composition["lifecycle"] if composition.key?("lifecycle")
+
+overlay = {
+  "machines" => [overlay_machine],
+  "profiles" => [overlay_profile]
+}
+
+yaml = overlay.to_yaml
+if output_path
+  FileUtils.mkdir_p(File.dirname(output_path))
+  if File.exist?(output_path) && File.read(output_path) == yaml
+    exit 0
+  end
+  File.write(output_path, yaml)
+else
+  puts yaml
+end

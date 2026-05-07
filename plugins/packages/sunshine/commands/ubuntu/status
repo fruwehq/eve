@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+set -eu
+
+exec ./scripts/package-status-command sunshine 'if command -v sunshine >/dev/null 2>&1 || dpkg-query -W -f="${Status}" sunshine 2>/dev/null | grep -q "install ok installed"; then echo installed; else echo missing; fi'

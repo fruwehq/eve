@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+set -eu
+
+exec ./scripts/package-down-windows rustdesk 'winget uninstall --id RustDesk.RustDesk --silent; exit 0'

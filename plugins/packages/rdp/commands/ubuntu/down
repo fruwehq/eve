@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+set -eu
+
+exec ./scripts/package-down-command rdp 'sudo systemctl disable --now xrdp || true; sudo apt-get remove -y xrdp || true'

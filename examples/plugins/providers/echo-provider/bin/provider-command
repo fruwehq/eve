@@ -1,0 +1,16 @@
+#!/usr/bin/env sh
+set -eu
+
+command="${1:?Usage: provider-command <command>}"
+payload="${EGAME_RESOLVED_JSON:-$(cat)}"
+instance="$(printf '%s\n' "$payload" | jq -r '.instance.name')"
+provider="$(printf '%s\n' "$payload" | jq -r '.machine.provider')"
+engine="$(printf '%s\n' "$payload" | jq -r '.engine')"
+
+jq -n \
+  --arg kind "provider" \
+  --arg provider "$provider" \
+  --arg command "$command" \
+  --arg instance "$instance" \
+  --arg engine "$engine" \
+  '{kind: $kind, provider: $provider, command: $command, instance: $instance, engine: $engine}'

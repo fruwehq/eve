@@ -28,30 +28,43 @@ check_aws() {
   fi
 }
 
-check_local_virtualbox() {
-  configured=no reachable=no notes="vagrant/virtualbox not found"
+check_local_qemu() {
+  configured=no reachable=no notes="vagrant/qemu not found"
 
-  if command -v vagrant >/dev/null 2>&1 || command -v VBoxManage >/dev/null 2>&1; then
+  if command -v vagrant >/dev/null 2>&1 || command -v qemu-system-aarch64 >/dev/null 2>&1 || command -v qemu-system-x86_64 >/dev/null 2>&1; then
     configured=yes
-    if command -v VBoxManage >/dev/null 2>&1; then
+    if command -v qemu-system-aarch64 >/dev/null 2>&1 || command -v qemu-system-x86_64 >/dev/null 2>&1; then
       reachable=yes
-      notes="VBoxManage available"
+      notes="qemu available"
     else
-      notes="vagrant present, VBoxManage missing"
+      notes="vagrant present, qemu missing"
     fi
   fi
 }
 
-check_local_vmware() {
-  configured=no reachable=no notes="vagrant/vmrun not found"
+check_gcp() {
+  configured=no reachable=no notes="missing GOOGLE_CLOUD_PROJECT/GOOGLE_PROJECT or gcloud config project"
 
-  if command -v vagrant >/dev/null 2>&1 || command -v vmrun >/dev/null 2>&1; then
+  local project="${GOOGLE_CLOUD_PROJECT:-${GOOGLE_PROJECT:-}}"
+  if [ -z "$project" ] && command -v gcloud >/dev/null 2>&1; then
+    project="$(gcloud config get-value project 2>/dev/null || true)"
+  fi
+
+  if [ -n "$project" ]; then
     configured=yes
-    if command -v vmrun >/dev/null 2>&1; then
+    if ! command -v gcloud >/dev/null 2>&1; then
+      notes="configured, but gcloud not found"
+    elif [ -n "${GOOGLE_OAUTH_ACCESS_TOKEN:-}" ]; then
       reachable=yes
-      notes="vmrun available"
+      notes="GOOGLE_OAUTH_ACCESS_TOKEN set; project=$project"
+    elif gcloud auth application-default print-access-token >/dev/null 2>&1; then
+      reachable=yes
+      notes="gcloud application-default auth ok; project=$project"
+    elif gcloud auth print-access-token >/dev/null 2>&1; then
+      reachable=yes
+      notes="gcloud user auth ok; project=$project; Terraform may need GOOGLE_OAUTH_ACCESS_TOKEN"
     else
-      notes="vagrant present, vmrun missing"
+      notes="configured, but gcloud auth failed; project=$project"
     fi
   fi
 }
@@ -113,13 +126,13 @@ print_row() {
   printf '%-17s  %-10s  %-9s  %s\n' "$name" "$configured" "$reachable" "$notes"
 }
 
-PROVIDERS="aws local-virtualbox local-vmware truenas vultr"
+PROVIDERS="aws gcp local-qemu truenas vultr"
 
 if [ -n "$PROVIDER" ]; then
   case "$PROVIDER" in
     aws)               check_aws ;;
-    local-virtualbox)  check_local_virtualbox ;;
-    local-vmware)      check_local_vmware ;;
+    gcp)               check_gcp ;;
+    local-qemu)        check_local_qemu ;;
     truenas)           check_truenas ;;
     vultr)             check_vultr ;;
     *)                 echo "Unknown provider: $PROVIDER (valid: $PROVIDERS)" >&2; exit 1 ;;
@@ -141,8 +154,8 @@ else
   printf '%s\n' 'Provider           Configured  Reachable  Notes'
   printf '%s\n' '-----------------  ----------  ---------  -------------------------------------------'
   check_aws;               print_row "aws"
-  check_local_virtualbox;  print_row "local-virtualbox"
-  check_local_vmware;      print_row "local-vmware"
+  check_gcp;               print_row "gcp"
+  check_local_qemu;         print_row "local-qemu"
   check_truenas;           print_row "truenas"
   check_vultr;             print_row "vultr"
 fi

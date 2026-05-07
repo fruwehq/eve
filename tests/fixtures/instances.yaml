@@ -1,0 +1,57 @@
+version: 1
+instances:
+  - name: dev-a
+    machine: local-qemu-medium
+    os: ubuntu-26.04-arm64
+    init: ssh-ubuntu-cloud-init
+    location: tokyo
+    bundles: [desktop-streaming, dev-ai]
+    overrides:
+      disk_gb: 64
+      memory_mb: 4096
+
+  - name: qemu-a
+    machine: local-qemu-medium
+    os: ubuntu-26.04-arm64
+    init: ssh-ubuntu-cloud-init
+    location: tokyo
+    bundles: [desktop-streaming, dev-ai]
+
+  - name: aws-gpu-a
+    machine: aws-gpu-g5
+    os: ubuntu-26.04-amd64
+    init: ssh-ubuntu-cloud-init
+    location: tokyo
+    bundles: [dev-ai]
+    overrides:
+      disk_gb: 240
+      instance_type: g5.xlarge
+      root_volume_type: gp3
+
+  - name: gcp-cheap-a
+    machine: gcp-cheap-x86
+    os: ubuntu-26.04-amd64
+    init: ssh-ubuntu-cloud-init
+    location: tokyo
+    bundles: [dev-ai]
+    overrides:
+      disk_gb: 20
+      machine_type: e2-small
+      disk_type: pd-balanced
+
+  - name: truenas-all-a
+    machine: truenas-scale-medium
+    os: ubuntu-26.04-amd64
+    init: ssh-ubuntu-cloud-init
+    location: tokyo
+    bundles: [desktop-streaming, dev-ai, gaming-streaming]
+    overrides:
+      disk_gb: 64
+      vcpus: 1
+
+  - name: rpi-all-a
+    machine: raspberry-pi-5
+    os: ubuntu-26.04-arm64
+    init: ssh-ubuntu-metal
+    location: tokyo
+    bundles: [desktop-streaming, dev-ai]

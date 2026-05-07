@@ -1,0 +1,32 @@
+#!/usr/bin/env sh
+set -eu
+
+command="${1:?Usage: package-command <install|status|down>}"
+payload="$(cat)"
+instance="$(printf '%s\n' "$payload" | jq -r '.instance.name')"
+os_family="$(printf '%s\n' "$payload" | jq -r '.os.family')"
+
+case "$command" in
+  install)
+    status="installed"
+    ;;
+  status)
+    status="unknown"
+    ;;
+  down)
+    status="missing"
+    ;;
+  *)
+    printf 'unsupported package command: %s\n' "$command" >&2
+    exit 2
+    ;;
+esac
+
+jq -n \
+  --arg kind "package-status" \
+  --arg package "${EGAME_PACKAGE_PLUGIN:-hello-package}" \
+  --arg command "$command" \
+  --arg instance "$instance" \
+  --arg os_family "$os_family" \
+  --arg status "$status" \
+  '{kind: $kind, package: $package, command: $command, instance: $instance, os_family: $os_family, status: $status}'

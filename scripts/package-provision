@@ -1,0 +1,161 @@
+#!/usr/bin/env bash
+# Upload Linux provisioning scripts and run the step subset for one package.
+
+set -euo pipefail
+
+usage() {
+  cat >&2 <<'USAGE'
+Usage:
+  scripts/package-provision --instance <name> --package <id> [--dry-run]
+  scripts/package-provision --profile <name> --package <id> [--dry-run]  # compatibility alias
+USAGE
+}
+
+INSTANCE_NAME=""
+PACKAGE=""
+DRY_RUN=0
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --instance|--profile)
+      INSTANCE_NAME="${2:-}"
+      shift 2
+      ;;
+    --package)
+      PACKAGE="${2:-}"
+      shift 2
+      ;;
+    --dry-run)
+      DRY_RUN=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      usage
+      exit 2
+      ;;
+  esac
+done
+
+if [ -z "$INSTANCE_NAME" ] || [ -z "$PACKAGE" ]; then
+  usage
+  exit 2
+fi
+
+cd "$(git rev-parse --show-toplevel)"
+
+RESOLVED_ENV=$(./scripts/profile-resolve --profile "$INSTANCE_NAME" --emit env)
+env_value() {
+  printf '%s\n' "$RESOLVED_ENV" | awk -F= -v key="$1" '$1 == key { print substr($0, index($0, "=") + 1) }'
+}
+
+OS_FAMILY=$(env_value OS_FAMILY)
+PROFILE_NAME=$(env_value PROFILE_NAME)
+PROVIDER=$(env_value PROVIDER)
+
+if [ "$OS_FAMILY" != "ubuntu" ]; then
+  echo "package-provision: granular package install is only implemented for ubuntu, got $OS_FAMILY" >&2
+  exit 2
+fi
+
+# Read install metadata from the package plugin manifest so adding a new
+# package only requires touching its plugins/packages/<id>/egame-plugin.yaml.
+PLUGIN_DOC=$(./scripts/plugin-list --kind package --json)
+PLUGIN_INSTALL=$(printf '%s' "$PLUGIN_DOC" | jq --arg id "$PACKAGE" '.plugins[] | select(.id == $id) | .install.ubuntu // null')
+
+if [ -z "$PLUGIN_INSTALL" ] || [ "$PLUGIN_INSTALL" = "null" ]; then
+  echo "package-provision: no ubuntu install step mapping for package: $PACKAGE" >&2
+  exit 2
+fi
+
+steps=()
+while IFS= read -r step; do
+  steps+=("$step")
+done < <(printf '%s' "$PLUGIN_INSTALL" | jq -r '.steps // [] | .[]')
+if [ "${#steps[@]}" -eq 0 ]; then
+  echo "package-provision: ubuntu install steps for $PACKAGE are empty in plugin manifest" >&2
+  exit 2
+fi
+
+# package_markers default to [PACKAGE] when the manifest does not override it.
+package_markers=()
+while IFS= read -r marker; do
+  package_markers+=("$marker")
+done < <(printf '%s' "$PLUGIN_INSTALL" | jq -r --arg id "$PACKAGE" '(.package_markers // [$id]) | .[]')
+
+if [ "$DRY_RUN" -eq 1 ]; then
+  jq -n \
+    --arg instance "$INSTANCE_NAME" \
+    --arg package "$PACKAGE" \
+    --arg os_family "$OS_FAMILY" \
+    --argjson steps "$(printf '%s\n' "${steps[@]}" | jq -R . | jq -s .)" \
+    --argjson package_markers "$(printf '%s\n' "${package_markers[@]}" | jq -R . | jq -s .)" \
+    '{kind: "package-provision", instance: $instance, profile: $instance, package: $package, os_family: $os_family, steps: $steps, package_markers: $package_markers, dry_run: true}'
+  exit 0
+fi
+
+./scripts/ssh-wait "$INSTANCE_NAME"
+
+if ! ./scripts/instance-ssh "$INSTANCE_NAME" -- 'sudo -n true' >/dev/null 2>&1; then
+  if [ "$PROVIDER" = "raspberry-pi" ] && [ -n "${RASPBERRY_PI_USER_PASSWORD:-}" ]; then
+    echo "[package-provision] configuring passwordless sudo for Raspberry Pi provisioning"
+    # shellcheck disable=SC2016
+    printf '%s\n' "$RASPBERRY_PI_USER_PASSWORD" | ./scripts/instance-ssh "$INSTANCE_NAME" -- \
+      'tmp=$(mktemp); printf "%s ALL=(ALL) NOPASSWD:ALL\n" "$USER" > "$tmp"; chmod 0440 "$tmp"; sudo -S -p "" install -o root -g root -m 0440 "$tmp" /etc/sudoers.d/90-egame-provision; rm -f "$tmp"; sudo -n visudo -cf /etc/sudoers.d/90-egame-provision'
+  fi
+fi
+
+if ! ./scripts/instance-ssh "$INSTANCE_NAME" -- 'sudo -n true' >/dev/null 2>&1; then
+  echo "[package-provision] Linux package install requires passwordless sudo for the SSH user." >&2
+  exit 1
+fi
+
+STAGE=$(mktemp -d)
+trap 'rm -rf "$STAGE"' EXIT
+cp -R linux/provision/scripts "$STAGE/scripts"
+mkdir -p "$STAGE/state"
+
+# The provision steps are package-gated. Include only the requested package and
+# explicit dependency markers so installs do not accidentally run the full bundle.
+printf '%s\n' "${package_markers[@]}" > "$STAGE/state/bundle_packages"
+
+_HOST_TZ="${TIMEZONE:-}"
+if [ -z "$_HOST_TZ" ]; then
+  _LINK=$(readlink /etc/localtime 2>/dev/null || true)
+  _HOST_TZ=$(echo "$_LINK" | sed -n 's|.*/zoneinfo/||p')
+fi
+
+cat > "$STAGE/state/env" <<EOF
+export OS_FAMILY="$OS_FAMILY"
+export PROFILE_NAME="$PROFILE_NAME"
+export EPHEMERAL_DISPLAY_RESOLUTION="${EPHEMERAL_DISPLAY_RESOLUTION:-}"
+export EPHEMERAL_DISPLAY_FPS="${EPHEMERAL_DISPLAY_FPS:-}"
+export PROVIDER="$PROVIDER"
+export EPHEMERAL_SUNSHINE_PASSWORD="${EPHEMERAL_SUNSHINE_PASSWORD:-}"
+export RASPBERRY_PI_HDMI_CONNECTOR="${RASPBERRY_PI_HDMI_CONNECTOR:-}"
+export RASPBERRY_PI_HDMI_MODE="${RASPBERRY_PI_HDMI_MODE:-}"
+export RUSTDESK_KEY="${RUSTDESK_KEY:-}"
+export RUSTDESK_PASSWORD="${RUSTDESK_PASSWORD:-}"
+export RUSTDESK_SERVER="${RUSTDESK_SERVER:-}"
+export SUNSHINE_MAX_BITRATE_KBPS="${SUNSHINE_MAX_BITRATE_KBPS:-}"
+export SUNSHINE_VERSION="${SUNSHINE_VERSION:-}"
+export TIMEZONE="$_HOST_TZ"
+EOF
+
+echo "[package-provision] uploading linux/provision scripts for package=$PACKAGE"
+./scripts/instance-ssh "$INSTANCE_NAME" -- 'rm -rf ~/provision/scripts && mkdir -p ~/provision/state ~/provision/logs ~/provision/downloads'
+./scripts/instance-ssh "$INSTANCE_NAME" --scp "$STAGE/scripts" 'provision/'
+./scripts/instance-ssh "$INSTANCE_NAME" --scp "$STAGE/state/bundle_packages" 'provision/state/'
+./scripts/instance-ssh "$INSTANCE_NAME" --scp "$STAGE/state/env" 'provision/state/'
+
+remote_steps=""
+for step in "${steps[@]}"; do
+  remote_steps="$remote_steps ~/provision/scripts/steps/$step"
+done
+
+echo "[package-provision] running package=$PACKAGE steps:${remote_steps}"
+# shellcheck disable=SC2029
+./scripts/instance-ssh "$INSTANCE_NAME" -- "set -e; export PROVISION_ROOT=\"\$HOME/provision\"; . \"\$HOME/provision/state/env\"; chmod +x ~/provision/scripts/steps/*.sh ~/provision/scripts/lib/*.sh; for step in$remote_steps; do echo \"[package-provision] running \$(basename \"\$step\")\"; /usr/bin/env bash \"\$step\"; done"

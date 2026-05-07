@@ -9,18 +9,39 @@ set -euo pipefail
 
 PROFILE="${1:?Usage: scripts/remote-vnc <profile>}"
 cd "$(git rev-parse --show-toplevel)"
+# shellcheck source=lib/instance-workdir.sh
+. ./scripts/lib/instance-workdir.sh
 
 VNC_PORT="${VNC_PORT:-5901}"
 LOCAL_PORT="${VNC_LOCAL_PORT:-15900}"
+VNC_VIEWER="${VNC_VIEWER:-auto}"
+
+case "$VNC_VIEWER" in
+    auto|system|tigervnc) ;;
+    *)
+        echo "remote-vnc: invalid VNC_VIEWER='$VNC_VIEWER' (valid: auto, system, tigervnc)" >&2
+        exit 2
+        ;;
+esac
 
 RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
 ENGINE=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^ENGINE=/{print $2}')
 SSH_USER=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^SSH_USER=/{print $2}')
 
 echo "[remote-vnc] Checking that remote VNC server is listening on port $VNC_PORT..."
-if ! ./scripts/instance-ssh "$PROFILE" -- "ss -tln 2>/dev/null | grep -q ':$VNC_PORT '"; then
+set +e
+VNC_CHECK_OUTPUT=$(./scripts/instance-ssh "$PROFILE" -- "ss -tln 2>/dev/null | grep -q ':$VNC_PORT '" 2>&1)
+VNC_CHECK_STATUS=$?
+set -e
+if [ "$VNC_CHECK_STATUS" -ne 0 ]; then
+    if [ -n "$VNC_CHECK_OUTPUT" ]; then
+        printf '%s\n' "$VNC_CHECK_OUTPUT" >&2
+        echo "[remote-vnc] Could not verify the remote VNC server because SSH failed." >&2
+        echo "[remote-vnc] Check that the instance is running and reachable, then retry." >&2
+        exit "$VNC_CHECK_STATUS"
+    fi
     echo "[remote-vnc] Nothing listening on remote port $VNC_PORT." >&2
-    echo "[remote-vnc] Run: make provision PROFILE=$PROFILE" >&2
+    echo "[remote-vnc] Run: make provision INSTANCE=$PROFILE" >&2
     exit 1
 fi
 
@@ -34,8 +55,9 @@ fi
 
 if [ "$ENGINE" = "vagrant" ]; then
     IP=$(./scripts/instance-ip "$PROFILE")
-    SSH_PORT=$(cd ".generated/$PROFILE" && vagrant ssh-config | awk '/Port/ {print $2; exit}')
-    PRIV_KEY=$(cd ".generated/$PROFILE" && vagrant ssh-config | awk '/IdentityFile/ {print $2; exit}')
+    WORKDIR="$(egame_instance_workdir "$PROFILE")"
+    SSH_PORT=$(cd "$WORKDIR" && vagrant ssh-config | awk '/Port/ {print $2; exit}')
+    PRIV_KEY=$(cd "$WORKDIR" && vagrant ssh-config | awk '/IdentityFile/ {print $2; exit}')
 
     ssh -f -N -L "$LOCAL_PORT:127.0.0.1:$VNC_PORT" \
         -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
@@ -66,7 +88,7 @@ echo "[remote-vnc] Opening VNC viewer..."
 
 VNC_AUTH_ARGS=()
 VNC_PASSWD_FILE=""
-if command -v mktemp >/dev/null 2>&1; then
+if [ "$VNC_VIEWER" != "system" ] && command -v mktemp >/dev/null 2>&1; then
     VNC_PASSWD_FILE=$(mktemp "${TMPDIR:-/tmp}/egame-vnc-passwd.XXXXXX")
     chmod 600 "$VNC_PASSWD_FILE"
     if ./scripts/instance-ssh "$PROFILE" -- 'if [ -f ~/.config/tigervnc/passwd ]; then cat ~/.config/tigervnc/passwd; elif [ -f ~/.vnc/passwd ]; then cat ~/.vnc/passwd; else exit 1; fi' > "$VNC_PASSWD_FILE"; then
@@ -83,15 +105,42 @@ cleanup() {
 }
 trap cleanup EXIT
 
+VNC_VIEWER_ARGS=(-Shared -AcceptClipboard -SendClipboard -RemoteResize=0 -AlwaysCursor=1 -CursorType=System)
+if [ -n "${VNC_DESKTOP_SIZE:-}" ]; then
+    VNC_VIEWER_ARGS+=(-DesktopSize "$VNC_DESKTOP_SIZE")
+fi
+
+open_system_vnc() {
+    if command -v open >/dev/null 2>&1; then
+        open "vnc://:${VNC_PASSWORD}@127.0.0.1:${LOCAL_PORT}"
+        echo "[remote-vnc] Using macOS Screen Sharing. Clipboard support is limited compared with TigerVNC."
+        echo "[remote-vnc] Tunnel will stay open. Run: kill \$(lsof -ti :$LOCAL_PORT) to close."
+        return 0
+    fi
+    echo "remote-vnc: system viewer requested but macOS open is not available" >&2
+    return 1
+}
+
+open_tigervnc() {
+    if command -v vncviewer >/dev/null 2>&1; then
+        vncviewer "${VNC_VIEWER_ARGS[@]}" "${VNC_AUTH_ARGS[@]}" "127.0.0.1::$LOCAL_PORT"
+        return 0
+    fi
+    echo "remote-vnc: TigerVNC requested but vncviewer is not installed" >&2
+    return 1
+}
+
 if [ -n "${VNC_VIEWER_CMD:-}" ]; then
     # shellcheck disable=SC2086
-    $VNC_VIEWER_CMD -Shared -AcceptClipboard -SendClipboard "${VNC_AUTH_ARGS[@]}" "127.0.0.1::$LOCAL_PORT"
+    $VNC_VIEWER_CMD "${VNC_VIEWER_ARGS[@]}" "${VNC_AUTH_ARGS[@]}" "127.0.0.1::$LOCAL_PORT"
+elif [ "$VNC_VIEWER" = "system" ]; then
+    open_system_vnc
+elif [ "$VNC_VIEWER" = "tigervnc" ]; then
+    open_tigervnc
 elif command -v vncviewer >/dev/null 2>&1; then
-    vncviewer -Shared -AcceptClipboard -SendClipboard "${VNC_AUTH_ARGS[@]}" "127.0.0.1::$LOCAL_PORT"
+    open_tigervnc
 elif command -v open >/dev/null 2>&1; then
-    open "vnc://:${VNC_PASSWORD}@127.0.0.1:${LOCAL_PORT}"
-    echo "[remote-vnc] Using macOS Screen Sharing fallback. Clipboard support is limited; install TigerVNC for better VNC behavior."
-    echo "[remote-vnc] Tunnel will stay open. Run: kill \$(lsof -ti :$LOCAL_PORT) to close."
+    open_system_vnc
 else
     echo "No VNC viewer found. Connect manually to: 127.0.0.1:$LOCAL_PORT"
     echo "Press Ctrl+C to close the tunnel."

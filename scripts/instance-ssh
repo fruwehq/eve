@@ -10,12 +10,20 @@ set -euo pipefail
 PROFILE="${1:?Usage: scripts/instance-ssh <profile> [-- <cmd>] [--scp <local> <remote>]}"
 shift || true
 cd "$(git rev-parse --show-toplevel)"
+# shellcheck source=lib/instance-workdir.sh
+. ./scripts/lib/instance-workdir.sh
 
 RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
 ENGINE=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^ENGINE=/{print $2}')
 
 if [ "$ENGINE" = "vagrant" ]; then
-  cd ".generated/$PROFILE"
+  WORKDIR="$(egame_instance_workdir "$PROFILE")"
+  if [ ! -f "$WORKDIR/Vagrantfile" ]; then
+    echo "instance-ssh: no Vagrantfile for $PROFILE at $WORKDIR" >&2
+    echo "instance-ssh: run: make up INSTANCE=$PROFILE" >&2
+    exit 1
+  fi
+  cd "$WORKDIR"
   if [ "${1:-}" = "--scp" ]; then
     shift
     LOCAL_PATH="${1:?--scp requires <local> <remote>}"
@@ -67,7 +75,15 @@ else
   PRIV_KEY="${SSH_PRIVATE_KEY_FILE:-}"
 fi
 
-SSH_OPTS=(-o StrictHostKeyChecking=no -o ServerAliveInterval=10 -o WarnWeakCrypto=no-pq-kex)
+SSH_OPTS=(
+  -o StrictHostKeyChecking=no
+  -o ConnectTimeout=10
+  -o ConnectionAttempts=1
+  -o ServerAliveInterval=10
+  -o ServerAliveCountMax=3
+  -o WarnWeakCrypto=no-pq-kex
+)
+[ "${EPHEMERAL_SSH_BATCH:-0}" = "1" ] && SSH_OPTS+=(-o BatchMode=yes -o NumberOfPasswordPrompts=0)
 [ -n "$PRIV_KEY" ] && SSH_OPTS+=(-i "$PRIV_KEY" -o IdentitiesOnly=yes)
 if [ "$ENGINE:$PROVIDER" = "metal:raspberry-pi" ] && [ -n "${RASPBERRY_PI_HOST:-}" ] && [ "$IP" != "$RASPBERRY_PI_HOST" ]; then
   SSH_OPTS+=(-o "HostKeyAlias=$RASPBERRY_PI_HOST")

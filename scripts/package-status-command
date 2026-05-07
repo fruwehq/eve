@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# Run a remote package status probe and emit the package status JSON contract.
+
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+PACKAGE="${1:?Usage: scripts/package-status-command <package> <remote-command>}"
+REMOTE_COMMAND="${2:?Usage: scripts/package-status-command <package> <remote-command>}"
+PROFILE="${EGAME_INSTANCE_NAME:?EGAME_INSTANCE_NAME is required}"
+OS_FAMILY="${EGAME_PACKAGE_OS_FAMILY:-ubuntu}"
+SSH_HELPER="${EGAME_PACKAGE_STATUS_SSH:-./scripts/instance-ssh}"
+
+set +e
+output="$("$SSH_HELPER" "$PROFILE" -- "$REMOTE_COMMAND" 2>&1)"
+exit_status=$?
+set -e
+
+clean_details() {
+  printf '%s\n' "$1" |
+    tr -d '\r' |
+    awk '
+      /^#< CLIXML/ { next }
+      /^<Objs / { next }
+      /^<Obj / { next }
+      /^<\/Objs>/ { next }
+      /_x000D__/ { next }
+      { print }
+    '
+}
+
+details="$(clean_details "$output")"
+
+if [ "$exit_status" -eq 0 ]; then
+  status="$(printf '%s\n' "$details" | awk '/^(installed|missing|unknown)$/ { print; exit }')"
+  status="${status:-unknown}"
+  case "$status" in
+    installed|missing|unknown) ;;
+    *) status="unknown" ;;
+  esac
+else
+  status="failed"
+fi
+
+jq -n \
+  --arg kind "package-status" \
+  --arg package "$PACKAGE" \
+  --arg command "status" \
+  --arg instance "$PROFILE" \
+  --arg os_family "$OS_FAMILY" \
+  --arg status "$status" \
+  --arg details "$details" \
+  '{kind: $kind, package: $package, command: $command, instance: $instance, os_family: $os_family, status: $status, details: $details}'

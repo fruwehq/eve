@@ -1,44 +1,227 @@
-# v2: Profile-Driven VM Platform
+# v3: Instance-Driven VM Platform
 
 > Work in progress: this repo is evolving from gaming-only infra into a layered machine-composition platform (machine + OS + init + workloads), supporting cloud and local targets.
 >
 > See: [docs/multi-purpose-vm-blueprint.md](docs/multi-purpose-vm-blueprint.md)
 >
+> Next boundary cleanup: [docs/v3.1-provider-plugin-boundaries-plan.md](docs/v3.1-provider-plugin-boundaries-plan.md)
+>
 > Planned runtime notes: [docs/raspberry-pi-provider.md](docs/raspberry-pi-provider.md)
 
+## v3 instance workflow
+
+v3 introduces concrete local instances selected from provider/platform catalog
+choices. Instances live in the git-ignored local registry at
+`.egame/instances.yaml`.
+
 ```bash
-docker run -it mcr.microsoft.com/dotnet/sdk:9.0 pwsh
+# List supported provider / platform / content choices
+make catalog.list
 
-ssh vultr
+# Create a concrete instance entry
+make instance.create INSTANCE=dev-a MACHINE=local-qemu-medium OS=ubuntu-26.04-arm64 LOCATION=tokyo BUNDLES=desktop-streaming DISK_GB=32
 
-ssh vultr 'Remove-Item -Recurse -Force C:\provision\*'
-scp -r ~/src/personal/ephemeral-cloud-gaming/windows/provision/* vultr:/C:/provision/
+# List and inspect concrete instances
+make instance.list
+make instance.info INSTANCE=dev-a
+make instance.env INSTANCE=dev-a
+make instance.paths INSTANCE=dev-a
+make instance.state INSTANCE=dev-a
+make instance.status INSTANCE=dev-a EMIT=json
+make instance.validate INSTANCE=dev-a
 
-ssh vultr "pwsh C:\provision\bootstrap.ps1"
+# Browse and operate instances from the optional Textual TUI
+make tui
+
+# Run lifecycle targets through the selected concrete instance
+make init INSTANCE=dev-a
+make env INSTANCE=dev-a
+make provision INSTANCE=dev-a
+make ssh INSTANCE=dev-a
+
+# Provisioning is stateful in v3; FORCE=1 clears remote provision state first
+make instance.provision INSTANCE=dev-a FORCE=1
+
+# Inspect plugin contracts and package lifecycle hooks
+make plugins.list
+make provider.status INSTANCE=dev-a
+make package.list INSTANCE=dev-a
+make package.select INSTANCE=dev-a PACKAGE=xpra
+make package.status INSTANCE=dev-a PACKAGE=docker
+make package.down INSTANCE=dev-a PACKAGE=docker YES=1
+make package.unselect INSTANCE=dev-a PACKAGE=xpra
 ```
 
-## v2 profile workflow (new)
+The v3 command surface is instance-first. The catalog defines machines, OSes,
+init methods, locations, bundles, packages, and plugins; `.egame/instances.yaml`
+defines concrete local instances composed from those catalog entries. Provider
+and package plugins receive resolved instance JSON, and legacy profile-shaped
+overlays are generated only as an internal compatibility detail for lower-level
+provider scripts.
 
-Profiles are defined in `config/catalog.yaml` and resolved by `scripts/profile-resolve`.
+The built-in Linux Docker package installs Docker in rootless mode. The daemon
+runs as the VM user through `systemd --user`, and `DOCKER_HOST` points at the
+user socket under `/run/user/<uid>/docker.sock`.
+
+Experimental Wayland app forwarding is available through the `waypipe` package
+and the `desktop-streaming` bundle. Waypipe is only the transport/proxy: on
+macOS it also needs a local Wayland compositor to render the remote window.
+XQuartz only provides X11, so `DISPLAY=/.../org.xquartz:0` is not enough.
+
+```bash
+make package.select INSTANCE=dev-a PACKAGE=waypipe
+make package.install INSTANCE=dev-a PACKAGE=waypipe
+```
+
+Recommended macOS experiment: **Cocoa-Way + waypipe-darwin**.
+
+1. Install the local compositor and Waypipe transport on the Mac:
+
+   ```bash
+   brew tap J-x-Z/tap
+   brew install cocoa-way waypipe-darwin
+   ```
+
+2. Start Cocoa-Way in one terminal and keep it running:
+
+   ```bash
+   cocoa-way
+   ```
+
+3. In another Mac terminal, point Waypipe at Cocoa-Way's socket:
+
+   ```bash
+   export XDG_RUNTIME_DIR="$(find /var/folders /tmp -type d -name cocoa-way 2>/dev/null | head -n 1)"
+   export WAYLAND_DISPLAY=wayland-1
+   echo "$XDG_RUNTIME_DIR"
+   ls -l "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY"
+   ```
+
+   The last command should show a socket such as
+   `/.../cocoa-way/wayland-1`. If it does not, Cocoa-Way is not running or the
+   socket directory was not found.
+
+4. Install a tiny Wayland test app on the remote Linux instance:
+
+   ```bash
+   make package.select INSTANCE=dev-a PACKAGE=waypipe
+   make package.install INSTANCE=dev-a PACKAGE=waypipe
+   ```
+
+   Or manually on Ubuntu/Debian:
+
+   ```bash
+   sudo apt update
+   sudo apt install -y waypipe zenity
+   ```
+
+5. Run the first hello-world test from the Mac terminal that exported
+   `XDG_RUNTIME_DIR` and `WAYLAND_DISPLAY`:
+
+   ```bash
+   waypipe --no-gpu ssh -o StreamLocalBindUnlink=yes user@remote-host \
+     env GDK_BACKEND=wayland zenity --info --text="Hello Waypipe"
+   ```
+
+   `StreamLocalBindUnlink=yes` helps when stale local socket files otherwise
+   cause "remote port forwarding failed" errors. `--no-gpu` is useful when a
+   window opens black, crashes, or behaves strangely; remove it after the small
+   test works.
+
+6. Try a Weston sample or a real app:
+
+   ```bash
+   sudo apt install -y weston
+   waypipe ssh -o StreamLocalBindUnlink=yes user@remote-host weston-flower
+
+   waypipe ssh -o StreamLocalBindUnlink=yes user@remote-host \
+     env GDK_BACKEND=wayland gedit
+   waypipe --no-gpu ssh -o StreamLocalBindUnlink=yes user@remote-host \
+     env GDK_BACKEND=wayland gedit
+   ```
+
+The repo action uses the same local compositor requirement:
+
+```bash
+make package.action INSTANCE=dev-a PACKAGE=waypipe ACTION=waypipe APP=foot
+```
+
+Wawona and wprs are still interesting research paths, but they are not the
+recommended first macOS setup today.
+
+This is a trial path, not a stable replacement for Xpra yet. For reliable
+day-to-day Linux GUI access on macOS, prefer RustDesk, VNC, Sunshine/Moonlight,
+or Xpra where the OS/package source supports it.
+
+Terraform-backed instances get instance-scoped backend roots and `TF_DATA_DIR` paths under
+`.generated/instances/<name>/tf/`, so multiple concrete instances on the same
+provider do not share local Terraform state.
+
+Linux GUI packages are selected explicitly through bundles and packages.
+For GNOME trials, select `gnome-desktop`; adding `macos-desktop-theme` applies a
+best-effort dock-at-bottom, left-side window controls, dark color scheme, and
+Papirus icon setup on the next GNOME login.
+
+Providers and packages are now described by plugin manifests. Built-ins live in
+`plugins/providers/<id>/egame-plugin.yaml` and
+`plugins/packages/<id>/egame-plugin.yaml`; optional external plugins can be
+pinned in `.egame/plugin-sources.yaml` and synchronized with
+`make plugins.sync`. Package `down` and `reinstall` operations are explicit and
+destructive removals require `YES=1`.
+
+Plugin contracts and example external plugin layouts are documented in
+[docs/plugins.md](docs/plugins.md).
+
+Instance state contracts are documented in [docs/state.md](docs/state.md).
+
+Manual and AI-assisted live test flow is documented in
+[docs/integration-testing.md](docs/integration-testing.md). Start with
+`make integration.plan INSTANCES=<linux>,<windows>`; live runs require
+`YES=1 make integration.test INSTANCES=<linux>,<windows>`. For a heavier
+package sweep, use
+`YES=1 make integration.packages INSTANCES=<linux>,<windows>` to install and
+status-check every installable package supported by each instance OS/arch.
+Optional host-side AI agent sandboxing is documented in
+[docs/ai-sandboxes.md](docs/ai-sandboxes.md).
+
+The optional `make tui` target opens a Textual instance manager for browsing
+instances, combined state, package state, and safe provider/package actions.
+Use `poetry install` once to install the optional Python dependencies; the rest
+of the v3 command surface has no Python package dependency.
+
+Package plugins may provide host-side command hooks at
+`commands/<os_family>/<install|status|down>` or
+`commands/common/<install|status|down>`. The built-in compatibility wrapper
+passes the resolved instance JSON on stdin and sets `EGAME_INSTANCE_NAME`,
+`EGAME_PACKAGE_PLUGIN`, and `EGAME_PACKAGE_PLUGIN_ROOT`.
+
+Manifest command `exec` paths may point at core repo scripts, such as
+`scripts/package-plugin`, or at plugin-local executables. External plugins that
+reuse a built-in id are rejected by default; set `EGAME_PLUGIN_ALLOW_OVERRIDE=1`
+only when you intentionally want the later external plugin to replace the
+built-in one.
+
+`make instance.paths INSTANCE=<name>` shows the generated overlay path,
+instance state file path, and Terraform artifact roots used by the bridge.
+
+## Instance Workflow
 
 Terraform provider versions are pinned exactly in the Terramate provider templates for reproducibility.
 
 ### Fresh checkout expectations
 
-- Local profile paths (e.g. VirtualBox/Vagrant) should work without cloud API keys.
+- Local instance choices (for example QEMU/Vagrant) should work without cloud API keys.
 - Cloud providers (AWS/Vultr/TrueNAS) only require their own env vars when used.
 - Keep personal settings in `.env.local`.
 
 ```bash
-# List available profiles
-make profiles.list
+# List catalog choices and create a concrete instance
+make catalog.list
+make instance.create INSTANCE=dev-a MACHINE=local-qemu-medium OS=ubuntu-26.04-arm64 LOCATION=tokyo BUNDLES=dev-ai
 
-# Pick a profile interactively
-make profiles.menu
-
-# Targets without PROFILE=… will prompt you to pick one
-make validate
-make plan
+# Validate and inspect the instance
+make validate INSTANCE=dev-a
+make info INSTANCE=dev-a
 ```
 
 Local customizations (without git-dirty state):
@@ -51,26 +234,25 @@ cp config/catalog.local.example.yaml config/catalog.local.yaml
 `config/catalog.local.yaml` is git-ignored and merged over the base catalog.
 
 ```bash
-# Validate and inspect a profile
-make validate PROFILE=aws-ubuntu-dev-headless
-make info PROFILE=aws-ubuntu-dev-headless
+# Cloud instance (terraform engine)
+make instance.create INSTANCE=aws-dev-a MACHINE=aws-cheap-x86 OS=ubuntu-26.04-amd64 LOCATION=tokyo BUNDLES=dev-ai
+make init INSTANCE=aws-dev-a
+make plan INSTANCE=aws-dev-a
+make up INSTANCE=aws-dev-a
+make provision INSTANCE=aws-dev-a
+make ssh INSTANCE=aws-dev-a
+make down INSTANCE=aws-dev-a
 
-# Cloud profile (terraform engine)
-make init PROFILE=aws-ubuntu-dev-headless
-make plan PROFILE=aws-ubuntu-dev-headless
-make up PROFILE=aws-ubuntu-dev-headless
-make provision PROFILE=aws-ubuntu-dev-headless  # installs bundle packages on the VM
-make ssh PROFILE=aws-ubuntu-dev-headless
-make down PROFILE=aws-ubuntu-dev-headless
+# Local instance (vagrant engine)
+make instance.create INSTANCE=local-dev-a MACHINE=local-qemu-medium OS=ubuntu-26.04-arm64 LOCATION=tokyo BUNDLES=dev-ai
+make plan INSTANCE=local-dev-a
+make up INSTANCE=local-dev-a
+make down INSTANCE=local-dev-a
 
-# Local profile (vagrant engine)
-make plan PROFILE=local-vbox-ubuntu-dev
-make up PROFILE=local-vbox-ubuntu-dev
-make down PROFILE=local-vbox-ubuntu-dev
-
-# TrueNAS profile (real provider wiring)
-make validate PROFILE=truenas-ubuntu-dev-headless
-make info PROFILE=truenas-ubuntu-dev-headless
+# TrueNAS instance (real provider wiring)
+make instance.create INSTANCE=truenas-dev-a MACHINE=truenas-scale-medium OS=ubuntu-26.04-amd64 LOCATION=tokyo BUNDLES=dev-ai
+make validate INSTANCE=truenas-dev-a
+make info INSTANCE=truenas-dev-a
 
 # Required env vars for provider auth:
 # - TRUENAS_SSH_PRIVATE_KEY_FILE (path to private key)
@@ -81,10 +263,10 @@ make info PROFILE=truenas-ubuntu-dev-headless
 # export TRUENAS_SSH_PRIVATE_KEY_FILE="$HOME/.ssh/truenas_ed25519"
 # export TRUENAS_SSH_HOST_KEY_FINGERPRINT="SHA256:..."
 
-make init PROFILE=truenas-ubuntu-dev-headless
-make plan PROFILE=truenas-ubuntu-dev-headless
-make up PROFILE=truenas-ubuntu-dev-headless
-make down PROFILE=truenas-ubuntu-dev-headless
+make init INSTANCE=truenas-dev-a
+make plan INSTANCE=truenas-dev-a
+make up INSTANCE=truenas-dev-a
+make down INSTANCE=truenas-dev-a
 ```
 
 ## Post-boot provisioning (Linux + Windows)
@@ -92,23 +274,23 @@ make down PROFILE=truenas-ubuntu-dev-headless
 After `up` creates an instance, run `provision` to install bundle packages:
 
 ```bash
-make ssh.wait PROFILE=aws-ubuntu-dev-headless   # optional — wait for SSH
-make provision PROFILE=aws-ubuntu-dev-headless  # installs bundles
-make logs PROFILE=aws-ubuntu-dev-headless       # tail remote logs
+make ssh.wait INSTANCE=aws-dev-a   # optional — wait for SSH
+make provision INSTANCE=aws-dev-a  # installs selected package set
+make logs INSTANCE=aws-dev-a       # tail remote logs
 ```
 
-`make provision` dispatches by the profile's `os_family`:
+`make provision` dispatches by the instance OS family:
 
-- Linux: uploads [linux/provision/](linux/provision/) to `$HOME/provision` on the VM, installs a `systemd` unit, and runs numbered steps (`00_base`, `10_docker`, `20_dev-toolchain`, `30_codex-cli`, `40_goose`, `45_xpra`, `50_rustdesk`, `60_sunshine`, `70_steam`, `99_finish`). Each step is skipped if its package id is not in the profile's bundles.
+- Linux: uploads [linux/provision/](linux/provision/) to `$HOME/provision` on the VM, installs a `systemd` unit, and runs numbered package steps. Each step is skipped if its package id is not selected by the instance.
 - Windows: uploads [windows/provision/](windows/provision/) to `C:\Users\Administrator\provision` and runs `bootstrap.ps1`, which registers a Scheduled Task that walks a similar sorted `steps/` directory. Requires `EPHEMERAL_WINDOWS_PASSWORD` (or a terraform output) and `EPHEMERAL_SUNSHINE_PASSWORD` — used to build `./tmp/env.json` and scp it into the provision state dir.
 
 State is tracked in `$HOME/provision/state/state.json` on the VM — provisioning resumes from the last completed step after a reboot.
 
 ## Remote GUI apps via Xpra (no full desktop)
 
-Xpra forwards individual remote applications over SSH and renders them as native-looking windows on the local host — useful when you want one remote app (e.g. a browser, IDE, or X11 tool) without pulling up a full remote desktop. Xpra is bundle-gated by the `remote-apps` bundle, so it is only installed on profiles that opt in.
+Xpra forwards individual remote applications over SSH and renders them as native-looking windows on the local host — useful when you want one remote app (e.g. a browser, IDE, or X11 tool) without pulling up a full remote desktop. Xpra is package-gated, so it is only installed on instances that opt in. The current upstream Xpra Linux packages require Python `< 3.13`; add it explicitly only when using a compatible OS/package source.
 
-> Linux profiles use virtual displays (`xpra start :N`). Windows profiles use shadow mode via Scheduled Task + SSH tunnel.
+> Linux instances use virtual displays (`xpra start :N`). Windows instances use shadow mode via Scheduled Task + SSH tunnel.
 
 ### Local install (macOS)
 
@@ -124,31 +306,24 @@ sudo apt-get install xpra          # Debian/Ubuntu
 # or follow https://github.com/Xpra-org/xpra/wiki/Download for other distros
 ```
 
-### Enable on a profile
+### Enable on an instance
 
-Add the `remote-apps` bundle to the profile in `config/catalog.yaml` (or your `catalog.local.yaml`):
+Select the package on a compatible instance:
 
-```yaml
-profiles:
-  - name: aws-ubuntu-dev-headless
-    machine: aws-cheap-x86
-    os: ubuntu-24.04-server-amd64
-    init: ssh-ubuntu-cloud-init
-    bundles: [access-headless, dev-sandbox-core, remote-apps]
-    location: tokyo
+```bash
+make package.select INSTANCE=dev-a PACKAGE=xpra
+make package.install INSTANCE=dev-a PACKAGE=xpra
 ```
-
-Then re-run `make provision PROFILE=…` to install `xpra` on the VM.
 
 ### Launch an app
 
 ```bash
-make remote.xpra PROFILE=aws-ubuntu-dev-headless APP=xeyes          # smoke test
-make remote.xpra PROFILE=aws-ubuntu-dev-headless APP=firefox        # browser
-make remote.xpra PROFILE=aws-ubuntu-dev-headless APP="xterm -e htop"
+make remote.xpra INSTANCE=dev-a APP=xeyes          # smoke test
+make remote.xpra INSTANCE=dev-a APP=firefox        # browser
+make remote.xpra INSTANCE=dev-a APP="xterm -e htop"
 ```
 
-The target starts an Xpra server on the VM, launches the requested app, and attaches a local client window. Use `make remote.xpra.stop PROFILE=...` to stop the remote session.
+The target starts an Xpra server on the VM, launches the requested app, and attaches a local client window. Use `make remote.xpra.stop INSTANCE=...` to stop the remote session.
 
 ## Provider setup guides
 
@@ -167,6 +342,13 @@ The target starts an Xpra server on the VM, launches the requested app, and atta
 3. **Required env vars** (in `.env` or `.env.local`):
    - `AWS_PROFILE` — e.g. `hekk-dev`
    - `AWS_REGION` — e.g. `ap-northeast-1`
+
+### GCP
+
+1. **Google Cloud CLI** — [install](https://cloud.google.com/sdk/docs/install)
+2. **Authenticate** — run `gcloud auth application-default login`, or export `GOOGLE_OAUTH_ACCESS_TOKEN="$(gcloud auth print-access-token)"` when ADC has less access than your active user account.
+3. **Required env vars** (in `.env` or `.env.local`):
+   - `GOOGLE_CLOUD_PROJECT` — optional if `gcloud config get-value project` is correct
 
 ### Vultr
 
@@ -203,30 +385,19 @@ The target starts an Xpra server on the VM, launches the requested app, and atta
     Adjust path to `/bin/dd` if using TrueNAS CORE (FreeBSD).
  8. **Disk image setup** — `make up` downloads the cloud image directly to the NAS, writes it to a zvol, and resizes the partition. No manual `dd` needed.
 
-### VirtualBox (local, Apple Silicon ⚠️)
+### QEMU (local, Apple Silicon ✅)
 
-> **Note**: VirtualBox on Apple Silicon (M1/M2/M3/M4) has limited ARM64 VM support and may fail to boot. VMware Fusion is recommended instead.
+QEMU is the preferred local Linux provider on Apple Silicon. It uses the public
+`cloud-image/ubuntu-26.04` Vagrant box with the `qemu` provider artifact.
 
-1. **VirtualBox** — [install](https://www.virtualbox.org/wiki/Downloads) (version 7.1+)
+1. **QEMU** — `brew install qemu`
 2. **Vagrant** — `brew install hashicorp/tap/vagrant`
-3. No cloud credentials needed
-
-### VMware Fusion (local, Apple Silicon ✅)
-
-1. **VMware Fusion** — [install](https://www.vmware.com/products/desktop-hypervisor/workstation-and-fusion) (free for personal use)
-2. **Vagrant** — `brew install hashicorp/tap/vagrant`
-3. **Vagrant VMware plugin** — `vagrant plugin install vagrant-vmware-desktop`
-4. **Vagrant VMware Utility** — `brew install --cask vagrant-vmware-utility`, then:
-   ```bash
-   vagrant-vmware-utility certificate generate
-   vagrant-vmware-utility service install
-   ```
-   The service install step requires `sudo`.
-5. No cloud credentials needed
+3. **Vagrant QEMU plugin** — `vagrant plugin install vagrant-qemu`
+4. No cloud credentials needed
 
 ### Raspberry Pi / ARM metal
 
-The Pi is wired in as `provider: raspberry-pi`, `kind: metal` — a first-class target alongside the VM-oriented runtimes (`local-virtualbox`, `local-vmware`, `truenas`), but with a simpler lifecycle: there is nothing to "create" or "destroy" remotely. You flash the SD card by hand once, then the repo SSHs in to do the rest.
+The Pi is wired in as `provider: raspberry-pi`, `kind: metal` — a first-class target alongside the VM-oriented runtimes (`local-qemu`, `truenas`, cloud providers), but with a simpler lifecycle: there is nothing to "create" or "destroy" remotely. You flash the SD card by hand once, then the repo SSHs in to do the rest.
 
 Recommended shape:
 
@@ -242,16 +413,16 @@ Set in `.env.local`:
 - `VM_USER_NAME` — the username preseeded into the SD card image (see Imager step below)
 - `SSH_PUBLIC_KEY_FILE` — path to the public key whose private half is loaded in your agent
 
-These are validated at runtime by [scripts/env-require](scripts/env-require) — `make ssh PROFILE=rpi-ubuntu-all` errors clearly if any are missing.
+These are validated at runtime by [scripts/env-require](scripts/env-require) — `make ssh INSTANCE=<rpi-instance>` errors clearly if any are missing.
 
 #### Initial SD card image (first boot)
 
-Flash **Ubuntu Server 24.04 LTS (64-bit)** with the official [Raspberry Pi Imager](https://www.raspberrypi.com/software/). Use Server (not Desktop) so the install stays reproducible — provisioning installs the GUI / Sunshine / etc. afterward, matching the Vagrant flow.
+Flash **Ubuntu Server 26.04 LTS (64-bit)** with the official [Raspberry Pi Imager](https://www.raspberrypi.com/software/). Use Server (not Desktop) so the install stays reproducible — provisioning installs the GUI / Sunshine / etc. afterward, matching the Vagrant flow.
 
 In Imager's advanced options (gear icon), preseed:
 
 - **Hostname**: e.g. `rpi5`
-- **Username**: `terraform` — matches `ssh_user` for the other remote-provisioned profiles ([config/catalog.yaml](config/catalog.yaml)) so the Pi doesn't introduce a third naming convention.
+- **Username**: `terraform` — matches `ssh_user` for the other remote-provisioned instances ([config/catalog.yaml](config/catalog.yaml)) so the Pi doesn't introduce a third naming convention.
 - **Password**: a long throwaway. Provisioning enforces `PasswordAuthentication no`, so it only matters until first SSH-in.
 - **SSH**: enabled, "Allow public-key authentication only", paste your public key.
 - **Wi-Fi**: optional; fine for first boot / provisioning. Prefer **Ethernet** for actual streaming — Sunshine over Wi-Fi tends to surface as jitter and frame drops well before bandwidth is the bottleneck.

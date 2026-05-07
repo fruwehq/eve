@@ -29,7 +29,7 @@ Keep all lists alphabetically sorted unless there is an explicit ordering requir
 
 - `Makefile` — `export` block, `.PHONY` targets, target definitions
 - `.env` — section headers and variable declarations within each section
-- `config/catalog.yaml` — entries within `machines`, `oses`, `inits`, `packages`, `bundles`, `locations`, `profiles`
+- `config/catalog.yaml` — entries within `machines`, `oses`, `inits`, `packages`, `bundles`, `locations`
 - `scripts/provision` — the `state/env` heredoc
 - Any other enumerated lists, arrays, or key-value blocks
 
@@ -39,20 +39,19 @@ When adding a new entry, insert it in alphabetical position rather than appendin
 
 ```
 config/
-  catalog.yaml                # Single source of truth: machines / oses / inits / bundles / locations / profiles
+  catalog.yaml                # Single source of truth: machines / oses / inits / bundles / locations
   catalog.local.example.yaml  # Template for personal overrides
   catalog.local.yaml          # Personal overrides (git-ignored, merged over base)
 modules/
   aws/ec2/                    # AWS EC2 instance + VPC + security group
-  vultr/instance.tm.hcl       # os_family-aware Vultr module (Windows script vs Linux cloud-init)
+  gcp/compute/                # GCP Compute Engine instance + firewall
   truenas/vm.tm.hcl           # truenas_zvol + cloud-init + truenas_vm
+  vultr/instance.tm.hcl       # os_family-aware Vultr module (Windows script vs Linux cloud-init)
 stacks/
-  aws/        truenas/        vultr/       # 10-shared (networking) + 20-services per provider
+  aws/        gcp/        truenas/        vultr/       # provider stacks
 scripts/
-  profile-resolve             # Resolves a profile name → env / JSON / Vagrantfile
-  profile-run                 # Interactive dispatcher when PROFILE is unset
-  profile-menu                # Interactive profile picker (fzf-style)
-  profiles-list               # List profiles with details
+  catalog-options             # List provider/platform/content choices
+  profile-resolve             # Lower-level compatibility resolver for generated overlays
   instance-ip / instance-ssh    # Instance IP + SSH wrappers (engine/provider aware)
   tf-env                      # Emits TF_VAR_* exports, gated by provider
   provision                   # Upload + run the OS-appropriate provisioning tree
@@ -60,16 +59,16 @@ scripts/
   logs                        # Stream remote provisioning logs
   start / stop / status       # Power on/off and status for all providers
   instance-password            # Display the instance's default password (Windows)
-  tf-init / tf-plan / tf-apply / tf-destroy  # Terraform dispatchers (profile-driven)
-  vagrant-up / vagrant-destroy  # Vagrant dispatchers (for local-* providers)
+  tf-init / tf-plan / tf-apply / tf-destroy  # Terraform dispatchers used by provider plugins
+  vagrant-up / vagrant-destroy  # Vagrant dispatchers for local-qemu
   truenas-cloudinit-upload    # Generates NoCloud seed ISO and uploads to TrueNAS REST API
   truenas-cloudinit-delete    # Removes cloud-init ISO from TrueNAS on destroy
-  test / test-profiles / test-terraform / test-shellcheck  # Test suite
+  test / test-catalog / test-instances / test-lint  # Test suite
 linux/provision/               # Bash state-machine runner (systemd unit)
   scripts/bootstrap.sh / runner.sh / lib/common.sh / steps/NN_*.sh
 windows/provision/             # PowerShell state-machine runner (Scheduled Task)
   scripts/bootstrap.ps1 / runner.ps1 / lib/*.ps1 / steps/NN_*.ps1
-tests/golden/                  # Frozen profile-resolve env snapshots
+tests/golden/                  # Frozen instance env snapshots
 .github/workflows/test.yml     # CI: runs make test
 .env                           # Canonical defaults (committed, no secrets)
 .env.local                     # Personal secrets and overrides (git-ignored)
@@ -82,23 +81,33 @@ tests/golden/                  # Frozen profile-resolve env snapshots
 3. Thread it through `scripts/tf-env` as a `TF_VAR_*` if terraform needs it (remember to gate it inside the right `PROVIDER` case), or use it directly via the exported environment.
 4. Do **not** use `${VAR:-fallback}` in scripts — the fallback belongs in `.env`.
 
-## Adding a new profile / machine / OS / bundle
+## Adding a new machine / OS / init / bundle
 
-1. Edit `config/catalog.yaml` — add entries under the relevant top-level key (`machines`, `oses`, `inits`, `bundles`, `locations`, or `profiles`).
-2. Run `scripts/profile-resolve --profile <name> --validate` to confirm catalog consistency (the jq rules check bundle/init/os/provider compatibility).
-3. If the new profile changes emitted env, run `make test.update-golden` to refresh `tests/golden/<name>.env`.
-4. Run `make test` — all three suites (profiles, terraform, shellcheck) must pass before committing.
+1. Edit `config/catalog.yaml` — add entries under the relevant top-level key (`machines`, `oses`, `inits`, `bundles`, `packages`, or `locations`).
+2. Run `make catalog.list` to confirm the provider/platform/content choices are exposed as expected.
+3. If instance resolution changes emitted env, run `make test.update-golden` to refresh `tests/golden/instances/<name>.env`.
+4. Run `make test` — all suites must pass before committing.
+
+## Init model
+
+Init entries are bootstrap/access methods, not user-facing workload choices. They exist so the manager can reach a machine and start normal provisioning, usually through SSH. Prefer exactly one valid init for a given provider/machine/OS combination and let `instance-create` infer it.
+
+- Use `providers: [...]` on init entries to bind them to provider implementations such as `raspberry-pi` or `vultr`.
+- Do not add descriptive-only fields such as `features`; package and bundle manifests model capabilities.
+- Only expose or require `INIT=` when there is a real ambiguous bootstrap choice for the same provider/machine/OS combination.
+- Keep graphical/user tooling decisions in packages and bundles, not in init metadata.
+- SSH is baseline management access from init/provider plumbing. Do not model SSH as a removable package or bundle entry.
 
 ## Provider conventions
 
 - Provider blocks and `required_providers` live in `providers.tm.hcl` files, not in stack or resource config files.
 - Each provider's variables (host, key paths, ports) are declared alongside the provider block in the same generated file.
-- Profile-driven values (region, instance type, plan, OS id, AZ) are threaded through as `TF_VAR_*` from `scripts/tf-env`; do **not** hardcode them in stack globals.
+- Instance-driven values (region, instance type, plan, OS id, AZ) are threaded through as `TF_VAR_*` from `scripts/tf-env`; do **not** hardcode them in stack globals.
 - TrueNAS is a special case: the parent `stacks/truenas/providers.tm.hcl` generates only `required_version`; the child `stacks/truenas/20-services/providers.tm.hcl` generates the full provider + variables (which the module at `modules/truenas/vm.tm.hcl` then relies on — see the note at `null_resource.cloudinit_iso` about `var.truenas_host`).
 
 ## Windows SSH shell
 
-The Windows SSH server default shell is **PowerShell** (not `cmd.exe`). All scripts that send remote commands via `instance-ssh --` to a Windows host use PowerShell syntax directly — there is no `cmd.exe` fallback. When writing new SSH-invoked commands for Windows profiles, use PowerShell cmdlets and syntax.
+The Windows SSH server default shell is **PowerShell** (not `cmd.exe`). All scripts that send remote commands via `instance-ssh --` to a Windows host use PowerShell syntax directly — there is no `cmd.exe` fallback. When writing new SSH-invoked commands for Windows instances, use PowerShell cmdlets and syntax.
 
 ## No fallbacks
 
@@ -108,47 +117,50 @@ This project provisions environments from scratch — we control the OS, install
 
 Machine entries declare a `kind:` field. Current supported kinds:
 
-- `kind: vm` — disposable VM lifecycle (aws, vultr, truenas, local-virtualbox, local-vmware). `up` creates, `down` deletes.
-- `kind: metal` — persistent hardware (planned: raspberry-pi). `down` tears down managed workloads, **not** the machine. Don't force metal targets through VM lifecycle assumptions.
+- `kind: vm` — disposable VM lifecycle (`aws`, `gcp`, `vultr`, `truenas`, `local-qemu`). `up` creates, `down` deletes.
+- `kind: metal` — persistent hardware (`raspberry-pi`). `down` tears down managed workloads, **not** the machine. Don't force metal targets through VM lifecycle assumptions.
 
 See [docs/raspberry-pi-provider.md](docs/raspberry-pi-provider.md) for the metal design guardrails.
 
 ## Post-boot provisioning
 
-Per-profile post-boot provisioning is OS-family driven:
+Per-instance post-boot provisioning is OS-family driven:
 
 - `linux/provision/` — bash state-machine runner for Ubuntu/Linux hosts.
 - `windows/provision/` — PowerShell state-machine runner for Windows hosts.
 
-Both use the same shape: `bootstrap` registers a runner (systemd unit or Scheduled Task), the runner walks a sorted `steps/` directory, and a `state.json` file tracks `currentStep` so provisioning is resumable across reboots. Steps are bundle-aware: a Linux step exits 0 early if its package id is not in the profile's `bundle_packages`.
+Both use the same shape: `bootstrap` registers a runner (systemd unit or Scheduled Task), the runner walks a sorted `steps/` directory, and a `state.json` file tracks `currentStep` so provisioning is resumable across reboots. Steps are package-aware: a Linux step exits 0 early if its package id is not selected for the instance.
 
 Entry points:
-- `make provision PROFILE=…` — uploads the right `<os>/provision/` tree and runs bootstrap. Dispatches by `os_family` resolved from the catalog.
-- `make ssh PROFILE=…` — SSH using the correct user (`ubuntu` for Linux, `Administrator` for Windows) and resolved IP.
-- `make ip PROFILE=…` — print the instance IP (terraform output or `vagrant ssh-config`).
-- `make logs PROFILE=…` — stream remote provisioning logs.
+- `make provision INSTANCE=…` — uploads the right `<os>/provision/` tree and runs bootstrap. Dispatches by `os_family` resolved from the instance.
+- `make ssh INSTANCE=…` — SSH using the correct user (`ubuntu` for Linux, `Administrator` for Windows) and resolved IP.
+- `make ip INSTANCE=…` — print the instance IP (terraform output or `vagrant ssh-config`).
+- `make logs INSTANCE=…` — stream remote provisioning logs.
 
 Adding a new Linux step:
 1. Drop `linux/provision/scripts/steps/NN_<name>.sh` (NN controls order).
-2. Source `$PROVISION_ROOT/scripts/lib/common.sh` for helpers (`log`, `apt_install`, `has_pkg`, `skip_unless_pkg`, `is_desktop`, `request_reboot`). Add `# shellcheck source=../lib/common.sh` above the source line.
+2. Source `$PROVISION_ROOT/scripts/lib/common.sh` for helpers (`log`, `apt_install`, `has_pkg`, `skip_unless_pkg`, `request_reboot`). Add `# shellcheck source=../lib/common.sh` above the source line.
 3. Call `skip_unless_pkg <package-id>` at the top if the step is bundle-gated.
 4. Keep steps idempotent — they will re-run if provisioning is restarted.
 
 ## Testing
 
-`make test` runs three suites from `scripts/test`:
+`make test` runs the suites from `scripts/test`:
 
-- **profiles** (`test-profiles`) — resolves every profile in `config/catalog.yaml`, diffs the emitted env against `tests/golden/<name>.env`. `UPDATE_GOLDEN=1` (or `make test.update-golden`) regenerates the snapshots. Determinism: TRUENAS_* and SSH_PUBLIC_KEY_FILE are unset inside the runner so golden output doesn't depend on the developer's environment.
-- **terraform** (`test-terraform`) — `terramate generate` + `terraform init -backend=false` + `terraform validate` across `aws-services`, `vultr-services`, `truenas-services`. Uses a fake `MY_IP` and a tempfile SSH key. No cloud credentials required.
+- **catalog** (`test-catalog`) — validates provider/platform/content choice emission and provider-specific OS image metadata gating.
+- **instances** (`test-instances`) — validates local instance registry fixtures, generated overlays, provider dispatch routing, and state contracts.
+- **terraform** (`test-terraform`) — `terramate generate` + `terraform init -backend=false` + `terraform validate` across `aws-services`, `gcp-services`, `vultr-services`, and `truenas-services`. Uses a fake `MY_IP` and a tempfile SSH key. No cloud credentials required.
 - **shellcheck** (`test-shellcheck`) — runs `shellcheck -x --source-path=SCRIPTDIR` over every shell script with a bash/sh shebang in `scripts/` and `linux/provision/`.
+- **python** (`test-python`) — runs ruff and strict mypy for Python TUI code.
+- **lint** (`test-lint`) — checks Ruby syntax, YAML syntax, Terraform formatting, and Terramate formatting.
 
-CI runs the same target via [.github/workflows/test.yml](.github/workflows/test.yml) on push/PR to `main` and `v2`.
+CI runs the same target via [.github/workflows/test.yml](.github/workflows/test.yml) on push to `main` and every pull request.
 
 When adding a shell script: ensure `#!/usr/bin/env bash|sh`, run `make test.shellcheck` locally, and fix warnings (or add a narrow `# shellcheck disable=SCnnnn` with a one-line justification).
 
 ## TrueNAS VM lifecycle
 
-`up` for a TrueNAS profile:
+`up` for a TrueNAS instance:
 1. Creates a `truenas_zvol` (empty block device at `/dev/zvol/<pool>/vms/<vm_name>`).
 2. Generates a NoCloud cloud-init seed ISO locally (`hdiutil makehybrid`) and uploads it to TrueNAS via REST API (`TRUENAS_API_KEY`).
 3. Creates the `truenas_vm` with the zvol as `disk` and the ISO as `cdrom`, started (`state = RUNNING`).

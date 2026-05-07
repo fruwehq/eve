@@ -57,6 +57,9 @@ node_modules
 # v2 generated local artifacts
 .generated
 
+# v3 local instance registry and state
+.egame
+
 # local catalog overrides (developer-specific, not committed)
 config/catalog.local.yaml
 .profile-selection

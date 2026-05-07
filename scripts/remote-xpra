@@ -19,6 +19,8 @@ PROFILE="${1:?Usage: scripts/remote-xpra <profile> <start|stop|run|attach|apps|s
 ACTION="${2:?Usage: scripts/remote-xpra <profile> <start|stop|run|attach|apps|status> [args...]}"
 shift 2
 cd "$(git rev-parse --show-toplevel)"
+# shellcheck source=lib/instance-workdir.sh
+. ./scripts/lib/instance-workdir.sh
 
 RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
 ENGINE=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^ENGINE=/{print $2}')
@@ -26,8 +28,9 @@ ENGINE=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^ENGINE=/{print $2}')
 if [ "$ENGINE" = "vagrant" ]; then
   SSH_USER=vagrant
   IP=$(./scripts/instance-ip "$PROFILE")
-  SSH_PORT=$(cd ".generated/$PROFILE" && vagrant ssh-config | awk '/Port/ {print $2; exit}')
-  PRIV_KEY=$(cd ".generated/$PROFILE" && vagrant ssh-config | awk '/IdentityFile/ {print $2; exit}')
+  WORKDIR="$(egame_instance_workdir "$PROFILE")"
+  SSH_PORT=$(cd "$WORKDIR" && vagrant ssh-config | awk '/Port/ {print $2; exit}')
+  PRIV_KEY=$(cd "$WORKDIR" && vagrant ssh-config | awk '/IdentityFile/ {print $2; exit}')
 else
   SSH_USER=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^SSH_USER=/{print $2}')
   IP=$(./scripts/instance-ip "$PROFILE")
@@ -98,7 +101,7 @@ case "$ACTION" in
       }
     fi
 
-    echo "[remote-xpra] server running. Attach with: make remote.xpra.attach PROFILE=$PROFILE"
+    echo "[remote-xpra] server running. Attach from the TUI package action, or run: make package.action INSTANCE=$PROFILE PACKAGE=xpra ACTION=xpra-attach"
     ;;
 
   stop)
@@ -141,7 +144,7 @@ case "$ACTION" in
       remote_ssh "xpra info :$DISPLAY_NUM >/dev/null 2>&1 || xpra start :$DISPLAY_NUM"
       remote_ssh "command -v -- '$APP_BIN' >/dev/null" || {
         echo "remote-xpra: remote command not found: $APP_BIN" >&2
-        echo "  Try: make remote.xpra.apps PROFILE=$PROFILE" >&2
+        echo "  Try: scripts/remote-xpra $PROFILE apps" >&2
         exit 1
       }
       remote_ssh "log=/tmp/xpra-run-$DISPLAY_NUM.log; : > \"\$log\"; DISPLAY=:$DISPLAY_NUM setsid $START_CMD </dev/null >>\"\$log\" 2>&1 & pid=\$!; sleep 1; if ! kill -0 \"\$pid\" 2>/dev/null; then echo \"remote-xpra: '$START_CMD' exited immediately\" >&2; cat \"\$log\" >&2; exit 1; fi"
@@ -204,7 +207,7 @@ case "$ACTION" in
       exit 1
     fi
     if [ "$OS_FAMILY" = "windows" ]; then
-      echo "remote-xpra: desktop mode is only implemented for Linux profiles; use remote.xpra.attach for Windows shadow mode." >&2
+      echo "remote-xpra: desktop mode is only implemented for Linux profiles; use xpra.attach for Windows shadow mode." >&2
       exit 2
     fi
 

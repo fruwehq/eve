@@ -1,0 +1,22 @@
+#!/usr/bin/env sh
+set -eu
+
+payload="$(cat)"
+case "$payload" in
+  *'"name":"dev-a"'*)
+    printf '{\n'
+    printf '  "kind": "package-hook",\n'
+    printf '  "package": "%s",\n' \
+      "${EGAME_PACKAGE_PLUGIN:-}"
+    printf '  "command": "status",\n'
+    printf '  "instance": "%s",\n' \
+      "${EGAME_INSTANCE_NAME:-}"
+    printf '  "os_family": "ubuntu",\n'
+    printf '  "status": "installed"\n'
+    printf '}\n'
+    ;;
+  *)
+    printf 'dummy status hook did not receive resolved instance JSON\n' >&2
+    exit 1
+    ;;
+esac

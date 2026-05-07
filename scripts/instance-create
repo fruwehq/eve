@@ -1,0 +1,171 @@
+#!/usr/bin/env ruby
+# Create a concrete local VM instance entry in the instance registry.
+
+require "fileutils"
+require "tempfile"
+require "time"
+require "yaml"
+
+ROOT = File.expand_path("..", __dir__)
+DEFAULT_REGISTRY_PATH = File.join(ROOT, ".egame/instances.yaml")
+
+def state_root
+  ENV["EGAME_STATE_DIR"] || File.join(ROOT, ".egame/state")
+end
+
+def state_path(instance)
+  File.join(state_root, "instances", "#{instance}.json")
+end
+
+def with_registry_lock(registry_path)
+  FileUtils.mkdir_p(File.dirname(registry_path))
+  File.open("#{registry_path}.lock", File::RDWR | File::CREAT, 0o600) do |lock|
+    lock.flock(File::LOCK_EX)
+    yield
+  end
+end
+
+def write_registry!(registry_path, registry)
+  Tempfile.create(["egame-registry-", ".yaml"], File.dirname(registry_path)) do |tmp|
+    tmp.write(registry.to_yaml)
+    tmp.close
+    FileUtils.mv(tmp.path, registry_path)
+  end
+end
+
+def usage
+  warn <<~USAGE
+    Usage:
+      scripts/instance-create --instance <name> --machine <machine> --os <os-id> --location <location> [options]
+
+    Options:
+      --registry <path>
+      --machine <machine>
+      --os <os-id>
+      --init <init-id>     Override automatic init selection when more than one init matches.
+      --location <location>
+      --bundles <bundle-a,bundle-b>
+      --packages <package-a,package-b>
+      --disk-gb <gb>
+      --memory-mb <mb>
+      --cpu-cores <n>
+      --vcpus <n>
+      --instance-type <aws-type>
+      --root-volume-type <aws-volume-type>
+      --plan <vultr-plan>
+  USAGE
+end
+
+name = nil
+registry_path = ENV["EGAME_INSTANCE_REGISTRY"] && !ENV["EGAME_INSTANCE_REGISTRY"].empty? \
+                ? File.expand_path(ENV["EGAME_INSTANCE_REGISTRY"], Dir.pwd) \
+                : DEFAULT_REGISTRY_PATH
+fields = {}
+overrides = {}
+
+args = ARGV.dup
+until args.empty?
+  case args.shift
+  when "--instance"
+    name = args.shift
+  when "--registry"
+    registry_path = File.expand_path(args.shift, Dir.pwd)
+  when "--machine"
+    fields["machine"] = args.shift
+  when "--os"
+    fields["os"] = args.shift
+  when "--init"
+    fields["init"] = args.shift
+  when "--location"
+    fields["location"] = args.shift
+  when "--bundles"
+    fields["bundles"] = args.shift.to_s.split(",").map(&:strip).reject(&:empty?)
+  when "--packages"
+    fields["packages"] = args.shift.to_s.split(",").map(&:strip).reject(&:empty?)
+  when "--disk-gb"
+    overrides["disk_gb"] = Integer(args.shift)
+  when "--memory-mb"
+    overrides["memory_mb"] = Integer(args.shift)
+  when "--cpu-cores"
+    overrides["cpu_cores"] = Integer(args.shift)
+  when "--vcpus"
+    overrides["vcpus"] = Integer(args.shift)
+  when "--instance-type"
+    overrides["instance_type"] = args.shift
+  when "--root-volume-type"
+    overrides["root_volume_type"] = args.shift
+  when "--plan"
+    overrides["plan"] = args.shift
+  when "-h", "--help"
+    usage
+    exit 0
+  else
+    usage
+    exit 2
+  end
+end
+
+unless name
+  usage
+  exit 2
+end
+
+required_fields = %w[machine os location]
+if required_fields.any? { |field| fields[field].nil? || fields[field].empty? }
+  warn "instance-create: provide --machine, --os, and --location"
+  exit 2
+end
+
+unless name.match?(/\A[a-z][a-z0-9-]*\z/)
+  warn "instance-create: name must match [a-z][a-z0-9-]*"
+  exit 2
+end
+
+with_registry_lock(registry_path) do
+  registry = if File.exist?(registry_path)
+               YAML.safe_load(File.read(registry_path), permitted_classes: [], aliases: true) || {}
+             else
+               { "version" => 1, "instances" => [] }
+             end
+  registry["version"] ||= 1
+  registry["instances"] ||= []
+
+  if registry["instances"].any? { |instance| instance["name"] == name }
+    warn "instance-create: instance already exists: #{name}"
+    exit 1
+  end
+
+  now = Time.now.utc.iso8601
+  entry = {
+    "name" => name,
+    "created_at" => now,
+    "updated_at" => now
+  }.merge(fields)
+  entry["overrides"] = overrides unless overrides.empty?
+
+  registry["instances"] << entry
+
+  Tempfile.create(["egame-instance-", ".yaml"]) do |tmp|
+    tmp.write(registry.to_yaml)
+    tmp.close
+
+    ok = system(
+      File.join(ROOT, "scripts/instance-resolve"),
+      "--registry", tmp.path,
+      "--instance", name,
+      "--validate",
+      out: File::NULL
+    )
+    unless ok
+      warn "instance-create: resolved instance did not validate; registry was not changed"
+      exit 1
+    end
+  end
+
+  write_registry!(registry_path, registry)
+end
+
+FileUtils.rm_f(state_path(name))
+
+puts "Created instance: #{name}"
+puts "Registry: #{registry_path}"

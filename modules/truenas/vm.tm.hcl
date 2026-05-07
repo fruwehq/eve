@@ -73,17 +73,22 @@ generate_hcl "z_truenas_vm.tf" {
       type = string
     }
 
+    variable "vm_user_name" {
+      type    = string
+      default = "ubuntu"
+    }
+
     variable "cloud_image_url" {
       type    = string
       default = ""
     }
 
     locals {
-      vm_name    = join("", regexall("[a-zA-Z0-9]+", var.profile_name))
-      base_dir   = var.vm_base_dir
-      iso_path   = "${local.base_dir}/iso/${local.vm_name}-${var.os_id}-cidata.iso"
-      images_dir = "${local.base_dir}/images"
-      zvol_path  = "${var.vm_zvol_prefix}/${local.vm_name}"
+      vm_name     = join("", regexall("[a-zA-Z0-9]+", var.profile_name))
+      base_dir    = var.vm_base_dir
+      iso_path    = "${local.base_dir}/iso/${local.vm_name}-${var.os_id}-cidata.iso"
+      images_dir  = "${local.base_dir}/images"
+      zvol_path   = "${var.vm_zvol_prefix}/${local.vm_name}"
       zvol_device = "/dev/zvol/${var.vm_pool}/${local.zvol_path}"
     }
 
@@ -135,11 +140,12 @@ generate_hcl "z_truenas_vm.tf" {
         os_id          = var.os_id
         truenas_host   = var.truenas_host
         iso_path       = local.iso_path
+        vm_user_name   = var.vm_user_name
         ssh_public_key = trimspace(file(var.ssh_public_key_file))
       }
 
       provisioner "local-exec" {
-        command = "\"$(git rev-parse --show-toplevel)/scripts/truenas-cloudinit-upload\" '${local.vm_name}' '${var.ssh_public_key_file}' '${var.truenas_host}' '${local.iso_path}'"
+        command = "\"$(git rev-parse --show-toplevel)/scripts/truenas-cloudinit-upload\" '${local.vm_name}' '${var.ssh_public_key_file}' '${var.truenas_host}' '${local.iso_path}' '${var.vm_user_name}'"
       }
 
       provisioner "local-exec" {

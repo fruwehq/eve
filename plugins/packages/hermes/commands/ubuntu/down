@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+set -eu
+
+exec ./scripts/package-down-command hermes 'rm -f ~/.local/bin/hermes'

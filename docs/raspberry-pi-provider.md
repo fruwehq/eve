@@ -2,7 +2,7 @@
 
 ## Why this fits the repo
 
-The current v2 catalog already separates:
+The current v3 catalog separates:
 
 - machine/provider runtime
 - OS image
@@ -16,7 +16,7 @@ For this repo, the cleanest interpretation is:
 - `provider: raspberry-pi`
 - `kind: metal`
 
-That makes the Pi a first-class target alongside `aws`, `vultr`, `truenas`, `local-virtualbox`, and `local-vmware`, while acknowledging that its lifecycle is different.
+That makes the Pi a first-class target alongside `aws`, `gcp`, `vultr`, `truenas`, and `local-qemu`, while acknowledging that its lifecycle is different.
 
 ## Recommended role
 
@@ -49,17 +49,16 @@ machines:
       connection_mode: ssh
 
 oses:
-  - id: ubuntu-24.04-server-arm64
+  - id: ubuntu-26.04-server-arm64
     family: ubuntu
-    version: "24.04"
+    version: "26.04"
     arch: arm64
-    ui_mode: headless
+    metal_image: ubuntu-26.04-arm64
 
 inits:
   - id: ssh-ubuntu-metal
     os_family: ubuntu
-    provider: raspberry-pi
-    features: [ssh, hardening, nonroot-user]
+    providers: [raspberry-pi]
 
 locations:
   - name: home-lan
@@ -68,13 +67,13 @@ locations:
       ssh_port: 22
       ssh_user: ubuntu
 
-profiles:
-  - name: rpi-ubuntu-dev-headless
+instances:
+  - name: rpi-dev
     machine: raspberry-pi-5-dev
-    os: ubuntu-24.04-server-arm64
+    os: ubuntu-26.04-server-arm64
     init: ssh-ubuntu-metal
-    bundles: [access-headless, dev-sandbox-core]
     location: home-lan
+    bundles: [dev-ai]
 ```
 
 ## Lifecycle expectations
@@ -83,18 +82,18 @@ Unlike the existing cloud/VM providers, a Raspberry Pi target should start with 
 
 Reasonable first version:
 
-- `profile.validate`
+- `instance.validate`
   - verify catalog compatibility
   - verify SSH reachability
   - verify remote OS family/arch if available
-- `profile.plan`
-  - resolve profile
+- `plan`
+  - resolve instance
   - show what provisioning and configuration would change
-- `profile.apply`
+- `up` / `instance.provision`
   - bootstrap the host if needed
   - upload/run provisioning
   - optionally apply host-level config
-- `profile.destroy`
+- `down`
   - remove managed workloads/config where safe
   - not necessarily destroy the machine itself
 
@@ -112,9 +111,9 @@ That is consistent with the repo's move from gaming-only infrastructure to a gen
 
 ## Good workload fit
 
-Good candidates for Raspberry Pi profiles here:
+Good candidates for Raspberry Pi instances here:
 
-- `dev-sandbox-core`
+- `dev-ai`
 - Docker-based experimentation
 - OpenCode or similar CLI/dev-agent environments
 - lightweight self-hosted services
@@ -122,7 +121,7 @@ Good candidates for Raspberry Pi profiles here:
 Less ideal as an initial target:
 
 - Windows workloads
-- GPU-heavy gaming/streaming profiles
+- GPU-heavy gaming/streaming workloads
 - assumptions that all providers support disposable VM lifecycle
 
 ## Recommended implementation order
@@ -130,7 +129,7 @@ Less ideal as an initial target:
 1. Add catalog support for `provider: raspberry-pi` and `kind: metal`.
 2. Add a provider-specific `init` entry such as `ssh-ubuntu-metal`.
 3. Reuse the existing Linux provisioning runner in `linux/provision/`.
-4. Make `profile.apply` for Raspberry Pi primarily an SSH/bootstrap/provision flow.
+4. Make `up`/`instance.provision` for Raspberry Pi primarily an SSH/bootstrap/provision flow.
 5. Add optional reset/cleanup semantics later if the repo gains image-based reinstallation workflows.
 
 ## Design guardrails

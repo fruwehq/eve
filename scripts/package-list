@@ -1,0 +1,133 @@
+#!/usr/bin/env ruby
+# List package catalog entries with plugin/support selection for an instance.
+
+require "json"
+require "open3"
+
+ROOT = File.expand_path("..", __dir__)
+
+def usage
+  warn <<~USAGE
+    Usage:
+      scripts/package-list --instance <name> [--registry <path>] [--json]
+  USAGE
+end
+
+def run_json(*cmd)
+  out, status = Open3.capture2e(*cmd)
+  raise out unless status.success?
+
+  JSON.parse(out)
+end
+
+instance_name = nil
+registry_path = ENV["EGAME_INSTANCE_REGISTRY"] ? File.expand_path(ENV["EGAME_INSTANCE_REGISTRY"], Dir.pwd) : nil
+json = false
+
+args = ARGV.dup
+until args.empty?
+  case args.shift
+  when "--instance"
+    instance_name = args.shift
+  when "--registry"
+    registry_path = File.expand_path(args.shift, Dir.pwd)
+  when "--json"
+    json = true
+  when "-h", "--help"
+    usage
+    exit 0
+  else
+    usage
+    exit 2
+  end
+end
+
+unless instance_name
+  usage
+  exit 2
+end
+
+begin
+  resolve_cmd = [File.join(ROOT, "scripts/instance-resolve"), "--instance", instance_name, "--emit", "json"]
+  resolve_cmd += ["--registry", registry_path] if registry_path
+  resolved = run_json(*resolve_cmd)
+
+  plugin_doc = run_json(File.join(ROOT, "scripts/plugin-list"), "--kind", "package", "--json")
+  plugins = plugin_doc.fetch("plugins")
+  plugin_by_id = plugins.to_h { |plugin| [plugin.fetch("id"), plugin] }
+  selected_ids = resolved.fetch("bundle_packages")
+  package_sources = resolved.fetch("package_sources", {})
+  os = resolved.fetch("os")
+  os_family = os.fetch("family")
+  os_arch = os.fetch("arch", "")
+  os_version = os.fetch("version", "")
+
+  support_allowed = lambda do |supports, field, value|
+    allowed = supports[field] || []
+    allowed.empty? || allowed.include?(value.to_s)
+  end
+
+  packages = plugins.map do |plugin|
+    supports = plugin.fetch("supports", {})
+    supported = support_allowed.call(supports, "os_families", os_family) &&
+                support_allowed.call(supports, "arches", os_arch) &&
+                support_allowed.call(supports, "os_ids", os.fetch("id")) &&
+                support_allowed.call(supports, "os_versions", os_version) &&
+                support_allowed.call(supports, "#{os_family}_versions", os_version)
+    installable = plugin.dig("install", os_family).is_a?(Hash)
+    actions = plugin.fetch("actions", [])
+    actions = [] if plugin.fetch("id") == "rdp" && os_family != "windows"
+
+    {
+      "id" => plugin.fetch("id"),
+      "display_name" => plugin.fetch("display_name"),
+      "plugin" => plugin.fetch("id"),
+      "selected" => selected_ids.include?(plugin.fetch("id")),
+      "selected_by" => package_sources.fetch(plugin.fetch("id"), []),
+      "supported" => supported,
+      "installable" => installable,
+      "source" => plugin.fetch("source"),
+      "path" => plugin.fetch("path"),
+      "actions" => actions
+    }
+  end.sort_by { |package| package["id"] }
+
+  # Keep selected catalog package ids visible even when the plugin is missing.
+  missing_selected = selected_ids.reject { |id| plugin_by_id.key?(id) }.map do |id|
+    {
+      "id" => id,
+      "display_name" => id,
+      "plugin" => nil,
+      "selected" => true,
+      "selected_by" => package_sources.fetch(id, []),
+      "supported" => false,
+      "source" => "missing",
+      "path" => nil,
+      "actions" => []
+    }
+  end
+  packages.concat(missing_selected)
+
+  if json
+    puts JSON.pretty_generate({
+      "instance" => instance_name,
+      "os_family" => os_family,
+      "packages" => packages
+    })
+  else
+    printf "%-24s %-8s %-22s %-9s %-10s %s\n", "PACKAGE", "SELECTED", "SELECTED_BY", "SUPPORTED", "SOURCE", "DISPLAY"
+    printf "%-24s %-8s %-22s %-9s %-10s %s\n", "-------", "--------", "-----------", "---------", "------", "-------"
+    packages.each do |package|
+      printf "%-24s %-8s %-22s %-9s %-10s %s\n",
+             package["id"],
+             package["selected"] ? "yes" : "no",
+             package["selected_by"].join(","),
+             package["supported"] ? "yes" : "no",
+             package["source"],
+             package["display_name"]
+    end
+  end
+rescue StandardError => e
+  warn "package-list: #{e.message}"
+  exit 1
+end

@@ -5,11 +5,6 @@ set -euo pipefail
 
 skip_unless_pkg vscode
 
-if ! is_desktop; then
-  log "### 24_vscode: headless OS — skipping"
-  exit 0
-fi
-
 log "### 24_vscode: installing Visual Studio Code"
 
 if command -v code >/dev/null 2>&1; then

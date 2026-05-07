@@ -1,0 +1,14 @@
+api_version: egame.plugin/v1
+kind: package
+id: bad-install-ubuntu
+display_name: Bad Install Ubuntu Test Package
+commands:
+  install: {exec: scripts/package-plugin, args: [bad-install-ubuntu, install]}
+  status: {exec: scripts/package-plugin, args: [bad-install-ubuntu, status]}
+  down: {exec: scripts/package-plugin, args: [bad-install-ubuntu, down]}
+supports: {os_families: [ubuntu]}
+down: {destructive: false}
+env: []
+install:
+  ubuntu:
+    steps: []

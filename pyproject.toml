@@ -1,0 +1,42 @@
+[project]
+name = "ephemeral-cloud-gaming"
+version = "3.0.0"
+description = ""
+authors = [
+    {name = "Christian-Manuel Butzke",email = "chris@fruwe.com"}
+]
+license = "MIT"
+readme = "README.md"
+requires-python = ">=3.13,<4.0"
+dependencies = [
+    "textual (>=8.2.5,<9.0.0)"
+]
+
+[dependency-groups]
+dev = [
+    "mypy (>=1.20.2,<2.0.0)",
+    "ruff (>=0.15.12,<0.16.0)"
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"scripts/egame-tui" = ["E501"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+warn_unreachable = true
+files = ["scripts/egame-tui"]
+
+[tool.poetry]
+package-mode = false
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"

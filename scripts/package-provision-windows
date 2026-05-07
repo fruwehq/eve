@@ -1,0 +1,208 @@
+#!/usr/bin/env bash
+# Upload Windows provisioning scripts and run the step subset for one package.
+#
+# Some Windows provisioning steps trigger reboot flags or depend on the runner
+# state machine restarting after a reboot (e.g. ViGEmBus, GPU driver, VDD).
+# Those packages stay on the explicit `make provision` fallback so the granular
+# install path never has to reason about a half-applied driver state. The
+# remaining packages map to a single self-contained step file.
+
+set -euo pipefail
+
+usage() {
+  cat >&2 <<'USAGE'
+Usage:
+  scripts/package-provision-windows --instance <name> --package <id> [--dry-run]
+  scripts/package-provision-windows --profile <name> --package <id> [--dry-run]  # compatibility alias
+USAGE
+}
+
+INSTANCE_NAME=""
+PACKAGE=""
+DRY_RUN=0
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --instance|--profile)
+      INSTANCE_NAME="${2:-}"
+      shift 2
+      ;;
+    --package)
+      PACKAGE="${2:-}"
+      shift 2
+      ;;
+    --dry-run)
+      DRY_RUN=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      usage
+      exit 2
+      ;;
+  esac
+done
+
+if [ -z "$INSTANCE_NAME" ] || [ -z "$PACKAGE" ]; then
+  usage
+  exit 2
+fi
+
+cd "$(git rev-parse --show-toplevel)"
+
+RESOLVED_ENV=$(./scripts/profile-resolve --profile "$INSTANCE_NAME" --emit env)
+env_value() {
+  printf '%s\n' "$RESOLVED_ENV" | awk -F= -v key="$1" '$1 == key { print substr($0, index($0, "=") + 1) }'
+}
+
+OS_FAMILY=$(env_value OS_FAMILY)
+
+if [ "$OS_FAMILY" != "windows" ]; then
+  echo "package-provision-windows: granular package install is only implemented for windows, got $OS_FAMILY" >&2
+  exit 2
+fi
+
+# Read install metadata from the package plugin manifest.  Packages whose
+# manifest declares install.windows.fallback: true (or omits install.windows
+# entirely) fall back to full provisioning -- that keeps reboot/driver
+# coupling (ViGEmBus, GPU driver, VDD) in the runner state machine.
+#
+# state_files lists files under provision/state that the script must upload
+# (e.g. env.json for rustdesk's rendezvous_server / key / password).  Steps
+# that don't consume state get an empty list so we never overwrite a populated
+# remote env.json with locally-blank values.
+PLUGIN_DOC=$(./scripts/plugin-list --kind package --json)
+PLUGIN_INSTALL=$(printf '%s' "$PLUGIN_DOC" | jq --arg id "$PACKAGE" '.plugins[] | select(.id == $id) | .install.windows // null')
+
+steps=()
+state_files=()
+fallback=0
+if [ -z "$PLUGIN_INSTALL" ] || [ "$PLUGIN_INSTALL" = "null" ]; then
+  fallback=1
+else
+  if [ "$(printf '%s' "$PLUGIN_INSTALL" | jq -r '.fallback // false')" = "true" ]; then
+    fallback=1
+  fi
+  while IFS= read -r step; do
+    [ -n "$step" ] && steps+=("$step")
+  done < <(printf '%s' "$PLUGIN_INSTALL" | jq -r '.steps // [] | .[]')
+  while IFS= read -r state_file; do
+    [ -n "$state_file" ] && state_files+=("$state_file")
+  done < <(printf '%s' "$PLUGIN_INSTALL" | jq -r '.state_files // [] | .[]')
+fi
+if [ "$fallback" -eq 1 ]; then
+  steps=()
+  state_files=()
+fi
+
+if [ "$DRY_RUN" -eq 1 ]; then
+  if [ "${#steps[@]}" -eq 0 ]; then
+    steps_json='[]'
+  else
+    steps_json="$(printf '%s\n' "${steps[@]}" | jq -R . | jq -s .)"
+  fi
+  if [ "${#state_files[@]}" -eq 0 ]; then
+    state_files_json='[]'
+  else
+    state_files_json="$(printf '%s\n' "${state_files[@]}" | jq -R . | jq -s .)"
+  fi
+  jq -n \
+    --arg instance "$INSTANCE_NAME" \
+    --arg package "$PACKAGE" \
+    --arg os_family "$OS_FAMILY" \
+    --argjson steps "$steps_json" \
+    --argjson state_files "$state_files_json" \
+    --argjson fallback "$fallback" \
+    '{kind: "package-provision-windows", instance: $instance, profile: $instance, package: $package, os_family: $os_family, steps: $steps, state_files: $state_files, fallback: ($fallback == 1), dry_run: true}'
+  exit 0
+fi
+
+if [ "$fallback" -eq 1 ]; then
+  echo "[package-provision-windows] no granular mapping for package=$PACKAGE; falling back to full provisioning"
+  exec ./scripts/provision "$INSTANCE_NAME"
+fi
+
+./scripts/ssh-wait "$INSTANCE_NAME"
+
+# Stage scripts: keep lib/ and templates/ available because most Windows steps
+# dot-source helpers from lib/.  Upload only the requested step file so the
+# Scheduled Task runner is never tempted to walk past it.
+STAGE=$(mktemp -d)
+trap 'rm -rf "$STAGE"' EXIT
+mkdir -p "$STAGE/scripts/steps"
+cp -R windows/provision/scripts/lib "$STAGE/scripts/lib"
+if [ -d windows/provision/scripts/templates ]; then
+  cp -R windows/provision/scripts/templates "$STAGE/scripts/templates"
+fi
+for step in "${steps[@]}"; do
+  cp "windows/provision/scripts/steps/$step" "$STAGE/scripts/steps/$step"
+done
+
+remote_step_dir='C:\Users\Administrator\provision\scripts-package'
+remote_lib_dir="$remote_step_dir\\lib"
+remote_steps_dir="$remote_step_dir\\steps"
+remote_state_dir='C:\Users\Administrator\provision\state'
+
+# state_files in the manifest is authoritative for what gets uploaded.  Today
+# only env.json is consumed -- mirror scripts/provision's shape there.
+needs_env=0
+for state_file in "${state_files[@]}"; do
+  if [ "$state_file" = "env.json" ]; then
+    needs_env=1
+  fi
+done
+unsupported_state_files=()
+for state_file in "${state_files[@]}"; do
+  if [ "$state_file" != "env.json" ]; then
+    unsupported_state_files+=("$state_file")
+  fi
+done
+if [ "${#unsupported_state_files[@]}" -gt 0 ]; then
+  echo "package-provision-windows: unsupported state_files for package=$PACKAGE: ${unsupported_state_files[*]}" >&2
+  exit 2
+fi
+
+if [ "$needs_env" -eq 1 ]; then
+  # Mirror scripts/provision's env.json shape so steps that consume it see
+  # the same configuration surface as full provisioning.  WINDOWS_PASSWORD
+  # only ever comes from an explicit env override here -- we deliberately
+  # skip the terraform fallback used in scripts/provision so granular
+  # installs don't drag in terraform state.
+  mkdir -p "$STAGE/state"
+  jq -n \
+    --arg wp "${EPHEMERAL_WINDOWS_PASSWORD:-}" \
+    --arg sp "${EPHEMERAL_SUNSHINE_PASSWORD:-}" \
+    --arg dr "${EPHEMERAL_DISPLAY_RESOLUTION:-}" \
+    --arg rk "${RUSTDESK_KEY:-}" \
+    --arg rp "${RUSTDESK_PASSWORD:-}" \
+    --arg rs "${RUSTDESK_SERVER:-}" \
+    --arg sv "${SUNSHINE_VERSION:-}" \
+    '{windows_password: $wp, sunshine_password: $sp, display_resolution: $dr, rustdesk_key: $rk, rustdesk_password: $rp, rustdesk_server: $rs, sunshine_version: $sv}' \
+    > "$STAGE/state/env.json"
+fi
+
+echo "[package-provision-windows] uploading windows step files for package=$PACKAGE"
+
+reset_cmd="if (Test-Path '$remote_step_dir') { Remove-Item -Recurse -Force '$remote_step_dir' } ; New-Item -ItemType Directory -Force '$remote_lib_dir' | Out-Null ; New-Item -ItemType Directory -Force '$remote_steps_dir' | Out-Null"
+if [ "$needs_env" -eq 1 ]; then
+  reset_cmd="$reset_cmd ; New-Item -ItemType Directory -Force '$remote_state_dir' | Out-Null"
+fi
+./scripts/instance-ssh "$INSTANCE_NAME" -- "$reset_cmd"
+./scripts/instance-ssh "$INSTANCE_NAME" --scp "$STAGE/scripts/lib" "/C:/Users/Administrator/provision/scripts-package/"
+if [ -d "$STAGE/scripts/templates" ]; then
+  ./scripts/instance-ssh "$INSTANCE_NAME" --scp "$STAGE/scripts/templates" "/C:/Users/Administrator/provision/scripts-package/"
+fi
+for step in "${steps[@]}"; do
+  ./scripts/instance-ssh "$INSTANCE_NAME" --scp "$STAGE/scripts/steps/$step" "/C:/Users/Administrator/provision/scripts-package/steps/$step"
+done
+if [ "$needs_env" -eq 1 ]; then
+  ./scripts/instance-ssh "$INSTANCE_NAME" --scp "$STAGE/state/env.json" "/C:/Users/Administrator/provision/state/env.json"
+fi
+
+for step in "${steps[@]}"; do
+  echo "[package-provision-windows] running step=$step package=$PACKAGE"
+  ./scripts/instance-ssh "$INSTANCE_NAME" -- "& 'C:\\Users\\Administrator\\provision\\scripts-package\\steps\\$step'"
+done

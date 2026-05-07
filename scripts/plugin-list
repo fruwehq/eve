@@ -1,0 +1,318 @@
+#!/usr/bin/env ruby
+# List and validate built-in plus local v3 plugins.
+
+require "json"
+require "yaml"
+
+ROOT = File.expand_path("..", __dir__)
+BUILTIN_ROOT = File.join(ROOT, "plugins")
+EXTERNAL_ROOT = File.join(ROOT, ".egame/plugins")
+API_VERSION = "egame.plugin/v1"
+PROVIDER_COMMANDS = %w[resolve init plan up down start stop status ip ssh].freeze
+PACKAGE_COMMANDS = %w[install status down].freeze
+PROVIDER_ENGINES = %w[terraform vagrant metal].freeze
+PROVIDER_KINDS = %w[vm metal].freeze
+PACKAGE_OS_FAMILIES = %w[ubuntu windows].freeze
+PACKAGE_ARCHES = %w[amd64 arm64].freeze
+
+def usage
+  warn <<~USAGE
+    Usage:
+      scripts/plugin-list [--kind provider|package] [--json] [--validate]
+  USAGE
+end
+
+def plugin_roots
+  roots = [BUILTIN_ROOT, EXTERNAL_ROOT]
+  extra = ENV.fetch("EGAME_PLUGIN_ROOTS", "")
+  roots.concat(extra.split(":").reject(&:empty?).map { |path| File.expand_path(path, Dir.pwd) })
+  roots.uniq
+end
+
+def plugin_paths
+  plugin_roots.flat_map do |root|
+    next [] unless Dir.exist?(root)
+
+    Dir.glob(File.join(root, "**/egame-plugin.yaml"))
+  end.sort
+end
+
+def load_plugin(path)
+  data = YAML.safe_load(File.read(path), permitted_classes: [], aliases: true) || {}
+  data["_path"] = path
+  data["_source"] = path.start_with?(BUILTIN_ROOT) ? "builtin" : "external"
+  data
+end
+
+def validate_plugin!(plugin)
+  required = %w[api_version kind id display_name commands supports env]
+  missing = required.reject { |key| plugin.key?(key) }
+  raise "#{plugin["_path"]}: missing required fields: #{missing.join(", ")}" unless missing.empty?
+
+  raise "#{plugin["_path"]}: api_version must be #{API_VERSION}" unless plugin["api_version"] == API_VERSION
+
+  kind = plugin["kind"]
+  unless %w[provider package].include?(kind)
+    raise "#{plugin["_path"]}: kind must be provider or package"
+  end
+
+  unless plugin["id"].to_s.match?(/\A[a-z][a-z0-9-]*\z/)
+    raise "#{plugin["_path"]}: id must match [a-z][a-z0-9-]*"
+  end
+
+  commands = plugin["commands"]
+  raise "#{plugin["_path"]}: commands must be a map" unless commands.is_a?(Hash)
+
+  required_commands = kind == "provider" ? PROVIDER_COMMANDS : PACKAGE_COMMANDS
+  missing_commands = required_commands.reject { |command| commands.key?(command) }
+  unless missing_commands.empty?
+    raise "#{plugin["_path"]}: missing #{kind} commands: #{missing_commands.join(", ")}"
+  end
+
+  commands.each do |name, spec|
+    raise "#{plugin["_path"]}: command #{name} must be a map" unless spec.is_a?(Hash)
+    raise "#{plugin["_path"]}: command #{name} missing exec" unless spec["exec"]
+    require_string_list!(spec["args"], plugin["_path"], "command #{name} args") if spec.key?("args")
+
+    exec_path = spec["exec"].to_s
+    resolved_exec = if exec_path.start_with?("/")
+                      exec_path
+                    else
+                      plugin_exec = File.join(File.dirname(plugin["_path"]), exec_path)
+                      root_exec = File.join(ROOT, exec_path)
+                      File.exist?(plugin_exec) ? plugin_exec : root_exec
+                    end
+    raise "#{plugin["_path"]}: command #{name} exec not found: #{exec_path}" unless File.file?(resolved_exec)
+  end
+
+  raise "#{plugin["_path"]}: supports must be a map" unless plugin["supports"].is_a?(Hash)
+  validate_provider_supports!(plugin) if kind == "provider"
+  validate_package_supports!(plugin) if kind == "package"
+  require_string_list!(plugin["env"], plugin["_path"], "env")
+
+  validate_package_install!(plugin) if kind == "package" && plugin.key?("install")
+  validate_package_actions!(plugin) if kind == "package" && plugin.key?("actions")
+end
+
+# install metadata is consumed by scripts/package-provision and
+# scripts/package-provision-windows.  Validate the shape up front so a
+# malformed manifest fails plugins.validate instead of blowing up at
+# package.install time.
+WINDOWS_STATE_FILES = %w[env.json].freeze
+
+def require_string_list!(value, path, field)
+  raise "#{path}: #{field} must be a list" unless value.is_a?(Array)
+
+  bad = value.reject { |entry| entry.is_a?(String) }
+  return if bad.empty?
+
+  raise "#{path}: #{field} must be a list of strings (got non-string entries: #{bad.map(&:inspect).join(", ")})"
+end
+
+def require_allowed_entries!(value, allowed, path, field)
+  unsupported = value - allowed
+  return if unsupported.empty?
+
+  raise "#{path}: #{field} contains unsupported entries: #{unsupported.join(", ")} (allowed: #{allowed.join(", ")})"
+end
+
+def validate_provider_supports!(plugin)
+  supports = plugin["supports"]
+  path = plugin["_path"]
+
+  if supports.key?("engines")
+    engines = supports["engines"]
+    require_string_list!(engines, path, "supports.engines")
+    require_allowed_entries!(engines, PROVIDER_ENGINES, path, "supports.engines")
+  end
+
+  if supports.key?("kinds")
+    kinds = supports["kinds"]
+    require_string_list!(kinds, path, "supports.kinds")
+    require_allowed_entries!(kinds, PROVIDER_KINDS, path, "supports.kinds")
+  end
+end
+
+def validate_package_supports!(plugin)
+  supports = plugin["supports"]
+  path = plugin["_path"]
+
+  if supports.key?("os_families")
+    os_families = supports["os_families"]
+    require_string_list!(os_families, path, "supports.os_families")
+    require_allowed_entries!(os_families, PACKAGE_OS_FAMILIES, path, "supports.os_families")
+  end
+
+  if supports.key?("arches")
+    arches = supports["arches"]
+    require_string_list!(arches, path, "supports.arches")
+    require_allowed_entries!(arches, PACKAGE_ARCHES, path, "supports.arches")
+  end
+
+  require_string_list!(supports["os_ids"], path, "supports.os_ids") if supports.key?("os_ids")
+  require_string_list!(supports["os_versions"], path, "supports.os_versions") if supports.key?("os_versions")
+  PACKAGE_OS_FAMILIES.each do |family|
+    key = "#{family}_versions"
+    require_string_list!(supports[key], path, "supports.#{key}") if supports.key?(key)
+  end
+end
+
+def validate_package_install!(plugin)
+  install = plugin["install"]
+  path = plugin["_path"]
+  raise "#{path}: install must be a map" unless install.is_a?(Hash)
+
+  if install.key?("ubuntu")
+    ubuntu = install["ubuntu"]
+    raise "#{path}: install.ubuntu must be a map" unless ubuntu.is_a?(Hash)
+
+    steps = ubuntu["steps"]
+    require_string_list!(steps, path, "install.ubuntu.steps") if ubuntu.key?("steps")
+    if steps.nil? || steps.empty?
+      raise "#{path}: install.ubuntu.steps must be a non-empty list"
+    end
+
+    if ubuntu.key?("package_markers")
+      require_string_list!(ubuntu["package_markers"], path, "install.ubuntu.package_markers")
+    end
+  end
+
+  if install.key?("windows")
+    windows = install["windows"]
+    raise "#{path}: install.windows must be a map" unless windows.is_a?(Hash)
+
+    require_string_list!(windows["steps"], path, "install.windows.steps") if windows.key?("steps")
+    if windows.key?("state_files")
+      state_files = windows["state_files"]
+      require_string_list!(state_files, path, "install.windows.state_files")
+
+      unsupported = state_files - WINDOWS_STATE_FILES
+      unless unsupported.empty?
+        raise "#{path}: install.windows.state_files contains unsupported entries: #{unsupported.join(", ")} (allowed: #{WINDOWS_STATE_FILES.join(", ")})"
+      end
+    end
+    if windows.key?("fallback")
+      fallback = windows["fallback"]
+      unless fallback == true || fallback == false
+        raise "#{path}: install.windows.fallback must be boolean"
+      end
+    end
+  end
+end
+
+def validate_package_actions!(plugin)
+  actions = plugin["actions"]
+  path = plugin["_path"]
+  raise "#{path}: actions must be a list" unless actions.is_a?(Array)
+
+  actions.each_with_index do |action, index|
+    field = "actions[#{index}]"
+    raise "#{path}: #{field} must be a map" unless action.is_a?(Hash)
+    %w[id label target].each do |key|
+      value = action[key]
+      raise "#{path}: #{field}.#{key} must be a string" unless value.is_a?(String) && !value.empty?
+    end
+    unless action["id"].match?(/\A[a-z][a-z0-9-]*\z/)
+      raise "#{path}: #{field}.id must match [a-z][a-z0-9-]*"
+    end
+    validate_package_action_prompt!(action["prompt"], path, "#{field}.prompt") if action.key?("prompt")
+  end
+end
+
+def validate_package_action_prompt!(prompt, path, field)
+  raise "#{path}: #{field} must be a map" unless prompt.is_a?(Hash)
+
+  %w[title message env choices].each do |key|
+    raise "#{path}: #{field}.#{key} is required" unless prompt.key?(key)
+  end
+  %w[title message env].each do |key|
+    value = prompt[key]
+    raise "#{path}: #{field}.#{key} must be a string" unless value.is_a?(String) && !value.empty?
+  end
+  unless prompt["env"].match?(/\A[A-Z][A-Z0-9_]*\z/)
+    raise "#{path}: #{field}.env must be an environment variable name"
+  end
+
+  choices = prompt["choices"]
+  raise "#{path}: #{field}.choices must be a list" unless choices.is_a?(Array)
+  raise "#{path}: #{field}.choices must not be empty" if choices.empty?
+
+  choices.each_with_index do |choice, index|
+    choice_field = "#{field}.choices[#{index}]"
+    raise "#{path}: #{choice_field} must be a map" unless choice.is_a?(Hash)
+    %w[value label].each do |key|
+      value = choice[key]
+      raise "#{path}: #{choice_field}.#{key} must be a string" unless value.is_a?(String) && !value.empty?
+    end
+    if choice.key?("variant") && !%w[default primary success warning error].include?(choice["variant"])
+      raise "#{path}: #{choice_field}.variant must be one of default, primary, success, warning, error"
+    end
+  end
+end
+
+kind = nil
+json = false
+validate_only = false
+
+args = ARGV.dup
+until args.empty?
+  case args.shift
+  when "--kind"
+    kind = args.shift
+  when "--json"
+    json = true
+  when "--validate"
+    validate_only = true
+  when "-h", "--help"
+    usage
+    exit 0
+  else
+    usage
+    exit 2
+  end
+end
+
+if kind && !%w[provider package].include?(kind)
+  warn "plugin-list: --kind must be provider or package"
+  exit 2
+end
+
+begin
+  plugins = plugin_paths.map { |path| load_plugin(path) }
+  plugins.each { |plugin| validate_plugin!(plugin) }
+
+  plugins_by_key = {}
+  plugins.each do |plugin|
+    key = "#{plugin["kind"]}:#{plugin["id"]}"
+    if plugins_by_key[key] && ENV["EGAME_PLUGIN_ALLOW_OVERRIDE"] != "1"
+      raise "duplicate plugin #{key}: #{plugins_by_key[key]["_path"]} and #{plugin["_path"]}"
+    end
+    plugins_by_key.delete(key) if plugins_by_key[key]
+    plugins_by_key[key] = plugin
+  end
+  plugins = plugins_by_key.values
+
+  plugins = plugins.select { |plugin| plugin["kind"] == kind } if kind
+  plugins = plugins.map do |plugin|
+    plugin.merge("path" => plugin.delete("_path"), "source" => plugin.delete("_source"))
+  end
+
+  if validate_only
+    puts "Plugins validated: #{plugins.length}"
+  elsif json
+    puts JSON.pretty_generate({ "plugins" => plugins })
+  else
+    printf "%-10s %-24s %-36s %-8s\n", "KIND", "ID", "DISPLAY", "SOURCE"
+    printf "%-10s %-24s %-36s %-8s\n", "----", "--", "-------", "------"
+    plugins.each do |plugin|
+      printf "%-10s %-24s %-36s %-8s\n",
+             plugin["kind"],
+             plugin["id"],
+             plugin["display_name"],
+             plugin["source"]
+    end
+  end
+rescue StandardError => e
+  warn "plugin-list: #{e.message}"
+  exit 1
+end

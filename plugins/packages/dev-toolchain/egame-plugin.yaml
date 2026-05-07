@@ -1,0 +1,14 @@
+api_version: egame.plugin/v1
+kind: package
+id: dev-toolchain
+display_name: Developer Toolchain
+commands:
+  install: {exec: scripts/package-plugin, args: [dev-toolchain, install]}
+  status: {exec: scripts/package-plugin, args: [dev-toolchain, status]}
+  down: {exec: scripts/package-plugin, args: [dev-toolchain, down]}
+supports: {os_families: [ubuntu]}
+down: {destructive: true}
+env: []
+install:
+  ubuntu:
+    steps: [00_base.sh, 05_timezone.sh, 20_dev-toolchain.sh]

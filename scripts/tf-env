@@ -46,6 +46,26 @@ print_kv() {
 
 PROVIDER="$(getv PROVIDER)"
 
+# Per-instance state isolation: when EGAME_INSTANCE_NAME is set the caller is
+# in v3 INSTANCE= mode. Route Terraform to a dedicated workspace plus
+# per-instance data/backend roots so two instances on the same provider do not
+# clobber each other's state. PROFILE= callers leave EGAME_INSTANCE_NAME unset
+# and continue to use the default compatibility paths.
+if [ -n "${EGAME_INSTANCE_NAME:-}" ]; then
+  if [ -n "${EGAME_INSTANCE_REGISTRY:-}" ]; then
+    INSTANCE_PATHS="$(./scripts/instance-paths --instance "$EGAME_INSTANCE_NAME" --emit env --registry "$EGAME_INSTANCE_REGISTRY")"
+  else
+    INSTANCE_PATHS="$(./scripts/instance-paths --instance "$EGAME_INSTANCE_NAME" --emit env)"
+  fi
+  getp() {
+    printf '%s\n' "$INSTANCE_PATHS" | awk -F= -v key="$1" '$1 == key { print substr($0, index($0, "=") + 1) }'
+  }
+
+  print_kv TF_WORKSPACE "$EGAME_INSTANCE_NAME"
+  print_kv EGAME_TF_DATA_BASE "$(getp INSTANCE_TF_DATA_BASE)"
+  print_kv EGAME_TF_STATE_BASE "$(getp INSTANCE_TF_STATE_BASE)"
+fi
+
 # Common — shared by every terraform-based provider
 print_kv TF_VAR_bundle_packages "$(getv BUNDLE_PACKAGES)"
 print_kv TF_VAR_location_name "$(getv LOCATION_NAME)"
@@ -53,6 +73,7 @@ print_kv TF_VAR_os_family "$(getv OS_FAMILY)"
 print_kv TF_VAR_os_id "$(getv OS_ID)"
 print_kv TF_VAR_profile_name "$PROFILE"
 print_kv TF_VAR_ssh_public_key_file "$(normalize_path "${SSH_PUBLIC_KEY_FILE:-}")"
+print_kv TF_VAR_vm_user_name "$(getv SSH_USER)"
 
 case "$PROVIDER" in
   aws)
@@ -61,6 +82,25 @@ case "$PROVIDER" in
     print_kv TF_VAR_instance_type "$(getv VM_INSTANCE_TYPE)"
     print_kv TF_VAR_region "$(getv LOCATION_REGION)"
     print_kv TF_VAR_root_volume_type "$(getv VM_ROOT_VOLUME_TYPE)"
+    ;;
+  gcp)
+    PROJECT_ID="${GOOGLE_CLOUD_PROJECT:-${GOOGLE_PROJECT:-}}"
+    if [ -z "$PROJECT_ID" ] && command -v gcloud >/dev/null 2>&1; then
+      PROJECT_ID="$(gcloud config get-value project 2>/dev/null || true)"
+    fi
+    if [ -z "$PROJECT_ID" ]; then
+      echo "tf-env: missing GOOGLE_CLOUD_PROJECT or GOOGLE_PROJECT for gcp provider" >&2
+      exit 2
+    fi
+    print_kv TF_VAR_disk_gb "$(getv VM_DISK_GB)"
+    print_kv TF_VAR_disk_type "$(getv VM_DISK_TYPE)"
+    print_kv TF_VAR_image_family "$(getv GCP_IMAGE_FAMILY)"
+    print_kv TF_VAR_image_project "$(getv GCP_IMAGE_PROJECT)"
+    print_kv TF_VAR_machine_type "$(getv VM_MACHINE_TYPE)"
+    print_kv TF_VAR_project_id "$PROJECT_ID"
+    print_kv TF_VAR_region "$(getv LOCATION_REGION)"
+    print_kv TF_VAR_ssh_allowed_cidr "${MY_IP}/32"
+    print_kv TF_VAR_zone "$(getv LOCATION_ZONE)"
     ;;
   vultr)
     print_kv TF_VAR_plan "$(getv VM_PLAN)"

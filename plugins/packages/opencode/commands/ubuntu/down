@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+set -eu
+
+exec ./scripts/package-down-command opencode 'npm uninstall -g opencode-ai || true; rm -f ~/.local/bin/opencode'

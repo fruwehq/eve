@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+set -eu
+
+exec ./scripts/package-down-command steam 'sudo apt-get remove -y steam steam-installer || true'

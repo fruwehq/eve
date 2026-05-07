@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+set -eu
+
+exec ./scripts/package-status-command steam 'if command -v steam >/dev/null 2>&1 || dpkg-query -W -f="${Status}" steam steam-installer 2>/dev/null | grep -q "install ok installed"; then echo installed; else echo missing; fi'

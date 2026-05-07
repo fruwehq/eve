@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+set -eu
+
+exec ./scripts/package-down-command vnc 'sudo systemctl disable --now tigervncserver@:1 || true; sudo apt-get remove -y tigervnc-standalone-server tigervnc-common || true'

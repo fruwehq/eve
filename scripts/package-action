@@ -1,0 +1,152 @@
+#!/usr/bin/env ruby
+# Dispatch package-defined UI/remote actions for a concrete instance.
+
+require "json"
+require "open3"
+require "English"
+require "fileutils"
+
+ROOT = File.expand_path("..", __dir__)
+
+def usage
+  warn <<~USAGE
+    Usage:
+      scripts/package-action --instance <name> --package <id> --action <id> [--dry-run]
+  USAGE
+end
+
+def run_json(*cmd)
+  out, status = Open3.capture2e(*cmd)
+  raise out unless status.success?
+
+  JSON.parse(out)
+end
+
+def prepare_instance_overlay(instance_name)
+  paths = run_json(File.join(ROOT, "scripts/instance-paths"), "--instance", instance_name, "--emit", "json")
+  overlay = paths.fetch("INSTANCE_OVERLAY_PATH")
+  FileUtils.mkdir_p(File.dirname(overlay))
+  out, status = Open3.capture2e(
+    File.join(ROOT, "scripts/instance-profile-overlay"),
+    "--instance", instance_name,
+    "--output", overlay
+  )
+  raise out unless status.success?
+
+  ENV["EGAME_CATALOG_LOCAL"] = overlay
+  ENV["EGAME_INSTANCE_NAME"] = instance_name
+end
+
+def run_action_target(target, instance_name)
+  case target
+  when "console.open"
+    exec File.join(ROOT, "scripts/remote-console"), instance_name
+  when "moonlight.open"
+    system(File.join(ROOT, "scripts/remote-sunshine-wait"), instance_name) || exit($CHILD_STATUS.exitstatus || 1)
+    exec File.join(ROOT, "scripts/remote-moonlight"), instance_name
+  when "moonlight.pair"
+    system(File.join(ROOT, "scripts/remote-sunshine-wait"), instance_name) || exit($CHILD_STATUS.exitstatus || 1)
+    exec File.join(ROOT, "scripts/remote-moonlight-pair"), instance_name
+  when "rdp.open"
+    exec File.join(ROOT, "scripts/remote-rdp"), instance_name
+  when "rustdesk.connect"
+    exec File.join(ROOT, "scripts/remote-rustdesk"), instance_name, "connect"
+  when "rustdesk.info"
+    exec File.join(ROOT, "scripts/remote-rustdesk"), instance_name
+  when "sunshine.open"
+    ip, status = Open3.capture2e(File.join(ROOT, "scripts/instance-ip"), instance_name)
+    raise "could not resolve IP for #{instance_name}: #{ip.strip}" unless status.success?
+    ip = ip.strip
+    raise "could not resolve IP for #{instance_name}" if ip.empty?
+
+    url = "https://#{ip}:47990"
+    exec "open", url if RUBY_PLATFORM.include?("darwin")
+    exec "xdg-open", url
+  when "sunshine.wait"
+    exec File.join(ROOT, "scripts/remote-sunshine-wait"), instance_name
+  when "vnc.open"
+    exec File.join(ROOT, "scripts/remote-vnc"), instance_name
+  when "waypipe.open"
+    if ENV["APP"] && !ENV["APP"].empty?
+      exec File.join(ROOT, "scripts/remote-waypipe"), instance_name, ENV["APP"]
+    end
+    exec File.join(ROOT, "scripts/remote-waypipe"), instance_name
+  when "xpra.apps"
+    exec File.join(ROOT, "scripts/remote-xpra"), instance_name, "apps"
+  when "xpra.attach"
+    exec File.join(ROOT, "scripts/remote-xpra"), instance_name, "attach"
+  when "xpra.desktop"
+    exec File.join(ROOT, "scripts/remote-xpra"), instance_name, "desktop"
+  when "xpra.run"
+    app = ENV["APP"]
+    raise "APP is required for xpra.run" if app.nil? || app.empty?
+
+    exec File.join(ROOT, "scripts/remote-xpra"), instance_name, "run", app
+  when "xpra.start"
+    exec File.join(ROOT, "scripts/remote-xpra"), instance_name, "start"
+  when "xpra.status"
+    exec File.join(ROOT, "scripts/remote-xpra"), instance_name, "status"
+  when "xpra.stop"
+    exec File.join(ROOT, "scripts/remote-xpra"), instance_name, "stop"
+  else
+    raise "unsupported package action target: #{target}"
+  end
+end
+
+instance_name = nil
+package_id = nil
+action_id = nil
+dry_run = false
+
+args = ARGV.dup
+until args.empty?
+  case args.shift
+  when "--instance"
+    instance_name = args.shift
+  when "--package"
+    package_id = args.shift
+  when "--action"
+    action_id = args.shift
+  when "--dry-run"
+    dry_run = true
+  when "-h", "--help"
+    usage
+    exit 0
+  else
+    usage
+    exit 2
+  end
+end
+
+unless instance_name && package_id && action_id
+  usage
+  exit 2
+end
+
+begin
+  doc = run_json(File.join(ROOT, "scripts/package-list"), "--instance", instance_name, "--json")
+  package = doc.fetch("packages").find { |entry| entry["id"] == package_id }
+  raise "unknown package: #{package_id}" unless package
+
+  action = package.fetch("actions", []).find { |entry| entry["id"] == action_id }
+  raise "unknown action #{action_id} for package #{package_id}" unless action
+
+  if dry_run
+    puts JSON.pretty_generate({
+      "kind" => "package-action",
+      "instance" => instance_name,
+      "package" => package_id,
+      "action" => action_id,
+      "label" => action.fetch("label"),
+      "target" => action.fetch("target"),
+      "dry_run" => true
+    })
+    exit 0
+  end
+
+  prepare_instance_overlay(instance_name)
+  run_action_target(action.fetch("target"), instance_name)
+rescue StandardError => e
+  warn "package-action: #{e.message}"
+  exit 1
+end

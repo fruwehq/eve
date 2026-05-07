@@ -1,0 +1,131 @@
+#!/usr/bin/env ruby
+# Delete a concrete local VM instance entry from the instance registry.
+# Optionally removes the generated workdir and state files.
+
+require "fileutils"
+require "json"
+require "open3"
+require "tempfile"
+require "yaml"
+
+ROOT = File.expand_path("..", __dir__)
+DEFAULT_REGISTRY_PATH = File.join(ROOT, ".egame/instances.yaml")
+
+def with_registry_lock(registry_path)
+  FileUtils.mkdir_p(File.dirname(registry_path))
+  File.open("#{registry_path}.lock", File::RDWR | File::CREAT, 0o600) do |lock|
+    lock.flock(File::LOCK_EX)
+    yield
+  end
+end
+
+def write_registry!(registry_path, registry)
+  Tempfile.create(["egame-registry-", ".yaml"], File.dirname(registry_path)) do |tmp|
+    tmp.write(registry.to_yaml)
+    tmp.close
+    FileUtils.mv(tmp.path, registry_path)
+  end
+end
+
+def usage
+  warn <<~USAGE
+    Usage:
+      scripts/instance-delete --instance <name> [options]
+
+    Options:
+      --registry <path>
+      --purge   Remove generated workdir and state files
+  USAGE
+end
+
+instance_name = nil
+registry_path = ENV["EGAME_INSTANCE_REGISTRY"] && !ENV["EGAME_INSTANCE_REGISTRY"].empty? \
+                ? File.expand_path(ENV["EGAME_INSTANCE_REGISTRY"], Dir.pwd) \
+                : DEFAULT_REGISTRY_PATH
+purge = false
+
+args = ARGV.dup
+until args.empty?
+  case args.shift
+  when "--instance"
+    instance_name = args.shift
+  when "--registry"
+    registry_path = File.expand_path(args.shift, Dir.pwd)
+  when "--purge"
+    purge = true
+  when "-h", "--help"
+    usage
+    exit 0
+  else
+    usage
+    exit 2
+  end
+end
+
+unless instance_name && !instance_name.empty?
+  usage
+  exit 2
+end
+
+if instance_name !~ /\A[A-Za-z0-9][A-Za-z0-9._-]*\z/
+  warn "instance-delete: invalid instance name: #{instance_name.inspect}"
+  exit 2
+end
+
+paths = nil
+
+with_registry_lock(registry_path) do
+  unless File.exist?(registry_path)
+    warn "instance-delete: registry not found: #{registry_path}"
+    exit 1
+  end
+
+  registry = YAML.safe_load(File.read(registry_path), permitted_classes: [], aliases: true) || {}
+  registry["instances"] ||= []
+
+  index = registry["instances"].index { |e| e.is_a?(Hash) && e["name"] == instance_name }
+  unless index
+    warn "instance-delete: instance not found: #{instance_name}"
+    exit 1
+  end
+
+  if purge
+    out, status = Open3.capture2e(
+      File.join(ROOT, "scripts/instance-paths"),
+      "--registry", registry_path,
+      "--instance", instance_name,
+      "--emit", "json"
+    )
+    unless status.success?
+      warn out
+      exit 1
+    end
+    paths = JSON.parse(out)
+  end
+
+  registry["instances"].delete_at(index)
+
+  if registry["instances"].empty?
+    FileUtils.rm_f(registry_path)
+  else
+    write_registry!(registry_path, registry)
+  end
+end
+
+puts "Deleted instance: #{instance_name}"
+puts "Registry: #{registry_path}"
+
+if purge
+  workdir = paths.fetch("INSTANCE_WORKDIR")
+  state = paths.fetch("INSTANCE_STATE_PATH")
+
+  if File.exist?(workdir)
+    FileUtils.rm_rf(workdir)
+    puts "Removed workdir: #{workdir}"
+  end
+
+  if File.exist?(state)
+    FileUtils.rm_f(state)
+    puts "Removed state: #{state}"
+  end
+end

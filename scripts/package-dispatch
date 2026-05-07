@@ -1,0 +1,218 @@
+#!/usr/bin/env ruby
+# Dispatch package lifecycle commands through package plugins.
+
+require "json"
+require "open3"
+
+ROOT = File.expand_path("..", __dir__)
+
+def usage
+  warn <<~USAGE
+    Usage:
+      scripts/package-dispatch --instance <name> --package <id> --command install|status|down|reinstall [--registry <path>] [--dry-run] [--yes]
+  USAGE
+end
+
+def run_json(*cmd)
+  out, status = Open3.capture2e(*cmd)
+  raise out unless status.success?
+
+  JSON.parse(out)
+end
+
+def command_vector(plugin, spec)
+  exec_path = spec.fetch("exec")
+  unless exec_path.start_with?("/")
+    plugin_exec = File.join(File.dirname(plugin.fetch("path")), exec_path)
+    root_exec = File.join(ROOT, exec_path)
+    exec_path = File.exist?(plugin_exec) ? plugin_exec : root_exec
+  end
+  [exec_path, *(spec["args"] || [])]
+end
+
+def record_state(instance_name, operation, status, package_id, package_state = nil, error = nil)
+  return if ENV["EGAME_DISABLE_STATE"] == "1"
+
+  cmd = [
+    File.join(ROOT, "scripts/instance-state"),
+    "--instance", instance_name,
+    "--operation", operation,
+    "--status", status
+  ]
+  cmd += ["--package", package_id, "--package-state", package_state] if package_state
+  cmd += ["--error", error] if error
+  system(*cmd, out: File::NULL, err: File::NULL)
+end
+
+PACKAGE_STATUS_VALUES = %w[installed missing unknown failed].freeze
+
+def run_plugin(plugin, command, resolved, dry_run)
+  spec = plugin.fetch("commands")[command]
+  raise "package plugin #{plugin["id"]} has no command: #{command}" unless spec
+
+  env = ENV.to_h.merge(
+    "EGAME_INSTANCE_NAME" => resolved.fetch("instance").fetch("name"),
+    "EGAME_PACKAGE_PLUGIN" => plugin.fetch("id"),
+    "EGAME_PACKAGE_PLUGIN_ROOT" => File.dirname(plugin.fetch("path"))
+  )
+  env["EGAME_PLUGIN_DRY_RUN"] = "1" if dry_run
+
+  cmd = command_vector(plugin, spec)
+  out = nil
+  Open3.popen3(env, *cmd, chdir: ROOT) do |stdin, stdout, stderr, wait_thr|
+    stdin.write(JSON.generate(resolved))
+    stdin.close
+    out = stdout.read
+    err = stderr.read
+    warn err unless err.empty?
+    print out
+    raise "package command failed: #{command}" unless wait_thr.value.success?
+  end
+  out
+end
+
+def package_status_from_output(output)
+  return nil if output.nil? || output.empty?
+
+  (output.length - 1).downto(0) do |index|
+    next unless output[index] == "{"
+
+    begin
+      parsed = JSON.parse(output[index..].strip)
+    rescue JSON::ParserError
+      next
+    end
+    status = parsed["status"]
+    return status if PACKAGE_STATUS_VALUES.include?(status)
+  end
+
+  output.each_line.reverse_each do |line|
+    line = line.strip
+    next if line.empty?
+
+    begin
+      parsed = JSON.parse(line)
+    rescue JSON::ParserError
+      next
+    end
+    status = parsed["status"]
+    return status if PACKAGE_STATUS_VALUES.include?(status)
+  end
+  nil
+end
+
+def validate_support_value!(package_id, supports, value, field, label)
+  allowed = supports[field] || []
+  return if allowed.empty? || allowed.include?(value.to_s)
+
+  raise "package plugin #{package_id} does not support #{label} #{value}"
+end
+
+def validate_package_support!(package_id, plugin, resolved)
+  supports = plugin.fetch("supports", {})
+  os = resolved.fetch("os")
+  os_family = os.fetch("family")
+  validate_support_value!(package_id, supports, os_family, "os_families", "os family")
+  validate_support_value!(package_id, supports, os.fetch("arch", ""), "arches", "architecture")
+  validate_support_value!(package_id, supports, os.fetch("id"), "os_ids", "OS")
+  validate_support_value!(package_id, supports, os.fetch("version", ""), "os_versions", "OS version")
+  validate_support_value!(package_id, supports, os.fetch("version", ""), "#{os_family}_versions", "#{os_family} version")
+end
+
+instance_name = nil
+package_id = nil
+command = nil
+registry_path = ENV["EGAME_INSTANCE_REGISTRY"] ? File.expand_path(ENV["EGAME_INSTANCE_REGISTRY"], Dir.pwd) : nil
+dry_run = false
+yes = false
+
+args = ARGV.dup
+until args.empty?
+  case args.shift
+  when "--instance"
+    instance_name = args.shift
+  when "--package"
+    package_id = args.shift
+  when "--command"
+    command = args.shift
+  when "--registry"
+    registry_path = File.expand_path(args.shift, Dir.pwd)
+  when "--dry-run"
+    dry_run = true
+  when "--yes"
+    yes = true
+  when "-h", "--help"
+    usage
+    exit 0
+  else
+    usage
+    exit 2
+  end
+end
+
+unless instance_name && package_id && command
+  usage
+  exit 2
+end
+
+unless %w[install status down reinstall].include?(command)
+  warn "package-dispatch: unsupported command: #{command}"
+  exit 2
+end
+
+begin
+  resolve_cmd = [File.join(ROOT, "scripts/instance-resolve"), "--instance", instance_name, "--emit", "json"]
+  resolve_cmd += ["--registry", registry_path] if registry_path
+  resolved = run_json(*resolve_cmd)
+
+  plugin_doc = run_json(File.join(ROOT, "scripts/plugin-list"), "--kind", "package", "--json")
+  plugin = plugin_doc.fetch("plugins").find { |entry| entry["id"] == package_id }
+  raise "package plugin not found: #{package_id}" unless plugin
+
+  validate_package_support!(package_id, plugin, resolved)
+
+  destructive = plugin.dig("down", "destructive") == true
+  if %w[down reinstall].include?(command) && destructive && !yes && ENV["EGAME_CONFIRM_DESTRUCTIVE"] != "1"
+    raise "package #{package_id} down is destructive; pass --yes or EGAME_CONFIRM_DESTRUCTIVE=1"
+  end
+
+  paths_cmd = [File.join(ROOT, "scripts/instance-paths"), "--instance", instance_name, "--emit", "json"]
+  paths_cmd += ["--registry", registry_path] if registry_path
+  paths = run_json(*paths_cmd)
+  overlay = paths.fetch("INSTANCE_OVERLAY_PATH")
+  overlay_cmd = [File.join(ROOT, "scripts/instance-profile-overlay"), "--instance", instance_name, "--output", overlay]
+  overlay_cmd += ["--registry", registry_path] if registry_path
+  overlay_out, overlay_status = Open3.capture2e(*overlay_cmd)
+  raise overlay_out unless overlay_status.success?
+  ENV["EGAME_CATALOG_LOCAL"] = overlay
+  ENV["EGAME_INSTANCE_REGISTRY"] = registry_path if registry_path
+
+  record_state(instance_name, "package.#{command}", "running", package_id) unless dry_run
+
+  output = nil
+  if command == "reinstall" && !plugin.fetch("commands").key?("reinstall")
+    run_plugin(plugin, "down", resolved, dry_run)
+    output = run_plugin(plugin, "install", resolved, dry_run)
+  else
+    output = run_plugin(plugin, command, resolved, dry_run)
+  end
+
+  package_state = case command
+                  when "install" then "installed"
+                  when "down" then "removed"
+                  when "reinstall" then "reinstalled"
+                  else package_status_from_output(output) || "unknown"
+                  end
+  record_state(instance_name, "package.#{command}", "succeeded", package_id, package_state) unless dry_run
+rescue StandardError => e
+  record_state(
+    instance_name,
+    "package.#{command || "unknown"}",
+    "failed",
+    package_id || "unknown",
+    "failed",
+    e.message
+  ) if instance_name && package_id && !dry_run
+  warn "package-dispatch: #{e.message}"
+  exit 1
+end

@@ -13,6 +13,8 @@ fi
 
 PROFILE="${1:?Usage: scripts/vagrant-up [--plan] <profile>}"
 cd "$(git rev-parse --show-toplevel)"
+# shellcheck source=lib/instance-workdir.sh
+. ./scripts/lib/instance-workdir.sh
 
 RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
 ENGINE=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^ENGINE=/{print $2}')
@@ -23,17 +25,24 @@ if [ "$ENGINE" != "vagrant" ]; then
 fi
 
 VPROV=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^PROVIDER=/{print $2}')
-VAGRANT_PROVIDER=$(echo "$VPROV" | sed 's/local-vmware/vmware_desktop/;s/local-virtualbox/virtualbox/')
+case "$VPROV" in
+  local-qemu) VAGRANT_PROVIDER=qemu ;;
+  *)
+    echo "[vagrant-up] unsupported local provider=$VPROV" >&2
+    exit 2
+    ;;
+esac
 echo "[vagrant-up] profile=$PROFILE provider=$VAGRANT_PROVIDER"
 
-mkdir -p ".generated/$PROFILE"
+WORKDIR="$(egame_instance_workdir "$PROFILE")"
+mkdir -p "$WORKDIR"
 ./scripts/profile-resolve --profile "$PROFILE" --emit vagrant \
-  --output ".generated/$PROFILE/Vagrantfile"
+  --output "$WORKDIR/Vagrantfile"
 
 if [ "$PLAN" -eq 1 ]; then
-  echo "[vagrant-up] Vagrantfile generated at .generated/$PROFILE/Vagrantfile (dry run)"
+  echo "[vagrant-up] Vagrantfile generated at $WORKDIR/Vagrantfile (dry run)"
   exit 0
 fi
 
-cd ".generated/$PROFILE"
+cd "$WORKDIR"
 vagrant up "--provider=$VAGRANT_PROVIDER"

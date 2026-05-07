@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+profile="${1:?Usage: provision-ok <profile>}"
+jq -n --arg profile "$profile" '{fixture: "provision-ok", profile: $profile}'

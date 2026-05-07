@@ -23,12 +23,22 @@ jobs:
       - name: Install Terramate
         uses: terramate-io/terramate-action@v3
         with:
-          version: "0.16.0"
+          version: "0.17.0"
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
 
       - name: Install shellcheck + jq + ruby
         run: |
           sudo apt-get update -y
           sudo apt-get install -y shellcheck jq ruby
+
+      - name: Install Python dependencies
+        run: |
+          pipx install poetry
+          poetry install --no-interaction --no-root
 
       - name: Run make test
         run: make test
