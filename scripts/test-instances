@@ -428,6 +428,16 @@ else
   FAIL=$((FAIL + 1))
 fi
 
+overlay_mtime_before="$(stat -f %m "$overlay" 2>/dev/null || stat -c %Y "$overlay")"
+if ./scripts/instance-profile-overlay --registry "$FIXTURE" --instance dev-a --output "$overlay" &&
+  overlay_mtime_after="$(stat -f %m "$overlay" 2>/dev/null || stat -c %Y "$overlay")" &&
+  [ "$overlay_mtime_before" = "$overlay_mtime_after" ]; then
+  printf '  [OK] unchanged profile overlay is not rewritten\n'
+else
+  printf '  [FAIL] unchanged profile overlay rewrite check\n' >&2
+  FAIL=$((FAIL + 1))
+fi
+
 profile_env="$(EGAME_CATALOG_LOCAL="$overlay" ./scripts/profile-resolve --profile dev-a --emit env | LC_ALL=C sort)"
 if printf '%s\n' "$profile_env" | grep -qx 'PROFILE_NAME=dev-a' &&
   printf '%s\n' "$profile_env" | grep -qx 'VM_DISK_GB=64' &&

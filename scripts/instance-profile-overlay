@@ -80,6 +80,9 @@ overlay = {
 yaml = overlay.to_yaml
 if output_path
   FileUtils.mkdir_p(File.dirname(output_path))
+  if File.exist?(output_path) && File.read(output_path) == yaml
+    exit 0
+  end
   File.write(output_path, yaml)
 else
   puts yaml

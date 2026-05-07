@@ -675,6 +675,26 @@ else
   FAIL=$((FAIL + 1))
 fi
 
+EGAME_STATE_DIR="$state_dir" ./scripts/instance-state \
+  --instance recover-read-a \
+  --operation provider.up \
+  --status succeeded \
+  --desired-state running \
+  --provider-state running >/dev/null
+EGAME_STATE_DIR="$state_dir" ./scripts/instance-state \
+  --instance recover-read-a \
+  --operation provider.ip \
+  --status running >/dev/null
+recovered_read_state="$(EGAME_STATE_DIR="$state_dir" ./scripts/instance-state --instance recover-read-a --recover-running)"
+if printf '%s\n' "$recovered_read_state" |
+  jq -e '.last_operation.name == "provider.ip" and .last_operation.status == "failed" and .provider_state == "running" and (.last_error | test("Recovered interrupted operation provider.ip"))' >/dev/null; then
+  printf '  [OK] instance state recover preserves read-only provider state\n'
+else
+  printf '  [FAIL] instance state read-only recover mismatch\n' >&2
+  printf '%s\n' "$recovered_read_state" >&2
+  FAIL=$((FAIL + 1))
+fi
+
 if EGAME_STATE_DIR="$state_dir" ./scripts/instance-state \
   --instance dev-a \
   --operation provider.status \

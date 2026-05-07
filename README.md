@@ -64,19 +64,88 @@ runs as the VM user through `systemd --user`, and `DOCKER_HOST` points at the
 user socket under `/run/user/<uid>/docker.sock`.
 
 Experimental Wayland app forwarding is available through the `waypipe` package
-and the `desktop-streaming` bundle:
+and the `desktop-streaming` bundle. Waypipe needs a local Wayland display on the
+Mac; XQuartz only provides X11, so `DISPLAY=/.../org.xquartz:0` is not enough.
 
 ```bash
 make package.select INSTANCE=dev-a PACKAGE=waypipe
 make package.install INSTANCE=dev-a PACKAGE=waypipe
-make remote.waypipe INSTANCE=dev-a APP=foot
 ```
 
-On macOS, install a local Wayland-capable client side first. Current experiments
-to try are [waypipe-darwin](https://github.com/J-x-Z/waypipe-darwin),
-[Wawona](https://github.com/Wawona/Wawona), or
-[wprs](https://github.com/wayland-transpositor/wprs). Treat this as a trial
-path, not a stable replacement for Xpra yet.
+Current macOS experiments:
+
+1. **waypipe-darwin + a local Wayland compositor**
+
+   `waypipe-darwin` provides a Darwin build of Waypipe, but it still expects
+   `WAYLAND_DISPLAY` to point at a local Wayland socket. Install it first:
+
+   ```bash
+   brew tap J-x-Z/tap
+   brew install waypipe-darwin
+   ```
+
+   Then start a macOS Wayland compositor. `WAYLAND_DISPLAY` must point at the
+   socket created by that compositor. It is usually either:
+
+   - a socket name such as `wayland-0`, resolved under `XDG_RUNTIME_DIR`
+   - an absolute socket path such as `/tmp/wawona-wayland-0`
+
+   Discover likely sockets with:
+
+   ```bash
+   find "${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}" -maxdepth 1 -type s -name 'wayland-*' -print
+   ```
+
+   If the command prints `/some/dir/wayland-0`, either set both variables:
+
+   ```bash
+   export XDG_RUNTIME_DIR=/some/dir
+   export WAYLAND_DISPLAY=wayland-0
+   ```
+
+   or use the absolute socket path directly:
+
+   ```bash
+   export WAYLAND_DISPLAY=/some/dir/wayland-0
+   ```
+
+   Then run a small app:
+
+   ```bash
+   test -n "${WAYLAND_DISPLAY:-}" && echo "$WAYLAND_DISPLAY"
+   make package.action INSTANCE=dev-a PACKAGE=waypipe ACTION=waypipe APP=foot
+   ```
+
+2. **Wawona + waypipe-darwin**
+
+   Wawona is an experimental Wayland stack for macOS. Build or install it from
+   its repository, start the compositor, then discover the socket it created:
+
+   ```bash
+   find "${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}" -maxdepth 1 -type s -name 'wayland-*' -print
+   export WAYLAND_DISPLAY=/path/printed/by/find
+   make package.action INSTANCE=dev-a PACKAGE=waypipe ACTION=waypipe APP=foot
+   ```
+
+   If the command still says `WAYLAND_DISPLAY is not set`, the compositor is not
+   exporting a socket into the shell that launched `make`, or you have not
+   pointed `WAYLAND_DISPLAY` at the socket.
+
+3. **wprs**
+
+   wprs is a separate experimental Wayland remote-display project. Treat it as
+   an alternative research path rather than a drop-in `make remote.waypipe`
+   backend today. Try it from its own repository first; once a local Wayland
+   socket exists, the same check applies:
+
+   ```bash
+   test -n "${WAYLAND_DISPLAY:-}" && echo "$WAYLAND_DISPLAY"
+   make package.action INSTANCE=dev-a PACKAGE=waypipe ACTION=waypipe APP=foot
+   ```
+
+This is a trial path, not a stable replacement for Xpra yet. For reliable
+day-to-day Linux GUI access on macOS, prefer RustDesk, VNC, Sunshine/Moonlight,
+or Xpra where the OS/package source supports it.
 
 Terraform-backed instances get instance-scoped backend roots and `TF_DATA_DIR` paths under
 `.generated/instances/<name>/tf/`, so multiple concrete instances on the same

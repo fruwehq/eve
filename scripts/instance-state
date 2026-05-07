@@ -150,7 +150,7 @@ if recover_running
     end
     case recovered["type"]
     when "provider"
-      state["provider_state"] = "error"
+      state["provider_state"] = "error" unless %w[provider.resolve provider.status provider.ip provider.ssh].include?(recovered["name"])
     when "provision"
       state["provision_state"] = "error"
     end

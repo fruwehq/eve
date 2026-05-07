@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import copy
 import json
 import os
 import re
@@ -18,7 +19,7 @@ from typing import Any, ClassVar, cast
 
 ROOT = Path(__file__).resolve().parents[1]
 NEW_INSTANCE_KEY = "__new_instance__"
-PACKAGE_ACTION_BUTTONS = 11
+PACKAGE_ACTION_BUTTONS = 9
 
 
 def usage() -> str:
@@ -69,10 +70,37 @@ def instance_status(instance: str) -> dict[str, Any]:
 
 
 def instance_ip(instance: str) -> str:
-    code, out, err = run_command(["make", "--no-print-directory", "ip", f"INSTANCE={instance}"])
+    code, out, err = run_command(
+        ["make", "--no-print-directory", "ip", f"INSTANCE={instance}"],
+        env={"EGAME_DISABLE_STATE": "1"},
+    )
     if code != 0:
         raise RuntimeError(err.strip() or out.strip() or f"make ip exited {code}")
     return out.strip()
+
+
+def provider_live_status(instance: str) -> str | None:
+    code, out, err = run_command(
+        ["make", "--no-print-directory", "provider.status", f"INSTANCE={instance}"],
+        env={"EGAME_DISABLE_STATE": "1"},
+    )
+    if code != 0:
+        raise RuntimeError(err.strip() or out.strip() or f"make provider.status exited {code}")
+    for line in out.splitlines():
+        if line.startswith("Status:"):
+            return normalize_provider_state(line.split(":", 1)[1].strip())
+    return None
+
+
+def normalize_provider_state(status: str) -> str:
+    normalized = status.strip().lower()
+    if normalized in {"running", "stopped"}:
+        return normalized
+    if normalized in {"not created", "not-created", "absent"}:
+        return "absent"
+    if normalized in {"unreachable", "error", "failed"}:
+        return "error"
+    return normalized or "unknown"
 
 
 def make_args(target: str, instance: str, *extra: str) -> list[str]:
@@ -197,12 +225,40 @@ def package_summary_label(summary: dict[str, Any]) -> str:
 
 
 def provider_actions_available(state: dict[str, Any]) -> bool:
-    provider_state = str(state.get("provider_state", "unknown"))
+    provider_state = effective_provider_state(state)
     desired_state = str(state.get("desired_state", "unknown"))
     provision_state = str(state.get("provision_state", "unknown"))
     return provider_state == "running" or (
         provider_state == "error" and desired_state == "running" and provision_state == "provisioned"
     )
+
+
+def effective_provider_state(state: dict[str, Any]) -> str:
+    provider_state = str(state.get("provider_state", "unknown"))
+    desired_state = str(state.get("desired_state", "unknown"))
+    provision_state = str(state.get("provision_state", "unknown"))
+    if provider_state == "error" and desired_state == "running" and provision_state == "provisioned":
+        return "running"
+    return provider_state
+
+
+def should_apply_live_provider_state(status: dict[str, Any], live_state: str) -> bool:
+    state = status.get("state", {})
+    if not isinstance(state, dict):
+        return True
+    if live_state == "absent" and effective_provider_state(state) == "running":
+        return False
+    return live_state in {"running", "stopped", "absent", "error"}
+
+
+def status_with_provider_state(status: dict[str, Any], provider_state: str) -> dict[str, Any]:
+    next_status = copy.deepcopy(status)
+    state = next_status.setdefault("state", {})
+    if isinstance(state, dict):
+        state["provider_state"] = provider_state
+        if provider_state == "running" and state.get("last_error"):
+            state["last_error"] = None
+    return next_status
 
 
 def action_allowed_for_instance(action: dict[str, Any], package_id: str, os_family: str) -> bool:
@@ -863,8 +919,8 @@ def run_tui() -> int:
         }
 
         #left {
-            width: 64;
-            min-width: 58;
+            width: 58;
+            min-width: 52;
             border-right: solid $primary;
             padding: 1;
         }
@@ -897,7 +953,7 @@ def run_tui() -> int:
         }
 
         #action-groups {
-            height: 21;
+            height: 17;
             margin-bottom: 1;
         }
 
@@ -921,10 +977,10 @@ def run_tui() -> int:
         }
 
         #remote-strip {
-            grid-size: 4 3;
-            grid-columns: 1fr 1fr 1fr 1fr;
-            grid-rows: 3 3 3;
-            height: 11;
+            grid-size: 5 2;
+            grid-columns: 1fr 1fr 1fr 1fr 1fr;
+            grid-rows: 3 3;
+            height: 7;
         }
 
         #instance-actions-group {
@@ -932,7 +988,7 @@ def run_tui() -> int:
         }
 
         #package-actions-group {
-            height: 12;
+            height: 8;
         }
 
         #lifecycle-strip,
@@ -1054,6 +1110,7 @@ def run_tui() -> int:
             self.hero_frame = 0
             self._rendering_instances = False
             self._detail_refresh_seq = 0
+            self._status_refreshing: set[str] = set()
 
         def compose(self) -> ComposeResult:
             yield Header(show_clock=True)
@@ -1280,24 +1337,27 @@ def run_tui() -> int:
             previous_names = [str(row.get("name", "")) for row in self.instances if row.get("name")]
             next_names = [str(row.get("name", "")) for row in rows if row.get("name")]
             self.instances = rows
-            self.statuses = {}
-            for row in rows:
-                name = str(row.get("name", ""))
-                if not name:
-                    continue
-                try:
-                    self.statuses[name] = await asyncio.to_thread(instance_status, name)
-                except Exception as exc:
-                    self.statuses[name] = {"instance": {"name": name}, "state": {"last_error": str(exc)}}
+            next_name_set = set(next_names)
+            self.statuses = {name: status for name, status in self.statuses.items() if name in next_name_set}
 
             if previous and previous in self.statuses:
                 self.current_instance = previous
             elif self.current_instance not in self.statuses:
-                self.current_instance = None
+                if previous and previous in next_name_set:
+                    self.current_instance = previous
+                elif self.current_instance in next_name_set:
+                    pass
+                else:
+                    self.current_instance = None
 
             if repaint_table or previous_names != next_names:
                 self.render_instances()
-            await self.refresh_current_status()
+            for name in next_names:
+                self.start_task(self.refresh_status_for(name, repaint_table=True))
+            if self.current_instance and self.current_instance not in self.statuses:
+                self.render_loading_detail(self.current_instance)
+                self.update_action_state()
+            await self.refresh_current_status(allow_fetch=False)
             self.query_one("#summary", Static).update(aggregate_state(self.statuses))
 
         def focus_instance_list_if_empty(self) -> None:
@@ -1329,15 +1389,16 @@ def run_tui() -> int:
                     current_row = row_index
                 status = self.statuses.get(name, {})
                 state = status.get("state", {})
-                provider_state = str(state.get("provider_state", "unknown"))
+                provider_state = effective_provider_state(cast(dict[str, Any], state))
                 provision_state = str(state.get("provision_state", "unknown"))
-                display_state_text = provider_state if provider_state != "unknown" else ""
+                loading = name in self._status_refreshing or not status
+                display_state_text = "loading" if loading else (provider_state if provider_state != "unknown" else "")
                 if not display_state_text and provision_state != "unknown":
                     display_state_text = provision_state
                 if not display_state_text:
                     display_state_text = "new"
                 table.add_row(
-                    glyph_for_status(provider_state),
+                    "..." if loading else glyph_for_status(provider_state),
                     name,
                     display_state_text,
                     os_id or "-",
@@ -1353,7 +1414,7 @@ def run_tui() -> int:
                     self.query_one(f"#{focused_id}").focus()
             self._rendering_instances = False
 
-        async def refresh_current_status(self) -> None:
+        async def refresh_current_status(self, *, allow_fetch: bool = True) -> None:
             self._detail_refresh_seq += 1
             refresh_seq = self._detail_refresh_seq
             instance_name = self.current_instance
@@ -1367,7 +1428,7 @@ def run_tui() -> int:
             next_status = self.statuses.get(instance_name)
             if status_instance_name(next_status) not in {None, instance_name}:
                 next_status = None
-            if not next_status:
+            if not next_status and allow_fetch:
                 try:
                     next_status = await asyncio.to_thread(instance_status, instance_name)
                     if refresh_seq != self._detail_refresh_seq or instance_name != self.current_instance:
@@ -1384,10 +1445,23 @@ def run_tui() -> int:
                         return
                     self.log_line(f"[error]instance-status failed:[/] {exc}")
                     return
+            if not next_status:
+                self.render_loading_detail(instance_name)
+                self.update_action_state()
+                return
             if refresh_seq != self._detail_refresh_seq or instance_name != self.current_instance:
                 return
+            try:
+                live_state = await asyncio.to_thread(provider_live_status, instance_name)
+                if live_state and should_apply_live_provider_state(next_status, live_state):
+                    next_status = status_with_provider_state(next_status, live_state)
+                    self.statuses[instance_name] = next_status
+            except Exception as exc:
+                self.log_line(f"[warning]provider.status failed:[/] {exc}")
+                if refresh_seq != self._detail_refresh_seq or instance_name != self.current_instance:
+                    return
             self.current_status = next_status
-            provider_state = str(next_status.get("state", {}).get("provider_state", "unknown"))
+            provider_state = effective_provider_state(cast(dict[str, Any], next_status.get("state", {})))
             if provider_state == "running":
                 try:
                     ip = await asyncio.to_thread(instance_ip, instance_name)
@@ -1401,19 +1475,36 @@ def run_tui() -> int:
             self.update_action_state()
             self.restore_focus(focused_id)
 
-        async def refresh_status_for(self, instance_name: str) -> None:
+        async def refresh_status_for(self, instance_name: str, *, repaint_table: bool = False) -> None:
+            self._status_refreshing.add(instance_name)
+            if repaint_table:
+                self.render_instances()
             try:
                 status = await asyncio.to_thread(instance_status, instance_name)
             except Exception as exc:
                 self.log_line(f"[error]instance-status failed for {instance_name}:[/] {exc}")
+                self._status_refreshing.discard(instance_name)
+                if repaint_table:
+                    self.render_instances()
                 return
             if status_instance_name(status) != instance_name:
                 self.log_line(
                     f"[error]instance-status returned {status_instance_name(status) or 'unknown'} "
                     f"while refreshing {instance_name}[/]"
                 )
+                self._status_refreshing.discard(instance_name)
+                if repaint_table:
+                    self.render_instances()
                 return
+            with suppress(Exception):
+                live_state = await asyncio.to_thread(provider_live_status, instance_name)
+                if live_state and should_apply_live_provider_state(status, live_state):
+                    status = status_with_provider_state(status, live_state)
             self.statuses[instance_name] = status
+            self._status_refreshing.discard(instance_name)
+            if repaint_table:
+                self.render_instances()
+                self.query_one("#summary", Static).update(aggregate_state(self.statuses))
             if self.current_instance == instance_name:
                 self.current_status = status
                 state = status.get("state", {})
@@ -1774,6 +1865,27 @@ def run_tui() -> int:
             if code == 0:
                 self.current_instance = result["name"]
                 await self.refresh_instances(preserve_selection=True)
+                self.select_instance_row(result["name"])
+
+        def select_instance_row(self, instance_name: str) -> None:
+            table = self.query_one("#instances", DataTable)
+            row_index = 1
+            filter_text = self.query_one("#filter", Input).value.strip().lower()
+            for row in self.instances:
+                name = str(row.get("name", ""))
+                os_id = str(row.get("os", ""))
+                machine = str(row.get("machine", ""))
+                if (
+                    filter_text
+                    and filter_text not in name.lower()
+                    and filter_text not in os_id.lower()
+                    and filter_text not in machine.lower()
+                ):
+                    continue
+                if name == instance_name:
+                    table.move_cursor(row=row_index, column=0, animate=False, scroll=True)
+                    return
+                row_index += 1
 
         def action_delete_instance(self) -> None:
             if not self.current_instance:
@@ -1985,18 +2097,18 @@ def run_tui() -> int:
             focused_id = self.focused.id if self.focused is not None else None
             has_instance = self.current_instance is not None
             state = self.current_status.get("state", {}) if self.current_status else {}
-            provider_state = str(state.get("provider_state", "unknown"))
             provision_state = str(state.get("provision_state", "unknown"))
+            display_provider_state = effective_provider_state(cast(dict[str, Any], state))
             provider_available = provider_actions_available(cast(dict[str, Any], state))
-            provider_busy = provider_state == "changing"
-            provider_absent = provider_state == "absent"
+            provider_busy = display_provider_state == "changing"
+            provider_absent = display_provider_state == "absent"
             self.current_remote_actions = self.installed_package_actions()
 
             busy = self.command_running
             self.set_button("refresh", disabled=busy)
             self.set_button(
                 "provider-up",
-                disabled=busy or not has_instance or provider_busy or provider_state == "running",
+                disabled=busy or not has_instance or provider_busy or display_provider_state == "running",
             )
             self.set_button(
                 "provider-stop",
@@ -2004,7 +2116,7 @@ def run_tui() -> int:
                     busy
                     or not has_instance
                     or provider_busy
-                    or provider_state in {"unknown", "stopped", "absent"}
+                    or display_provider_state in {"unknown", "stopped", "absent"}
                 ),
             )
             self.set_button(
@@ -2020,7 +2132,7 @@ def run_tui() -> int:
             self.set_button("logs", disabled=busy or not has_instance or not provider_available)
             self.set_button(
                 "provider-down",
-                disabled=busy or not has_instance or provider_busy or provider_state in {"absent", "unknown"},
+                disabled=busy or not has_instance or provider_busy or display_provider_state in {"absent", "unknown"},
             )
             self.set_button("delete-instance", disabled=busy or not has_instance)
             self.set_button("connect-ssh", disabled=busy or not has_instance or not provider_available)
@@ -2089,7 +2201,7 @@ def run_tui() -> int:
             if len(buttons) < 2 or self.focused not in buttons:
                 return False
             current = buttons.index(self.focused)
-            columns = 4 if parent.id == "remote-strip" else (
+            columns = 5 if parent.id == "remote-strip" else (
                 3 if parent.id in {
                     "lifecycle-strip",
                     "package-actions",
