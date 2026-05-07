@@ -23,9 +23,14 @@ if ! command -v waypipe >/dev/null 2>&1; then
   exit 2
 fi
 
-if [ -z "${WAYLAND_DISPLAY:-}" ] && [ -z "${DISPLAY:-}" ]; then
-  echo "remote-waypipe: no local WAYLAND_DISPLAY or DISPLAY is set." >&2
-  echo "  Start a local Wayland compositor first, e.g. Wawona or Weston-on-macOS." >&2
+if [ -z "${WAYLAND_DISPLAY:-}" ]; then
+  echo "remote-waypipe: WAYLAND_DISPLAY is not set on the local machine." >&2
+  if [ -n "${DISPLAY:-}" ]; then
+    echo "  DISPLAY=$DISPLAY is an X11/XQuartz display, not a Wayland socket." >&2
+  fi
+  echo "  Start a local Wayland compositor first, then retry with WAYLAND_DISPLAY set." >&2
+  echo "  macOS experiments include Wawona or another Darwin Wayland compositor." >&2
+  exit 2
 fi
 
 RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)

@@ -18,7 +18,7 @@ from typing import Any, ClassVar, cast
 
 ROOT = Path(__file__).resolve().parents[1]
 NEW_INSTANCE_KEY = "__new_instance__"
-PACKAGE_ACTION_BUTTONS = 8
+PACKAGE_ACTION_BUTTONS = 11
 
 
 def usage() -> str:
@@ -897,14 +897,12 @@ def run_tui() -> int:
         }
 
         #action-groups {
-            height: 9;
+            height: 21;
             margin-bottom: 1;
         }
 
         .action-group {
             width: 1fr;
-            height: 1fr;
-            margin-right: 1;
         }
 
         .action-title {
@@ -918,21 +916,39 @@ def run_tui() -> int:
         #bundle-actions,
         #danger-strip {
             layout: grid;
-            grid-size: 3 3;
-            grid-columns: 1fr 1fr 1fr;
-            grid-rows: 3 3 3;
             grid-gutter: 1;
             background: transparent;
         }
 
         #remote-strip {
-            height: 7;
+            grid-size: 4 3;
+            grid-columns: 1fr 1fr 1fr 1fr;
+            grid-rows: 3 3 3;
+            height: 11;
+        }
+
+        #instance-actions-group {
+            height: 8;
+        }
+
+        #package-actions-group {
+            height: 12;
         }
 
         #lifecycle-strip,
-        #package-actions,
-        #bundle-actions {
-            height: 5;
+        #package-actions {
+            grid-size: 3 2;
+            grid-columns: 1fr 1fr 1fr;
+            grid-rows: 3 3;
+            height: 7;
+        }
+
+        #bundle-actions,
+        #danger-strip {
+            grid-size: 3 1;
+            grid-columns: 1fr 1fr 1fr;
+            grid-rows: 3;
+            height: 3;
         }
 
         #detail-grid {
@@ -940,7 +956,6 @@ def run_tui() -> int:
         }
 
         #danger-strip {
-            height: 3;
             margin-top: 1;
         }
 
@@ -1074,14 +1089,8 @@ def run_tui() -> int:
                                 yield Static("IP\n-", id="ip-pill", classes="pill")
                                 yield Static("Provision\nunknown", id="provision-pill", classes="pill")
                                 yield Static("Packages\nunknown", id="packages-pill", classes="pill")
-                            with Horizontal(id="action-groups"):
-                                with Vertical(classes="action-group"):
-                                    yield Static("Package Actions", classes="action-title")
-                                    with Grid(id="remote-strip"):
-                                        yield Button("SSH", id="connect-ssh")
-                                        for index in range(PACKAGE_ACTION_BUTTONS):
-                                            yield Button("", id=f"pkg-action-{index}")
-                                with Vertical(classes="action-group"):
+                            with Vertical(id="action-groups"):
+                                with Vertical(id="instance-actions-group", classes="action-group"):
                                     yield Static("Instance Controls", classes="action-title")
                                     with Grid(id="lifecycle-strip"):
                                         yield Button("Up", id="provider-up", variant="success")
@@ -1089,6 +1098,12 @@ def run_tui() -> int:
                                         yield Button("Provision", id="provision", variant="primary")
                                         yield Button("Logs", id="logs")
                                         yield Button("Refresh", id="refresh", variant="primary")
+                                with Vertical(id="package-actions-group", classes="action-group"):
+                                    yield Static("Package Actions", classes="action-title")
+                                    with Grid(id="remote-strip"):
+                                        yield Button("SSH", id="connect-ssh")
+                                        for index in range(PACKAGE_ACTION_BUTTONS):
+                                            yield Button("", id=f"pkg-action-{index}")
                             with Horizontal(id="detail-grid"):
                                 with Vertical(id="packages-pane"):
                                     yield Static("Bundles", classes="section-title")
@@ -2074,13 +2089,14 @@ def run_tui() -> int:
             if len(buttons) < 2 or self.focused not in buttons:
                 return False
             current = buttons.index(self.focused)
-            columns = 3 if parent.id in {
-                "remote-strip",
-                "lifecycle-strip",
-                "package-actions",
-                "bundle-actions",
-                "danger-strip",
-            } else len(buttons)
+            columns = 4 if parent.id == "remote-strip" else (
+                3 if parent.id in {
+                    "lifecycle-strip",
+                    "package-actions",
+                    "bundle-actions",
+                    "danger-strip",
+                } else len(buttons)
+            )
             delta = {
                 "left": -1,
                 "right": 1,

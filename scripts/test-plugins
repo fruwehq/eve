@@ -20,9 +20,10 @@ WIN_ONLY_PLUGIN_FIXTURE="tests/fixtures/plugins/packages/win-only"
 profile_catalog_dir="$(mktemp -d "${TMPDIR:-/tmp}/egame-plugin-profiles.XXXXXX")"
 profile_catalog="$profile_catalog_dir/catalog.local.yaml"
 state_dir=""
+waypipe_bin_dir=""
 FAIL=0
 
-trap 'rm -rf "$profile_catalog_dir"; if [ -n "$state_dir" ]; then rm -rf "$state_dir"; fi' EXIT
+trap 'rm -rf "$profile_catalog_dir"; if [ -n "$state_dir" ]; then rm -rf "$state_dir"; fi; if [ -n "$waypipe_bin_dir" ]; then rm -rf "$waypipe_bin_dir"; fi' EXIT
 
 cat >"$profile_catalog" <<'YAML'
 profiles:
@@ -152,6 +153,18 @@ if EGAME_INSTANCE_REGISTRY="$FIXTURE" ./scripts/package-action --instance dev-a 
   printf '  [OK] package action dry-run resolves manifest target\n'
 else
   printf '  [FAIL] package action dry-run resolves manifest target\n' >&2
+  FAIL=$((FAIL + 1))
+fi
+
+waypipe_bin_dir="$(mktemp -d "${TMPDIR:-/tmp}/egame-waypipe-bin.XXXXXX")"
+printf '#!/usr/bin/env sh\nexit 99\n' >"$waypipe_bin_dir/waypipe"
+chmod +x "$waypipe_bin_dir/waypipe"
+waypipe_err="$(env PATH="$waypipe_bin_dir:$PATH" WAYLAND_DISPLAY= DISPLAY=/tmp/org.xquartz:0 ./scripts/remote-waypipe dev-a 2>&1 >/dev/null || true)"
+if printf '%s' "$waypipe_err" | grep -q "X11/XQuartz display, not a Wayland socket"; then
+  printf '  [OK] remote-waypipe rejects XQuartz without local Wayland\n'
+else
+  printf '  [FAIL] remote-waypipe rejects XQuartz without local Wayland\n' >&2
+  printf '%s\n' "$waypipe_err" >&2
   FAIL=$((FAIL + 1))
 fi
 
