@@ -1,6 +1,6 @@
 # Makefile
 .DEFAULT_GOAL := default
-.PHONY: ai.sandbox aws.login bundle.select bundle.unselect catalog.list clean default doctor down env generate help info integration.packages integration.plan integration.test \
+.PHONY: ai.sandbox aws.login bundle.select bundle.unselect catalog.list clean default doctor down env eve generate help info install-cli integration.packages integration.plan integration.test \
 				init init.all instance.create instance.delete instance.env instance.info instance.provision \
 				instance.list instance.observe instance.paths instance.recover instance.state instance.status instance.validate ip lint logs plan \
 				package.action package.down package.install package.list package.reinstall package.select \
@@ -144,6 +144,13 @@ init: ## Initialize provider backend for an instance
 
 init.all: generate ## Init all stacks in parallel (set TM_PARALLEL=N)
 	terramate run --parallel=$(TM_PARALLEL) --continue-on-error -- terraform init -upgrade
+
+install-cli: ## Install eve launcher into ~/.local/bin
+	@install -d "$(HOME)/.local/bin"
+	@printf '%s\n' '#!/usr/bin/env sh' 'set -eu' 'exec "$(CURDIR)/scripts/eve" "$$@"' > "$(HOME)/.local/bin/eve"
+	@chmod +x "$(HOME)/.local/bin/eve"
+	@echo "Installed eve to $(HOME)/.local/bin/eve"
+	@case ":$$PATH:" in *:$(HOME)/.local/bin:*) ;; *) echo "Add $(HOME)/.local/bin to PATH if eve is not found by your shell."; esac
 
 instance.create: ## Create a local instance registry entry (INSTANCE=<name> MACHINE=... OS=... LOCATION=...)
 	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make instance.create INSTANCE=<name> MACHINE=<machine> OS=<os> LOCATION=<location> [INIT=<init>] [BUNDLES=a,b] [PACKAGES=a,b] [DISK_GB=n] [MEMORY_MB=n]"; exit 2; fi; \

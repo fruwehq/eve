@@ -190,6 +190,9 @@ The optional `make eve` target opens **Eve** (Ephemeral VM Environment), a
 Textual instance manager for browsing instances, combined state, package state,
 and safe provider/package actions. `make tui` remains available as a
 compatibility alias.
+Run `make install-cli` once to install an `eve` command into `~/.local/bin`;
+after that, `eve` opens the same TUI from any directory as long as
+`~/.local/bin` is on your `PATH`.
 Use `poetry install` once to install the optional Python dependencies; the rest
 of the v3 command surface has no Python package dependency.
 
