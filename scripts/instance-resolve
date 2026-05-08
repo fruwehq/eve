@@ -309,6 +309,8 @@ def emit_env(resolved)
     "LOCATION_ZONE" => (locp["zone"] || ""),
     "SSH_USER" => if os["family"] == "windows"
                     "Administrator"
+                  elsif provider == "truenas"
+                    env_or("EGAME_PROVISION_USER", "egame-provision")
                   else
                     env_or("VM_USER_NAME", "")
                   end,

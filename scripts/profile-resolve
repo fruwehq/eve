@@ -255,6 +255,7 @@ emit_env() {
     "LOCATION_ZONE=" + ($locp.zone // ""),
     "SSH_USER=" + (
       if (.os.family == "windows") then "Administrator"
+      elif (.machine.provider == "truenas") then env_or("EGAME_PROVISION_USER"; "egame-provision")
       else env_or("VM_USER_NAME"; "")
       end
     ),

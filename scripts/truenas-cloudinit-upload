@@ -2,16 +2,31 @@
 set -euo pipefail
 
 # Generate a NoCloud cloud-init seed ISO and upload it to TrueNAS via SCP.
-# Usage: truenas-cloudinit-upload <vm_name> <ssh_public_key_file> <truenas_host> <iso_path> [vm_user_name]
+# Usage: truenas-cloudinit-upload <vm_name> <ssh_public_key_file> <truenas_host> <iso_path> <provision_user_name> [human_user_name]
 
 VM_NAME="${1:?vm_name required}"
 SSH_PUBLIC_KEY_FILE="${2:?ssh_public_key_file required}"
 TRUENAS_HOST="${3:?truenas_host required}"
 ISO_PATH="${4:?iso_path required}"
-VM_USER_NAME="${5:-}"
-if [ -z "$VM_USER_NAME" ]; then
-  echo "truenas-cloudinit-upload: vm_user_name is required" >&2
+PROVISION_USER_NAME="${5:-}"
+HUMAN_USER_NAME="${6:-}"
+if [ -z "$PROVISION_USER_NAME" ]; then
+  echo "truenas-cloudinit-upload: provision_user_name is required" >&2
   exit 2
+fi
+validate_user_name() {
+  local label="$1"
+  local value="$2"
+  case "$value" in
+    *[!a-zA-Z0-9._-]*)
+      echo "truenas-cloudinit-upload: $label contains unsupported characters: $value" >&2
+      exit 2
+      ;;
+  esac
+}
+validate_user_name provision_user_name "$PROVISION_USER_NAME"
+if [ -n "$HUMAN_USER_NAME" ]; then
+  validate_user_name human_user_name "$HUMAN_USER_NAME"
 fi
 
 normalize_path() {
@@ -57,13 +72,26 @@ cat > "$TMPDIR/cidata/user-data" <<EOF
 #cloud-config
 hostname: $VM_NAME
 users:
-  - name: $VM_USER_NAME
+  - name: $PROVISION_USER_NAME
+    lock_passwd: true
     ssh_authorized_keys:
       - $SSH_PUBLIC_KEY
-    sudo: ALL=(ALL) NOPASSWD:ALL
+    sudo:
+      - ALL=(ALL) NOPASSWD:ALL
     shell: /bin/bash
     groups: [adm, sudo]
 EOF
+
+if [ -n "$HUMAN_USER_NAME" ] && [ "$HUMAN_USER_NAME" != "$PROVISION_USER_NAME" ]; then
+  cat >> "$TMPDIR/cidata/user-data" <<EOF
+  - name: $HUMAN_USER_NAME
+    lock_passwd: true
+    ssh_authorized_keys:
+      - $SSH_PUBLIC_KEY
+    shell: /bin/bash
+    groups: [adm, sudo]
+EOF
+fi
 
 cat > "$TMPDIR/cidata/meta-data" <<EOF
 instance-id: $VM_NAME

@@ -47,10 +47,14 @@ print_kv() {
 PROVIDER="$(getv PROVIDER)"
 OS_FAMILY="$(getv OS_FAMILY)"
 SSH_USER="$(getv SSH_USER)"
+VM_USER_NAME_VALUE="$(getv VM_USER_NAME)"
 
 if [ "$OS_FAMILY" != "windows" ] && [ -z "$SSH_USER" ]; then
   echo "tf-env: missing VM_USER_NAME for $PROFILE ($OS_FAMILY)" >&2
   exit 2
+fi
+if [ -z "$VM_USER_NAME_VALUE" ]; then
+  VM_USER_NAME_VALUE="$SSH_USER"
 fi
 
 # Per-instance state isolation: when EGAME_INSTANCE_NAME is set the caller is
@@ -80,7 +84,7 @@ print_kv TF_VAR_os_family "$OS_FAMILY"
 print_kv TF_VAR_os_id "$(getv OS_ID)"
 print_kv TF_VAR_profile_name "$PROFILE"
 print_kv TF_VAR_ssh_public_key_file "$(normalize_path "${SSH_PUBLIC_KEY_FILE:-}")"
-print_kv TF_VAR_vm_user_name "$SSH_USER"
+print_kv TF_VAR_vm_user_name "$VM_USER_NAME_VALUE"
 
 case "$PROVIDER" in
   aws)
@@ -117,6 +121,7 @@ case "$PROVIDER" in
   truenas)
     ./scripts/env-require TRUENAS_SSH_USER
     print_kv TF_VAR_cloud_image_url "$(getv CLOUD_IMAGE_URL)"
+    print_kv TF_VAR_provision_user_name "$SSH_USER"
     print_kv TF_VAR_truenas_host "$(getv TRUENAS_HOST)"
     print_kv TF_VAR_truenas_ssh_host_key_fingerprint "${TRUENAS_SSH_HOST_KEY_FINGERPRINT:-}"
     print_kv TF_VAR_truenas_ssh_port "$(getv TRUENAS_SSH_PORT)"

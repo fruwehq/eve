@@ -78,6 +78,11 @@ generate_hcl "z_truenas_vm.tf" {
       default = "ubuntu"
     }
 
+    variable "provision_user_name" {
+      type    = string
+      default = "egame-provision"
+    }
+
     variable "cloud_image_url" {
       type    = string
       default = ""
@@ -136,16 +141,17 @@ generate_hcl "z_truenas_vm.tf" {
 
     resource "null_resource" "cloudinit_iso" {
       triggers = {
-        vm_name        = local.vm_name
-        os_id          = var.os_id
-        truenas_host   = var.truenas_host
-        iso_path       = local.iso_path
-        vm_user_name   = var.vm_user_name
-        ssh_public_key = trimspace(file(var.ssh_public_key_file))
+        vm_name             = local.vm_name
+        os_id               = var.os_id
+        truenas_host        = var.truenas_host
+        iso_path            = local.iso_path
+        provision_user_name = var.provision_user_name
+        vm_user_name        = var.vm_user_name
+        ssh_public_key      = trimspace(file(var.ssh_public_key_file))
       }
 
       provisioner "local-exec" {
-        command = "\"$(git rev-parse --show-toplevel)/scripts/truenas-cloudinit-upload\" '${local.vm_name}' '${var.ssh_public_key_file}' '${var.truenas_host}' '${local.iso_path}' '${var.vm_user_name}'"
+        command = "\"$(git rev-parse --show-toplevel)/scripts/truenas-cloudinit-upload\" '${local.vm_name}' '${var.ssh_public_key_file}' '${var.truenas_host}' '${local.iso_path}' '${var.provision_user_name}' '${var.vm_user_name}'"
       }
 
       provisioner "local-exec" {
