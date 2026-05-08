@@ -11,4 +11,4 @@ down: {destructive: true}
 env: []
 install:
   ubuntu:
-    steps: [00_base.sh, 05_timezone.sh, provision/ubuntu/71_discord.sh]
+    steps: [base.sh, timezone.sh, provision/ubuntu/discord.sh]

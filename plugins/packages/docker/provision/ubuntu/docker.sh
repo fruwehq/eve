@@ -5,7 +5,7 @@ set -euo pipefail
 
 skip_unless_pkg docker
 
-log "### 10_docker: installing rootless Docker CE"
+log "### docker: installing rootless Docker CE"
 
 uid="$HUMAN_UID"
 rootless_sock="/run/user/$uid/docker.sock"
@@ -64,4 +64,4 @@ fi
 export DOCKER_HOST="unix://$rootless_sock"
 human_run docker version >/dev/null
 
-log "### 10_docker: done"
+log "### docker: done"

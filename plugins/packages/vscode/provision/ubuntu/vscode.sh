@@ -5,7 +5,7 @@ set -euo pipefail
 
 skip_unless_pkg vscode
 
-log "### 24_vscode: installing Visual Studio Code"
+log "### vscode: installing Visual Studio Code"
 
 if command -v code >/dev/null 2>&1; then
   log "vscode already installed — skipping"
@@ -25,4 +25,4 @@ Signed-By: /usr/share/keyrings/microsoft.gpg" > /etc/apt/sources.list.d/vscode.s
 sudo DEBIAN_FRONTEND=noninteractive apt-get update -y
 apt_install code
 
-log "### 24_vscode: done"
+log "### vscode: done"

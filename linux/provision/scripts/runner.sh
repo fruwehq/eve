@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# runner.sh — executes numbered step scripts, resumable via state.json.
+# runner.sh — executes provision step scripts, resumable via state.json.
 # On reboot.flag, requests a reboot and exits so systemd can resume us.
 
 set -euo pipefail
@@ -10,6 +10,7 @@ STEPS_DIR="$SCRIPTS_DIR/steps"
 STATE_DIR="$PROVISION_ROOT/state"
 LOGS_DIR="$PROVISION_ROOT/logs"
 STATE_FILE="$STATE_DIR/state.json"
+STEPS_FILE="$STATE_DIR/steps.list"
 REBOOT_FLAG="$STATE_DIR/reboot.flag"
 LOG_FILE="$LOGS_DIR/provision.log"
 LOCK_FILE="$STATE_DIR/runner.lock"
@@ -46,7 +47,17 @@ write_step() {
 # shellcheck disable=SC1091
 [ -f "$STATE_DIR/env" ] && . "$STATE_DIR/env"
 
-mapfile -t STEPS < <(find "$STEPS_DIR" -maxdepth 1 -type f -name '*.sh' ! -name '._*' | sort)
+if [ -f "$STEPS_FILE" ]; then
+  mapfile -t STEP_NAMES < <(sed '/^[[:space:]]*$/d' "$STEPS_FILE")
+  STEPS=()
+  for step_name in "${STEP_NAMES[@]}"; do
+    step="$STEPS_DIR/$step_name"
+    [ -f "$step" ] || { log "ERROR: ordered step missing: $step"; exit 1; }
+    STEPS+=("$step")
+  done
+else
+  mapfile -t STEPS < <(find "$STEPS_DIR" -maxdepth 1 -type f -name '*.sh' ! -name '._*' | sort)
+fi
 TOTAL=${#STEPS[@]}
 
 while : ; do

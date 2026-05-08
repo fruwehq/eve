@@ -169,7 +169,7 @@ Ubuntu package install metadata:
 ```yaml
 install:
   ubuntu:
-    steps: [00_base.sh, 05_timezone.sh, 10_docker.sh]
+    steps: [base.sh, timezone.sh, docker.sh]
     package_markers: [docker]
 ```
 
@@ -178,7 +178,7 @@ Windows package install metadata:
 ```yaml
 install:
   windows:
-    steps: [provision/windows/40_rustdesk.ps1]
+    steps: [provision/windows/rustdesk.ps1]
     state_files: [env.json]
     fallback: false
 ```

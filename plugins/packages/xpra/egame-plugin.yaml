@@ -21,8 +21,8 @@ actions:
     target: xpra.attach
 install:
   ubuntu:
-    steps: [00_base.sh, 05_timezone.sh, provision/ubuntu/45_xpra.sh]
+    steps: [base.sh, timezone.sh, provision/ubuntu/xpra.sh]
   windows:
-    steps: [provision/windows/35_xpra.ps1]
+    steps: [provision/windows/xpra.ps1]
     state_files: []
     fallback: false

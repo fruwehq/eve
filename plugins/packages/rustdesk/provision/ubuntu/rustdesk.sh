@@ -5,7 +5,7 @@ set -euo pipefail
 
 skip_unless_pkg rustdesk
 
-log "### 50_rustdesk: installing RustDesk"
+log "### rustdesk: installing RustDesk"
 
 if ! command -v rustdesk >/dev/null 2>&1; then
   arch=$(dpkg --print-architecture)
@@ -23,7 +23,7 @@ else
 fi
 
 if ! command -v lightdm >/dev/null 2>&1; then
-  log "### 50_rustdesk: installing LightDM display manager"
+  log "### rustdesk: installing LightDM display manager"
   printf 'shared/default-x-display-manager select lightdm\n' | sudo debconf-set-selections
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y lightdm
 fi
@@ -33,7 +33,7 @@ if has_pkg gnome-desktop; then
   desktop_session="gnome"
 fi
 
-log "### 50_rustdesk: configuring LightDM autologin session=$desktop_session"
+log "### rustdesk: configuring LightDM autologin session=$desktop_session"
 sudo mkdir -p /etc/lightdm/lightdm.conf.d
 sudo tee /etc/lightdm/lightdm.conf.d/50-ephemeral-autologin.conf >/dev/null <<EOF
 [Seat:*]
@@ -95,15 +95,15 @@ if [ "${PROVIDER:-}" = "raspberry-pi" ]; then
   xrandr_mode="${xrandr_mode%D}"
   if [ -w /boot/firmware/cmdline.txt ] || sudo test -w /boot/firmware/cmdline.txt; then
     if grep -qF "video=${hdmi_connector}:" /boot/firmware/cmdline.txt; then
-      log "### 50_rustdesk: removing obsolete Raspberry Pi HDMI-forcing cmdline token"
+      log "### rustdesk: removing obsolete Raspberry Pi HDMI-forcing cmdline token"
       sudo cp /boot/firmware/cmdline.txt /boot/firmware/cmdline.txt.egame.bak
       sudo sed -i -E "s#(^| )video=${hdmi_connector}:[^ ]+##g; s#  +# #g; s#^ ##; s# \$##" /boot/firmware/cmdline.txt
     fi
   else
-    log "### 50_rustdesk: warn: /boot/firmware/cmdline.txt not writable; cannot clean obsolete HDMI forcing"
+    log "### rustdesk: warn: /boot/firmware/cmdline.txt not writable; cannot clean obsolete HDMI forcing"
   fi
 
-  log "### 50_rustdesk: configuring Raspberry Pi Xorg dummy display $xrandr_mode"
+  log "### rustdesk: configuring Raspberry Pi Xorg dummy display $xrandr_mode"
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y xserver-xorg-video-dummy
   xrandr_width="${xrandr_mode%x*}"
   xrandr_height="${xrandr_mode#*x}"
@@ -165,7 +165,7 @@ elif [ -n "${EPHEMERAL_DISPLAY_RESOLUTION:-}" ]; then
     modeline_config=""
   fi
 
-  log "### 50_rustdesk: configuring Xorg virtual display ${xrandr_mode} for RustDesk"
+  log "### rustdesk: configuring Xorg virtual display ${xrandr_mode} for RustDesk"
   sudo mkdir -p /etc/X11/xorg.conf.d
   sudo rm -f /etc/X11/xorg.conf.d/20-ephemeral-virtual-display.conf
   sudo tee /etc/X11/xorg.conf.d/20-ephemeral-virtual-display.conf >/dev/null <<EOF
@@ -279,7 +279,7 @@ write_rustdesk_config() {
 }
 
 for cfg in "$HUMAN_HOME/.config/rustdesk/RustDesk2.toml" /root/.config/rustdesk/RustDesk2.toml; do
-  log "### 50_rustdesk: writing $cfg"
+  log "### rustdesk: writing $cfg"
   write_rustdesk_config "$cfg"
 done
 sudo chown -R "$HUMAN_USER_NAME:$HUMAN_GROUP" "$HUMAN_HOME/.config/rustdesk"
@@ -297,7 +297,7 @@ for i in $(seq 1 15); do
   if rustdesk --get-id >/dev/null 2>&1; then
     break
   fi
-  log "### 50_rustdesk: waiting for daemon ($i/15)..."
+  log "### rustdesk: waiting for daemon ($i/15)..."
   sleep 2
 done
 
@@ -309,16 +309,16 @@ for i in $(seq 1 15); do
     rd_server_ready=1
     break
   fi
-  log "### 50_rustdesk: waiting for user server ($i/15)..."
+  log "### rustdesk: waiting for user server ($i/15)..."
   sleep 1
 done
 
 # Set permanent password — must run after the user-side `rustdesk --server`
 # owns its IPC socket.
 if [ -n "${RUSTDESK_PASSWORD:-}" ]; then
-  log "### 50_rustdesk: setting permanent password"
+  log "### rustdesk: setting permanent password"
   if [ "$rd_server_ready" -ne 1 ]; then
-    log "### 50_rustdesk: warn: user server was not detected; attempting --password for $rd_user anyway"
+    log "### rustdesk: warn: user server was not detected; attempting --password for $rd_user anyway"
   fi
 
   set_rustdesk_password() {
@@ -328,12 +328,12 @@ if [ -n "${RUSTDESK_PASSWORD:-}" ]; then
   }
 
   if set_rustdesk_password sudo rustdesk --password "$RUSTDESK_PASSWORD"; then
-    log "### 50_rustdesk: permanent password set via admin service"
+    log "### rustdesk: permanent password set via admin service"
   elif set_rustdesk_password human_run rustdesk --password "$RUSTDESK_PASSWORD"; then
-    log "### 50_rustdesk: permanent password set via user server"
+    log "### rustdesk: permanent password set via user server"
   else
-    log "### 50_rustdesk: warn: --password failed (server-user=$rd_user); client will be prompted to set one"
+    log "### rustdesk: warn: --password failed (server-user=$rd_user); client will be prompted to set one"
   fi
 fi
 
-log "### 50_rustdesk: done"
+log "### rustdesk: done"

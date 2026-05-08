@@ -312,7 +312,7 @@ package_install="$(
   EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-package-dispatch-test" \
     ./scripts/package-provision --profile local-qemu-ubuntu-dev-gui --package docker --dry-run
 )"
-if printf '%s\n' "$package_install" | jq -e '.kind == "package-provision" and .package == "docker" and .steps == ["00_base.sh", "05_timezone.sh", "provision/ubuntu/10_docker.sh"] and .dry_run == true' >/dev/null; then
+if printf '%s\n' "$package_install" | jq -e '.kind == "package-provision" and .package == "docker" and .steps == ["base.sh", "timezone.sh", "provision/ubuntu/docker.sh"] and .dry_run == true' >/dev/null; then
   printf '  [OK] ubuntu package install maps to granular provision steps\n'
 else
   printf '  [FAIL] ubuntu package install maps to granular provision steps\n' >&2
@@ -323,7 +323,7 @@ fi
 codex_install="$(
   ./scripts/package-provision --profile local-qemu-ubuntu-dev-gui --package codex-cli --dry-run
 )"
-if printf '%s\n' "$codex_install" | jq -e '.package == "codex-cli" and .steps == ["00_base.sh", "05_timezone.sh", "../dev-toolchain/provision/ubuntu/20_dev-toolchain.sh", "provision/ubuntu/30_codex-cli.sh"] and .package_markers == ["dev-toolchain", "codex-cli"]' >/dev/null; then
+if printf '%s\n' "$codex_install" | jq -e '.package == "codex-cli" and .steps == ["base.sh", "timezone.sh", "../dev-toolchain/provision/ubuntu/dev-toolchain.sh", "provision/ubuntu/codex-cli.sh"] and .package_markers == ["dev-toolchain", "codex-cli"]' >/dev/null; then
   printf '  [OK] package install includes dependency package markers\n'
 else
   printf '  [FAIL] package install includes dependency package markers\n' >&2
@@ -334,7 +334,7 @@ fi
 windows_steam_install="$(
   ./scripts/package-provision-windows --profile vultr-windows-gaming --package steam --dry-run
 )"
-if printf '%s\n' "$windows_steam_install" | jq -e '.kind == "package-provision-windows" and .package == "steam" and .os_family == "windows" and .steps == ["provision/windows/30_steam.ps1"] and .state_files == [] and .fallback == false and .dry_run == true' >/dev/null; then
+if printf '%s\n' "$windows_steam_install" | jq -e '.kind == "package-provision-windows" and .package == "steam" and .os_family == "windows" and .steps == ["provision/windows/steam.ps1"] and .state_files == [] and .fallback == false and .dry_run == true' >/dev/null; then
   printf '  [OK] windows steam install maps to steam step\n'
 else
   printf '  [FAIL] windows steam install maps to steam step\n' >&2
@@ -345,7 +345,7 @@ fi
 windows_rustdesk_install="$(
   ./scripts/package-provision-windows --profile vultr-windows-gaming --package rustdesk --dry-run
 )"
-if printf '%s\n' "$windows_rustdesk_install" | jq -e '.package == "rustdesk" and .steps == ["provision/windows/40_rustdesk.ps1"] and .state_files == ["env.json"] and .fallback == false' >/dev/null; then
+if printf '%s\n' "$windows_rustdesk_install" | jq -e '.package == "rustdesk" and .steps == ["provision/windows/rustdesk.ps1"] and .state_files == ["env.json"] and .fallback == false' >/dev/null; then
   printf '  [OK] windows rustdesk install maps to rustdesk step\n'
 else
   printf '  [FAIL] windows rustdesk install maps to rustdesk step\n' >&2
@@ -364,7 +364,7 @@ fi
 windows_xpra_install="$(
   ./scripts/package-provision-windows --profile vultr-windows-gaming --package xpra --dry-run
 )"
-if printf '%s\n' "$windows_xpra_install" | jq -e '.package == "xpra" and .steps == ["provision/windows/35_xpra.ps1"] and .state_files == [] and .fallback == false' >/dev/null; then
+if printf '%s\n' "$windows_xpra_install" | jq -e '.package == "xpra" and .steps == ["provision/windows/xpra.ps1"] and .state_files == [] and .fallback == false' >/dev/null; then
   printf '  [OK] windows xpra install maps to xpra step\n'
 else
   printf '  [FAIL] windows xpra install maps to xpra step\n' >&2
@@ -398,7 +398,7 @@ manifest_steam_steps="$(
   ./scripts/plugin-list --kind package --json | \
     jq -r '.plugins[] | select(.id == "steam") | .install.ubuntu.steps | join(",")'
 )"
-if [ "$manifest_steam_steps" = "00_base.sh,05_timezone.sh,provision/ubuntu/70_steam.sh" ]; then
+if [ "$manifest_steam_steps" = "base.sh,timezone.sh,provision/ubuntu/steam.sh" ]; then
   printf '  [OK] steam plugin manifest declares ubuntu install steps\n'
 else
   printf '  [FAIL] steam plugin manifest declares ubuntu install steps (got: %s)\n' "$manifest_steam_steps" >&2
@@ -419,7 +419,7 @@ else
   printf '  [OK] package install scripts have no hardcoded case "$PACKAGE" mapping\n'
 fi
 
-hardcoded_step_refs="$(grep -nE '\b(00_base\.sh|05_timezone\.sh|10_docker\.sh|20_dev-toolchain\.sh|30_codex-cli\.sh|40_goose\.sh|45_xpra\.sh|46_vnc\.sh|47_waypipe\.sh|48_gnome_desktop\.sh|49_macos_desktop_theme\.sh|50_rustdesk\.sh|60_sunshine\.sh|70_steam\.sh|10_sunshine\.ps1|30_steam\.ps1|35_xpra\.ps1|40_rustdesk\.ps1)\b' scripts/package-provision scripts/package-provision-windows || true)"
+hardcoded_step_refs="$(grep -nE '\b(base\.sh|timezone\.sh|10_docker\.sh|20_dev-toolchain\.sh|30_codex-cli\.sh|40_goose\.sh|45_xpra\.sh|46_vnc\.sh|47_waypipe\.sh|48_gnome_desktop\.sh|49_macos_desktop_theme\.sh|50_rustdesk\.sh|60_sunshine\.sh|70_steam\.sh|10_sunshine\.ps1|30_steam\.ps1|35_xpra\.ps1|40_rustdesk\.ps1)\b' scripts/package-provision scripts/package-provision-windows || true)"
 if [ -n "$hardcoded_step_refs" ]; then
   printf '  [FAIL] package install scripts still reference step files directly\n' >&2
   printf '%s\n' "$hardcoded_step_refs" >&2

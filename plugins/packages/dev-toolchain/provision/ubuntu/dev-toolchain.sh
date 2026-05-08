@@ -5,7 +5,7 @@ set -euo pipefail
 
 skip_unless_pkg dev-toolchain
 
-log "### 20_dev-toolchain: build tools + language toolchains"
+log "### dev-toolchain: build tools + language toolchains"
 
 apt_update_once
 apt_install build-essential pkg-config libssl-dev python3 python3-pip python3-venv
@@ -25,4 +25,4 @@ if ! human_run sh -lc 'command -v rustc >/dev/null 2>&1'; then
   human_run sh "$HUMAN_HOME/.cache/egame/rustup-init.sh" -y --default-toolchain stable --profile minimal
 fi
 
-log "### 20_dev-toolchain: done"
+log "### dev-toolchain: done"

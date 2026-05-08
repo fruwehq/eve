@@ -43,6 +43,10 @@ case "$OS_FAMILY" in
     trap 'rm -rf "$STAGE"' EXIT
     cp -R linux/provision/scripts "$STAGE/scripts"
     mkdir -p "$STAGE/state"
+    rm -f "$STAGE/scripts/steps/"*.sh
+
+    ordered_steps=()
+    ordered_plugin_roots=()
 
     copy_step() {
       local step="$1"
@@ -63,10 +67,30 @@ case "$OS_FAMILY" in
       cp "$source" "$target"
     }
 
+    add_step() {
+      local step="$1"
+      local plugin_root="$2"
+      local existing
+
+      for existing in "${ordered_steps[@]}"; do
+        [ "$existing" = "$step" ] && return 0
+      done
+
+      ordered_steps+=("$step")
+      ordered_plugin_roots+=("$plugin_root")
+    }
+
+    add_step "base.sh" ""
+    add_step "human-user.sh" ""
+    add_step "timezone.sh" ""
+
     PLUGIN_DOC=$(./scripts/plugin-list --kind package --json)
     while IFS=$'\t' read -r plugin_path step; do
       [ -n "$plugin_path" ] || continue
-      copy_step "$step" "$(dirname "$plugin_path")"
+      case "$step" in
+        base.sh|human-user.sh|timezone.sh|finish.sh) continue ;;
+      esac
+      add_step "$step" "$(dirname "$plugin_path")"
     done < <(
       printf '%s' "$PLUGIN_DOC" |
         jq -r --arg packages_csv "$BUNDLE_PACKAGES" '
@@ -78,6 +102,12 @@ case "$OS_FAMILY" in
           [$plugin.path, .] | @tsv
         '
     )
+    add_step "finish.sh" ""
+
+    for index in "${!ordered_steps[@]}"; do
+      copy_step "${ordered_steps[$index]}" "${ordered_plugin_roots[$index]}"
+    done
+    printf '%s\n' "${ordered_steps[@]##*/}" > "$STAGE/state/steps.list"
 
     # bundle_packages: one package per line for cheap grep lookup in step scripts
     printf '%s\n' "$BUNDLE_PACKAGES" | tr ',' '\n' > "$STAGE/state/bundle_packages"
@@ -112,6 +142,7 @@ EOF
     ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/scripts" 'provision/'
     ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/state/bundle_packages" 'provision/state/'
     ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/state/env" 'provision/state/'
+    ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/state/steps.list" 'provision/state/'
     echo "[provision] running bootstrap.sh"
     ./scripts/instance-ssh "$PROFILE" -- 'chmod +x ~/provision/scripts/bootstrap.sh ~/provision/scripts/runner.sh ~/provision/scripts/steps/*.sh ~/provision/scripts/lib/*.sh && ~/provision/scripts/bootstrap.sh'
     ;;

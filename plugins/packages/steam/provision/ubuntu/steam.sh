@@ -10,7 +10,7 @@ if [ "$(dpkg --print-architecture)" != "amd64" ]; then
   exit 0
 fi
 
-log "### 70_steam: installing Steam"
+log "### steam: installing Steam"
 
 if command -v steam >/dev/null 2>&1 || dpkg -l steam-launcher >/dev/null 2>&1; then
   log "steam already installed — skipping"
@@ -27,4 +27,4 @@ echo "steam steam/question select I AGREE" | sudo debconf-set-selections
 echo "steam steam/license note" | sudo debconf-set-selections
 apt_install steam-installer
 
-log "### 70_steam: done"
+log "### steam: done"

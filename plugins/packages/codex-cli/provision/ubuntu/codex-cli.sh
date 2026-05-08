@@ -5,7 +5,7 @@ set -euo pipefail
 
 skip_unless_pkg codex-cli
 
-log "### 30_codex-cli: installing @openai/codex"
+log "### codex-cli: installing @openai/codex"
 
 if ! command -v npm >/dev/null 2>&1; then
   log "npm not found — ensure dev-toolchain bundle is included before codex-cli"
@@ -19,4 +19,4 @@ fi
 
 sudo npm install -g @openai/codex
 
-log "### 30_codex-cli: done"
+log "### codex-cli: done"

@@ -5,7 +5,7 @@ set -euo pipefail
 
 skip_unless_pkg macos-desktop-theme
 
-log "### 49_macos_desktop_theme: installing macOS-like GNOME defaults"
+log "### macos-desktop-theme: installing macOS-like GNOME defaults"
 
 apt_install \
   gnome-shell-extension-ubuntu-dock \
@@ -40,4 +40,4 @@ NoDisplay=true
 X-GNOME-Autostart-enabled=true
 EOF
 
-log "### 49_macos_desktop_theme: done"
+log "### macos-desktop-theme: done"

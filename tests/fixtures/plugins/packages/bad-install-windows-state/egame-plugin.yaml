@@ -11,6 +11,6 @@ down: {destructive: false}
 env: []
 install:
   windows:
-    steps: [99_phantom.ps1]
+    steps: [phantom.ps1]
     state_files: [secrets.txt]
     fallback: false

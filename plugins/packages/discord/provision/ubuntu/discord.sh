@@ -10,7 +10,7 @@ if [ "$(dpkg --print-architecture)" != "amd64" ]; then
   exit 0
 fi
 
-log "### 71_discord: installing Discord"
+log "### discord: installing Discord"
 
 if command -v discord >/dev/null 2>&1 || dpkg -s discord >/dev/null 2>&1; then
   log "discord already installed — skipping"
@@ -23,4 +23,4 @@ deb="$DOWNLOADS_DIR/discord.deb"
 wget -qO "$deb" 'https://discord.com/api/download?platform=linux&format=deb'
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "$deb"
 
-log "### 71_discord: done"
+log "### discord: done"

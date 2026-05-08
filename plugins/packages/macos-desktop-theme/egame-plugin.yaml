@@ -11,5 +11,5 @@ down: {destructive: true}
 env: []
 install:
   ubuntu:
-    steps: [00_base.sh, 05_timezone.sh, ../gnome-desktop/provision/ubuntu/48_gnome_desktop.sh, provision/ubuntu/49_macos_desktop_theme.sh]
+    steps: [base.sh, timezone.sh, ../gnome-desktop/provision/ubuntu/gnome-desktop.sh, provision/ubuntu/macos-desktop-theme.sh]
     package_markers: [gnome-desktop, macos-desktop-theme]

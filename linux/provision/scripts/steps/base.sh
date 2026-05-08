@@ -3,7 +3,7 @@ set -euo pipefail
 # shellcheck source=../lib/common.sh
 . "$PROVISION_ROOT/scripts/lib/common.sh"
 
-log "### 00_base: apt update + common tools"
+log "### base: apt update + common tools"
 
 if [ -r /etc/os-release ]; then
   # shellcheck disable=SC1091
@@ -40,11 +40,11 @@ apt_update_once
 apt_install autocutsel bmon ca-certificates curl git glances gnupg iftop jq locales lsb-release nload unzip xclip xsel
 
 if ! locale -a 2>/dev/null | grep -Fixq "en_US.utf8"; then
-  log "### 00_base: generating en_US.UTF-8 locale"
+  log "### base: generating en_US.UTF-8 locale"
   sudo sed -i 's/^# *\(en_US.UTF-8 UTF-8\)/\1/' /etc/locale.gen
   sudo locale-gen en_US.UTF-8
 fi
 
 sudo update-locale LANG=en_US.UTF-8
 
-log "### 00_base: done"
+log "### base: done"

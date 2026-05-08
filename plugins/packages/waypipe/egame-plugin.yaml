@@ -15,4 +15,4 @@ actions:
     target: waypipe.open
 install:
   ubuntu:
-    steps: [00_base.sh, 05_timezone.sh, provision/ubuntu/47_waypipe.sh]
+    steps: [base.sh, timezone.sh, provision/ubuntu/waypipe.sh]

@@ -5,7 +5,7 @@ set -euo pipefail
 
 skip_unless_pkg waypipe
 
-log "### 47_waypipe: installing experimental Wayland remote-app tooling"
+log "### waypipe: installing experimental Wayland remote-app tooling"
 
 if command -v waypipe >/dev/null 2>&1; then
   log "waypipe already installed — skipping"
@@ -15,4 +15,4 @@ fi
 apt_update_once
 apt_install waypipe weston xwayland foot x11-apps zenity
 
-log "### 47_waypipe: done"
+log "### waypipe: done"

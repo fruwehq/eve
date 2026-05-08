@@ -45,7 +45,7 @@ if (-not $rustdeskExe) {
 
 if (-not $rustdeskExe) {
   # Resolve the latest Windows x86_64 installer asset via the GitHub API
-  # (mirrors the Sunshine step's pattern in 10_sunshine.ps1).
+  # (mirrors the Sunshine step's pattern in sunshine.ps1).
   $headers = @{ "User-Agent"="Mozilla/5.0"; "Accept"="application/vnd.github+json" }
   $api = "https://api.github.com/repos/rustdesk/rustdesk/releases/latest"
   $release = $null

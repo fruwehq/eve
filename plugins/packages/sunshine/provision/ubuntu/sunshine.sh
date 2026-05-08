@@ -5,7 +5,7 @@ set -euo pipefail
 
 skip_unless_pkg sunshine
 
-log "### 60_sunshine: installing LizardByte Sunshine"
+log "### sunshine: installing LizardByte Sunshine"
 
 install_sunshine_compat_libs() {
   # The noble deb is built against Ubuntu 24.04 libs. On 26.04 (resolute) the
@@ -18,7 +18,7 @@ install_sunshine_compat_libs() {
     return
   fi
 
-  log "### 60_sunshine: installing Noble compatibility libraries for $codename"
+  log "### sunshine: installing Noble compatibility libraries for $codename"
   case "$(dpkg --print-architecture)" in
     amd64) multiarch="x86_64-linux-gnu" ;;
     arm64) multiarch="aarch64-linux-gnu" ;;
@@ -26,7 +26,7 @@ install_sunshine_compat_libs() {
     *) multiarch="" ;;
   esac
   if [ -z "$multiarch" ]; then
-    log "### 60_sunshine: warn: no known multiarch lib dir for $(dpkg --print-architecture)"
+    log "### sunshine: warn: no known multiarch lib dir for $(dpkg --print-architecture)"
   fi
   lib_dir="/usr/lib/$multiarch"
   case "$(dpkg --print-architecture)" in
@@ -43,7 +43,7 @@ install_sunshine_compat_libs() {
       sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "$DOWNLOADS_DIR/$icu_deb"
       ;;
     *)
-      log "### 60_sunshine: warn: no libicu74 compatibility package configured for $(dpkg --print-architecture)"
+      log "### sunshine: warn: no libicu74 compatibility package configured for $(dpkg --print-architecture)"
       ;;
   esac
   if [ -n "$multiarch" ] && [ -e "$lib_dir/libminiupnpc.so.21" ]; then
@@ -81,7 +81,7 @@ install_sunshine_compat_libs
 # Configure web UI to be reachable from outside localhost. Without this, the
 # host (or vagrant port-forwarder) can hit the port but Sunshine returns 401/403
 # because the web UI is locked to local-origin requests by default.
-log "### 60_sunshine: configuring web UI"
+log "### sunshine: configuring web UI"
 human_install_dir "$HUMAN_HOME/.config/sunshine"
 SUN_CONF="$HUMAN_HOME/.config/sunshine/sunshine.conf"
 sudo touch "$SUN_CONF"
@@ -135,11 +135,11 @@ fi
 
 # Set Sunshine web UI credentials (matches Windows step 10's behavior).
 if [ -n "${EPHEMERAL_SUNSHINE_PASSWORD:-}" ]; then
-  log "### 60_sunshine: setting web UI credentials"
+  log "### sunshine: setting web UI credentials"
   human_run sunshine "$SUN_CONF" --creds sunshine "$EPHEMERAL_SUNSHINE_PASSWORD" || \
-    log "### 60_sunshine: warn: failed to set credentials (will retry on next run)"
+    log "### sunshine: warn: failed to set credentials (will retry on next run)"
 else
-  log "### 60_sunshine: EPHEMERAL_SUNSHINE_PASSWORD not set — skipping creds"
+  log "### sunshine: EPHEMERAL_SUNSHINE_PASSWORD not set — skipping creds"
 fi
 
 # Sunshine must have exactly one owner. The package-provided systemd user unit
@@ -215,7 +215,7 @@ EOF
   fi
 }
 
-log "### 60_sunshine: writing controlled Sunshine app list"
+log "### sunshine: writing controlled Sunshine app list"
 write_sunshine_apps
 
 XDG_RUNTIME_DIR="/run/user/$HUMAN_UID"
@@ -257,7 +257,7 @@ start_sunshine_with_display() {
 }
 
 if human_run systemctl --user is-active sunshine >/dev/null 2>&1; then
-  log "### 60_sunshine: restarting sunshine to reload config"
+  log "### sunshine: restarting sunshine to reload config"
   export DISPLAY="$SUN_DISPLAY"
   export XAUTHORITY="$SUN_XAUTHORITY"
   if [ -x "$HUMAN_HOME/.local/bin/egame-set-display-mode" ]; then
@@ -266,10 +266,10 @@ if human_run systemctl --user is-active sunshine >/dev/null 2>&1; then
   human_run systemctl --user reset-failed sunshine 2>/dev/null || true
   human_run env DISPLAY="$SUN_DISPLAY" XAUTHORITY="$SUN_XAUTHORITY" systemctl --user restart sunshine 2>/dev/null || true
 elif [ -d "$XDG_RUNTIME_DIR" ] && { sunshine_display_ready || sunshine_kms_ready; }; then
-  log "### 60_sunshine: starting sunshine on display $SUN_DISPLAY"
+  log "### sunshine: starting sunshine on display $SUN_DISPLAY"
   start_sunshine_with_display
 else
-  log "### 60_sunshine: no usable user display yet — sunshine will start at next autologin"
+  log "### sunshine: no usable user display yet — sunshine will start at next autologin"
 fi
 
-log "### 60_sunshine: done"
+log "### sunshine: done"

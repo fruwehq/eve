@@ -27,4 +27,4 @@ actions:
           label: TigerVNC
 install:
   ubuntu:
-    steps: [00_base.sh, 05_timezone.sh, provision/ubuntu/46_vnc.sh]
+    steps: [base.sh, timezone.sh, provision/ubuntu/vnc.sh]

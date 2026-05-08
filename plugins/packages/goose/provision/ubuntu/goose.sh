@@ -5,7 +5,7 @@ set -euo pipefail
 
 skip_unless_pkg goose
 
-log "### 40_goose: installing Goose CLI"
+log "### goose: installing Goose CLI"
 
 if human_run sh -lc 'command -v goose >/dev/null 2>&1'; then
   log "goose already installed — skipping"
@@ -38,4 +38,4 @@ install -m 0755 "$binary" "$HOME/.local/bin/goose"
 "$HOME/.local/bin/goose" --version
 '
 
-log "### 40_goose: done"
+log "### goose: done"

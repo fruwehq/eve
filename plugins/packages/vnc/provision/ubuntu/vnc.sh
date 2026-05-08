@@ -5,7 +5,7 @@ set -euo pipefail
 
 skip_unless_pkg vnc
 
-log "### 46_vnc: installing TigerVNC server and tools"
+log "### vnc: installing TigerVNC server and tools"
 
 if command -v tigervncserver >/dev/null 2>&1; then
   log "tigervncserver already installed — skipping install"
@@ -26,7 +26,7 @@ if ! dpkg -s autocutsel >/dev/null 2>&1; then
 fi
 
 if ! command -v startxfce4 >/dev/null 2>&1; then
-  log "### 46_vnc: installing XFCE desktop (GNOME Shell does not work under VNC)"
+  log "### vnc: installing XFCE desktop (GNOME Shell does not work under VNC)"
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y xfce4
 fi
 
@@ -44,7 +44,7 @@ human_install_dir "$VNC_HOME"
 # JavaScript rule format under /etc/polkit-1/rules.d/ instead.
 POLKIT_RULE=/etc/polkit-1/rules.d/45-allow-colord.rules
 if ! sudo test -f "$POLKIT_RULE"; then
-  log "### 46_vnc: adding polkit rule for colord (rules.d / JS)"
+  log "### vnc: adding polkit rule for colord (rules.d / JS)"
   sudo tee "$POLKIT_RULE" > /dev/null << 'EOF'
 polkit.addRule(function(action, subject) {
     if (action.id.match(/^org\.freedesktop\.color-manager\./)) {
@@ -55,7 +55,7 @@ EOF
   sudo systemctl restart polkit 2>/dev/null || true
 fi
 if [ ! -f "$VNC_HOME/passwd" ]; then
-  log "### 46_vnc: setting VNC password"
+  log "### vnc: setting VNC password"
   printf 'vagrant\nvagrant\nn\n' | sudo -H -u "$HUMAN_USER_NAME" tigervncpasswd 2>&1
 fi
 
@@ -82,7 +82,7 @@ XEOF
 )
 
 if [ ! -f "$VNC_HOME/xstartup" ] || [ "$XSTARTUP_CONTENT" != "$(cat "$VNC_HOME/xstartup")" ]; then
-  log "### 46_vnc: writing xstartup script"
+  log "### vnc: writing xstartup script"
   printf '%s\n' "$XSTARTUP_CONTENT" | human_write_file "$VNC_HOME/xstartup" 0755
 fi
 
@@ -113,41 +113,41 @@ EOF
 
 UNIT_CHANGED=0
 if ! sudo test -f "$UNIT_PATH" || ! echo "$UNIT_CONTENT" | sudo cmp -s - "$UNIT_PATH"; then
-  log "### 46_vnc: writing systemd system unit for VNC"
+  log "### vnc: writing systemd system unit for VNC"
   echo "$UNIT_CONTENT" | sudo tee "$UNIT_PATH" >/dev/null
   sudo systemctl daemon-reload
   UNIT_CHANGED=1
 fi
 
 if sudo systemctl is-enabled vncserver.service >/dev/null 2>&1; then
-  log "### 46_vnc: VNC system unit already enabled"
+  log "### vnc: VNC system unit already enabled"
 else
-  log "### 46_vnc: enabling VNC system unit"
+  log "### vnc: enabling VNC system unit"
   sudo systemctl enable vncserver.service
 fi
 
 if sudo systemctl is-active vncserver.service >/dev/null 2>&1 && ! ss -tlnp 2>/dev/null | grep -q ':5901 '; then
-  log "### 46_vnc: restarting VNC system unit on display :1"
+  log "### vnc: restarting VNC system unit on display :1"
   sudo systemctl restart vncserver.service || true
   sleep 2
 elif [ "$UNIT_CHANGED" = "1" ] && sudo systemctl is-active vncserver.service >/dev/null 2>&1; then
-  log "### 46_vnc: restarting VNC system unit after unit change"
+  log "### vnc: restarting VNC system unit after unit change"
   sudo systemctl restart vncserver.service || true
   sleep 2
 elif sudo systemctl is-active vncserver.service >/dev/null 2>&1; then
-  log "### 46_vnc: VNC server already running"
+  log "### vnc: VNC server already running"
 else
-  log "### 46_vnc: starting VNC system unit"
+  log "### vnc: starting VNC system unit"
   sudo systemctl start vncserver.service || true
   sleep 2
 fi
 
 if sudo systemctl is-active vncserver.service >/dev/null 2>&1; then
-  log "### 46_vnc: VNC server running (systemd unit)"
+  log "### vnc: VNC server running (systemd unit)"
 elif ss -tlnp 2>/dev/null | grep -q ':5901 '; then
-  log "### 46_vnc: VNC server running on port 5901"
+  log "### vnc: VNC server running on port 5901"
 else
-  log "### 46_vnc: WARNING — VNC server may not be running. Check: sudo systemctl status vncserver.service"
+  log "### vnc: WARNING — VNC server may not be running. Check: sudo systemctl status vncserver.service"
 fi
 
-log "### 46_vnc: done"
+log "### vnc: done"

@@ -12,5 +12,5 @@ env: []
 install:
   ubuntu:
     steps:
-      - 00_base.sh
+      - base.sh
       - {bad: value}

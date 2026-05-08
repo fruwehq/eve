@@ -5,7 +5,7 @@ set -euo pipefail
 
 skip_unless_pkg claude
 
-log "### 21_claude: installing Claude Code CLI"
+log "### claude: installing Claude Code CLI"
 
 if human_run sh -lc 'command -v claude >/dev/null 2>&1'; then
   log "claude already installed — skipping"
@@ -28,4 +28,4 @@ if ! human_run sh -lc 'command -v claude >/dev/null 2>&1 || [ -x "$HOME/.local/b
   exit 1
 fi
 
-log "### 21_claude: done"
+log "### claude: done"

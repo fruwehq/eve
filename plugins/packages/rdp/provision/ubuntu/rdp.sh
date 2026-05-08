@@ -5,7 +5,7 @@ set -euo pipefail
 
 skip_unless_pkg rdp
 
-log "### 72_rdp: installing xrdp"
+log "### rdp: installing xrdp"
 
 if command -v xrdp >/dev/null 2>&1 || dpkg -s xrdp >/dev/null 2>&1; then
   log "xrdp already installed — skipping"
@@ -15,4 +15,4 @@ fi
 apt_install xrdp
 sudo systemctl enable --now xrdp
 
-log "### 72_rdp: done"
+log "### rdp: done"

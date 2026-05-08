@@ -5,7 +5,7 @@ set -euo pipefail
 
 skip_unless_pkg gnome-desktop
 
-log "### 48_gnome_desktop: installing GNOME desktop session"
+log "### gnome-desktop: installing GNOME desktop session"
 
 apt_install \
   dbus-x11 \
@@ -19,8 +19,8 @@ apt_install \
   yaru-theme-icon
 
 if sudo test -d /etc/lightdm/lightdm.conf.d; then
-  log "### 48_gnome_desktop: preferring GNOME for existing LightDM autologin"
+  log "### gnome-desktop: preferring GNOME for existing LightDM autologin"
   sudo sed -i 's/^user-session=.*/user-session=gnome/' /etc/lightdm/lightdm.conf.d/50-ephemeral-autologin.conf 2>/dev/null || true
 fi
 
-log "### 48_gnome_desktop: done"
+log "### gnome-desktop: done"
