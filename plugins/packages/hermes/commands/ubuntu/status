@@ -1,4 +1,4 @@
 #!/usr/bin/env sh
 set -eu
 
-exec ./scripts/package-status-command hermes 'if command -v hermes >/dev/null 2>&1 || [ -x "$HOME/.local/bin/hermes" ]; then echo installed; else echo missing; fi'
+exec ./scripts/package-status-command hermes 'if egame_human_run sh -lc "command -v hermes >/dev/null 2>&1 || [ -x \"\$HOME/.local/bin/hermes\" ]"; then echo installed; else echo missing; fi'

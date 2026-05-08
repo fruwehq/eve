@@ -72,8 +72,8 @@ case "$OS_FAMILY" in
         jq -r --arg packages_csv "$BUNDLE_PACKAGES" '
           ($packages_csv | split(",") | map(select(length > 0))) as $selected |
           .plugins[] |
-          select($selected | index(.id)) |
           . as $plugin |
+          select($selected | index($plugin.id)) |
           (.install.ubuntu.steps // [])[] |
           [$plugin.path, .] | @tsv
         '
@@ -92,6 +92,7 @@ case "$OS_FAMILY" in
 export OS_FAMILY="$OS_FAMILY"
 export PROFILE_NAME="$PROFILE_NAME"
 export VM_USER_NAME="$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^VM_USER_NAME=/{print $2}')"
+export VM_USER_PASSWORD="${VM_USER_PASSWORD:-}"
 export EPHEMERAL_DISPLAY_RESOLUTION="${EPHEMERAL_DISPLAY_RESOLUTION:-}"
 export PROVIDER="$PROVIDER"
 export EPHEMERAL_SUNSHINE_PASSWORD="${EPHEMERAL_SUNSHINE_PASSWORD:-}"
@@ -178,8 +179,8 @@ EOF
         jq -r --arg packages_csv "$BUNDLE_PACKAGES" '
           ($packages_csv | split(",") | map(select(length > 0))) as $selected |
           .plugins[] |
-          select($selected | index(.id)) |
           . as $plugin |
+          select($selected | index($plugin.id)) |
           (.install.windows.steps // [])[] |
           [$plugin.path, .] | @tsv
         '

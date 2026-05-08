@@ -80,6 +80,7 @@ export TRUENAS_VM_POOL
 export TRUENAS_VM_ZVOL_PREFIX
 export VAGRANT_SHOW_CONSOLE
 export VM_USER_NAME
+export VM_USER_PASSWORD
 export VULTR_API_KEY
 
 aws.login: ## Refresh AWS CLI login session for the selected profile

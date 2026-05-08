@@ -33,12 +33,13 @@ EGAME_HUMAN_HOME=\$(getent passwd "\$EGAME_HUMAN_USER" | cut -d: -f6)
 EGAME_HUMAN_UID=\$(id -u "\$EGAME_HUMAN_USER")
 export EGAME_HUMAN_USER EGAME_HUMAN_HOME EGAME_HUMAN_UID
 export HOME="\$EGAME_HUMAN_HOME"
-export PATH="\$EGAME_HUMAN_HOME/.local/bin:\$PATH"
+export PATH="\$EGAME_HUMAN_HOME/.local/bin:\$EGAME_HUMAN_HOME/.cargo/bin:\$PATH"
 egame_human_run() {
   sudo -H -u "\$EGAME_HUMAN_USER" env \
     HOME="\$EGAME_HUMAN_HOME" \
     USER="\$EGAME_HUMAN_USER" \
     LOGNAME="\$EGAME_HUMAN_USER" \
+    PATH="\$EGAME_HUMAN_HOME/.local/bin:\$EGAME_HUMAN_HOME/.cargo/bin:\$PATH" \
     XDG_RUNTIME_DIR="/run/user/\$EGAME_HUMAN_UID" \
     "\$@"
 }
