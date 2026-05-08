@@ -16,6 +16,9 @@ case "$OS_FAMILY" in
   ubuntu)
     log() { printf '[update] %s\n' "$*"; }
 
+    log "Checking SSH connectivity..."
+    "${SSH_CMD[@]}" true
+
     log "Updating apt packages..."
     "${SSH_CMD[@]}" 'sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq && sudo DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -qq' || true
 

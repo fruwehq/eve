@@ -293,6 +293,17 @@ def action_allowed_for_instance(action: dict[str, Any], package_id: str, os_fami
     return True
 
 
+def password_supported(status: dict[str, Any] | None) -> bool:
+    if os.environ.get("EPHEMERAL_WINDOWS_PASSWORD"):
+        return status_instance_name(status) is not None
+    if not status:
+        return False
+    instance = status.get("instance", {})
+    if not isinstance(instance, dict):
+        return False
+    return instance.get("provider") == "vultr" and instance.get("os_family") == "windows"
+
+
 def aggregate_state(statuses: dict[str, dict[str, Any]]) -> str:
     counts = {"running": 0, "stopped": 0, "failed": 0, "other": 0}
     for status in statuses.values():
@@ -1568,11 +1579,11 @@ def run_tui() -> int:
                 try:
                     if refresh_instance:
                         await asyncio.wait_for(
-                            self.refresh_status_for(refresh_instance, repaint_table=True),
-                            timeout=8,
+                            self.refresh_status_for(refresh_instance, repaint_table=True, resolve_ip=False),
+                            timeout=4,
                         )
                     else:
-                        await asyncio.wait_for(self.refresh_current_status(), timeout=8)
+                        await asyncio.wait_for(self.refresh_current_status(resolve_ip=False), timeout=4)
                 except TimeoutError:
                     self.log_line("[warning]Status refresh timed out; press Refresh to retry.[/]")
                 finally:
@@ -1710,7 +1721,7 @@ def run_tui() -> int:
                 table.focus()
             self._rendering_instances = False
 
-        async def refresh_current_status(self, *, allow_fetch: bool = True) -> None:
+        async def refresh_current_status(self, *, allow_fetch: bool = True, resolve_ip: bool = True) -> None:
             self._detail_refresh_seq += 1
             refresh_seq = self._detail_refresh_seq
             instance_name = self.current_instance
@@ -1757,20 +1768,30 @@ def run_tui() -> int:
                     return
             self.current_status = next_status
             provider_state = effective_provider_state(cast(dict[str, Any], next_status.get("state", {})))
-            if provider_state == "running":
+            if resolve_ip and provider_state == "running":
                 try:
                     ip = await asyncio.to_thread(instance_ip, instance_name)
                     if refresh_seq == self._detail_refresh_seq and instance_name == self.current_instance:
                         self.instance_ips[instance_name] = ip or "-"
                 except Exception:
                     self.instance_ips[instance_name] = "-"
+            elif not resolve_ip:
+                observed = next_status.get("observed_state", {})
+                if isinstance(observed, dict) and observed.get("ip"):
+                    self.instance_ips[instance_name] = str(observed.get("ip"))
             else:
                 self.instance_ips[instance_name] = "-"
             self.render_detail()
             self.update_action_state()
             self.restore_focus(focused_id)
 
-        async def refresh_status_for(self, instance_name: str, *, repaint_table: bool = False) -> None:
+        async def refresh_status_for(
+            self,
+            instance_name: str,
+            *,
+            repaint_table: bool = False,
+            resolve_ip: bool = True,
+        ) -> None:
             self._status_refreshing.add(instance_name)
             try:
                 status = await asyncio.to_thread(instance_status, instance_name)
@@ -1801,9 +1822,13 @@ def run_tui() -> int:
             if self.current_instance == instance_name:
                 self.current_status = status
                 state = status.get("state", {})
-                if isinstance(state, dict) and provider_actions_available(state):
+                if resolve_ip and isinstance(state, dict) and provider_actions_available(state):
                     with suppress(Exception):
                         self.instance_ips[instance_name] = await asyncio.to_thread(instance_ip, instance_name) or "-"
+                elif not resolve_ip:
+                    observed = status.get("observed_state", {})
+                    if isinstance(observed, dict) and observed.get("ip"):
+                        self.instance_ips[instance_name] = str(observed.get("ip"))
                 else:
                     self.instance_ips[instance_name] = "-"
                 self.render_detail()
@@ -2719,7 +2744,10 @@ def run_tui() -> int:
             self.set_button("logs", disabled=busy or not has_instance or not provider_available)
             self.set_button("update-tools", disabled=busy or not has_instance or not provider_available)
             self.set_button("upload", disabled=busy or not has_instance or not provider_available)
-            self.set_button("show-password", disabled=busy or not has_instance or not provider_available)
+            self.set_button(
+                "show-password",
+                disabled=busy or not has_instance or not provider_available or not password_supported(self.current_status),
+            )
             self.set_button(
                 "provider-down",
                 disabled=busy or not has_instance or provider_busy or display_provider_state in {"absent", "unknown"},
