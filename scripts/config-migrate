@@ -17,6 +17,7 @@ MIGRATIONS = {
   "EPHEMERAL_DISPLAY_FPS" => %w[display fps],
   "EPHEMERAL_DISPLAY_RESOLUTION" => %w[display resolution],
   "EPHEMERAL_MOONLIGHT_BITRATE_KBPS" => %w[moonlight bitrate_kbps],
+  "EPHEMERAL_MOONLIGHT_DISPLAY_MODE" => %w[moonlight display_mode],
   "EPHEMERAL_MOONLIGHT_VIDEO_CODEC" => %w[moonlight video_codec],
   "EPHEMERAL_MOONLIGHT_VIDEO_DECODER" => %w[moonlight video_decoder],
   "GOOGLE_APPLICATION_CREDENTIALS" => %w[gcp application_credentials],

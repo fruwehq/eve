@@ -20,6 +20,17 @@ fi
 if [ -n "${EPHEMERAL_MOONLIGHT_BITRATE_KBPS:-}" ]; then
   EXTRA_ARGS+=(--bitrate "$EPHEMERAL_MOONLIGHT_BITRATE_KBPS")
 fi
+MOONLIGHT_DISPLAY_MODE="${EPHEMERAL_MOONLIGHT_DISPLAY_MODE:-borderless}"
+if [ -n "$MOONLIGHT_DISPLAY_MODE" ]; then
+  case "$MOONLIGHT_DISPLAY_MODE" in
+    fullscreen|borderless|windowed) ;;
+    *)
+      echo "remote-moonlight: invalid EPHEMERAL_MOONLIGHT_DISPLAY_MODE='$MOONLIGHT_DISPLAY_MODE' (valid: fullscreen, borderless, windowed)" >&2
+      exit 2
+      ;;
+  esac
+  EXTRA_ARGS+=(--display-mode "$MOONLIGHT_DISPLAY_MODE")
+fi
 if [ -n "${EPHEMERAL_MOONLIGHT_VIDEO_CODEC:-}" ]; then
   case "$EPHEMERAL_MOONLIGHT_VIDEO_CODEC" in
     auto|H.264|HEVC|AV1) ;;

@@ -77,11 +77,13 @@ display:
 global:
   vm_user_name: egame-user
 moonlight:
+  display_mode: borderless
   video_codec: HEVC
 YAML
 
 config_env="$(EGAME_CONFIG_PATH="$tmp_config" ./scripts/config-env --make | LC_ALL=C sort)"
 if printf '%s\n' "$config_env" | grep -qx 'EPHEMERAL_DISPLAY_RESOLUTION=5120x1440' &&
+  printf '%s\n' "$config_env" | grep -qx 'EPHEMERAL_MOONLIGHT_DISPLAY_MODE=borderless' &&
   printf '%s\n' "$config_env" | grep -qx 'EPHEMERAL_MOONLIGHT_VIDEO_CODEC=HEVC' &&
   printf '%s\n' "$config_env" | grep -qx 'VM_USER_NAME=egame-user'; then
   printf '  [OK] structured config emits non-secret environment overrides\n'

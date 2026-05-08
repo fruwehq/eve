@@ -26,6 +26,7 @@ global:
 
 moonlight:
   bitrate_kbps:
+  display_mode: borderless
   video_codec:
   video_decoder:
 

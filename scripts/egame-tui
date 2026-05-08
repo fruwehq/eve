@@ -10,6 +10,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import signal
 import subprocess
 import sys
@@ -1104,13 +1105,8 @@ def run_tui() -> int:
         }
 
         #busy-cancel-command {
-            display: none;
             width: 100%;
             margin: 0 1;
-        }
-
-        #root.busy #busy-cancel-command {
-            display: block;
         }
 
         #root.busy #output {
@@ -1348,11 +1344,11 @@ def run_tui() -> int:
             Binding("p", "provision", "Provision"),
             Binding("x", "down_instance", "Down"),
             Binding("d", "delete_instance", "Delete Local"),
-            Binding("c", "cancel_command", "Cancel"),
+            Binding("c", "cancel_command", "Cancel", priority=True),
             Binding("ctrl+c", "cancel_command", "Cancel", priority=True),
             Binding("escape", "cancel_command", "Cancel", priority=True),
-            Binding("l", "focus_log", "Log"),
-            Binding("y", "copy_log", "Copy Log"),
+            Binding("l", "focus_log", "Log", priority=True),
+            Binding("y", "copy_log", "Copy Log", priority=True),
             Binding("q", "quit", "Quit"),
         ]
 
@@ -2695,6 +2691,8 @@ def run_tui() -> int:
             package_rows = self.current_status.get("packages", {}).get("all", [])
             provision_state = str(self.current_status.get("state", {}).get("provision_state", "unknown"))
             os_family = str(self.current_status.get("instance", {}).get("os_family", ""))
+            state_doc = self.current_status.get("state", {})
+            provider_available = provider_actions_available(cast(dict[str, Any], state_doc)) if isinstance(state_doc, dict) else False
             actions: list[dict[str, Any]] = []
             for package in package_rows:
                 if not isinstance(package, dict):
@@ -2705,10 +2703,11 @@ def run_tui() -> int:
                 effectively_installed = status in {"installed", "reinstalled"} or (
                     status in {None, "unknown"} and bool(package.get("selected")) and provision_state == "provisioned"
                 )
-                if not effectively_installed:
-                    continue
                 for action in package.get("actions", []):
                     if not isinstance(action, dict):
+                        continue
+                    native_action = bool(action.get("native"))
+                    if not effectively_installed and not (native_action and provider_available and bool(package.get("supported"))):
                         continue
                     if not action_allowed_for_instance(action, package_id, os_family):
                         continue
@@ -2801,7 +2800,7 @@ def run_tui() -> int:
             self.update_busy_layout()
             self.set_button("refresh", disabled=busy)
             self.set_button("cancel-command", disabled=not busy)
-            self.set_button("busy-cancel-command", disabled=not busy)
+            self.set_button("busy-cancel-command", disabled=not busy, hide_when_disabled=False)
             self.set_button("provider-status", disabled=busy or not has_instance)
             self.set_button("provider-plan", disabled=busy or not has_instance or provider_busy)
             self.set_button("provider-init", disabled=busy or not has_instance or provider_busy)
@@ -2898,6 +2897,8 @@ def run_tui() -> int:
             root = self.query_one("#root", Container)
             summary = self.query_one("#summary", Static)
             output_help = self.query_one("#output-help", Static)
+            cancel_button = self.query_one("#busy-cancel-command", Button)
+            cancel_button.display = self.command_running
             if self.command_running:
                 root.add_class("busy")
                 label = self.current_command_label or "command"
@@ -2924,6 +2925,8 @@ def run_tui() -> int:
         def action_copy_log(self) -> None:
             output = self.query_one("#output", TextArea)
             self.copy_to_clipboard(output.text)
+            if sys.platform == "darwin" and shutil.which("pbcopy"):
+                subprocess.run(["pbcopy"], input=output.text, text=True, check=False)
             self.notify("Copied log output")
 
         def focus_button_relative(self, key: str) -> bool:

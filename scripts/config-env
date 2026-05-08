@@ -23,6 +23,7 @@ MAPPINGS = [
   [%w[global timezone], "TIMEZONE"],
   [%w[global vm_user_name], "VM_USER_NAME"],
   [%w[moonlight bitrate_kbps], "EPHEMERAL_MOONLIGHT_BITRATE_KBPS"],
+  [%w[moonlight display_mode], "EPHEMERAL_MOONLIGHT_DISPLAY_MODE"],
   [%w[moonlight video_codec], "EPHEMERAL_MOONLIGHT_VIDEO_CODEC"],
   [%w[moonlight video_decoder], "EPHEMERAL_MOONLIGHT_VIDEO_DECODER"],
   [%w[raspberry_pi hdmi_connector], "RASPBERRY_PI_HDMI_CONNECTOR"],

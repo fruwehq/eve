@@ -148,8 +148,8 @@ else
 fi
 
 if ./scripts/package-list --registry "$FIXTURE" --instance dev-a --json | \
-  jq -e '.packages[] | select(.id == "rdp") | .supported == true and .actions == []' >/dev/null; then
-  printf '  [OK] package-list treats RDP as Linux xrdp package\n'
+  jq -e '.packages[] | select(.id == "rdp") | .supported == true and (.actions[] | select(.id == "rdp" and .target == "rdp.open" and .native == true))' >/dev/null; then
+  printf '  [OK] package-list exposes RDP as native-capable package action\n'
 else
   printf '  [FAIL] package-list RDP package metadata mismatch\n' >&2
   ./scripts/package-list --registry "$FIXTURE" --instance dev-a --json >&2 || true

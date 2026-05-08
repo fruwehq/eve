@@ -28,5 +28,46 @@ done
 ps_script="\$paths = @($ps_paths); if (\$paths | Where-Object { Test-Path \$_ }) { 'installed' } else { 'missing' }"
 encoded_command="$(printf '%s' "$ps_script" | iconv -f UTF-8 -t UTF-16LE | base64 | tr -d '\n')"
 remote_command="powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand $encoded_command"
+PROFILE="${EGAME_INSTANCE_NAME:?EGAME_INSTANCE_NAME is required}"
+SSH_HELPER="${EGAME_PACKAGE_STATUS_SSH:-./scripts/instance-ssh}"
 
-EGAME_PACKAGE_OS_FAMILY=windows exec ./scripts/package-status-command "$PACKAGE" "$remote_command"
+set +e
+output="$("$SSH_HELPER" "$PROFILE" -- "$remote_command" 2>&1)"
+exit_status=$?
+set -e
+
+clean_details() {
+  printf '%s\n' "$1" |
+    tr -d '\r' |
+    awk '
+      /^#< CLIXML/ { next }
+      /^<Objs / { next }
+      /^<Obj / { next }
+      /^<\/Objs>/ { next }
+      /_x000D__/ { next }
+      { print }
+    '
+}
+
+details="$(clean_details "$output")"
+
+if [ "$exit_status" -eq 0 ]; then
+  status="$(printf '%s\n' "$details" | awk '/^(installed|missing|unknown)$/ { print; exit }')"
+  status="${status:-unknown}"
+  case "$status" in
+    installed|missing|unknown) ;;
+    *) status="unknown" ;;
+  esac
+else
+  status="failed"
+fi
+
+jq -n \
+  --arg kind "package-status" \
+  --arg package "$PACKAGE" \
+  --arg command "status" \
+  --arg instance "$PROFILE" \
+  --arg os_family "windows" \
+  --arg status "$status" \
+  --arg details "$details" \
+  '{kind: $kind, package: $package, command: $command, instance: $instance, os_family: $os_family, status: $status, details: $details}'
