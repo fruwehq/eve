@@ -428,10 +428,10 @@ else
   FAIL=$((FAIL + 1))
 fi
 
-overlay_mtime_before="$(stat -f %m "$overlay" 2>/dev/null || stat -c %Y "$overlay")"
+overlay_before="$tmp_overlay_dir/dev-a.catalog.local.yaml.before"
+cp "$overlay" "$overlay_before"
 if ./scripts/instance-profile-overlay --registry "$FIXTURE" --instance dev-a --output "$overlay" &&
-  overlay_mtime_after="$(stat -f %m "$overlay" 2>/dev/null || stat -c %Y "$overlay")" &&
-  [ "$overlay_mtime_before" = "$overlay_mtime_after" ]; then
+  cmp -s "$overlay_before" "$overlay"; then
   printf '  [OK] unchanged profile overlay is not rewritten\n'
 else
   printf '  [FAIL] unchanged profile overlay rewrite check\n' >&2
