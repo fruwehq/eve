@@ -1,0 +1,47 @@
+FROM python:3.13-slim-bookworm
+
+ARG TERRAFORM_VERSION=1.13.5
+ARG TERRAMATE_VERSION=0.17.0
+ARG TARGETARCH
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PATH="/home/eve/.local/bin:${PATH}"
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+    bash \
+    ca-certificates \
+    curl \
+    git \
+    gnupg \
+    jq \
+    make \
+    openssh-client \
+    ruby \
+    shellcheck \
+    unzip \
+  && rm -rf /var/lib/apt/lists/*
+
+RUN set -eux; \
+  case "${TARGETARCH:-$(dpkg --print-architecture)}" in \
+    amd64|x86_64) tool_arch=amd64 ;; \
+    arm64|aarch64) tool_arch=arm64 ;; \
+    *) echo "Unsupported architecture: ${TARGETARCH:-$(dpkg --print-architecture)}" >&2; exit 1 ;; \
+  esac; \
+  curl -fsSLo /tmp/terraform.zip "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_${tool_arch}.zip"; \
+  unzip -d /usr/local/bin /tmp/terraform.zip; \
+  rm -f /tmp/terraform.zip; \
+  curl -fsSLo /tmp/terramate.tar.gz "https://github.com/terramate-io/terramate/releases/download/v${TERRAMATE_VERSION}/terramate_${TERRAMATE_VERSION}_linux_${tool_arch}.tar.gz"; \
+  mkdir -p /tmp/terramate; \
+  tar -C /tmp/terramate -xzf /tmp/terramate.tar.gz; \
+  find /tmp/terramate -type f -name terramate -exec install -m 0755 {} /usr/local/bin/terramate \; -quit; \
+  test -x /usr/local/bin/terramate; \
+  rm -rf /tmp/terramate /tmp/terramate.tar.gz
+
+RUN pip install --no-cache-dir poetry
+
+RUN useradd --create-home --shell /bin/bash eve
+USER eve
+WORKDIR /workspace
+
+CMD ["bash"]

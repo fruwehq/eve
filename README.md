@@ -196,6 +196,26 @@ after that, `eve` opens the same TUI from any directory as long as
 Use `poetry install` once to install the optional Python dependencies; the rest
 of the v3 command surface has no Python package dependency.
 
+### Optional containerized toolchain
+
+The default Eve workflow is still native on macOS because remote-access clients
+such as Moonlight, RustDesk, VNC viewers, Cocoa-Way, XQuartz, and iTerm need
+host GUI and desktop integration. For contributors who only need the CLI
+toolchain, tests, Terraform/Terramate, and provider/package scripts, Eve also
+ships an optional Docker image.
+
+```bash
+make docker.build
+make docker.shell
+make docker.test
+```
+
+The container mounts the repository at `/workspace`, reads `.env.local` if it
+exists, and mounts `~/.ssh` read-only for SSH-based provider operations. On
+Docker Desktop for macOS it also uses the host SSH agent socket when available.
+Use this for reproducible CLI work; use native `eve` / `make tui` for anything
+that launches a local GUI client.
+
 Package plugins may provide host-side command hooks at
 `commands/<os_family>/<install|status|down>` or
 `commands/common/<install|status|down>`. The built-in compatibility wrapper

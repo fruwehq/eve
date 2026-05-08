@@ -1,6 +1,6 @@
 # Makefile
 .DEFAULT_GOAL := default
-.PHONY: ai.sandbox aws.login bundle.select bundle.unselect catalog.list clean config.migrate default doctor down env eve generate help info install-cli integration.packages integration.plan integration.test \
+.PHONY: ai.sandbox aws.login bundle.select bundle.unselect catalog.list clean config.migrate default docker.build docker.shell docker.test doctor down env eve generate help info install-cli integration.packages integration.plan integration.test \
 				init init.all instance.create instance.delete instance.env instance.info instance.provision \
 				instance.list instance.observe instance.paths instance.recover instance.state instance.status instance.validate ip lint logs plan \
 				package.action package.down package.install package.list package.reinstall package.select \
@@ -14,6 +14,7 @@
 
 TM_PARALLEL ?= 8
 AGENT ?= codex
+EVE_TOOLCHAIN_IMAGE ?= eve-toolchain:local
 
 # v3 concrete instance selection. Instances live in .egame/instances.yaml.
 INSTANCE ?=
@@ -99,6 +100,15 @@ config.migrate: ## Move non-secret .env.local values to .egame/config.yaml (YES=
 
 doctor: ## Check local tools, plugins, providers, and state hints
 	./scripts/doctor
+
+docker.build: ## Build optional Eve CLI/toolchain container
+	docker build -f docker/Dockerfile.toolchain -t $(EVE_TOOLCHAIN_IMAGE) .
+
+docker.shell: ## Open a shell inside the optional Eve toolchain container
+	EVE_TOOLCHAIN_IMAGE=$(EVE_TOOLCHAIN_IMAGE) ./scripts/eve-docker bash
+
+docker.test: ## Run make test inside the optional Eve toolchain container
+	EVE_TOOLCHAIN_IMAGE=$(EVE_TOOLCHAIN_IMAGE) ./scripts/eve-docker make test
 
 ai.sandbox: ## Run a coding agent in Docker Sandboxes (AGENT=codex|opencode|claude|shell)
 	@if ! command -v sbx >/dev/null 2>&1; then \

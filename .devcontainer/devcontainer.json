@@ -1,0 +1,11 @@
+{
+  "name": "Eve toolchain",
+  "build": {
+    "dockerfile": "../docker/Dockerfile.toolchain",
+    "context": ".."
+  },
+  "workspaceFolder": "/workspace",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached",
+  "remoteUser": "eve",
+  "postCreateCommand": "poetry install"
+}
