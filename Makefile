@@ -1,16 +1,15 @@
 # Makefile
 .DEFAULT_GOAL := default
-.PHONY: ai.sandbox aws.login bundle.select bundle.unselect catalog.list clean config.migrate default docker.build docker.shell docker.test doctor down env eve generate help info install-cli integration.packages integration.plan integration.test \
-				init.all instance.create instance.delete instance.env instance.info instance.provision \
-				instance.list instance.observe instance.paths instance.recover instance.state instance.status instance.validate ip lint logs \
-				package.action package.down package.install package.list package.reinstall package.select \
-				package.status package.uninstall package.unselect \
-				plugins.list plugins.sync plugins.validate \
-				provider.status providers.status provision \
-				provision.clear-state provision.restart provision.wait reboot \
-				show-password ssh ssh.run ssh.truenas ssh.wait start status stop \
-				test test.catalog test.instances test.plugins test.plugins-sync test.python test.shellcheck test.terraform \
-				test.lint test.tf-isolation test.tui test.update-golden tui up update upload validate
+.PHONY: ai.sandbox aws.login bundle.select bundle.unselect catalog.list clean config.migrate default docker.build \
+				docker.shell docker.test doctor down env eve generate help info init.all install-cli instance.create \
+				instance.delete instance.env instance.info instance.list instance.observe instance.paths instance.provision \
+				instance.recover instance.state instance.status instance.validate integration.packages integration.plan \
+				integration.test ip lint logs package.action package.down package.install package.list package.reinstall \
+				package.select package.status package.uninstall package.unselect plugins.list plugins.sync plugins.validate \
+				provider.status providers.status provision provision.clear-state provision.restart provision.wait reboot \
+				show-password ssh ssh.run ssh.truenas ssh.wait start status stop test test.catalog test.instances test.lint \
+				test.plugins test.plugins-sync test.python test.shellcheck test.terraform test.tf-isolation test.tui \
+				test.update-golden tui up update upload validate
 
 TM_PARALLEL ?= 8
 AGENT ?= codex
@@ -83,8 +82,27 @@ export VM_USER_NAME
 export VM_USER_PASSWORD
 export VULTR_API_KEY
 
+ai.sandbox: ## Run a coding agent in Docker Sandboxes (AGENT=codex|opencode|claude|shell)
+	@if ! command -v sbx >/dev/null 2>&1; then \
+		echo "Docker Sandboxes CLI (sbx) is not installed."; \
+		echo "See docs/ai-sandboxes.md for setup notes."; \
+		exit 2; \
+	fi; \
+	exec sbx run $(AGENT) .
+
 aws.login: ## Refresh AWS CLI login session for the selected profile
 	aws login --profile $(AWS_PROFILE)
+
+bundle.select: ## Add a bundle to an instance's desired bundle list
+	@if [ -z "$(INSTANCE)" ] || [ -z "$(BUNDLE)" ]; then echo "Usage: make bundle.select INSTANCE=<name> BUNDLE=<id>"; exit 2; fi; \
+	./scripts/bundle-selection --instance $(INSTANCE) --bundle $(BUNDLE) --add
+
+bundle.unselect: ## Remove a bundle from an instance's desired bundle list
+	@if [ -z "$(INSTANCE)" ] || [ -z "$(BUNDLE)" ]; then echo "Usage: make bundle.unselect INSTANCE=<name> BUNDLE=<id>"; exit 2; fi; \
+	./scripts/bundle-selection --instance $(INSTANCE) --bundle $(BUNDLE) --remove
+
+catalog.list: ## List provider/platform/content choices
+	@./scripts/catalog-options
 
 clean: ## Remove terramate-generated terraform files and cache
 	find stacks -name ".terraform" -type d -prune -exec rm -rf {} \;
@@ -94,13 +112,10 @@ clean: ## Remove terramate-generated terraform files and cache
 	rm -rf .terraform-cache-dir/plugins/*
 	rm -rf .terraform-cache-dir/state/*
 
-default: help  ## Show help
-
 config.migrate: ## Move non-secret .env.local values to .egame/config.yaml (YES=1 to apply)
 	@if [ "$(YES)" = "1" ]; then ./scripts/config-migrate --apply; else ./scripts/config-migrate --dry-run; fi
 
-doctor: ## Check local tools, plugins, providers, and state hints
-	./scripts/doctor
+default: help  ## Show help
 
 docker.build: ## Build optional Eve CLI/toolchain container
 	docker build -f docker/Dockerfile.toolchain -t $(EVE_TOOLCHAIN_IMAGE) .
@@ -111,13 +126,8 @@ docker.shell: ## Open a shell inside the optional Eve toolchain container
 docker.test: ## Run make test inside the optional Eve toolchain container
 	EVE_TOOLCHAIN_IMAGE=$(EVE_TOOLCHAIN_IMAGE) ./scripts/eve-docker make test
 
-ai.sandbox: ## Run a coding agent in Docker Sandboxes (AGENT=codex|opencode|claude|shell)
-	@if ! command -v sbx >/dev/null 2>&1; then \
-		echo "Docker Sandboxes CLI (sbx) is not installed."; \
-		echo "See docs/ai-sandboxes.md for setup notes."; \
-		exit 2; \
-	fi; \
-	exec sbx run $(AGENT) .
+doctor: ## Check local tools, plugins, providers, and state hints
+	./scripts/doctor
 
 down: ## Destroy provider resources for an instance
 	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make down INSTANCE=<name>"; exit 2; fi; \
@@ -126,6 +136,9 @@ down: ## Destroy provider resources for an instance
 env: ## Print resolved instance data as env lines
 	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make env INSTANCE=<name>"; exit 2; fi; \
 	./scripts/instance-run env $(INSTANCE)
+
+eve: ## Open Eve, the Textual instance manager
+	@./scripts/eve
 
 generate: ## Generate terraform configuration from terramate files
 	terramate generate
@@ -138,26 +151,6 @@ help: ## Show this help message
 info: ## Print resolved instance data as JSON
 	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make info INSTANCE=<name>"; exit 2; fi; \
 	./scripts/instance-run info $(INSTANCE)
-
-integration.plan: ## Print integration test plan (INSTANCES=a,b)
-	@if [ -z "$(INSTANCES)" ]; then echo "Usage: make integration.plan INSTANCES=<linux>,<windows>"; exit 2; fi; \
-	args=""; \
-	for instance in $$(printf '%s' "$(INSTANCES)" | tr ',' ' '); do args="$$args --instance $$instance"; done; \
-	./scripts/integration-test $$args
-
-integration.test: ## Run live integration test (INSTANCES=a,b YES=1 DELETE_INSTANCES=1)
-	@if [ -z "$(INSTANCES)" ]; then echo "Usage: make integration.test INSTANCES=<linux>,<windows> YES=1"; exit 2; fi; \
-	args=""; \
-	for instance in $$(printf '%s' "$(INSTANCES)" | tr ',' ' '); do args="$$args --instance $$instance"; done; \
-	if [ "$(DELETE_INSTANCES)" = "1" ]; then args="$$args --delete-instances"; fi; \
-	./scripts/integration-test --live $$args
-
-integration.packages: ## Optional live smoke: install/status every supported package (INSTANCES=a,b YES=1)
-	@if [ -z "$(INSTANCES)" ]; then echo "Usage: make integration.packages INSTANCES=<linux>,<windows> YES=1 [DELETE_INSTANCES=1]"; exit 2; fi; \
-	args=""; \
-	for instance in $$(printf '%s' "$(INSTANCES)" | tr ',' ' '); do args="$$args --instance $$instance"; done; \
-	if [ "$(DELETE_INSTANCES)" = "1" ]; then args="$$args --delete-instances"; fi; \
-	./scripts/integration-test --live --all-packages $$args
 
 init.all: generate ## Init all stacks in parallel (set TM_PARALLEL=N)
 	terramate run --parallel=$(TM_PARALLEL) --continue-on-error -- terraform init -upgrade
@@ -238,6 +231,26 @@ instance.validate: ## Validate a concrete instance from .egame/instances.yaml
 	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make instance.validate INSTANCE=<name>"; exit 2; fi; \
 	./scripts/instance-resolve --instance $(INSTANCE) --validate
 
+integration.packages: ## Optional live smoke: install/status every supported package (INSTANCES=a,b YES=1)
+	@if [ -z "$(INSTANCES)" ]; then echo "Usage: make integration.packages INSTANCES=<linux>,<windows> YES=1 [DELETE_INSTANCES=1]"; exit 2; fi; \
+	args=""; \
+	for instance in $$(printf '%s' "$(INSTANCES)" | tr ',' ' '); do args="$$args --instance $$instance"; done; \
+	if [ "$(DELETE_INSTANCES)" = "1" ]; then args="$$args --delete-instances"; fi; \
+	./scripts/integration-test --live --all-packages $$args
+
+integration.plan: ## Print integration test plan (INSTANCES=a,b)
+	@if [ -z "$(INSTANCES)" ]; then echo "Usage: make integration.plan INSTANCES=<linux>,<windows>"; exit 2; fi; \
+	args=""; \
+	for instance in $$(printf '%s' "$(INSTANCES)" | tr ',' ' '); do args="$$args --instance $$instance"; done; \
+	./scripts/integration-test $$args
+
+integration.test: ## Run live integration test (INSTANCES=a,b YES=1 DELETE_INSTANCES=1)
+	@if [ -z "$(INSTANCES)" ]; then echo "Usage: make integration.test INSTANCES=<linux>,<windows> YES=1"; exit 2; fi; \
+	args=""; \
+	for instance in $$(printf '%s' "$(INSTANCES)" | tr ',' ' '); do args="$$args --instance $$instance"; done; \
+	if [ "$(DELETE_INSTANCES)" = "1" ]; then args="$$args --delete-instances"; fi; \
+	./scripts/integration-test --live $$args
+
 ip: ## Print the instance IP
 	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make ip INSTANCE=<name>"; exit 2; fi; \
 	./scripts/instance-run ip $(INSTANCE)
@@ -253,21 +266,11 @@ package.action: ## Run a package-defined action (PACKAGE=<id> ACTION=<id>)
 	@if [ -z "$(INSTANCE)" ] || [ -z "$(PACKAGE)" ] || [ -z "$(ACTION)" ]; then echo "Usage: make package.action INSTANCE=<name> PACKAGE=<id> ACTION=<id>"; exit 2; fi; \
 	./scripts/package-action --instance $(INSTANCE) --package $(PACKAGE) --action $(ACTION)
 
-bundle.select: ## Add a bundle to an instance's desired bundle list
-	@if [ -z "$(INSTANCE)" ] || [ -z "$(BUNDLE)" ]; then echo "Usage: make bundle.select INSTANCE=<name> BUNDLE=<id>"; exit 2; fi; \
-	./scripts/bundle-selection --instance $(INSTANCE) --bundle $(BUNDLE) --add
-
-bundle.unselect: ## Remove a bundle from an instance's desired bundle list
-	@if [ -z "$(INSTANCE)" ] || [ -z "$(BUNDLE)" ]; then echo "Usage: make bundle.unselect INSTANCE=<name> BUNDLE=<id>"; exit 2; fi; \
-	./scripts/bundle-selection --instance $(INSTANCE) --bundle $(BUNDLE) --remove
-
 package.down: ## Remove package from an instance (PACKAGE=<id>, YES=1 for destructive)
 	@if [ -z "$(INSTANCE)" ] || [ -z "$(PACKAGE)" ]; then echo "Usage: make package.down INSTANCE=<name> PACKAGE=<id> YES=1"; exit 2; fi; \
 	args="--instance $(INSTANCE) --package $(PACKAGE) --command down"; \
 	if [ "$(YES)" = "1" ]; then args="$$args --yes"; fi; \
 	./scripts/package-dispatch $$args
-
-package.uninstall: package.down ## Alias for package.down
 
 package.install: ## Install selected package set for an instance (PACKAGE=<id>)
 	@if [ -z "$(INSTANCE)" ] || [ -z "$(PACKAGE)" ]; then echo "Usage: make package.install INSTANCE=<name> PACKAGE=<id>"; exit 2; fi; \
@@ -293,6 +296,8 @@ package.status: ## Show package plugin status for an instance (PACKAGE=<id>)
 	@if [ -z "$(INSTANCE)" ] || [ -z "$(PACKAGE)" ]; then echo "Usage: make package.status INSTANCE=<name> PACKAGE=<id>"; exit 2; fi; \
 	./scripts/package-dispatch --instance $(INSTANCE) --package $(PACKAGE) --command status
 
+package.uninstall: package.down ## Alias for package.down
+
 package.unselect: ## Remove a package from an instance's desired direct package list
 	@if [ -z "$(INSTANCE)" ] || [ -z "$(PACKAGE)" ]; then echo "Usage: make package.unselect INSTANCE=<name> PACKAGE=<id>"; exit 2; fi; \
 	./scripts/package-selection --instance $(INSTANCE) --package $(PACKAGE) --remove
@@ -313,9 +318,6 @@ provider.status: ## Show provider plugin status for an instance
 providers.status: ## Check provider configuration and connectivity
 	@./scripts/providers-status
 
-catalog.list: ## List provider/platform/content choices
-	@./scripts/catalog-options
-
 provision: ## Upload and run OS-appropriate provisioning scripts on the instance
 	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make provision INSTANCE=<name>"; exit 2; fi; \
 	./scripts/instance-run provision $(INSTANCE)
@@ -329,10 +331,6 @@ provision.restart: provision.clear-state provision ## Clear remote state then re
 provision.wait: ## Wait until provisioning finishes (survives intermediate reboots)
 	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make provision.wait INSTANCE=<name>"; exit 2; fi; \
 	./scripts/instance-run provision.wait $(INSTANCE)
-
-update: ## Update all installed tools to latest versions
-	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make update INSTANCE=<name>"; exit 2; fi; \
-	./scripts/instance-run update $(INSTANCE)
 
 reboot: ## Reboot the instance
 	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make reboot INSTANCE=<name>"; exit 2; fi; \
@@ -412,12 +410,13 @@ test.update-golden: ## Regenerate tests/golden/instances/*.env from current inst
 tui: ## Open the v3 Textual instance manager
 	@poetry run python ./scripts/egame-tui
 
-eve: ## Open Eve, the Textual instance manager
-	@./scripts/eve
-
 up: ## Create and start provider resources for an instance
 	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make up INSTANCE=<name>"; exit 2; fi; \
 	./scripts/instance-run up $(INSTANCE)
+
+update: ## Update all installed tools to latest versions
+	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make update INSTANCE=<name>"; exit 2; fi; \
+	./scripts/instance-run update $(INSTANCE)
 
 upload: ## Upload ./upload folders to the instance (UPLOADS=a,b optional)
 	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make upload INSTANCE=<name>"; exit 2; fi; \
