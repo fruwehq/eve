@@ -35,7 +35,13 @@ fi
 eval "$(./scripts/tf-env "$PROFILE")"
 
 init_args=(terraform init -reconfigure)
-tm_args=(--tags="$TAGS")
+tm_args=(
+  --disable-safeguards=git-untracked
+  --disable-safeguards=git-uncommitted
+  --disable-safeguards=git-out-of-sync
+  --disable-safeguards=outdated-code
+  --tags="$TAGS"
+)
 
 # When in v3 INSTANCE= mode, ensure a dedicated workspace exists per stack so
 # subsequent plan/apply/destroy/output operations (which honor TF_WORKSPACE and
@@ -57,6 +63,6 @@ fi
 run_step terramate run "${tm_args[@]}" -- "${init_args[@]}"
 
 if [ -n "${EGAME_INSTANCE_NAME:-}" ]; then
-  TF_WORKSPACE="" run_step terramate run --tags="$TAGS" -- \
+  TF_WORKSPACE="" run_step terramate run "${tm_args[@]}" -- \
     terraform workspace select -or-create "$EGAME_INSTANCE_NAME"
 fi

@@ -196,13 +196,17 @@ fi
 
 if [ "$needs_env" -eq 1 ]; then
   # Mirror scripts/provision's env.json shape so steps that consume it see
-  # the same configuration surface as full provisioning.  WINDOWS_PASSWORD
-  # only ever comes from an explicit env override here -- we deliberately
-  # skip the terraform fallback used in scripts/provision so granular
-  # installs don't drag in terraform state.
+  # the same configuration surface as full provisioning.
+  WINDOWS_PASSWORD="${EPHEMERAL_WINDOWS_PASSWORD:-}"
+  if [ -z "$WINDOWS_PASSWORD" ]; then
+    if ! WINDOWS_PASSWORD="$(./scripts/instance-password "$INSTANCE_NAME" 2>/dev/null)"; then
+      WINDOWS_PASSWORD=""
+    fi
+  fi
+
   mkdir -p "$STAGE/state"
   jq -n \
-    --arg wp "${EPHEMERAL_WINDOWS_PASSWORD:-}" \
+    --arg wp "$WINDOWS_PASSWORD" \
     --arg sp "${EPHEMERAL_SUNSHINE_PASSWORD:-}" \
     --arg dr "${EPHEMERAL_DISPLAY_RESOLUTION:-}" \
     --arg rk "${RUSTDESK_KEY:-}" \

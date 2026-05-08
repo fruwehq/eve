@@ -1,7 +1,7 @@
 $ErrorActionPreference = 'Stop'
 
 Write-Host "#########################################################"
-Write-Host "### Start 40"
+Write-Host "### Start rustdesk"
 Write-Host "#########################################################"
 
 . "$PSScriptRoot\..\lib\downloads.ps1"
@@ -18,7 +18,10 @@ Write-Host "Installing RustDesk..."
 # the Administrator user profile (interactive session context).
 $candidateDirs = @(
   "${env:LOCALAPPDATA}\rustdesk",
-  "C:\Users\Administrator\AppData\Local\rustdesk"
+  "C:\Windows\System32\config\systemprofile\AppData\Local\rustdesk",
+  "C:\Users\Administrator\AppData\Local\rustdesk",
+  "C:\Program Files\RustDesk",
+  "C:\Program Files (x86)\RustDesk"
 )
 
 $rustdeskDir = $null
@@ -116,15 +119,38 @@ $envFile = "C:\Users\Administrator\provision\state\env.json"
 $rustdeskKey = $null
 $rustdeskServer = $null
 $rustdeskPassword = $null
+$windowsPassword = $null
 if (Test-Path $envFile) {
   try {
     $envData = Get-Content $envFile | ConvertFrom-Json
     $rustdeskKey      = $envData.rustdesk_key
     $rustdeskServer   = $envData.rustdesk_server
     $rustdeskPassword = $envData.rustdesk_password
+    $windowsPassword  = $envData.windows_password
   } catch {
     Write-Warning "Failed to parse env file: $envFile"
   }
+}
+
+function Write-TextFileIfChanged {
+  param(
+    [Parameter(Mandatory = $true)][string]$Path,
+    [Parameter(Mandatory = $true)][string]$Value
+  )
+
+  $existing = if (Test-Path $Path) { Get-Content $Path -Raw } else { $null }
+  if ($existing -ne $Value) {
+    $parent = Split-Path $Path
+    if (-not (Test-Path $parent)) {
+      New-Item -ItemType Directory -Path $parent -Force | Out-Null
+    }
+    Set-Content -Path $Path -Value $Value -Encoding UTF8 -NoNewline
+  }
+}
+
+function Escape-ForSingleQuotedPowerShell {
+  param([string]$Value)
+  return $Value.Replace("'", "''")
 }
 
 Write-Host "Waiting for RustDesk process..."
@@ -210,6 +236,95 @@ if ($rustdeskServer -or $rustdeskKey -or $rustdeskPassword) {
   }
 }
 
+# The provisioning runner executes as SYSTEM. That is enough to install RustDesk,
+# but not enough to guarantee the interactive Administrator desktop has a running
+# RustDesk process after login. Register a user-session launcher and a configure
+# helper so the visible desktop owns the RustDesk process and permanent password.
+$stateDir = "C:\Users\Administrator\provision\state"
+if (-not (Test-Path $stateDir)) {
+  New-Item -ItemType Directory -Path $stateDir -Force | Out-Null
+}
+
+$startScript = Join-Path $stateDir "start-rustdesk.ps1"
+$configureScript = Join-Path $stateDir "configure-rustdesk-user.ps1"
+$escapedExe = Escape-ForSingleQuotedPowerShell $rustdeskExe
+$escapedEnvFile = Escape-ForSingleQuotedPowerShell $envFile
+$escapedConfigureScript = Escape-ForSingleQuotedPowerShell $configureScript
+
+$startScriptBody = @"
+`$ErrorActionPreference = 'SilentlyContinue'
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File '$escapedConfigureScript' | Out-Null
+"@
+Write-TextFileIfChanged -Path $startScript -Value $startScriptBody
+
+$configureScriptBody = @"
+`$ErrorActionPreference = 'SilentlyContinue'
+`$exe = '$escapedExe'
+`$envFile = '$escapedEnvFile'
+if (-not (Test-Path `$exe)) { exit 0 }
+`$currentSessionId = (Get-Process -Id `$PID).SessionId
+`$sessionRustDesk = Get-Process rustdesk -ErrorAction SilentlyContinue | Where-Object { `$_.SessionId -eq `$currentSessionId } | Select-Object -First 1
+if (-not `$sessionRustDesk) {
+  Start-Process -FilePath `$exe -WindowStyle Hidden
+  Start-Sleep -Seconds 3
+}
+if (Test-Path `$envFile) {
+  try {
+    `$envData = Get-Content `$envFile | ConvertFrom-Json
+    `$password = `$envData.rustdesk_password
+    if (`$password) {
+      `$markerDir = Join-Path `$env:APPDATA 'RustDesk'
+      if (-not (Test-Path `$markerDir)) { New-Item -ItemType Directory -Path `$markerDir -Force | Out-Null }
+      `$passwordMarker = Join-Path `$markerDir 'egame-password.sha256'
+      `$hashBytes = [System.Security.Cryptography.SHA256]::Create().ComputeHash([System.Text.Encoding]::UTF8.GetBytes(`$password))
+      `$hash = ([System.BitConverter]::ToString(`$hashBytes)).Replace('-', '').ToLowerInvariant()
+      `$existing = if (Test-Path `$passwordMarker) { (Get-Content `$passwordMarker -Raw).Trim() } else { '' }
+      if (`$existing -ne `$hash) {
+        & `$exe --password `$password | Out-Null
+        Set-Content -Path `$passwordMarker -Value `$hash -Encoding ASCII -NoNewline
+      }
+    }
+  } catch {
+  }
+}
+"@
+Write-TextFileIfChanged -Path $configureScript -Value $configureScriptBody
+
+$runValue = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$configureScript`""
+New-Item -Path "HKLM:\Software\Microsoft\Windows\CurrentVersion\Run" -Force | Out-Null
+Set-ItemProperty -Path "HKLM:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "EGameRustDesk" -Value $runValue
+Write-Host "Registered RustDesk interactive autostart."
+
+if ($windowsPassword) {
+  $autoTask = "EGameRustDeskAutostart"
+  $configureTask = "EGameRustDeskConfigure"
+  $startTaskCommand = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$configureScript`""
+  $configureTaskCommand = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$configureScript`""
+
+  try {
+    & schtasks.exe /Create /TN $autoTask /SC ONLOGON /RU "Administrator" /RP $windowsPassword /RL HIGHEST /IT /TR $startTaskCommand /F | Out-Null
+    Write-Host "Registered RustDesk Administrator logon task."
+  } catch {
+    Write-Warning "Could not register RustDesk Administrator logon task; HKLM Run fallback is in place."
+  }
+
+  try {
+    $configureStart = (Get-Date).AddMinutes(1).ToString("HH:mm")
+    & schtasks.exe /Create /TN $configureTask /SC ONCE /ST $configureStart /RU "Administrator" /RP $windowsPassword /RL HIGHEST /IT /TR $configureTaskCommand /F | Out-Null
+    & schtasks.exe /Run /TN $configureTask | Out-Null
+    Start-Sleep -Seconds 8
+    & schtasks.exe /Delete /TN $configureTask /F | Out-Null
+    Write-Host "Submitted RustDesk user-session configuration task."
+  } catch {
+    Write-Warning "Could not submit RustDesk user-session configuration task; it will be applied on next login."
+  }
+} else {
+  Write-Warning "Windows password not available; RustDesk password can only be applied in the provisioning context."
+}
+
+Write-Host "Ensuring RustDesk is started in the current context..."
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $configureScript | Out-Null
+
 Write-Host "Resolving RustDesk ID..."
 for ($i = 1; $i -le 15; $i++) {
   $id = (& $rustdeskExe --get-id 2>$null) -replace '\s', ''
@@ -221,6 +336,6 @@ for ($i = 1; $i -le 15; $i++) {
 }
 
 Write-Host "---------------------------------------------------------"
-Write-Host "END 40"
+Write-Host "END rustdesk"
 Write-Host "---------------------------------------------------------"
 Write-Host ""
