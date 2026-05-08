@@ -75,7 +75,13 @@ fi
 # that don't consume state get an empty list so we never overwrite a populated
 # remote env.json with locally-blank values.
 PLUGIN_DOC=$(./scripts/plugin-list --kind package --json)
-PLUGIN_INSTALL=$(printf '%s' "$PLUGIN_DOC" | jq --arg id "$PACKAGE" '.plugins[] | select(.id == $id) | .install.windows // null')
+PLUGIN_ENTRY=$(printf '%s' "$PLUGIN_DOC" | jq -c --arg id "$PACKAGE" '.plugins[] | select(.id == $id)' | head -n 1)
+PLUGIN_INSTALL=$(printf '%s' "$PLUGIN_ENTRY" | jq '.install.windows // null')
+PLUGIN_PATH=$(printf '%s' "$PLUGIN_ENTRY" | jq -r '.path // empty')
+PLUGIN_ROOT=""
+if [ -n "$PLUGIN_PATH" ]; then
+  PLUGIN_ROOT=$(dirname "$PLUGIN_PATH")
+fi
 
 steps=()
 state_files=()
@@ -137,8 +143,24 @@ cp -R windows/provision/scripts/lib "$STAGE/scripts/lib"
 if [ -d windows/provision/scripts/templates ]; then
   cp -R windows/provision/scripts/templates "$STAGE/scripts/templates"
 fi
+
+resolve_step_path() {
+  local step="$1"
+  if [ -n "$PLUGIN_ROOT" ] && [ -f "$PLUGIN_ROOT/$step" ]; then
+    printf '%s\n' "$PLUGIN_ROOT/$step"
+    return 0
+  fi
+  if [ -f "windows/provision/scripts/steps/$step" ]; then
+    printf '%s\n' "windows/provision/scripts/steps/$step"
+    return 0
+  fi
+  echo "package-provision-windows: step not found for package=$PACKAGE: $step" >&2
+  exit 2
+}
+
 for step in "${steps[@]}"; do
-  cp "windows/provision/scripts/steps/$step" "$STAGE/scripts/steps/$step"
+  step_file=$(basename "$step")
+  cp "$(resolve_step_path "$step")" "$STAGE/scripts/steps/$step_file"
 done
 
 remote_step_dir='C:\Users\Administrator\provision\scripts-package'
@@ -196,13 +218,15 @@ if [ -d "$STAGE/scripts/templates" ]; then
   ./scripts/instance-ssh "$INSTANCE_NAME" --scp "$STAGE/scripts/templates" "/C:/Users/Administrator/provision/scripts-package/"
 fi
 for step in "${steps[@]}"; do
-  ./scripts/instance-ssh "$INSTANCE_NAME" --scp "$STAGE/scripts/steps/$step" "/C:/Users/Administrator/provision/scripts-package/steps/$step"
+  step_file=$(basename "$step")
+  ./scripts/instance-ssh "$INSTANCE_NAME" --scp "$STAGE/scripts/steps/$step_file" "/C:/Users/Administrator/provision/scripts-package/steps/$step_file"
 done
 if [ "$needs_env" -eq 1 ]; then
   ./scripts/instance-ssh "$INSTANCE_NAME" --scp "$STAGE/state/env.json" "/C:/Users/Administrator/provision/state/env.json"
 fi
 
 for step in "${steps[@]}"; do
-  echo "[package-provision-windows] running step=$step package=$PACKAGE"
-  ./scripts/instance-ssh "$INSTANCE_NAME" -- "& 'C:\\Users\\Administrator\\provision\\scripts-package\\steps\\$step'"
+  step_file=$(basename "$step")
+  echo "[package-provision-windows] running step=$step_file package=$PACKAGE"
+  ./scripts/instance-ssh "$INSTANCE_NAME" -- "& 'C:\\Users\\Administrator\\provision\\scripts-package\\steps\\$step_file'"
 done

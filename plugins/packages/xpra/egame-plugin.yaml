@@ -23,6 +23,6 @@ install:
   ubuntu:
     steps: [00_base.sh, 05_timezone.sh, provision/ubuntu/45_xpra.sh]
   windows:
-    steps: [35_xpra.ps1]
+    steps: [provision/windows/35_xpra.ps1]
     state_files: []
     fallback: false

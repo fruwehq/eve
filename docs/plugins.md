@@ -178,7 +178,7 @@ Windows package install metadata:
 ```yaml
 install:
   windows:
-    steps: [40_rustdesk.ps1]
+    steps: [provision/windows/40_rustdesk.ps1]
     state_files: [env.json]
     fallback: false
 ```

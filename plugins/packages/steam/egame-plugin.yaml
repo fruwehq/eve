@@ -13,6 +13,6 @@ install:
   ubuntu:
     steps: [00_base.sh, 05_timezone.sh, provision/ubuntu/70_steam.sh]
   windows:
-    steps: [30_steam.ps1]
+    steps: [provision/windows/30_steam.ps1]
     state_files: []
     fallback: false

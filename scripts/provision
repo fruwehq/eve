@@ -145,11 +145,51 @@ EOF
       '{windows_password: $wp, sunshine_password: $sp, display_resolution: $dr, rustdesk_key: $rk, rustdesk_password: $rp, rustdesk_server: $rs, sunshine_version: $sv}' \
       > ./tmp/env.json
 
+    STAGE=$(mktemp -d)
+    trap 'rm -rf "$STAGE"' EXIT
+    cp -R windows/provision "$STAGE/provision"
+
+    copy_windows_step() {
+      local step="$1"
+      local plugin_root="$2"
+      local source=""
+      local target
+      target="$STAGE/provision/scripts/steps/$(basename "$step")"
+
+      if [ -f "windows/provision/scripts/steps/$step" ]; then
+        source="windows/provision/scripts/steps/$step"
+      elif [ -f "$plugin_root/$step" ]; then
+        source="$plugin_root/$step"
+      else
+        echo "[provision] windows install step not found: $step" >&2
+        exit 2
+      fi
+
+      cp "$source" "$target"
+    }
+
+    PLUGIN_DOC=$(./scripts/plugin-list --kind package --json)
+    while IFS=$'\t' read -r plugin_path step; do
+      [ -n "$plugin_path" ] || continue
+      [ -n "$step" ] || continue
+      copy_windows_step "$step" "$(dirname "$plugin_path")"
+    done < <(
+      printf '%s' "$PLUGIN_DOC" |
+        jq -r --arg packages_csv "$BUNDLE_PACKAGES" '
+          ($packages_csv | split(",") | map(select(length > 0))) as $selected |
+          .plugins[] |
+          select($selected | index(.id)) |
+          . as $plugin |
+          (.install.windows.steps // [])[] |
+          [$plugin.path, .] | @tsv
+        '
+    )
+
     echo "[provision] uploading windows/provision/ to remote"
     # Clear scripts AND state — without state reset, currentStep can outrun the
     # available step files when new steps are added, silently skipping them.
     ./scripts/instance-ssh "$PROFILE" -- 'New-Item -ItemType Directory -Force C:\Users\Administrator\provision | Out-Null; if (Test-Path "C:\Users\Administrator\provision\scripts") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\scripts" }; if (Test-Path "C:\Users\Administrator\provision\state") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\state" }; New-Item -ItemType Directory -Force C:\Users\Administrator\provision\state | Out-Null'
-    ./scripts/instance-ssh "$PROFILE" --scp windows/provision '/C:/Users/Administrator/'
+    ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/provision" '/C:/Users/Administrator/'
     ./scripts/instance-ssh "$PROFILE" --scp ./tmp/env.json '/C:/Users/Administrator/provision/state/env.json'
     echo "[provision] running bootstrap.ps1"
     # The Windows runner may trigger a reboot mid-step, which drops the SSH
