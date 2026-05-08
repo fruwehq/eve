@@ -198,6 +198,13 @@ EOF
       fi
 
       cp "$source" "$target"
+      if [ -n "$plugin_root" ] && [ -d "$plugin_root/provision/windows/lib" ]; then
+        cp -R "$plugin_root/provision/windows/lib/." "$STAGE/provision/scripts/lib/"
+      fi
+      if [ -n "$plugin_root" ] && [ -d "$plugin_root/provision/windows/templates" ]; then
+        mkdir -p "$STAGE/provision/scripts/templates"
+        cp -R "$plugin_root/provision/windows/templates/." "$STAGE/provision/scripts/templates/"
+      fi
     }
 
     PLUGIN_DOC=$(./scripts/plugin-list --kind package --json)

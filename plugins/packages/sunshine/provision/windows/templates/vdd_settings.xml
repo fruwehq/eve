@@ -7,9 +7,9 @@
         <friendlyname>default</friendlyname>
     </gpu>
     <!-- <global> and <resolutions> are populated at provision time by
-         windows/provision/scripts/steps/21_vdd_config.ps1 from the project's
-         baseline list and EPHEMERAL_DISPLAY_RESOLUTION. Anything between the
-         tags below is dropped. -->
+         plugins/packages/sunshine/provision/windows/21_vdd_config.ps1 from the
+         project's baseline list and EPHEMERAL_DISPLAY_RESOLUTION. Anything
+         between the tags below is dropped. -->
     <global></global>
     <resolutions></resolutions>
     <options>

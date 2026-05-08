@@ -143,6 +143,13 @@ cp -R windows/provision/scripts/lib "$STAGE/scripts/lib"
 if [ -d windows/provision/scripts/templates ]; then
   cp -R windows/provision/scripts/templates "$STAGE/scripts/templates"
 fi
+if [ -n "$PLUGIN_ROOT" ] && [ -d "$PLUGIN_ROOT/provision/windows/lib" ]; then
+  cp -R "$PLUGIN_ROOT/provision/windows/lib/." "$STAGE/scripts/lib/"
+fi
+if [ -n "$PLUGIN_ROOT" ] && [ -d "$PLUGIN_ROOT/provision/windows/templates" ]; then
+  mkdir -p "$STAGE/scripts/templates"
+  cp -R "$PLUGIN_ROOT/provision/windows/templates/." "$STAGE/scripts/templates/"
+fi
 
 resolve_step_path() {
   local step="$1"

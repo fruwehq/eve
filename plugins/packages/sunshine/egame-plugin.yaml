@@ -27,6 +27,13 @@ install:
     # through a kernel-mode driver that requests a reboot.  Stay on the full
     # provisioning path so a "package install" actually delivers a usable
     # Sunshine.
-    steps: []
+    steps:
+      - provision/windows/10_sunshine.ps1
+      - provision/windows/11_vigembus.ps1
+      - provision/windows/20_vdd.ps1
+      - provision/windows/21_vdd_config.ps1
+      - provision/windows/22_vdd_only_display.ps1
+      - provision/windows/23_sunshine_target_vdd.ps1
+      - provision/windows/31_virtual_audio.ps1
     state_files: []
     fallback: true

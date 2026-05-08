@@ -405,6 +405,18 @@ else
   FAIL=$((FAIL + 1))
 fi
 
+manifest_sunshine_windows_steps="$(
+  ./scripts/plugin-list --kind package --json | \
+    jq -r '.plugins[] | select(.id == "sunshine") | .install.windows.steps | join(",")'
+)"
+expected_sunshine_windows_steps="provision/windows/10_sunshine.ps1,provision/windows/11_vigembus.ps1,provision/windows/20_vdd.ps1,provision/windows/21_vdd_config.ps1,provision/windows/22_vdd_only_display.ps1,provision/windows/23_sunshine_target_vdd.ps1,provision/windows/31_virtual_audio.ps1"
+if [ "$manifest_sunshine_windows_steps" = "$expected_sunshine_windows_steps" ]; then
+  printf '  [OK] sunshine plugin manifest owns reboot-coupled Windows steps\n'
+else
+  printf '  [FAIL] sunshine plugin manifest declares unexpected Windows steps (got: %s)\n' "$manifest_sunshine_windows_steps" >&2
+  FAIL=$((FAIL + 1))
+fi
+
 # shellcheck disable=SC2016 # The single-quoted strings below are literal
 # patterns/messages -- $PACKAGE refers to the variable name in the scripts
 # under test, not in this shell.
