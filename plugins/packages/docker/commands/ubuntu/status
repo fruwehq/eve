@@ -2,4 +2,4 @@
 set -eu
 
 # shellcheck disable=SC2016 # Remote command must expand on the VM.
-exec ./scripts/package-status-command docker 'sock="/run/user/$(id -u)/docker.sock"; if command -v docker >/dev/null 2>&1 && [ -S "$sock" ]; then echo installed; else echo missing; fi'
+exec ./scripts/package-status-command docker 'sock="/run/user/$EGAME_HUMAN_UID/docker.sock"; if command -v docker >/dev/null 2>&1 && [ -S "$sock" ]; then echo installed; else echo missing; fi'

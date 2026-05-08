@@ -7,11 +7,11 @@ skip_unless_pkg hermes
 
 log "### 23_hermes: installing Hermes agent"
 
-if command -v hermes >/dev/null 2>&1; then
+if human_run sh -lc 'command -v hermes >/dev/null 2>&1'; then
   log "hermes already installed — skipping"
   exit 0
 fi
 
-curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash
+human_run sh -lc 'curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash'
 
 log "### 23_hermes: done"

@@ -17,10 +17,10 @@ if ! command -v node >/dev/null 2>&1; then
   apt_install nodejs
 fi
 
-if ! command -v rustc >/dev/null 2>&1; then
+if ! human_run sh -lc 'command -v rustc >/dev/null 2>&1'; then
   log "installing Rust (rustup)"
   download https://sh.rustup.rs "$DOWNLOADS_DIR/rustup-init.sh"
-  sh "$DOWNLOADS_DIR/rustup-init.sh" -y --default-toolchain stable --profile minimal
+  human_run sh "$DOWNLOADS_DIR/rustup-init.sh" -y --default-toolchain stable --profile minimal
 fi
 
 log "### 20_dev-toolchain: done"

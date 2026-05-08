@@ -10,8 +10,44 @@ PROFILE="${EGAME_INSTANCE_NAME:?EGAME_INSTANCE_NAME is required}"
 OS_FAMILY="${EGAME_PACKAGE_OS_FAMILY:-ubuntu}"
 SSH_HELPER="${EGAME_PACKAGE_STATUS_SSH:-./scripts/instance-ssh}"
 
+if RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env 2>/dev/null); then
+  SSH_USER=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^SSH_USER=/{print $2}')
+  VM_USER_NAME=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^VM_USER_NAME=/{print $2}')
+else
+  SSH_USER=""
+  VM_USER_NAME=""
+fi
+HUMAN_USER="${VM_USER_NAME:-$SSH_USER}"
+HUMAN_USER="${HUMAN_USER:-$(id -un)}"
+case "$HUMAN_USER" in
+  *[!a-zA-Z0-9._-]*)
+    echo "package-status-command: unsupported VM user name: $HUMAN_USER" >&2
+    exit 2
+    ;;
+esac
+
+REMOTE_COMMAND_WITH_CONTEXT=$(cat <<EOF
+set -eu
+EGAME_HUMAN_USER="$HUMAN_USER"
+EGAME_HUMAN_HOME=\$(getent passwd "\$EGAME_HUMAN_USER" | cut -d: -f6)
+EGAME_HUMAN_UID=\$(id -u "\$EGAME_HUMAN_USER")
+export EGAME_HUMAN_USER EGAME_HUMAN_HOME EGAME_HUMAN_UID
+export HOME="\$EGAME_HUMAN_HOME"
+export PATH="\$EGAME_HUMAN_HOME/.local/bin:\$PATH"
+egame_human_run() {
+  sudo -H -u "\$EGAME_HUMAN_USER" env \
+    HOME="\$EGAME_HUMAN_HOME" \
+    USER="\$EGAME_HUMAN_USER" \
+    LOGNAME="\$EGAME_HUMAN_USER" \
+    XDG_RUNTIME_DIR="/run/user/\$EGAME_HUMAN_UID" \
+    "\$@"
+}
+$REMOTE_COMMAND
+EOF
+)
+
 set +e
-output="$("$SSH_HELPER" "$PROFILE" -- "$REMOTE_COMMAND" 2>&1)"
+output="$("$SSH_HELPER" "$PROFILE" -- "$REMOTE_COMMAND_WITH_CONTEXT" 2>&1)"
 exit_status=$?
 set -e
 

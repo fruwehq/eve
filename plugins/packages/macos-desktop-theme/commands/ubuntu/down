@@ -1,4 +1,4 @@
 #!/usr/bin/env sh
 set -eu
 
-exec ./scripts/package-down-command macos-desktop-theme 'rm -f "$HOME/.config/autostart/egame-gnome-macos-theme.desktop" "$HOME/.local/bin/egame-gnome-macos-theme"; sudo DEBIAN_FRONTEND=noninteractive apt-get remove -y gnome-shell-extension-ubuntu-dock papirus-icon-theme || true'
+exec ./scripts/package-down-command macos-desktop-theme 'sudo rm -f "$EGAME_HUMAN_HOME/.config/autostart/egame-gnome-macos-theme.desktop" "$EGAME_HUMAN_HOME/.local/bin/egame-gnome-macos-theme"; sudo DEBIAN_FRONTEND=noninteractive apt-get remove -y gnome-shell-extension-ubuntu-dock papirus-icon-theme || true'

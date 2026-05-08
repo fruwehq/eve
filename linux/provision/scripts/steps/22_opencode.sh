@@ -7,11 +7,11 @@ skip_unless_pkg opencode
 
 log "### 22_opencode: installing OpenCode CLI"
 
-if command -v opencode >/dev/null 2>&1; then
+if human_run sh -lc 'command -v opencode >/dev/null 2>&1'; then
   log "opencode already installed — skipping"
   exit 0
 fi
 
-curl -fsSL https://opencode.ai/install | bash
+human_run sh -lc 'curl -fsSL https://opencode.ai/install | bash'
 
 log "### 22_opencode: done"
