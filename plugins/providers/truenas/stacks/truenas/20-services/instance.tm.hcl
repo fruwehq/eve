@@ -9,10 +9,10 @@ stack {
   ]
 
   after = [
-    "/stacks/truenas/10-shared",
+    "/plugins/providers/truenas/stacks/truenas/10-shared",
   ]
 }
 
 import {
-  source = "/modules/truenas/vm.tm.hcl"
+  source = "/plugins/providers/truenas/modules/truenas/vm.tm.hcl"
 }

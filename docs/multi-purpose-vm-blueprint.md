@@ -272,7 +272,7 @@ Given your current Terramate/Terraform layout:
 
 - TrueNAS-hosted VM mapping.
   - Catalog scaffold is in place (`provider: truenas` + sample instance).
-  - Terramate stack/module implementation is in place (`stacks/truenas/*`, `modules/truenas/*`) with `deevus/truenas` provider and `truenas_vm` resource wiring.
+  - Terramate stack/module implementation is in place under `plugins/providers/truenas/` with `deevus/truenas` provider and `truenas_vm` resource wiring.
   - Current instance defaults are conservative (STOPPED by default, explicit SSH host key fingerprint required).
 - USB/metal (Raspberry Pi) machine kind with cloud-init/ansible init adaptation.
   - Prefer a dedicated machine/provider model such as `provider: raspberry-pi`, `kind: metal`.

@@ -103,7 +103,7 @@ Init entries are bootstrap/access methods, not user-facing workload choices. The
 - Provider blocks and `required_providers` live in `providers.tm.hcl` files, not in stack or resource config files.
 - Each provider's variables (host, key paths, ports) are declared alongside the provider block in the same generated file.
 - Instance-driven values (region, instance type, plan, OS id, AZ) are threaded through as `TF_VAR_*` from `scripts/tf-env`; do **not** hardcode them in stack globals.
-- TrueNAS is a special case: the parent `stacks/truenas/providers.tm.hcl` generates only `required_version`; the child `stacks/truenas/20-services/providers.tm.hcl` generates the full provider + variables (which the module at `modules/truenas/vm.tm.hcl` then relies on — see the note at `null_resource.cloudinit_iso` about `var.truenas_host`).
+- TrueNAS is a special case: its Terramate implementation lives with the provider plugin under `plugins/providers/truenas/stacks/truenas/` and `plugins/providers/truenas/modules/truenas/`. The parent `providers.tm.hcl` generates only `required_version`; the child `20-services/providers.tm.hcl` generates the full provider + variables (which the module then relies on — see the note at `null_resource.cloudinit_iso` about `var.truenas_host`).
 
 ## Windows SSH shell
 
