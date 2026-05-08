@@ -1061,6 +1061,16 @@ def run_tui() -> int:
             background: $warning 20%;
         }
 
+        #busy-cancel-command {
+            display: none;
+            width: 100%;
+            margin: 0 1;
+        }
+
+        #root.busy #busy-cancel-command {
+            display: block;
+        }
+
         #root.busy #output {
             height: 1fr;
             border: round $accent;
@@ -1284,6 +1294,7 @@ def run_tui() -> int:
             Binding("d", "delete_instance", "Delete Local"),
             Binding("c", "cancel_command", "Cancel"),
             Binding("ctrl+c", "cancel_command", "Cancel", priority=True),
+            Binding("escape", "cancel_command", "Cancel", priority=True),
             Binding("l", "focus_log", "Log"),
             Binding("y", "copy_log", "Copy Log"),
             Binding("q", "quit", "Quit"),
@@ -1321,6 +1332,7 @@ def run_tui() -> int:
                     id="hero",
                 )
                 yield Static("Loading instances...", id="summary")
+                yield Button("Cancel Running Command", id="busy-cancel-command", variant="error")
                 with Horizontal(id="body"):
                     with Vertical(id="left"):
                         yield Static("Providers", classes="section-title")
@@ -1538,7 +1550,10 @@ def run_tui() -> int:
                     except TimeoutError:
                         if refresh_instance:
                             with suppress(TimeoutError):
-                                await asyncio.wait_for(self.refresh_status_for(refresh_instance), timeout=8)
+                                await asyncio.wait_for(
+                                    self.refresh_status_for(refresh_instance, resolve_ip=False),
+                                    timeout=4,
+                                )
 
             if refresh_instance:
                 status_poll_task = asyncio.create_task(poll_running_status())
@@ -2190,7 +2205,7 @@ def run_tui() -> int:
                 self.set_detail_tab(button_id.split("-", 1)[1])
             elif button_id == "refresh":
                 await self.action_refresh()
-            elif button_id == "cancel-command":
+            elif button_id in {"cancel-command", "busy-cancel-command"}:
                 await self.action_cancel_command()
             elif button_id == "provider-up":
                 await self.action_provider("up")
@@ -2260,6 +2275,8 @@ def run_tui() -> int:
         async def action_cancel_command(self) -> None:
             proc = self.current_process
             if not self.command_running or proc is None or proc.returncode is not None:
+                if self.command_running:
+                    self.log_line("[warning]No cancellable subprocess is active yet.[/]")
                 return
             self.log_line("[warning]Cancelling current command...[/]")
             with suppress(ProcessLookupError):
@@ -2710,6 +2727,7 @@ def run_tui() -> int:
             self.update_busy_layout()
             self.set_button("refresh", disabled=busy)
             self.set_button("cancel-command", disabled=not busy)
+            self.set_button("busy-cancel-command", disabled=not busy)
             self.set_button("provider-status", disabled=busy or not has_instance)
             self.set_button("provider-plan", disabled=busy or not has_instance or provider_busy)
             self.set_button("provider-init", disabled=busy or not has_instance or provider_busy)
