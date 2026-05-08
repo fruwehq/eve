@@ -65,6 +65,7 @@ fi
 # package only requires touching its plugins/packages/<id>/egame-plugin.yaml.
 PLUGIN_DOC=$(./scripts/plugin-list --kind package --json)
 PLUGIN_INSTALL=$(printf '%s' "$PLUGIN_DOC" | jq --arg id "$PACKAGE" '.plugins[] | select(.id == $id) | .install.ubuntu // null')
+PLUGIN_ROOT=$(printf '%s' "$PLUGIN_DOC" | jq -r --arg id "$PACKAGE" '.plugins[] | select(.id == $id) | .path' | xargs dirname)
 
 if [ -z "$PLUGIN_INSTALL" ] || [ "$PLUGIN_INSTALL" = "null" ]; then
   echo "package-provision: no ubuntu install step mapping for package: $PACKAGE" >&2
@@ -118,6 +119,29 @@ trap 'rm -rf "$STAGE"' EXIT
 cp -R linux/provision/scripts "$STAGE/scripts"
 mkdir -p "$STAGE/state"
 
+copy_step() {
+  local step="$1"
+  local plugin_root="$2"
+  local source=""
+  local target
+  target="$STAGE/scripts/steps/$(basename "$step")"
+
+  if [ -f "linux/provision/scripts/steps/$step" ]; then
+    source="linux/provision/scripts/steps/$step"
+  elif [ -f "$plugin_root/$step" ]; then
+    source="$plugin_root/$step"
+  else
+    echo "package-provision: install step not found: $step" >&2
+    exit 2
+  fi
+
+  cp "$source" "$target"
+}
+
+for step in "${steps[@]}"; do
+  copy_step "$step" "$PLUGIN_ROOT"
+done
+
 # The provision steps are package-gated. Include only the requested package and
 # explicit dependency markers so installs do not accidentally run the full bundle.
 printf '%s\n' "${package_markers[@]}" > "$STAGE/state/bundle_packages"
@@ -154,7 +178,7 @@ echo "[package-provision] uploading linux/provision scripts for package=$PACKAGE
 
 remote_steps=""
 for step in "${steps[@]}"; do
-  remote_steps="$remote_steps ~/provision/scripts/steps/$step"
+  remote_steps="$remote_steps ~/provision/scripts/steps/$(basename "$step")"
 done
 
 echo "[package-provision] running package=$PACKAGE steps:${remote_steps}"

@@ -281,7 +281,11 @@ make logs INSTANCE=aws-dev-a       # tail remote logs
 
 `make provision` dispatches by the instance OS family:
 
-- Linux: uploads [linux/provision/](linux/provision/) to `$HOME/provision` on the VM, installs a `systemd` unit, and runs numbered package steps. Each step is skipped if its package id is not selected by the instance.
+- Linux: stages the shared provisioning runner plus selected package-local
+  install steps, uploads them to `$HOME/provision` on the VM, installs a
+  `systemd` unit, and runs numbered package steps. During the v3.1 migration,
+  manifests may still reference legacy shared steps, but package-specific steps
+  should live under `plugins/packages/<id>/provision/ubuntu/`.
 - Windows: uploads [windows/provision/](windows/provision/) to `C:\Users\Administrator\provision` and runs `bootstrap.ps1`, which registers a Scheduled Task that walks a similar sorted `steps/` directory. Requires `EPHEMERAL_WINDOWS_PASSWORD` (or a terraform output) and `EPHEMERAL_SUNSHINE_PASSWORD` — used to build `./tmp/env.json` and scp it into the provision state dir.
 
 State is tracked in `$HOME/provision/state/state.json` on the VM — provisioning resumes from the last completed step after a reboot.
