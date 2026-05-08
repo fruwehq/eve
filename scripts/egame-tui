@@ -2693,6 +2693,7 @@ def run_tui() -> int:
                 with suppress(Exception):
                     button = self.query_one(f"#tab-{tab}", Button)
                     button.label = f"[b]{tab.title()}[/b]" if active else tab.title()
+                    button.variant = "primary" if active else "default"
 
         def update_action_state(self) -> None:
             focused_id = self.focused.id if self.focused is not None else None
