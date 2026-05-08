@@ -226,7 +226,7 @@ generate_hcl "z_ec2_instance.tf" {
       vpc_security_group_ids               = [data.aws_security_group.default.id]
       iam_instance_profile                 = aws_iam_instance_profile.main.name
       instance_initiated_shutdown_behavior = "stop"
-      user_data                            = var.os_family == "ubuntu" ? data.cloudinit_config.ubuntu[0].rendered : null
+      user_data_base64                     = var.os_family == "ubuntu" ? data.cloudinit_config.ubuntu[0].rendered : null
 
       root_block_device {
         volume_type           = var.root_volume_type

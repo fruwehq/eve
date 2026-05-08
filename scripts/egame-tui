@@ -2144,11 +2144,14 @@ def run_tui() -> int:
                     current_seen = True
                     current_row = row_index
                 state = package.get("state", {}) or {}
+                package_status = str(state.get("status") or "unknown")
+                if not selected and package_status == "unknown":
+                    package_status = "-"
                 selected_by = package.get("selected_by", [])
                 table.add_row(
                     package_id,
                     "selected" if selected else "available",
-                    str(state.get("status") or "unknown"),
+                    package_status,
                     "yes" if package.get("supported") else "no",
                     package_source_label(selected_by),
                     key=package_id,
