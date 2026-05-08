@@ -171,6 +171,7 @@ packages:
   - id: claude
   - id: codex-cli
   - id: dev-toolchain
+  - id: discord
   - id: docker
   - id: gnome-desktop
   - id: goose
