@@ -6,10 +6,9 @@ commands:
   install: {exec: scripts/package-plugin, args: [rdp, install]}
   status: {exec: scripts/package-plugin, args: [rdp, status]}
   down: {exec: scripts/package-plugin, args: [rdp, down]}
-supports: {os_families: [ubuntu, windows]}
+supports: {os_families: [ubuntu]}
 down: {destructive: true}
 env: []
-actions:
-  - id: rdp
-    label: RDP
-    target: rdp.open
+install:
+  ubuntu:
+    steps: [00_base.sh, 05_timezone.sh, provision/ubuntu/72_rdp.sh]

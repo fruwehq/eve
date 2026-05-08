@@ -305,9 +305,6 @@ def status_with_observed_state(status: dict[str, Any], state_doc: dict[str, Any]
 
 
 def action_allowed_for_instance(action: dict[str, Any], package_id: str, os_family: str) -> bool:
-    target = str(action.get("target") or "")
-    if package_id == "rdp" and target == "rdp.open":
-        return os_family == "windows"
     return True
 
 

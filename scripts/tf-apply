@@ -32,13 +32,9 @@ terramate generate
 
 eval "$(./scripts/tf-env "$PROFILE")"
 
-if [ -n "${EGAME_INSTANCE_NAME:-}" ] && [ -n "${EGAME_TF_STATE_BASE:-}" ]; then
-  state_marker="$EGAME_TF_STATE_BASE/.tf-init-done"
-  if [ ! -f "$state_marker" ]; then
-    echo "[tf-apply] instance=$EGAME_INSTANCE_NAME backend not initialized, running init first"
-    ./scripts/tf-init "$PROFILE"
-    touch "$state_marker"
-  fi
+if [ -n "${EGAME_INSTANCE_NAME:-}" ]; then
+  echo "[tf-apply] instance=$EGAME_INSTANCE_NAME initializing backend before apply"
+  ./scripts/tf-init "$PROFILE"
 fi
 
 terramate run --tags="$TAGS" -- terraform apply -auto-approve

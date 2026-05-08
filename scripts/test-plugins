@@ -148,10 +148,10 @@ else
 fi
 
 if ./scripts/package-list --registry "$FIXTURE" --instance dev-a --json | \
-  jq -e '.packages[] | select(.id == "rdp") | .actions == []' >/dev/null; then
-  printf '  [OK] package-list hides Windows-only RDP action on Ubuntu\n'
+  jq -e '.packages[] | select(.id == "rdp") | .supported == true and .actions == []' >/dev/null; then
+  printf '  [OK] package-list treats RDP as Linux xrdp package\n'
 else
-  printf '  [FAIL] package-list hides Windows-only RDP action on Ubuntu\n' >&2
+  printf '  [FAIL] package-list RDP package metadata mismatch\n' >&2
   ./scripts/package-list --registry "$FIXTURE" --instance dev-a --json >&2 || true
   FAIL=$((FAIL + 1))
 fi

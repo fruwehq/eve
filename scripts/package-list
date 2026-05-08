@@ -76,7 +76,6 @@ begin
                 support_allowed.call(supports, "#{os_family}_versions", os_version)
     installable = plugin.dig("install", os_family).is_a?(Hash)
     actions = plugin.fetch("actions", [])
-    actions = [] if plugin.fetch("id") == "rdp" && os_family != "windows"
 
     {
       "id" => plugin.fetch("id"),
