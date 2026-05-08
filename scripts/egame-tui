@@ -1973,7 +1973,7 @@ def run_tui() -> int:
                     )
                 )
             lines += [
-                "[b]EPHEMERAL VM COCKPIT[/b]",
+                f"[b]EVE[/b] [dim]{APP_EXPANSION}[/]",
                 "",
                 "[b]Please, select an instance[/b]",
                 "Highlight an instance to preview and manage it.",
