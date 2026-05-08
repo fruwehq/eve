@@ -9,10 +9,10 @@ stack {
   ]
 
   after = [
-    "/stacks/gcp/10-shared",
+    "/plugins/providers/gcp/stacks/10-shared",
   ]
 }
 
 import {
-  source = "/modules/gcp/compute/instance.tm.hcl"
+  source = "/plugins/providers/gcp/modules/compute/instance.tm.hcl"
 }

@@ -10,5 +10,5 @@ stack {
 }
 
 import {
-  source = "/modules/gcp/compute/firewall.tm.hcl"
+  source = "/plugins/providers/gcp/modules/compute/firewall.tm.hcl"
 }

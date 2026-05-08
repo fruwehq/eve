@@ -9,10 +9,10 @@ stack {
   ]
 
   after = [
-    "/stacks/vultr/10-shared",
+    "/plugins/providers/vultr/stacks/10-shared",
   ]
 }
 
 import {
-  source = "/modules/vultr/instance.tm.hcl"
+  source = "/plugins/providers/vultr/modules/instance.tm.hcl"
 }

@@ -239,9 +239,10 @@ Fail fast at plan time with actionable errors.
 
 ## How this maps to current repo
 
-Given your current Terramate/Terraform layout:
+Given the current Terramate/Terraform layout:
 
-- Keep existing `stacks/aws/*` and `stacks/vultr/*` working.
+- Provider Terraform/Terramate implementation lives with each provider plugin
+  under `plugins/providers/<id>/stacks/` and `plugins/providers/<id>/modules/`.
 - Add a generated layer that resolves one concrete instance into provider-specific working files and Terraform/Terramate inputs.
 - Existing provider blocks (`aws`, `vultr`) and local backend setup remain valid.
 

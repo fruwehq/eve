@@ -42,13 +42,13 @@ config/
   catalog.yaml                # Single source of truth: machines / oses / inits / bundles / locations
   catalog.local.example.yaml  # Template for personal overrides
   catalog.local.yaml          # Personal overrides (git-ignored, merged over base)
-modules/
-  aws/ec2/                    # AWS EC2 instance + VPC + security group
-  gcp/compute/                # GCP Compute Engine instance + firewall
-  truenas/vm.tm.hcl           # truenas_zvol + cloud-init + truenas_vm
-  vultr/instance.tm.hcl       # os_family-aware Vultr module (Windows script vs Linux cloud-init)
 stacks/
-  aws/        gcp/        truenas/        vultr/       # provider stacks
+  config.tm.hcl               # Legacy shared Terramate globals only
+plugins/providers/
+  aws/                         # AWS plugin, Terramate stacks, EC2 modules
+  gcp/                         # GCP plugin, Terramate stacks, Compute modules
+  truenas/                     # TrueNAS plugin, Terramate stacks, VM module
+  vultr/                       # Vultr plugin, Terramate stacks, instance module
 scripts/
   catalog-options             # List provider/platform/content choices
   profile-resolve             # Lower-level compatibility resolver for generated overlays
@@ -103,7 +103,8 @@ Init entries are bootstrap/access methods, not user-facing workload choices. The
 - Provider blocks and `required_providers` live in `providers.tm.hcl` files, not in stack or resource config files.
 - Each provider's variables (host, key paths, ports) are declared alongside the provider block in the same generated file.
 - Instance-driven values (region, instance type, plan, OS id, AZ) are threaded through as `TF_VAR_*` from `scripts/tf-env`; do **not** hardcode them in stack globals.
-- TrueNAS is a special case: its Terramate implementation lives with the provider plugin under `plugins/providers/truenas/stacks/truenas/` and `plugins/providers/truenas/modules/truenas/`. The parent `providers.tm.hcl` generates only `required_version`; the child `20-services/providers.tm.hcl` generates the full provider + variables (which the module then relies on — see the note at `null_resource.cloudinit_iso` about `var.truenas_host`).
+- Terraform/Terramate provider implementations live with their provider plugins under `plugins/providers/<id>/stacks/` and `plugins/providers/<id>/modules/`. The remaining top-level `stacks/config.tm.hcl` is legacy shared global context only; do not add new provider implementation files there.
+- TrueNAS is a special case inside that layout: the parent `providers.tm.hcl` generates only `required_version`; the child `20-services/providers.tm.hcl` generates the full provider + variables (which the module then relies on — see the note at `null_resource.cloudinit_iso` about `var.truenas_host`).
 
 ## Windows SSH shell
 

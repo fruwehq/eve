@@ -54,7 +54,7 @@ generate_hcl "z_vultr_instance.tf" {
       name  = "${var.profile_name}-windows-ssh"
       type  = "boot"
       script = base64encode(templatefile(
-        "${terramate.root.path.fs.absolute}/modules/vultr/templates/windows-startup.cmd.tftpl",
+        "${terramate.root.path.fs.absolute}/plugins/providers/vultr/modules/templates/windows-startup.cmd.tftpl",
         {
           encoded_command = textencodebase64(templatefile(
             "${terramate.root.path.fs.absolute}/windows/ssh.ps1.tftpl",

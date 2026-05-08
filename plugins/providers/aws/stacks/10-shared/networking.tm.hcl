@@ -22,9 +22,9 @@ generate_hcl "z_allowed-cidrs.tf" {
 }
 
 import {
-  source = "/modules/aws/ec2/vpc.tm.hcl"
+  source = "/plugins/providers/aws/modules/ec2/vpc.tm.hcl"
 }
 
 import {
-  source = "/modules/aws/ec2/security_group.tm.hcl"
+  source = "/plugins/providers/aws/modules/ec2/security_group.tm.hcl"
 }

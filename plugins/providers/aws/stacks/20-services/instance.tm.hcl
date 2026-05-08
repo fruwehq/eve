@@ -9,10 +9,10 @@ stack {
   ]
 
   after = [
-    "/stacks/aws/10-shared",
+    "/plugins/providers/aws/stacks/10-shared",
   ]
 }
 
 import {
-  source = "/modules/aws/ec2/instance.tm.hcl"
+  source = "/plugins/providers/aws/modules/ec2/instance.tm.hcl"
 }
