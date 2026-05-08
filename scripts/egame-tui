@@ -2415,15 +2415,15 @@ def run_tui() -> int:
             instance = self.current_instance
             self.push_screen(
                 ConfirmScreen(
-                    "Delete instance registry entry?",
-                    f"This removes {instance} from the local registry. "
-                    "Destroy cloud/local resources first.",
+                    "Delete local instance entry?",
+                    f"This removes {instance} from the local registry and purges local generated state. "
+                    "Run Down first to destroy cloud/local resources.",
                 ),
                 lambda confirmed: self.start_task(self.perform_delete_instance(instance)) if confirmed else None,
             )
 
         async def perform_delete_instance(self, instance: str) -> None:
-            args = make_args("instance.delete", instance)
+            args = make_args("instance.delete", instance, "PURGE=1")
             await self.stream_command("instance.delete", args)
             if self.current_instance == instance:
                 self.current_instance = None
