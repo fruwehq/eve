@@ -1,0 +1,141 @@
+#!/usr/bin/env ruby
+# Move approved non-secret .env.local values into .egame/config.yaml.
+
+require "fileutils"
+require "time"
+require "yaml"
+
+ROOT = File.expand_path("..", __dir__)
+ENV_PATH = ENV.fetch("EGAME_ENV_LOCAL", File.join(ROOT, ".env.local"))
+CONFIG_PATH = ENV.fetch("EGAME_CONFIG_PATH", File.join(ROOT, ".egame/config.yaml"))
+
+MIGRATIONS = {
+  "AWS_CONFIG_FILE" => %w[aws config_file],
+  "AWS_PROFILE" => %w[aws profile],
+  "AWS_REGION" => %w[aws region],
+  "AWS_SHARED_CREDENTIALS_FILE" => %w[aws shared_credentials_file],
+  "EPHEMERAL_DISPLAY_FPS" => %w[display fps],
+  "EPHEMERAL_DISPLAY_RESOLUTION" => %w[display resolution],
+  "EPHEMERAL_MOONLIGHT_BITRATE_KBPS" => %w[moonlight bitrate_kbps],
+  "EPHEMERAL_MOONLIGHT_VIDEO_CODEC" => %w[moonlight video_codec],
+  "EPHEMERAL_MOONLIGHT_VIDEO_DECODER" => %w[moonlight video_decoder],
+  "GOOGLE_APPLICATION_CREDENTIALS" => %w[gcp application_credentials],
+  "GOOGLE_CLOUD_PROJECT" => %w[gcp project],
+  "GOOGLE_PROJECT" => %w[gcp project],
+  "MY_IP" => %w[global my_ip],
+  "RASPBERRY_PI_HDMI_CONNECTOR" => %w[raspberry_pi hdmi_connector],
+  "RASPBERRY_PI_HDMI_MODE" => %w[raspberry_pi hdmi_mode],
+  "RASPBERRY_PI_HOST" => %w[raspberry_pi host],
+  "RASPBERRY_PI_IP" => %w[raspberry_pi ip],
+  "RUSTDESK_SERVER" => %w[rustdesk server],
+  "SSH_PUBLIC_KEY_FILE" => %w[global ssh_public_key_file],
+  "SUNSHINE_MAX_BITRATE_KBPS" => %w[sunshine max_bitrate_kbps],
+  "SUNSHINE_VERSION" => %w[sunshine version],
+  "TIMEZONE" => %w[global timezone],
+  "TRUENAS_API_USER" => %w[truenas api_user],
+  "TRUENAS_HOST" => %w[truenas host],
+  "TRUENAS_SSH_HOST_KEY_FINGERPRINT" => %w[truenas ssh_host_key_fingerprint],
+  "TRUENAS_SSH_PORT" => %w[truenas ssh_port],
+  "TRUENAS_SSH_PRIVATE_KEY_FILE" => %w[truenas ssh_private_key_file],
+  "TRUENAS_SSH_USER" => %w[truenas ssh_user],
+  "TRUENAS_VM_BASE_DIR" => %w[truenas vm_base_dir],
+  "TRUENAS_VM_POOL" => %w[truenas vm_pool],
+  "TRUENAS_VM_ZVOL_PREFIX" => %w[truenas vm_zvol_prefix],
+  "VAGRANT_SHOW_CONSOLE" => %w[vagrant show_console],
+  "VM_USER_NAME" => %w[global vm_user_name]
+}.freeze
+
+def usage
+  warn <<~USAGE
+    Usage:
+      scripts/config-migrate [--dry-run|--apply]
+
+    Migrates non-secret values from .env.local to .egame/config.yaml.
+  USAGE
+end
+
+def parse_assignment(line)
+  return nil if line.lstrip.start_with?("#")
+
+  match = line.match(/\A\s*(?:export\s+)?(?<key>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?<value>.*)\z/)
+  return nil unless match
+
+  value = match[:value].strip
+  if (value.start_with?('"') && value.end_with?('"')) || (value.start_with?("'") && value.end_with?("'"))
+    value = value[1...-1]
+  end
+  [match[:key], value]
+end
+
+def load_config(path)
+  return {} unless File.exist?(path)
+
+  data = YAML.safe_load(File.read(path), aliases: false)
+  return {} if data.nil?
+  raise "#{path}: expected a mapping" unless data.is_a?(Hash)
+
+  data
+end
+
+def set_path(data, path, value)
+  cursor = data
+  path[0...-1].each do |key|
+    cursor[key] = {} unless cursor[key].is_a?(Hash)
+    cursor = cursor[key]
+  end
+  cursor[path[-1]] = value
+end
+
+mode = ARGV.first || "--dry-run"
+unless %w[--dry-run --apply].include?(mode) && ARGV.length <= 1
+  usage
+  exit 2
+end
+
+unless File.exist?(ENV_PATH)
+  warn "config-migrate: not found: #{ENV_PATH}"
+  exit 1
+end
+
+lines = File.readlines(ENV_PATH, chomp: true)
+config = load_config(CONFIG_PATH)
+migrated = []
+
+lines.each_with_index do |line, index|
+  parsed = parse_assignment(line)
+  next unless parsed
+
+  key, value = parsed
+  path = MIGRATIONS[key]
+  next unless path
+  next if value.empty?
+
+  set_path(config, path, value)
+  migrated << [index, key]
+end
+
+if migrated.empty?
+  puts "No non-secret .env.local values to migrate."
+  exit 0
+end
+
+puts "Will migrate #{migrated.length} values to #{CONFIG_PATH}:"
+migrated.each { |_index, key| puts "  - #{key}" }
+
+exit 0 if mode == "--dry-run"
+
+FileUtils.mkdir_p(File.dirname(CONFIG_PATH))
+File.write(CONFIG_PATH, config.to_yaml)
+
+backup_path = "#{ENV_PATH}.bak.#{Time.now.utc.strftime("%Y%m%d%H%M%S")}"
+FileUtils.cp(ENV_PATH, backup_path)
+
+migrated.each do |index, _key|
+  next if lines[index].lstrip.start_with?("#")
+
+  lines[index] = "# migrated to .egame/config.yaml: #{lines[index]}"
+end
+
+File.write(ENV_PATH, lines.join("\n") + "\n")
+puts "Updated #{CONFIG_PATH} and commented migrated entries in #{ENV_PATH}."
+puts "Backup: #{backup_path}"

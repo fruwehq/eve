@@ -8,21 +8,41 @@ ROOT = File.expand_path("..", __dir__)
 DEFAULT_CONFIG = File.join(ROOT, "config/defaults.yaml")
 LOCAL_CONFIG = ENV.fetch("EGAME_CONFIG_PATH", File.join(ROOT, ".egame/config.yaml"))
 
-MAPPINGS = {
-  %w[display fps] => "EPHEMERAL_DISPLAY_FPS",
-  %w[display resolution] => "EPHEMERAL_DISPLAY_RESOLUTION",
-  %w[global timezone] => "TIMEZONE",
-  %w[global vm_user_name] => "VM_USER_NAME",
-  %w[moonlight bitrate_kbps] => "EPHEMERAL_MOONLIGHT_BITRATE_KBPS",
-  %w[moonlight video_codec] => "EPHEMERAL_MOONLIGHT_VIDEO_CODEC",
-  %w[moonlight video_decoder] => "EPHEMERAL_MOONLIGHT_VIDEO_DECODER",
-  %w[raspberry_pi hdmi_connector] => "RASPBERRY_PI_HDMI_CONNECTOR",
-  %w[raspberry_pi hdmi_mode] => "RASPBERRY_PI_HDMI_MODE",
-  %w[raspberry_pi host] => "RASPBERRY_PI_HOST",
-  %w[raspberry_pi ip] => "RASPBERRY_PI_IP",
-  %w[sunshine max_bitrate_kbps] => "SUNSHINE_MAX_BITRATE_KBPS",
-  %w[sunshine version] => "SUNSHINE_VERSION"
-}.freeze
+MAPPINGS = [
+  [%w[aws config_file], "AWS_CONFIG_FILE"],
+  [%w[aws profile], "AWS_PROFILE"],
+  [%w[aws region], "AWS_REGION"],
+  [%w[aws shared_credentials_file], "AWS_SHARED_CREDENTIALS_FILE"],
+  [%w[display fps], "EPHEMERAL_DISPLAY_FPS"],
+  [%w[display resolution], "EPHEMERAL_DISPLAY_RESOLUTION"],
+  [%w[gcp application_credentials], "GOOGLE_APPLICATION_CREDENTIALS"],
+  [%w[gcp project], "GOOGLE_CLOUD_PROJECT"],
+  [%w[gcp project], "GOOGLE_PROJECT"],
+  [%w[global my_ip], "MY_IP"],
+  [%w[global ssh_public_key_file], "SSH_PUBLIC_KEY_FILE"],
+  [%w[global timezone], "TIMEZONE"],
+  [%w[global vm_user_name], "VM_USER_NAME"],
+  [%w[moonlight bitrate_kbps], "EPHEMERAL_MOONLIGHT_BITRATE_KBPS"],
+  [%w[moonlight video_codec], "EPHEMERAL_MOONLIGHT_VIDEO_CODEC"],
+  [%w[moonlight video_decoder], "EPHEMERAL_MOONLIGHT_VIDEO_DECODER"],
+  [%w[raspberry_pi hdmi_connector], "RASPBERRY_PI_HDMI_CONNECTOR"],
+  [%w[raspberry_pi hdmi_mode], "RASPBERRY_PI_HDMI_MODE"],
+  [%w[raspberry_pi host], "RASPBERRY_PI_HOST"],
+  [%w[raspberry_pi ip], "RASPBERRY_PI_IP"],
+  [%w[rustdesk server], "RUSTDESK_SERVER"],
+  [%w[sunshine max_bitrate_kbps], "SUNSHINE_MAX_BITRATE_KBPS"],
+  [%w[sunshine version], "SUNSHINE_VERSION"],
+  [%w[truenas api_user], "TRUENAS_API_USER"],
+  [%w[truenas host], "TRUENAS_HOST"],
+  [%w[truenas ssh_host_key_fingerprint], "TRUENAS_SSH_HOST_KEY_FINGERPRINT"],
+  [%w[truenas ssh_port], "TRUENAS_SSH_PORT"],
+  [%w[truenas ssh_private_key_file], "TRUENAS_SSH_PRIVATE_KEY_FILE"],
+  [%w[truenas ssh_user], "TRUENAS_SSH_USER"],
+  [%w[truenas vm_base_dir], "TRUENAS_VM_BASE_DIR"],
+  [%w[truenas vm_pool], "TRUENAS_VM_POOL"],
+  [%w[truenas vm_zvol_prefix], "TRUENAS_VM_ZVOL_PREFIX"],
+  [%w[vagrant show_console], "VAGRANT_SHOW_CONSOLE"]
+].freeze
 
 def usage
   warn <<~USAGE

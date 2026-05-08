@@ -1,6 +1,6 @@
 # Makefile
 .DEFAULT_GOAL := default
-.PHONY: ai.sandbox aws.login bundle.select bundle.unselect catalog.list clean default doctor down env eve generate help info install-cli integration.packages integration.plan integration.test \
+.PHONY: ai.sandbox aws.login bundle.select bundle.unselect catalog.list clean config.migrate default doctor down env eve generate help info install-cli integration.packages integration.plan integration.test \
 				init init.all instance.create instance.delete instance.env instance.info instance.provision \
 				instance.list instance.observe instance.paths instance.recover instance.state instance.status instance.validate ip lint logs plan \
 				package.action package.down package.install package.list package.reinstall package.select \
@@ -93,6 +93,9 @@ clean: ## Remove terramate-generated terraform files and cache
 	rm -rf .terraform-cache-dir/state/*
 
 default: help  ## Show help
+
+config.migrate: ## Move non-secret .env.local values to .egame/config.yaml (YES=1 to apply)
+	@if [ "$(YES)" = "1" ]; then ./scripts/config-migrate --apply; else ./scripts/config-migrate --dry-run; fi
 
 doctor: ## Check local tools, plugins, providers, and state hints
 	./scripts/doctor

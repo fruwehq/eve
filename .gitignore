@@ -48,6 +48,7 @@ gha-creds-*.json
 node_modules
 
 # dotenv environment variable files
+.env.local.bak.*
 .env.*.local
 .env.local
 

@@ -223,6 +223,8 @@ Terraform provider versions are pinned exactly in the Terramate provider templat
 - Non-secret preferences can go in `.egame/config.yaml`, using the same shape
   as [config/defaults.yaml](config/defaults.yaml). This is intended for
   UI-editable settings such as display resolution and Moonlight preferences.
+  Run `make config.migrate` to preview moving existing non-secret `.env.local`
+  values into `.egame/config.yaml`; apply with `YES=1 make config.migrate`.
 
 ```bash
 # List catalog choices and create a concrete instance

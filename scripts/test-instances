@@ -16,7 +16,14 @@ mkdir -p "$GOLDEN_DIR"
 unset TRUENAS_HOST TRUENAS_SSH_PORT TRUENAS_SSH_USER \
       TRUENAS_SSH_PRIVATE_KEY_FILE TRUENAS_SSH_HOST_KEY_FINGERPRINT \
       TRUENAS_API_KEY TRUENAS_API_USER SSH_PUBLIC_KEY_FILE \
-      RASPBERRY_PI_HOST RASPBERRY_PI_IP VM_USER_NAME EGAME_CONFIG_PATH
+      AWS_CONFIG_FILE AWS_PROFILE AWS_REGION AWS_SHARED_CREDENTIALS_FILE \
+      EPHEMERAL_DISPLAY_FPS EPHEMERAL_DISPLAY_RESOLUTION \
+      EPHEMERAL_MOONLIGHT_BITRATE_KBPS EPHEMERAL_MOONLIGHT_VIDEO_CODEC \
+      EPHEMERAL_MOONLIGHT_VIDEO_DECODER GOOGLE_APPLICATION_CREDENTIALS \
+      GOOGLE_CLOUD_PROJECT GOOGLE_PROJECT MY_IP RASPBERRY_PI_HDMI_CONNECTOR \
+      RASPBERRY_PI_HDMI_MODE RASPBERRY_PI_HOST RASPBERRY_PI_IP \
+      RUSTDESK_SERVER SUNSHINE_MAX_BITRATE_KBPS SUNSHINE_VERSION \
+      TIMEZONE VAGRANT_SHOW_CONSOLE VM_USER_NAME EGAME_CONFIG_PATH
 
 FAIL=0
 INSTANCES=$(./scripts/instance-list --registry "$FIXTURE" --json | jq -r '.instances[].name')
@@ -81,6 +88,24 @@ if printf '%s\n' "$config_env" | grep -qx 'EPHEMERAL_DISPLAY_RESOLUTION=5120x144
 else
   printf '  [FAIL] structured config emits non-secret environment overrides\n' >&2
   printf '%s\n' "$config_env" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+tmp_env_local="$tmp_overlay_dir/env.local"
+tmp_migrated_config="$tmp_overlay_dir/migrated-config.yaml"
+cat >"$tmp_env_local" <<'ENV'
+EPHEMERAL_DISPLAY_RESOLUTION=2560x1440
+TRUENAS_API_KEY=secret-value
+RUSTDESK_SERVER=rustdesk.example.com
+ENV
+if EGAME_ENV_LOCAL="$tmp_env_local" EGAME_CONFIG_PATH="$tmp_migrated_config" ./scripts/config-migrate --apply >/dev/null &&
+  ruby -ryaml -e 'config = YAML.safe_load(File.read(ARGV[0])); exit(config.dig("display", "resolution") == "2560x1440" && config.dig("rustdesk", "server") == "rustdesk.example.com" ? 0 : 1)' "$tmp_migrated_config" &&
+  grep -qx '# migrated to .egame/config.yaml: EPHEMERAL_DISPLAY_RESOLUTION=2560x1440' "$tmp_env_local" &&
+  grep -qx 'TRUENAS_API_KEY=secret-value' "$tmp_env_local"; then
+  printf '  [OK] config migration moves non-secret values and keeps secrets in env\n'
+else
+  printf '  [FAIL] config migration moves non-secret values and keeps secrets in env\n' >&2
+  [ -f "$tmp_env_local" ] && sed 's/=.*/=<redacted>/' "$tmp_env_local" >&2
   FAIL=$((FAIL + 1))
 fi
 

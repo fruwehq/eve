@@ -4,11 +4,23 @@
 # for UI-editable preferences. Keep secrets such as API keys and passwords in
 # .env.local.
 
+aws:
+  config_file:
+  profile:
+  region:
+  shared_credentials_file:
+
 display:
   fps:
   resolution:
 
+gcp:
+  application_credentials:
+  project:
+
 global:
+  my_ip:
+  ssh_public_key_file:
   timezone:
   vm_user_name:
 
@@ -23,7 +35,23 @@ raspberry_pi:
   host:
   ip:
 
+rustdesk:
+  server:
+
 sunshine:
   max_bitrate_kbps:
   version:
 
+truenas:
+  api_user:
+  host:
+  ssh_host_key_fingerprint:
+  ssh_port:
+  ssh_private_key_file:
+  ssh_user:
+  vm_base_dir:
+  vm_pool:
+  vm_zvol_prefix:
+
+vagrant:
+  show_console:
