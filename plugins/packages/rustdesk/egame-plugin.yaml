@@ -18,7 +18,7 @@ actions:
     target: rustdesk.info
 install:
   ubuntu:
-    steps: [00_base.sh, 05_timezone.sh, 50_rustdesk.sh]
+    steps: [00_base.sh, 05_timezone.sh, provision/ubuntu/50_rustdesk.sh]
   windows:
     steps: [40_rustdesk.ps1]
     state_files: [env.json]

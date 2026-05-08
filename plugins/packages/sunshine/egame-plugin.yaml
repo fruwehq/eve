@@ -21,7 +21,7 @@ actions:
     target: moonlight.open
 install:
   ubuntu:
-    steps: [00_base.sh, 05_timezone.sh, 60_sunshine.sh]
+    steps: [00_base.sh, 05_timezone.sh, provision/ubuntu/60_sunshine.sh]
   windows:
     # Sunshine works without ViGEmBus, but Moonlight gamepad input only routes
     # through a kernel-mode driver that requests a reboot.  Stay on the full

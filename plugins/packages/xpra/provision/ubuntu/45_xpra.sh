@@ -36,7 +36,7 @@ if [ ! -f "$REPO_LIST" ]; then
 fi
 
 if sudo DEBIAN_FRONTEND=noninteractive apt-get install -y xpra xpra-x11 2>&1; then
-  log "### 45_xpra: done"
+log "### 45_xpra: done"
 else
   log "### 45_xpra: WARNING — xpra packages incompatible with this OS, skipping"
   log "### 45_xpra: (xpra requires python3 < 3.13; this system has python3 $(python3 -c 'import sys; print(sys.version)'))"
