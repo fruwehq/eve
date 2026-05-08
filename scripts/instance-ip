@@ -22,6 +22,8 @@ ENGINE=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^ENGINE=/{print $2}')
 PROVIDER=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^PROVIDER=/{print $2}')
 TAGS=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^STACK_TAGS=/{print $2}')
 RESOLVED_SSH_USER=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^SSH_USER=/{print $2}')
+RESOLVED_RASPBERRY_PI_HOST=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^RASPBERRY_PI_HOST=/{print substr($0, index($0, "=") + 1)}')
+RESOLVED_RASPBERRY_PI_IP=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^RASPBERRY_PI_IP=/{print substr($0, index($0, "=") + 1)}')
 
 if [ "$ENGINE" = "terraform" ]; then
   eval "$(./scripts/tf-env "$PROFILE")"
@@ -128,20 +130,22 @@ discover_ssh_ip() {
 case "$ENGINE:$PROVIDER" in
   metal:raspberry-pi)
     ./scripts/env-require VM_USER_NAME
-    IP="${RASPBERRY_PI_IP:-}"
+    PI_HOST="${RESOLVED_RASPBERRY_PI_HOST:-${RASPBERRY_PI_HOST:-}}"
+    IP="${RESOLVED_RASPBERRY_PI_IP:-${RASPBERRY_PI_IP:-}}"
     if [ -z "$IP" ]; then
-      ./scripts/env-require RASPBERRY_PI_HOST
-      IP=$(resolve_host_ip "$RASPBERRY_PI_HOST" || true)
+      [ -n "$PI_HOST" ] || ./scripts/env-require RASPBERRY_PI_HOST
+      PI_HOST="${PI_HOST:-$RASPBERRY_PI_HOST}"
+      IP=$(resolve_host_ip "$PI_HOST" || true)
     fi
     if [ -z "$IP" ]; then
       SSH_USER="${RESOLVED_SSH_USER:-$VM_USER_NAME}"
-      IP=$(ssh_host_ip "$RASPBERRY_PI_HOST" "$SSH_USER" || true)
+      IP=$(ssh_host_ip "$PI_HOST" "$SSH_USER" || true)
     fi
     if [ -z "$IP" ]; then
       IP=$(discover_ssh_ip "$SSH_USER" || true)
     fi
     if [ -z "$IP" ]; then
-      echo "instance-ip: could not resolve RASPBERRY_PI_HOST '$RASPBERRY_PI_HOST' to an IP address" >&2
+      echo "instance-ip: could not resolve Raspberry Pi host '${PI_HOST:-}' to an IP address" >&2
       exit 1
     fi
     printf '%s\n' "$IP"

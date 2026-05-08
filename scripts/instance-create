@@ -44,6 +44,8 @@ def usage
       --os <os-id>
       --init <init-id>     Override automatic init selection when more than one init matches.
       --location <location>
+      --provider-host <host>
+      --provider-ip <ip>
       --bundles <bundle-a,bundle-b>
       --packages <package-a,package-b>
       --disk-gb <gb>
@@ -62,6 +64,7 @@ registry_path = ENV["EGAME_INSTANCE_REGISTRY"] && !ENV["EGAME_INSTANCE_REGISTRY"
                 : DEFAULT_REGISTRY_PATH
 fields = {}
 overrides = {}
+provider_config = {}
 
 args = ARGV.dup
 until args.empty?
@@ -78,6 +81,10 @@ until args.empty?
     fields["init"] = args.shift
   when "--location"
     fields["location"] = args.shift
+  when "--provider-host"
+    provider_config["host"] = args.shift
+  when "--provider-ip"
+    provider_config["ip"] = args.shift
   when "--bundles"
     fields["bundles"] = args.shift.to_s.split(",").map(&:strip).reject(&:empty?)
   when "--packages"
@@ -142,6 +149,7 @@ with_registry_lock(registry_path) do
     "updated_at" => now
   }.merge(fields)
   entry["overrides"] = overrides unless overrides.empty?
+  entry["provider_config"] = provider_config unless provider_config.empty?
 
   registry["instances"] << entry
 

@@ -426,15 +426,26 @@ Recommended shape:
 - Let this repo manage first-boot/bootstrap and post-boot workload provisioning.
 - Reserve VM-host orchestration for x86/TrueNAS when you need stronger guest isolation or x86 compatibility.
 
-#### Required env vars
+#### Required config
 
-Set in `.env.local`:
+Raspberry Pi instances use the same global SSH key config as every other
+provider:
 
-- `RASPBERRY_PI_HOST` — e.g. `rapi.local` or the Pi's LAN IP
-- `VM_USER_NAME` — the username preseeded into the SD card image (see Imager step below)
-- `SSH_PUBLIC_KEY_FILE` — path to the public key whose private half is loaded in your agent
+- `global.vm_user_name` / `VM_USER_NAME` — the username preseeded into the SD card image (see Imager step below)
+- `global.ssh_public_key_file` / `SSH_PUBLIC_KEY_FILE` — path to the public key whose private half is loaded in your agent
 
-These are validated at runtime by [scripts/env-require](scripts/env-require) — `make ssh INSTANCE=<rpi-instance>` errors clearly if any are missing.
+The Pi address is instance-specific so multiple boards can be managed from one
+registry. Create each Pi instance with its own `PROVIDER_IP`:
+
+```sh
+make instance.create INSTANCE=rpi5-a MACHINE=raspberry-pi-5 OS=ubuntu-26.04-arm64 LOCATION=tokyo PROVIDER_IP=192.168.0.41 BUNDLES=dev-ai
+make instance.create INSTANCE=rpi5-b MACHINE=raspberry-pi-5 OS=ubuntu-26.04-arm64 LOCATION=tokyo PROVIDER_IP=192.168.0.42 BUNDLES=desktop-streaming
+```
+
+The TUI asks for this IP address when the selected platform is Raspberry Pi.
+`raspberry_pi.host` / `raspberry_pi.ip` in `.egame/config.yaml` remain useful as
+single-board defaults, but a per-instance `provider_config.ip` wins whenever it
+is present.
 
 #### Initial SD card image (first boot)
 

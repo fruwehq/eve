@@ -260,7 +260,16 @@ emit_env() {
       end
     ),
     "CLOUD_IMAGE_URL=" + (.os.cloud_image_url // ""),
-    "RASPBERRY_PI_HOST=" + env_or("RASPBERRY_PI_HOST"; $locp.host // ""),
+    "RASPBERRY_PI_HOST=" + (
+      if (.machine.provider == "raspberry-pi" and (($locp.host // "") != "")) then $locp.host
+      else env_or("RASPBERRY_PI_HOST"; $locp.host // "")
+      end
+    ),
+    "RASPBERRY_PI_IP=" + (
+      if (.machine.provider == "raspberry-pi" and (($locp.ip // "") != "")) then $locp.ip
+      else env_or("RASPBERRY_PI_IP"; $locp.ip // "")
+      end
+    ),
     "TRUENAS_HOST=" + env_or("TRUENAS_HOST"; $locp.host // ""),
     "TRUENAS_SSH_PORT=" + env_or("TRUENAS_SSH_PORT"; (($locp.ssh_port // 22) | tostring)),
     "TRUENAS_SSH_USER=" + env_or("TRUENAS_SSH_USER"; $locp.ssh_user // ""),

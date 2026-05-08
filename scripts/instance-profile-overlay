@@ -57,6 +57,8 @@ resolved = JSON.parse(resolved_json)
 composition = resolved.fetch("composition")
 machine = resolved.fetch("machine")
 machine_name = "instance-#{instance_name}-machine"
+provider = machine.fetch("provider")
+provider_config = resolved["provider_config"].is_a?(Hash) ? resolved["provider_config"] : {}
 
 overlay_machine = Marshal.load(Marshal.dump(machine))
 overlay_machine["name"] = machine_name
@@ -76,6 +78,18 @@ overlay = {
   "machines" => [overlay_machine],
   "profiles" => [overlay_profile]
 }
+
+unless provider_config.empty?
+  overlay_location = Marshal.load(Marshal.dump(resolved.fetch("location")))
+  location_name = "instance-#{instance_name}-location"
+  overlay_location["name"] = location_name
+  overlay_location[provider] = (overlay_location[provider] || {}).merge(provider_config)
+  if provider == "raspberry-pi" && overlay_location[provider]["host"].to_s.empty?
+    overlay_location[provider]["host"] = overlay_location[provider]["ip"]
+  end
+  overlay_profile["location"] = location_name
+  overlay["locations"] = [overlay_location]
+end
 
 yaml = overlay.to_yaml
 if output_path

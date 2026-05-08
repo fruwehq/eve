@@ -133,6 +133,7 @@ def create_instance_args(
     packages: str,
     disk_gb: str,
     memory_mb: str,
+    provider_ip: str = "",
 ) -> list[str]:
     args = [
         "make",
@@ -151,6 +152,8 @@ def create_instance_args(
         args.append(f"DISK_GB={disk_gb}")
     if memory_mb:
         args.append(f"MEMORY_MB={memory_mb}")
+    if provider_ip:
+        args.append(f"PROVIDER_IP={provider_ip}")
     return args
 
 
@@ -547,6 +550,10 @@ def run_tui() -> int:
             margin-right: 1;
         }
 
+        #provider-ip {
+            margin-bottom: 1;
+        }
+
         #content-selects {
             height: 18;
             margin-bottom: 1;
@@ -649,6 +656,8 @@ def run_tui() -> int:
                     yield DataTable(id="platform-cards")
                     yield Static("", id="platform-defaults")
                 with Vertical(id="step-content"):
+                    yield Input(placeholder="Raspberry Pi IP address", id="provider-ip")
+                    yield Static("Required for Raspberry Pi metal instances. The shared SSH key remains global.", id="provider-ip-help", classes="muted")
                     with Horizontal(id="content-selects"):
                         with Vertical(classes="content-column"):
                             yield Static("Bundles", classes="muted")
@@ -890,6 +899,12 @@ def run_tui() -> int:
                 self.query_one(f"#{widget_id}", Vertical).display = index == self.step
 
             platform_choice = self.selected_platform()
+            provider = str(platform_choice.get("provider") or "")
+            provider_ip_widget = self.query_one("#provider-ip", Input)
+            provider_ip_help = self.query_one("#provider-ip-help", Static)
+            provider_ip_required = provider == "raspberry-pi"
+            provider_ip_widget.display = provider_ip_required
+            provider_ip_help.display = provider_ip_required
             defaults = platform_choice.get("defaults", {}) if isinstance(platform_choice.get("defaults"), dict) else {}
             self.sync_bundle_options()
             self.sync_package_options()
@@ -902,6 +917,7 @@ def run_tui() -> int:
             )
 
             name = self.query_one("#new-name", Input).value.strip() or "<instance>"
+            provider_ip = provider_ip_widget.value.strip()
             disk = self.query_one("#new-disk", Input).value.strip()
             memory = self.query_one("#new-memory", Input).value.strip()
             selected_bundles = self.selected_bundles()
@@ -933,12 +949,14 @@ def run_tui() -> int:
                 ",".join(selected_packages),
                 disk,
                 memory,
+                provider_ip if provider_ip_required else "",
             )
             self.query_one("#review", Static).update(
                 "\n".join(
                     [
                         f"Instance: {name}",
                         *self.platform_default_lines(platform_choice),
+                        *([f"Raspberry Pi IP: {provider_ip or '(required)'}"] if provider_ip_required else []),
                         f"Bundles: {bundle_text}",
                         f"Bundle packages: {bundled_text}",
                         f"Disk override: {disk or '(use platform default)'}",
@@ -988,7 +1006,7 @@ def run_tui() -> int:
             self.update_wizard()
 
         def on_input_changed(self, event: Input.Changed) -> None:
-            if event.input.id in {"new-name", "new-disk", "new-memory"}:
+            if event.input.id in {"new-name", "new-disk", "new-memory", "provider-ip"}:
                 self.update_wizard()
 
         def on_key(self, event: Any) -> None:
@@ -1017,6 +1035,13 @@ def run_tui() -> int:
                 if self.step == 1 and not self.selected_platform():
                     self.notify("Platform is required", severity="error")
                     return
+                if (
+                    self.step == 2
+                    and self.selected_platform().get("provider") == "raspberry-pi"
+                    and not self.query_one("#provider-ip", Input).value.strip()
+                ):
+                    self.notify("Raspberry Pi IP address is required", severity="error")
+                    return
                 self.set_step(self.step + 1)
                 return
             if event.button.id != "create":
@@ -1025,6 +1050,10 @@ def run_tui() -> int:
             platform_choice = self.selected_platform()
             if not name or not platform_choice:
                 self.notify("Name and platform are required", severity="error")
+                return
+            provider_ip = self.query_one("#provider-ip", Input).value.strip()
+            if platform_choice.get("provider") == "raspberry-pi" and not provider_ip:
+                self.notify("Raspberry Pi IP address is required", severity="error")
                 return
             packages = ",".join(self.selected_packages())
             bundles = ",".join(self.selected_bundles())
@@ -1039,6 +1068,7 @@ def run_tui() -> int:
                     "packages": packages,
                     "disk_gb": self.query_one("#new-disk", Input).value.strip(),
                     "memory_mb": self.query_one("#new-memory", Input).value.strip(),
+                    "provider_ip": provider_ip if platform_choice.get("provider") == "raspberry-pi" else "",
                 }
             )
 
@@ -2316,6 +2346,7 @@ def run_tui() -> int:
                 result["packages"],
                 result["disk_gb"],
                 result["memory_mb"],
+                result.get("provider_ip", ""),
             )
             code = await self.stream_command("instance.create", args)
             if code == 0:

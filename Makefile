@@ -163,12 +163,14 @@ install-cli: ## Install eve launcher into ~/.local/bin
 	@case ":$$PATH:" in *:$(HOME)/.local/bin:*) ;; *) echo "Add $(HOME)/.local/bin to PATH if eve is not found by your shell."; esac
 
 instance.create: ## Create a local instance registry entry (INSTANCE=<name> MACHINE=... OS=... LOCATION=...)
-	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make instance.create INSTANCE=<name> MACHINE=<machine> OS=<os> LOCATION=<location> [INIT=<init>] [BUNDLES=a,b] [PACKAGES=a,b] [DISK_GB=n] [MEMORY_MB=n]"; exit 2; fi; \
+	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make instance.create INSTANCE=<name> MACHINE=<machine> OS=<os> LOCATION=<location> [INIT=<init>] [BUNDLES=a,b] [PACKAGES=a,b] [DISK_GB=n] [MEMORY_MB=n] [PROVIDER_IP=ip]"; exit 2; fi; \
 	args="--instance $(INSTANCE)"; \
 	if [ -n "$(MACHINE)" ]; then args="$$args --machine $(MACHINE)"; fi; \
 	if [ -n "$(OS)" ]; then args="$$args --os $(OS)"; fi; \
 	if [ -n "$(INIT)" ]; then args="$$args --init $(INIT)"; fi; \
 	if [ -n "$(LOCATION)" ]; then args="$$args --location $(LOCATION)"; fi; \
+	if [ -n "$(PROVIDER_HOST)" ]; then args="$$args --provider-host $(PROVIDER_HOST)"; fi; \
+	if [ -n "$(PROVIDER_IP)" ]; then args="$$args --provider-ip $(PROVIDER_IP)"; fi; \
 	if [ -n "$(BUNDLES)" ]; then args="$$args --bundles $(BUNDLES)"; fi; \
 	if [ -n "$(PACKAGES)" ]; then args="$$args --packages $(PACKAGES)"; fi; \
 	if [ -n "$(DISK_GB)" ]; then args="$$args --disk-gb $(DISK_GB)"; fi; \

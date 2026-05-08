@@ -41,6 +41,16 @@ def deep_merge(left, right)
   end
 end
 
+def provider_config_for(instance, provider)
+  config = instance["provider_config"]
+  return {} unless config.is_a?(Hash)
+
+  provider_config = config[provider]
+  return provider_config if provider_config.is_a?(Hash)
+
+  config
+end
+
 def merge_by_key(base_arr, over_arr, key)
   out = (base_arr || []).map(&:dup)
   (over_arr || []).each do |entry|
@@ -273,6 +283,9 @@ end
 def emit_env(resolved)
   provider = resolved.dig("machine", "provider")
   locp = resolved.dig("location", provider) || {}
+  provider_config = resolved["provider_config"] || {}
+  pi_host = provider_config["host"] || provider_config["ip"] || env_or("RASPBERRY_PI_HOST", locp["host"] || "")
+  pi_ip = provider_config["ip"] || env_or("RASPBERRY_PI_IP", locp["ip"] || "")
   os = resolved["os"]
   machine_defaults = resolved.dig("machine", "defaults") || {}
 
@@ -315,7 +328,8 @@ def emit_env(resolved)
                     env_or("VM_USER_NAME", "")
                   end,
     "CLOUD_IMAGE_URL" => (os["cloud_image_url"] || ""),
-    "RASPBERRY_PI_HOST" => env_or("RASPBERRY_PI_HOST", locp["host"] || ""),
+    "RASPBERRY_PI_HOST" => pi_host,
+    "RASPBERRY_PI_IP" => pi_ip,
     "TRUENAS_HOST" => env_or("TRUENAS_HOST", locp["host"] || ""),
     "TRUENAS_SSH_PORT" => env_or("TRUENAS_SSH_PORT", (locp["ssh_port"] || 22).to_s),
     "TRUENAS_SSH_USER" => env_or("TRUENAS_SSH_USER", locp["ssh_user"] || ""),
@@ -364,7 +378,7 @@ begin
   raise "Instance not found: #{instance_name} (registry: #{registry_path})" unless instance
 
   instance_overrides = instance.reject do |key, _value|
-    %w[name overrides created_at updated_at state].include?(key)
+    %w[name overrides provider_config created_at updated_at state].include?(key)
   end
   composition = instance_overrides
   composition["name"] = instance["name"]
@@ -386,6 +400,7 @@ begin
   validate!(catalog, composition, machine, os, init, location, bundle_packages)
 
   provider = machine["provider"]
+  provider_config = provider_config_for(instance, provider)
   engine = engine_for(machine)
   validate_provider_plugin!(machine, engine)
   validate_package_plugins!(bundle_packages, os)
@@ -396,6 +411,7 @@ begin
     "os" => os,
     "init" => init,
     "location" => location,
+    "provider_config" => provider_config,
     "bundle_packages" => bundle_packages,
     "package_sources" => package_sources,
     "provider_plugin" => provider,

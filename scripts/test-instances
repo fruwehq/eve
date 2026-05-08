@@ -509,6 +509,31 @@ fi
 
 extract() { printf '%s\n' "$1" | awk -F= -v key="$2" '$1 == key { print substr($0, index($0, "=") + 1) }'; }
 
+rpi_a_env="$(EGAME_INSTANCE_REGISTRY="$FIXTURE" ./scripts/instance-resolve --instance rpi-all-a --emit env)"
+rpi_b_env="$(EGAME_INSTANCE_REGISTRY="$FIXTURE" ./scripts/instance-resolve --instance rpi-all-b --emit env)"
+rpi_a_ip="$(extract "$rpi_a_env" RASPBERRY_PI_IP)"
+rpi_b_ip="$(extract "$rpi_b_env" RASPBERRY_PI_IP)"
+if [ "$rpi_a_ip" = "192.0.2.10" ] && [ "$rpi_b_ip" = "192.0.2.11" ]; then
+  printf '  [OK] Raspberry Pi instances keep separate provider IPs\n'
+else
+  printf '  [FAIL] Raspberry Pi provider IP resolution mismatch\n' >&2
+  printf 'rpi-all-a IP: %s\n' "$rpi_a_ip" >&2
+  printf 'rpi-all-b IP: %s\n' "$rpi_b_ip" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+rpi_overlay="$tmp_overlay_dir/rpi-all-a/catalog.local.yaml"
+EGAME_INSTANCE_REGISTRY="$FIXTURE" ./scripts/instance-profile-overlay --instance rpi-all-a --output "$rpi_overlay"
+rpi_overlay_env="$(EGAME_CATALOG_LOCAL="$rpi_overlay" ./scripts/profile-resolve --profile rpi-all-a --emit env)"
+if [ "$(extract "$rpi_overlay_env" RASPBERRY_PI_IP)" = "192.0.2.10" ] &&
+  [ "$(extract "$rpi_overlay_env" RASPBERRY_PI_HOST)" = "192.0.2.10" ]; then
+  printf '  [OK] generated profile overlay preserves Raspberry Pi address\n'
+else
+  printf '  [FAIL] Raspberry Pi overlay address mismatch\n' >&2
+  printf '%s\n' "$rpi_overlay_env" >&2
+  FAIL=$((FAIL + 1))
+fi
+
 paths_target="$(EGAME_INSTANCE_REGISTRY="$FIXTURE" EGAME_INSTANCE_WORKDIR="$tmp_overlay_dir/run" \
   make instance.paths INSTANCE=dev-a 2>/dev/null)"
 paths_target_workdir="$(extract "$paths_target" INSTANCE_WORKDIR)"

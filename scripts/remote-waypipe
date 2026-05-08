@@ -53,8 +53,9 @@ if [ "$ENGINE" = "vagrant" ]; then
 fi
 
 SSH_USER=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^SSH_USER=/{print $2}')
-if [ "$ENGINE" = "metal" ] && [ "$PROVIDER" = "raspberry-pi" ] && [ -n "${RASPBERRY_PI_IP:-}" ]; then
-  IP="$RASPBERRY_PI_IP"
+RESOLVED_RASPBERRY_PI_IP=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^RASPBERRY_PI_IP=/{print substr($0, index($0, "=") + 1)}')
+if [ "$ENGINE" = "metal" ] && [ "$PROVIDER" = "raspberry-pi" ] && [ -n "$RESOLVED_RASPBERRY_PI_IP" ]; then
+  IP="$RESOLVED_RASPBERRY_PI_IP"
 else
   IP=$(./scripts/instance-ip "$PROFILE")
 fi

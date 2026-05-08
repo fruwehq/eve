@@ -45,13 +45,15 @@ if [ "$ENGINE" = "vagrant" ]; then
 fi
 
 PROVIDER=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^PROVIDER=/{print $2}')
+RESOLVED_RASPBERRY_PI_HOST=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^RASPBERRY_PI_HOST=/{print substr($0, index($0, "=") + 1)}')
+RESOLVED_RASPBERRY_PI_IP=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^RASPBERRY_PI_IP=/{print substr($0, index($0, "=") + 1)}')
 
 if [ "$ENGINE" = "metal" ]; then
   case "$PROVIDER" in
     raspberry-pi)
       ./scripts/env-require VM_USER_NAME
-      if [ -n "${RASPBERRY_PI_IP:-}" ]; then
-        IP="$RASPBERRY_PI_IP"
+      if [ -n "$RESOLVED_RASPBERRY_PI_IP" ]; then
+        IP="$RESOLVED_RASPBERRY_PI_IP"
       else
         IP=$(./scripts/instance-ip "$PROFILE")
       fi
@@ -90,8 +92,8 @@ SSH_OPTS=(
 )
 [ "${EPHEMERAL_SSH_BATCH:-0}" = "1" ] && SSH_OPTS+=(-o BatchMode=yes -o NumberOfPasswordPrompts=0)
 [ -n "$PRIV_KEY" ] && SSH_OPTS+=(-i "$PRIV_KEY" -o IdentitiesOnly=yes)
-if [ "$ENGINE:$PROVIDER" = "metal:raspberry-pi" ] && [ -n "${RASPBERRY_PI_HOST:-}" ] && [ "$IP" != "$RASPBERRY_PI_HOST" ]; then
-  SSH_OPTS+=(-o "HostKeyAlias=$RASPBERRY_PI_HOST")
+if [ "$ENGINE:$PROVIDER" = "metal:raspberry-pi" ] && [ -n "$RESOLVED_RASPBERRY_PI_HOST" ] && [ "$IP" != "$RESOLVED_RASPBERRY_PI_HOST" ]; then
+  SSH_OPTS+=(-o "HostKeyAlias=$RESOLVED_RASPBERRY_PI_HOST")
 fi
 
 if [ "${1:-}" = "--scp" ]; then
