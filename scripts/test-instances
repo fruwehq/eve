@@ -564,7 +564,7 @@ else
 fi
 
 provider_bridge_failed=0
-for provider_target in init plan up down stop status ip ssh; do
+for provider_target in up down stop status ip ssh; do
   provider_bridge_out="$(
     EGAME_PROVIDER_DRY_RUN=1 EGAME_INSTANCE_REGISTRY="$FIXTURE" EGAME_INSTANCE_WORKDIR="$tmp_overlay_dir/provider-bridge" \
       make --no-print-directory "$provider_target" INSTANCE=dev-a 2>/dev/null
@@ -588,6 +588,25 @@ if ! printf '%s\n' "$provider_bridge_start" |
 fi
 if [ "$provider_bridge_failed" -eq 0 ]; then
   printf '  [OK] make lifecycle targets route INSTANCE through provider plugins\n'
+else
+  FAIL=$((FAIL + 1))
+fi
+
+provider_debug_failed=0
+for provider_target in init plan; do
+  provider_debug_out="$(
+    EGAME_PROVIDER_DRY_RUN=1 EGAME_INSTANCE_REGISTRY="$FIXTURE" EGAME_INSTANCE_WORKDIR="$tmp_overlay_dir/provider-bridge" \
+      ./scripts/provider-dispatch --instance dev-a --command "$provider_target" 2>/dev/null
+  )"
+  if ! printf '%s\n' "$provider_debug_out" |
+    jq -e --arg command "$provider_target" '.provider == "local-qemu" and .command == $command and .dry_run == true' >/dev/null; then
+    printf '  [FAIL] provider-dispatch %s did not route through provider dry-run\n' "$provider_target" >&2
+    printf '%s\n' "$provider_debug_out" >&2
+    provider_debug_failed=$((provider_debug_failed + 1))
+  fi
+done
+if [ "$provider_debug_failed" -eq 0 ]; then
+  printf '  [OK] provider debug targets route through provider dispatch\n'
 else
   FAIL=$((FAIL + 1))
 fi

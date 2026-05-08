@@ -118,6 +118,17 @@ def make_args(target: str, instance: str, *extra: str) -> list[str]:
     return ["make", "--no-print-directory", target, f"INSTANCE={instance}", *extra]
 
 
+def provider_dispatch_args(command: str, instance: str, *extra: str) -> list[str]:
+    return [
+        str(ROOT / "scripts/provider-dispatch"),
+        "--instance",
+        instance,
+        "--command",
+        command,
+        *extra,
+    ]
+
+
 def package_make_args(target: str, instance: str, package: str, *extra: str) -> list[str]:
     return ["make", "--no-print-directory", target, f"INSTANCE={instance}", f"PACKAGE={package}", *extra]
 
@@ -1204,6 +1215,8 @@ def run_tui() -> int:
 
         #remote-strip,
         #lifecycle-strip,
+        #utility-strip,
+        #provider-debug-strip,
         #package-actions,
         #bundle-actions,
         #danger-strip {
@@ -1220,7 +1233,11 @@ def run_tui() -> int:
         }
 
         #instance-actions-group {
-            height: 16;
+            height: 4;
+        }
+
+        #utility-actions-group {
+            height: 7;
         }
 
         #package-actions-group {
@@ -1228,10 +1245,18 @@ def run_tui() -> int:
         }
 
         #lifecycle-strip {
-            grid-size: 4 4;
+            grid-size: 4 1;
             grid-columns: 1fr 1fr 1fr 1fr;
-            grid-rows: 3 3 3 3;
-            height: 15;
+            grid-rows: 3;
+            height: 3;
+        }
+
+        #utility-strip,
+        #provider-debug-strip {
+            grid-size: 4 2;
+            grid-columns: 1fr 1fr 1fr 1fr;
+            grid-rows: 3 3;
+            height: 7;
         }
 
         #package-actions {
@@ -1319,9 +1344,9 @@ def run_tui() -> int:
         BINDINGS: ClassVar[list[Binding | tuple[str, str] | tuple[str, str, str]]] = [
             Binding("/", "focus_filter", "Filter", show=True),
             Binding("?", "help", "Help", show=True),
+            Binding("h", "toggle_hidden", "Hidden"),
             Binding("r", "refresh", "Refresh"),
             Binding("u", "provider('up')", "Up"),
-            Binding("s", "provider('start')", "Start"),
             Binding("t", "provider('stop')", "Stop"),
             Binding("p", "provision", "Provision"),
             Binding("x", "down_instance", "Down"),
@@ -1356,6 +1381,7 @@ def run_tui() -> int:
             self._status_refreshing: set[str] = set()
             self._list_status_task: asyncio.Task[None] | None = None
             self.detail_tab = "overview"
+            self.show_disabled = False
 
         def compose(self) -> ComposeResult:
             yield Header(show_clock=True)
@@ -1400,17 +1426,17 @@ def run_tui() -> int:
                                 yield Button("Ops", id="tab-ops")
                             with Vertical(id="overview-tab"), Vertical(id="action-groups"):
                                 with Vertical(id="instance-actions-group", classes="action-group"):
-                                    yield Static("Instance Controls + Debug", classes="action-title")
+                                    yield Static("Instance Controls", classes="action-title")
                                     with Grid(id="lifecycle-strip"):
                                         yield Button("Up", id="provider-up", variant="success")
                                         yield Button("Stop", id="provider-stop", variant="warning")
                                         yield Button("Reboot", id="reboot", variant="warning")
                                         yield Button("Provision", id="provision", variant="primary")
+                                with Vertical(id="utility-actions-group", classes="action-group"):
+                                    yield Static("Utilities", classes="action-title")
+                                    with Grid(id="utility-strip"):
                                         yield Button("Logs", id="logs")
                                         yield Button("Refresh", id="refresh", variant="primary")
-                                        yield Button("Status", id="provider-status")
-                                        yield Button("Plan", id="provider-plan")
-                                        yield Button("Init", id="provider-init")
                                         yield Button("Update", id="update-tools")
                                         yield Button("Upload", id="upload")
                                         yield Button("Password", id="show-password")
@@ -1439,6 +1465,12 @@ def run_tui() -> int:
                             with Vertical(id="ops-tab"):
                                 yield Static("Recent Ops", classes="section-title")
                                 yield Static("No operations yet.", id="ops")
+                                with Vertical(id="provider-debug-group", classes="action-group"):
+                                    yield Static("Provider Debug", classes="action-title")
+                                    with Grid(id="provider-debug-strip"):
+                                        yield Button("Status", id="provider-status")
+                                        yield Button("Plan", id="provider-plan")
+                                        yield Button("Init", id="provider-init")
                                 with Grid(id="danger-strip"):
                                     yield Button("Down", id="provider-down", variant="error")
                                     yield Button("Recover", id="instance-recover")
@@ -2137,6 +2169,9 @@ def run_tui() -> int:
                 package_id = str(package.get("id", ""))
                 if not package_id:
                     continue
+                supported = bool(package.get("supported"))
+                if not supported and not self.show_disabled:
+                    continue
                 selected = bool(package.get("selected"))
                 if selected and first_selected is None:
                     first_selected = package_id
@@ -2152,7 +2187,7 @@ def run_tui() -> int:
                     package_id,
                     "selected" if selected else "available",
                     package_status,
-                    "yes" if package.get("supported") else "no",
+                    "yes" if supported else "no",
                     package_source_label(selected_by),
                     key=package_id,
                 )
@@ -2453,7 +2488,11 @@ def run_tui() -> int:
                 state = self.current_status.get("state", {}) if self.current_status else {}
                 if effective_provider_state(cast(dict[str, Any], state)) == "stopped":
                     command = "start"
-            args = make_args(command, instance)
+            args = (
+                provider_dispatch_args(command, instance)
+                if command in {"init", "plan", "status"}
+                else make_args(command, instance)
+            )
             code = await self.stream_command(f"provider.{command}", args, refresh_instance=instance)
             self.keep_instance_selected(instance)
             if code == 0:
@@ -2686,8 +2725,11 @@ def run_tui() -> int:
                         actions.append(next_action)
             return actions[:PACKAGE_ACTION_BUTTONS]
 
-        def set_button(self, button_id: str, *, disabled: bool) -> None:
-            self.query_one(f"#{button_id}", Button).disabled = disabled
+        def set_button(self, button_id: str, *, disabled: bool, hide_when_disabled: bool = True) -> None:
+            button = self.query_one(f"#{button_id}", Button)
+            button.disabled = disabled
+            if hide_when_disabled:
+                button.display = self.show_disabled or not disabled
 
         def restore_focus(self, focused_id: str | None) -> None:
             if not focused_id:
@@ -2701,15 +2743,12 @@ def run_tui() -> int:
         def focus_top_action(self) -> None:
             self.set_detail_tab("overview", focus=False)
             for button_id in (
-                "connect-ssh",
                 "provider-up",
-                "refresh",
                 "provider-stop",
                 "reboot",
                 "provision",
-                "provider-status",
-                "provider-plan",
-                "provider-init",
+                "connect-ssh",
+                "refresh",
                 "update-tools",
                 "upload",
                 "show-password",
@@ -2817,8 +2856,9 @@ def run_tui() -> int:
                 if index < len(self.current_remote_actions):
                     action = self.current_remote_actions[index]
                     button.label = action["label"]
-                    button.display = True
-                    button.disabled = busy or not has_instance or not provider_available
+                    disabled = busy or not has_instance or not provider_available
+                    button.display = self.show_disabled or not disabled
+                    button.disabled = disabled
                 else:
                     button.label = ""
                     button.display = False
@@ -2848,8 +2888,14 @@ def run_tui() -> int:
             self.set_button(
                 "bundle-unselect",
                 disabled=busy or not has_instance or not has_bundle or not bundle_selected,
-            )
+                )
             self.restore_focus(focused_id)
+
+        def action_toggle_hidden(self) -> None:
+            self.show_disabled = not self.show_disabled
+            self.render_detail()
+            self.update_action_state()
+            self.notify("Showing disabled controls and packages" if self.show_disabled else "Hiding disabled controls and packages")
 
         def update_busy_layout(self) -> None:
             root = self.query_one("#root", Container)
@@ -2898,7 +2944,7 @@ def run_tui() -> int:
                 return False
             current = buttons.index(self.focused)
             columns = 5 if parent.id == "remote-strip" else (
-                4 if parent.id == "lifecycle-strip" else 3 if parent.id in {
+                4 if parent.id in {"lifecycle-strip", "utility-strip", "provider-debug-strip"} else 3 if parent.id in {
                     "package-actions",
                     "bundle-actions",
                     "danger-strip",
@@ -2937,7 +2983,7 @@ def run_tui() -> int:
 
         async def action_help(self) -> None:
             self.log_line(
-                "[b]Keys[/b] / filter, l log, y copy log, r refresh, u up, s start, t stop, "
+                "[b]Keys[/b] / filter, h show/hide disabled, l log, y copy log, r refresh, u up, t stop, "
                 "p provision, d delete, q quit. "
                 "Select << New Instance >> to create an instance."
             )

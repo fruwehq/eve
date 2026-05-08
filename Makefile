@@ -1,8 +1,8 @@
 # Makefile
 .DEFAULT_GOAL := default
 .PHONY: ai.sandbox aws.login bundle.select bundle.unselect catalog.list clean config.migrate default docker.build docker.shell docker.test doctor down env eve generate help info install-cli integration.packages integration.plan integration.test \
-				init init.all instance.create instance.delete instance.env instance.info instance.provision \
-				instance.list instance.observe instance.paths instance.recover instance.state instance.status instance.validate ip lint logs plan \
+				init.all instance.create instance.delete instance.env instance.info instance.provision \
+				instance.list instance.observe instance.paths instance.recover instance.state instance.status instance.validate ip lint logs \
 				package.action package.down package.install package.list package.reinstall package.select \
 				package.status package.uninstall package.unselect \
 				plugins.list plugins.sync plugins.validate \
@@ -159,10 +159,6 @@ integration.packages: ## Optional live smoke: install/status every supported pac
 	if [ "$(DELETE_INSTANCES)" = "1" ]; then args="$$args --delete-instances"; fi; \
 	./scripts/integration-test --live --all-packages $$args
 
-init: ## Initialize provider backend for an instance
-	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make init INSTANCE=<name>"; exit 2; fi; \
-	./scripts/instance-run init $(INSTANCE)
-
 init.all: generate ## Init all stacks in parallel (set TM_PARALLEL=N)
 	terramate run --parallel=$(TM_PARALLEL) --continue-on-error -- terraform init -upgrade
 
@@ -252,10 +248,6 @@ lint: ## Format terramate files in place
 logs: ## Stream remote provisioning logs for an instance
 	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make logs INSTANCE=<name>"; exit 2; fi; \
 	./scripts/instance-run logs $(INSTANCE)
-
-plan: ## Plan provider changes for an instance
-	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make plan INSTANCE=<name>"; exit 2; fi; \
-	./scripts/instance-run plan $(INSTANCE)
 
 package.action: ## Run a package-defined action (PACKAGE=<id> ACTION=<id>)
 	@if [ -z "$(INSTANCE)" ] || [ -z "$(PACKAGE)" ] || [ -z "$(ACTION)" ]; then echo "Usage: make package.action INSTANCE=<name> PACKAGE=<id> ACTION=<id>"; exit 2; fi; \
