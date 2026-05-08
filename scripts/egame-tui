@@ -1116,8 +1116,25 @@ def run_tui() -> int:
             margin-bottom: 1;
         }
 
+        #detail-tabs {
+            height: 3;
+            margin-bottom: 1;
+            background: transparent;
+        }
+
+        #detail-tabs Button {
+            width: 1fr;
+            min-width: 12;
+        }
+
+        #overview-tab,
+        #packages-tab,
+        #ops-tab {
+            height: 1fr;
+        }
+
         #action-groups {
-            height: 29;
+            height: 1fr;
             margin-bottom: 1;
         }
 
@@ -1148,7 +1165,7 @@ def run_tui() -> int:
         }
 
         #instance-actions-group {
-            height: 8;
+            height: 16;
         }
 
         #package-actions-group {
@@ -1186,8 +1203,7 @@ def run_tui() -> int:
         }
 
         #packages-pane {
-            width: 2fr;
-            margin-right: 1;
+            width: 1fr;
         }
 
         #bundles {
@@ -1201,10 +1217,6 @@ def run_tui() -> int:
 
         #packages {
             height: 1fr;
-        }
-
-        #ops-pane {
-            width: 1fr;
         }
 
         #output {
@@ -1287,6 +1299,7 @@ def run_tui() -> int:
             self._detail_refresh_seq = 0
             self._status_refreshing: set[str] = set()
             self._list_status_task: asyncio.Task[None] | None = None
+            self.detail_tab = "overview"
 
         def compose(self) -> ComposeResult:
             yield Header(show_clock=True)
@@ -1324,7 +1337,11 @@ def run_tui() -> int:
                                 yield Static("IP\n-", id="ip-pill", classes="pill")
                                 yield Static("Provision\nunknown", id="provision-pill", classes="pill")
                                 yield Static("Packages\nunknown", id="packages-pill", classes="pill")
-                            with Vertical(id="action-groups"):
+                            with Horizontal(id="detail-tabs"):
+                                yield Button("Overview", id="tab-overview", variant="primary")
+                                yield Button("Packages", id="tab-packages")
+                                yield Button("Ops", id="tab-ops")
+                            with Vertical(id="overview-tab"), Vertical(id="action-groups"):
                                 with Vertical(id="instance-actions-group", classes="action-group"):
                                     yield Static("Instance Controls + Debug", classes="action-title")
                                     with Grid(id="lifecycle-strip"):
@@ -1342,34 +1359,33 @@ def run_tui() -> int:
                                         yield Button("Password", id="show-password")
                                         yield Button("Cancel", id="cancel-command", variant="error")
                                 with Vertical(id="package-actions-group", classes="action-group"):
-                                    yield Static("Package Actions", classes="action-title")
+                                    yield Static("Actions", classes="action-title")
                                     with Grid(id="remote-strip"):
                                         yield Button("SSH", id="connect-ssh")
                                         for index in range(PACKAGE_ACTION_BUTTONS):
                                             yield Button("", id=f"pkg-action-{index}")
-                            with Horizontal(id="detail-grid"):
-                                with Vertical(id="packages-pane"):
-                                    yield Static("Bundles", classes="section-title")
-                                    yield DataTable(id="bundles")
-                                    with Grid(id="bundle-actions"):
-                                        yield Button("Add Bundle", id="bundle-select")
-                                        yield Button("Remove Bundle", id="bundle-unselect")
-                                    yield Static("Packages", classes="section-title")
-                                    yield DataTable(id="packages")
-                                    with Grid(id="package-actions"):
-                                        yield Button("Status", id="package-status")
-                                        yield Button("Add Extra", id="package-select")
-                                        yield Button("Remove Extra", id="package-unselect")
-                                        yield Button("Install", id="package-install", variant="success")
-                                        yield Button("Reinstall", id="package-reinstall", variant="warning")
-                                        yield Button("Uninstall", id="package-down", variant="warning")
-                                with Vertical(id="ops-pane"):
-                                    yield Static("Recent Ops", classes="section-title")
-                                    yield Static("No operations yet.", id="ops")
-                            with Grid(id="danger-strip"):
-                                yield Button("Down", id="provider-down", variant="error")
-                                yield Button("Recover", id="instance-recover")
-                                yield Button("Delete Local", id="delete-instance", variant="error")
+                            with Vertical(id="packages-tab"), Vertical(id="packages-pane"):
+                                yield Static("Bundles", classes="section-title")
+                                yield DataTable(id="bundles")
+                                with Grid(id="bundle-actions"):
+                                    yield Button("Add Bundle", id="bundle-select")
+                                    yield Button("Remove Bundle", id="bundle-unselect")
+                                yield Static("Packages", classes="section-title")
+                                yield DataTable(id="packages")
+                                with Grid(id="package-actions"):
+                                    yield Button("Status", id="package-status")
+                                    yield Button("Add Extra", id="package-select")
+                                    yield Button("Remove Extra", id="package-unselect")
+                                    yield Button("Install", id="package-install", variant="success")
+                                    yield Button("Reinstall", id="package-reinstall", variant="warning")
+                                    yield Button("Uninstall", id="package-down", variant="warning")
+                            with Vertical(id="ops-tab"):
+                                yield Static("Recent Ops", classes="section-title")
+                                yield Static("No operations yet.", id="ops")
+                                with Grid(id="danger-strip"):
+                                    yield Button("Down", id="provider-down", variant="error")
+                                    yield Button("Recover", id="instance-recover")
+                                    yield Button("Delete Local", id="delete-instance", variant="error")
                 yield Static(
                     "Output  |  press l to focus, arrows/PageUp/PageDown to scroll, y to copy all log text",
                     id="output-help",
@@ -1402,6 +1418,7 @@ def run_tui() -> int:
             bundles.cursor_type = "row"
             bundles.add_columns("Bundle", "Selection", "Includes")
 
+            self.update_detail_tabs()
             self.animate_hero()
             self.set_interval(1.2, self.animate_hero)
             self.set_interval(15, self.trigger_blink)
@@ -2144,7 +2161,9 @@ def run_tui() -> int:
 
         async def on_button_pressed(self, event: Button.Pressed) -> None:
             button_id = event.button.id or ""
-            if button_id == "refresh":
+            if button_id.startswith("tab-"):
+                self.set_detail_tab(button_id.split("-", 1)[1])
+            elif button_id == "refresh":
                 await self.action_refresh()
             elif button_id == "cancel-command":
                 await self.action_cancel_command()
@@ -2198,7 +2217,20 @@ def run_tui() -> int:
                 await self.action_bundle("bundle.unselect")
 
         async def action_refresh(self) -> None:
-            await self.refresh_instances(preserve_selection=True)
+            if self.command_running:
+                self.notify("A command is already running", severity="warning")
+                return
+            self.command_running = True
+            self.current_command_label = "refresh"
+            self.update_action_state()
+            self.log_line("[primary]Refreshing instances...[/]")
+            try:
+                await self.refresh_instances(preserve_selection=True, quiet=True)
+                self.log_line("[success]Refreshing instances finished.[/]")
+            finally:
+                self.command_running = False
+                self.current_command_label = None
+                self.update_action_state()
 
         async def action_cancel_command(self) -> None:
             proc = self.current_process
@@ -2587,6 +2619,7 @@ def run_tui() -> int:
                 widget.focus()
 
         def focus_top_action(self) -> None:
+            self.set_detail_tab("overview", focus=False)
             for button_id in (
                 "connect-ssh",
                 "provider-up",
@@ -2612,6 +2645,29 @@ def run_tui() -> int:
                 if not button.disabled and button.display:
                     button.focus()
                     return
+
+        def set_detail_tab(self, tab: str, *, focus: bool = True) -> None:
+            if tab not in {"overview", "packages", "ops"}:
+                tab = "overview"
+            self.detail_tab = tab
+            self.update_detail_tabs()
+            if focus:
+                first_focus = {
+                    "overview": "provider-up",
+                    "packages": "bundles",
+                    "ops": "provider-down",
+                }[tab]
+                with suppress(Exception):
+                    self.query_one(f"#{first_focus}").focus()
+
+        def update_detail_tabs(self) -> None:
+            for tab in ("overview", "packages", "ops"):
+                active = tab == self.detail_tab
+                with suppress(Exception):
+                    self.query_one(f"#{tab}-tab", Vertical).display = active
+                with suppress(Exception):
+                    button = self.query_one(f"#tab-{tab}", Button)
+                    button.label = f"[b]{tab.title()}[/b]" if active else tab.title()
 
         def update_action_state(self) -> None:
             focused_id = self.focused.id if self.focused is not None else None
