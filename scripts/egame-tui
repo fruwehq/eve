@@ -1088,10 +1088,9 @@ def run_tui() -> int:
             margin-bottom: 1;
         }
 
-        .provider-health {
-            height: 8;
-            margin-top: 1;
-            color: $text-muted;
+        #providers {
+            height: 7;
+            margin-bottom: 1;
         }
 
         #right {
@@ -1300,10 +1299,11 @@ def run_tui() -> int:
                 yield Static("Loading instances...", id="summary")
                 with Horizontal(id="body"):
                     with Vertical(id="left"):
+                        yield Static("Providers", classes="section-title")
+                        yield DataTable(id="providers")
                         yield Static("Instances", classes="section-title")
                         yield Input(placeholder="Filter instances", id="filter")
                         yield DataTable(id="instances")
-                        yield Static("Providers\nchecking...", id="provider-health", classes="provider-health")
                     with Vertical(id="right"):
                         yield Static(
                             "\n".join(
@@ -1385,6 +1385,11 @@ def run_tui() -> int:
             yield Footer()
 
         async def on_mount(self) -> None:
+            providers = self.query_one("#providers", DataTable)
+            providers.cursor_type = "row"
+            providers.add_columns("Provider", "Configured", "Reachable", "Notes")
+            providers.add_row("checking...", "-", "-", "-")
+
             instances = self.query_one("#instances", DataTable)
             instances.cursor_type = "row"
             instances.add_columns("", "Instance", "State", "OS")
@@ -1411,24 +1416,26 @@ def run_tui() -> int:
             self.call_after_refresh(self.focus_instance_list_if_empty)
 
         async def load_provider_health(self) -> None:
-            health = self.query_one("#provider-health", Static)
+            table = self.query_one("#providers", DataTable)
             try:
                 text = await asyncio.to_thread(provider_status_table)
             except Exception as exc:
-                health.update(f"Providers\n[error]{exc}[/]")
+                table.clear()
+                table.add_row("[error]error[/]", "-", "-", str(exc))
                 return
             lines = text.splitlines()
-            if len(lines) > 2:
-                compact = []
-                for row in lines[2:]:
-                    parts = row.split(None, 3)
-                    if len(parts) >= 3:
-                        name, configured, reachable = parts[:3]
-                        marker = "[success]●[/]" if reachable == "yes" else ("[warning]○[/]" if configured == "yes" else "[dim]-[/]")
-                        compact.append(f"{marker} {name} {configured}/{reachable}")
-                health.update("Providers\n" + "\n".join(compact[:6]))
-            else:
-                health.update("Providers\n" + text)
+            table.clear()
+            for row in lines[2:]:
+                parts = row.split(None, 3)
+                if len(parts) < 3:
+                    continue
+                name, configured, reachable = parts[:3]
+                notes = parts[3] if len(parts) > 3 else "-"
+                configured_text = "[success]yes[/]" if configured == "yes" else "[dim]no[/]"
+                reachable_text = "[success]yes[/]" if reachable == "yes" else "[warning]no[/]"
+                table.add_row(name, configured_text, reachable_text, notes)
+            if not table.row_count:
+                table.add_row("[dim]none[/]", "-", "-", "-")
 
         async def load_catalog_options(self) -> None:
             try:
