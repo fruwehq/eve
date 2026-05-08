@@ -7,7 +7,7 @@ skip_unless_pkg docker
 
 log "### 10_docker: installing rootless Docker CE"
 
-uid="$(id -u)"
+uid="$HUMAN_UID"
 rootless_sock="/run/user/$uid/docker.sock"
 if command -v docker >/dev/null 2>&1 && [ -S "$rootless_sock" ]; then
   log "rootless docker already installed — skipping"
@@ -36,30 +36,32 @@ apt_install \
   uidmap
 
 sudo systemctl disable --now docker.service docker.socket >/dev/null 2>&1 || true
-sudo loginctl enable-linger "$USER"
+sudo loginctl enable-linger "$HUMAN_USER_NAME"
 sudo systemctl start "user@$uid.service" || true
 
 export XDG_RUNTIME_DIR="/run/user/$uid"
 if [ ! -d "$XDG_RUNTIME_DIR" ]; then
-  sudo install -d -m 700 -o "$USER" -g "$(id -gn)" "$XDG_RUNTIME_DIR"
+  sudo install -d -m 700 -o "$HUMAN_USER_NAME" -g "$HUMAN_GROUP" "$XDG_RUNTIME_DIR"
 fi
 export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
 
-if [ ! -f "$HOME/.config/systemd/user/docker.service" ]; then
-  log "setting up rootless docker daemon for $USER"
-  dockerd-rootless-setuptool.sh install --force
+if [ ! -f "$HUMAN_HOME/.config/systemd/user/docker.service" ]; then
+  log "setting up rootless docker daemon for $HUMAN_USER_NAME"
+  human_run dockerd-rootless-setuptool.sh install --force
 fi
 
-systemctl --user daemon-reload
-systemctl --user enable --now docker
+human_run systemctl --user daemon-reload
+human_run systemctl --user enable --now docker
 
 # shellcheck disable=SC2016 # Written literally so each login shell resolves its own uid.
 profile_line='export DOCKER_HOST="unix:///run/user/$(id -u)/docker.sock"'
-if ! grep -Fqx "$profile_line" "$HOME/.profile" 2>/dev/null; then
-  printf '\n# Rootless Docker daemon for ephemeral-cloud-gaming.\n%s\n' "$profile_line" >>"$HOME/.profile"
+if ! sudo test -f "$HUMAN_HOME/.profile" || ! sudo grep -Fqx "$profile_line" "$HUMAN_HOME/.profile" 2>/dev/null; then
+  printf '\n# Rootless Docker daemon for ephemeral-cloud-gaming.\n%s\n' "$profile_line" \
+    | sudo tee -a "$HUMAN_HOME/.profile" >/dev/null
+  sudo chown "$HUMAN_USER_NAME:$HUMAN_GROUP" "$HUMAN_HOME/.profile"
 fi
 
 export DOCKER_HOST="unix://$rootless_sock"
-docker version >/dev/null
+human_run docker version >/dev/null
 
 log "### 10_docker: done"

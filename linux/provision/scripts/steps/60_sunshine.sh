@@ -82,23 +82,26 @@ install_sunshine_compat_libs
 # host (or vagrant port-forwarder) can hit the port but Sunshine returns 401/403
 # because the web UI is locked to local-origin requests by default.
 log "### 60_sunshine: configuring web UI"
-mkdir -p "$HOME/.config/sunshine"
-SUN_CONF="$HOME/.config/sunshine/sunshine.conf"
-touch "$SUN_CONF"
+human_install_dir "$HUMAN_HOME/.config/sunshine"
+SUN_CONF="$HUMAN_HOME/.config/sunshine/sunshine.conf"
+sudo touch "$SUN_CONF"
+sudo chown "$HUMAN_USER_NAME:$HUMAN_GROUP" "$SUN_CONF"
 
 set_sunshine_config() {
   local key="$1"
   local value="$2"
-  if grep -q "^${key}[[:space:]]*=" "$SUN_CONF"; then
-    sed -i "s|^${key}[[:space:]]*=.*|${key} = ${value}|" "$SUN_CONF"
+  if sudo grep -q "^${key}[[:space:]]*=" "$SUN_CONF"; then
+    sudo sed -i "s|^${key}[[:space:]]*=.*|${key} = ${value}|" "$SUN_CONF"
   else
-    printf '%s = %s\n' "$key" "$value" >> "$SUN_CONF"
+    printf '%s = %s\n' "$key" "$value" | sudo tee -a "$SUN_CONF" >/dev/null
   fi
+  sudo chown "$HUMAN_USER_NAME:$HUMAN_GROUP" "$SUN_CONF"
 }
 
 unset_sunshine_config() {
   local key="$1"
-  sed -i "/^${key}[[:space:]]*=/d" "$SUN_CONF" 2>/dev/null || true
+  sudo sed -i "/^${key}[[:space:]]*=/d" "$SUN_CONF" 2>/dev/null || true
+  sudo chown "$HUMAN_USER_NAME:$HUMAN_GROUP" "$SUN_CONF"
 }
 
 set_sunshine_config origin_web_ui_allowed wan
@@ -108,8 +111,8 @@ unset_sunshine_config resolutions
 if [ "${PROVIDER:-}" = "raspberry-pi" ]; then
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y kmod
   sudo groupadd --system uinput 2>/dev/null || true
-  sudo usermod -aG input "$USER"
-  sudo usermod -aG uinput "$USER"
+  sudo usermod -aG input "$HUMAN_USER_NAME"
+  sudo usermod -aG uinput "$HUMAN_USER_NAME"
   echo uinput | sudo tee /etc/modules-load.d/egame-uinput.conf >/dev/null
   sudo modprobe uinput 2>/dev/null || true
   sudo tee /etc/udev/rules.d/70-egame-uinput.rules >/dev/null <<'EOF'
@@ -133,7 +136,7 @@ fi
 # Set Sunshine web UI credentials (matches Windows step 10's behavior).
 if [ -n "${EPHEMERAL_SUNSHINE_PASSWORD:-}" ]; then
   log "### 60_sunshine: setting web UI credentials"
-  sunshine "$SUN_CONF" --creds sunshine "$EPHEMERAL_SUNSHINE_PASSWORD" || \
+  human_run sunshine "$SUN_CONF" --creds sunshine "$EPHEMERAL_SUNSHINE_PASSWORD" || \
     log "### 60_sunshine: warn: failed to set credentials (will retry on next run)"
 else
   log "### 60_sunshine: EPHEMERAL_SUNSHINE_PASSWORD not set — skipping creds"
@@ -142,22 +145,21 @@ fi
 # Sunshine must have exactly one owner. The package-provided systemd user unit
 # is persistent with linger enabled; XFCE autostart creates a second generated
 # app-sunshine@autostart.service and can race or duplicate CPU-heavy encoders.
-rm -f "$HOME/.config/autostart/sunshine.desktop"
+sudo rm -f "$HUMAN_HOME/.config/autostart/sunshine.desktop"
 
-mkdir -p "$HOME/.local/bin"
-if [ ! -x "$HOME/.local/bin/egame-set-display-mode" ]; then
-  cat > "$HOME/.local/bin/egame-set-display-mode" <<'EOF'
+human_install_dir "$HUMAN_HOME/.local/bin"
+if [ ! -x "$HUMAN_HOME/.local/bin/egame-set-display-mode" ]; then
+  cat <<'EOF' | human_write_file "$HUMAN_HOME/.local/bin/egame-set-display-mode" 0755
 #!/usr/bin/env sh
 exit 0
 EOF
-  chmod +x "$HOME/.local/bin/egame-set-display-mode"
 fi
 
 write_sunshine_apps() {
   local include_steam=0
   { has_pkg steam || command -v steam >/dev/null 2>&1; } && include_steam=1
   if [ "$include_steam" -eq 1 ]; then
-    cat > "$HOME/.config/sunshine/apps.json" <<'EOF'
+    cat <<'EOF' | human_write_file "$HUMAN_HOME/.config/sunshine/apps.json" 0644
 {
   "env": {
     "PATH": "$(PATH):$(HOME)/.local/bin"
@@ -191,7 +193,7 @@ write_sunshine_apps() {
 }
 EOF
   else
-    cat > "$HOME/.config/sunshine/apps.json" <<'EOF'
+    cat <<'EOF' | human_write_file "$HUMAN_HOME/.config/sunshine/apps.json" 0644
 {
   "env": {
     "PATH": "$(PATH):$(HOME)/.local/bin"
@@ -216,16 +218,16 @@ EOF
 log "### 60_sunshine: writing controlled Sunshine app list"
 write_sunshine_apps
 
-XDG_RUNTIME_DIR="/run/user/$(id -u)"
+XDG_RUNTIME_DIR="/run/user/$HUMAN_UID"
 export XDG_RUNTIME_DIR
 SUN_DISPLAY="${SUNSHINE_DISPLAY:-:0}"
-SUN_XAUTHORITY="${XAUTHORITY:-$HOME/.Xauthority}"
+SUN_XAUTHORITY="${XAUTHORITY:-$HUMAN_HOME/.Xauthority}"
 
-sudo loginctl enable-linger "$USER"
-systemctl --user enable sunshine 2>/dev/null || true
-systemctl --user add-wants default.target sunshine.service 2>/dev/null || true
-systemctl --user stop sunshine 2>/dev/null || true
-pkill -u "$USER" -x sunshine 2>/dev/null || true
+sudo loginctl enable-linger "$HUMAN_USER_NAME"
+human_run systemctl --user enable sunshine 2>/dev/null || true
+human_run systemctl --user add-wants default.target sunshine.service 2>/dev/null || true
+human_run systemctl --user stop sunshine 2>/dev/null || true
+pkill -u "$HUMAN_USER_NAME" -x sunshine 2>/dev/null || true
 
 sunshine_display_ready() {
   DISPLAY="$SUN_DISPLAY" XAUTHORITY="$SUN_XAUTHORITY" xrandr --query >/dev/null 2>&1
@@ -244,25 +246,25 @@ sunshine_kms_ready() {
 start_sunshine_with_display() {
   export DISPLAY="$SUN_DISPLAY"
   export XAUTHORITY="$SUN_XAUTHORITY"
-  if [ -x "$HOME/.local/bin/egame-set-display-mode" ]; then
-    "$HOME/.local/bin/egame-set-display-mode" || true
+  if [ -x "$HUMAN_HOME/.local/bin/egame-set-display-mode" ]; then
+    human_run "$HUMAN_HOME/.local/bin/egame-set-display-mode" || true
   fi
-  systemctl --user import-environment DISPLAY XAUTHORITY XDG_RUNTIME_DIR 2>/dev/null || true
-  systemctl --user reset-failed sunshine 2>/dev/null || true
-  if ! systemctl --user start sunshine 2>/dev/null; then
-    setsid nohup sunshine "$SUN_CONF" >>"$LOGS_DIR/sunshine.log" 2>&1 < /dev/null &
+  human_run env DISPLAY="$SUN_DISPLAY" XAUTHORITY="$SUN_XAUTHORITY" systemctl --user import-environment DISPLAY XAUTHORITY XDG_RUNTIME_DIR 2>/dev/null || true
+  human_run systemctl --user reset-failed sunshine 2>/dev/null || true
+  if ! human_run env DISPLAY="$SUN_DISPLAY" XAUTHORITY="$SUN_XAUTHORITY" systemctl --user start sunshine 2>/dev/null; then
+    human_run setsid nohup sunshine "$SUN_CONF" >>"$LOGS_DIR/sunshine.log" 2>&1 < /dev/null &
   fi
 }
 
-if systemctl --user is-active sunshine >/dev/null 2>&1; then
+if human_run systemctl --user is-active sunshine >/dev/null 2>&1; then
   log "### 60_sunshine: restarting sunshine to reload config"
   export DISPLAY="$SUN_DISPLAY"
   export XAUTHORITY="$SUN_XAUTHORITY"
-  if [ -x "$HOME/.local/bin/egame-set-display-mode" ]; then
-    "$HOME/.local/bin/egame-set-display-mode" || true
+  if [ -x "$HUMAN_HOME/.local/bin/egame-set-display-mode" ]; then
+    human_run "$HUMAN_HOME/.local/bin/egame-set-display-mode" || true
   fi
-  systemctl --user reset-failed sunshine 2>/dev/null || true
-  systemctl --user restart sunshine 2>/dev/null || true
+  human_run systemctl --user reset-failed sunshine 2>/dev/null || true
+  human_run env DISPLAY="$SUN_DISPLAY" XAUTHORITY="$SUN_XAUTHORITY" systemctl --user restart sunshine 2>/dev/null || true
 elif [ -d "$XDG_RUNTIME_DIR" ] && { sunshine_display_ready || sunshine_kms_ready; }; then
   log "### 60_sunshine: starting sunshine on display $SUN_DISPLAY"
   start_sunshine_with_display

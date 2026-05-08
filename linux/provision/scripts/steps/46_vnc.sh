@@ -32,12 +32,12 @@ fi
 
 VNC_VERSION=$(dpkg-query -W -f '${Version}' tigervnc-standalone-server 2>/dev/null | grep -oP '^\d+\.\d+' || echo "0.0")
 if dpkg --compare-versions "$VNC_VERSION" ge "1.15"; then
-  VNC_HOME=~/.config/tigervnc
-  rm -rf ~/.vnc
+  VNC_HOME="$HUMAN_HOME/.config/tigervnc"
+  sudo rm -rf "$HUMAN_HOME/.vnc"
 else
-  VNC_HOME=~/.vnc
+  VNC_HOME="$HUMAN_HOME/.vnc"
 fi
-mkdir -p "$VNC_HOME"
+human_install_dir "$VNC_HOME"
 
 # Suppress the colord polkit prompt that appears on every XFCE/VNC session.
 # Ubuntu 26.04 (polkit 124+) silently ignores the legacy .pkla format — use the
@@ -56,7 +56,7 @@ EOF
 fi
 if [ ! -f "$VNC_HOME/passwd" ]; then
   log "### 46_vnc: setting VNC password"
-  printf 'vagrant\nvagrant\nn\n' | tigervncpasswd 2>&1
+  printf 'vagrant\nvagrant\nn\n' | sudo -H -u "$HUMAN_USER_NAME" tigervncpasswd 2>&1
 fi
 
 XSTARTUP_CONTENT=$(cat <<'XEOF'
@@ -83,8 +83,7 @@ XEOF
 
 if [ ! -f "$VNC_HOME/xstartup" ] || [ "$XSTARTUP_CONTENT" != "$(cat "$VNC_HOME/xstartup")" ]; then
   log "### 46_vnc: writing xstartup script"
-  printf '%s\n' "$XSTARTUP_CONTENT" > "$VNC_HOME/xstartup"
-  chmod +x "$VNC_HOME/xstartup"
+  printf '%s\n' "$XSTARTUP_CONTENT" | human_write_file "$VNC_HOME/xstartup" 0755
 fi
 
 # VNC should use the same configured display size as the VM unless a VNC-only
@@ -99,8 +98,8 @@ After=network.target
 
 [Service]
 Type=forking
-User=$USER
-Environment=HOME=$HOME
+User=$HUMAN_USER_NAME
+Environment=HOME=$HUMAN_HOME
 ExecStartPre=/bin/sh -c '/usr/bin/vncserver -kill :1 2>/dev/null || true'
 ExecStart=/usr/bin/vncserver :1 -geometry $VNC_GEOMETRY -depth 24 -SecurityTypes VncAuth -AlwaysShared
 ExecStop=/usr/bin/vncserver -kill :1

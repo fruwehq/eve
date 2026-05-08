@@ -37,7 +37,7 @@ log "### 50_rustdesk: configuring LightDM autologin session=$desktop_session"
 sudo mkdir -p /etc/lightdm/lightdm.conf.d
 sudo tee /etc/lightdm/lightdm.conf.d/50-ephemeral-autologin.conf >/dev/null <<EOF
 [Seat:*]
-autologin-user=$USER
+autologin-user=$HUMAN_USER_NAME
 autologin-user-timeout=0
 user-session=$desktop_session
 EOF
@@ -46,13 +46,13 @@ write_display_mode_helper() {
   local output_name="$1"
   local mode_name="$2"
   local modeline="$3"
-  mkdir -p "$HOME/.local/bin" "$HOME/.config/autostart"
-  cat > "$HOME/.local/bin/egame-set-display-mode" <<EOF
+  human_install_dir "$HUMAN_HOME/.local/bin" "$HUMAN_HOME/.config/autostart"
+  cat <<EOF | human_write_file "$HUMAN_HOME/.local/bin/egame-set-display-mode" 0755
 #!/usr/bin/env sh
 set -eu
 preferred_output="$output_name"
 export DISPLAY="\${DISPLAY:-:0}"
-export XAUTHORITY="\${XAUTHORITY:-$HOME/.Xauthority}"
+export XAUTHORITY="\${XAUTHORITY:-$HUMAN_HOME/.Xauthority}"
 if ! xrandr --query >/dev/null 2>&1; then
   exit 0
 fi
@@ -60,21 +60,22 @@ output_name="\$(xrandr --query | awk '/ connected/{print \$1; exit}')"
 output_name="\${output_name:-\$preferred_output}"
 EOF
   if [ -n "$modeline" ]; then
-    cat >> "$HOME/.local/bin/egame-set-display-mode" <<EOF
+    cat <<EOF | sudo tee -a "$HUMAN_HOME/.local/bin/egame-set-display-mode" >/dev/null
 xrandr --newmode $modeline 2>/dev/null || true
 xrandr --addmode "\$output_name" "$mode_name" 2>/dev/null || true
 EOF
   fi
-  cat >> "$HOME/.local/bin/egame-set-display-mode" <<EOF
+  cat <<EOF | sudo tee -a "$HUMAN_HOME/.local/bin/egame-set-display-mode" >/dev/null
 xrandr --output "\$output_name" --mode "$mode_name" 2>/dev/null || true
 EOF
-  chmod +x "$HOME/.local/bin/egame-set-display-mode"
+  sudo chown "$HUMAN_USER_NAME:$HUMAN_GROUP" "$HUMAN_HOME/.local/bin/egame-set-display-mode"
+  sudo chmod 0755 "$HUMAN_HOME/.local/bin/egame-set-display-mode"
 
-  cat > "$HOME/.config/autostart/egame-display-mode.desktop" <<EOF
+  cat <<EOF | human_write_file "$HUMAN_HOME/.config/autostart/egame-display-mode.desktop" 0644
 [Desktop Entry]
 Type=Application
 Name=Set display mode
-Exec=$HOME/.local/bin/egame-set-display-mode
+Exec=$HUMAN_HOME/.local/bin/egame-set-display-mode
 Hidden=false
 NoDisplay=true
 X-GNOME-Autostart-enabled=true
@@ -118,7 +119,7 @@ if [ "${PROVIDER:-}" = "raspberry-pi" ]; then
     modeline_config=""
   fi
   sudo mkdir -p /etc/X11/xorg.conf.d
-  mkdir -p "$HOME/.local/bin"
+  human_install_dir "$HUMAN_HOME/.local/bin"
   sudo rm -f /etc/X11/xorg.conf.d/10-raspi-kms.conf
   sudo tee /etc/X11/xorg.conf.d/10-ephemeral-dummy-display.conf >/dev/null <<EOF
 Section "Device"
@@ -200,10 +201,10 @@ fi
 sudo groupadd --system autologin 2>/dev/null || true
 sudo groupadd --system nopasswdlogin 2>/dev/null || true
 sudo groupadd --system uinput 2>/dev/null || true
-sudo usermod -aG autologin "$USER"
-sudo usermod -aG nopasswdlogin "$USER"
-sudo usermod -aG input "$USER"
-sudo usermod -aG uinput "$USER"
+sudo usermod -aG autologin "$HUMAN_USER_NAME"
+sudo usermod -aG nopasswdlogin "$HUMAN_USER_NAME"
+sudo usermod -aG input "$HUMAN_USER_NAME"
+sudo usermod -aG uinput "$HUMAN_USER_NAME"
 
 # Without this, xfce4-screensaver/light-locker locks the auto-logged-in session
 # after a few minutes and prompts for the user's (often-unset) Unix password,
@@ -213,8 +214,8 @@ sudo systemctl disable --now xfce4-screensaver.service 2>/dev/null || true
 
 # Belt-and-suspenders: pin the xfconf settings so even if a screensaver gets
 # pulled back in by another package, it stays disabled.
-mkdir -p "$HOME/.config/xfce4/xfconf/xfce-perchannel-xml"
-cat > "$HOME/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-screensaver.xml" <<'XEOF'
+human_install_dir "$HUMAN_HOME/.config/xfce4/xfconf/xfce-perchannel-xml"
+cat <<'XEOF' | human_write_file "$HUMAN_HOME/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-screensaver.xml" 0644
 <?xml version="1.0" encoding="UTF-8"?>
 <channel name="xfce4-screensaver" version="1.0">
   <property name="lock" type="empty">
@@ -226,30 +227,30 @@ cat > "$HOME/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-screensaver.xml" <<'
 </channel>
 XEOF
 
-mkdir -p "$HOME/.config/autostart"
-cat > "$HOME/.config/autostart/rustdesk-server.desktop" <<EOF
+human_install_dir "$HUMAN_HOME/.config/autostart"
+cat <<EOF | human_write_file "$HUMAN_HOME/.config/autostart/rustdesk-server.desktop" 0644
 [Desktop Entry]
 Type=Application
 Name=RustDesk Server
-Exec=sh -lc 'export DISPLAY="\${DISPLAY:-:0}"; export XAUTHORITY="\${XAUTHORITY:-$HOME/.Xauthority}"; [ -x "$HOME/.local/bin/egame-set-display-mode" ] && "$HOME/.local/bin/egame-set-display-mode" || true; exec rustdesk --server'
+Exec=sh -lc 'export DISPLAY="\${DISPLAY:-:0}"; export XAUTHORITY="\${XAUTHORITY:-$HUMAN_HOME/.Xauthority}"; [ -x "$HUMAN_HOME/.local/bin/egame-set-display-mode" ] && "$HUMAN_HOME/.local/bin/egame-set-display-mode" || true; exec rustdesk --server'
 Hidden=false
 NoDisplay=true
 X-GNOME-Autostart-enabled=true
 EOF
 
-mkdir -p "$HOME/.config/rustdesk"
+human_install_dir "$HUMAN_HOME/.config/rustdesk"
 sudo mkdir -p /root/.config/rustdesk
 
 # Clear leftover immutable flag from a prior buggy provisioning run
-sudo chattr -i "$HOME/.config/rustdesk/RustDesk2.toml" 2>/dev/null || true
+sudo chattr -i "$HUMAN_HOME/.config/rustdesk/RustDesk2.toml" 2>/dev/null || true
 sudo chattr -i /root/.config/rustdesk/RustDesk2.toml 2>/dev/null || true
 
 # Stop the daemon so it doesn't rewrite the file while we edit it
 sudo systemctl stop rustdesk 2>/dev/null || true
 sudo killall -9 rustdesk 2>/dev/null || true
 sudo systemctl disable --now rustdesk-vnc-server.service >/dev/null 2>&1 || true
-rm -f "$HOME/.config/systemd/user/rustdesk-vnc-server.service"
-XDG_RUNTIME_DIR="/run/user/$(id -u)" systemctl --user disable --now rustdesk-vnc-server.service >/dev/null 2>&1 || true
+sudo rm -f "$HUMAN_HOME/.config/systemd/user/rustdesk-vnc-server.service"
+human_run systemctl --user disable --now rustdesk-vnc-server.service >/dev/null 2>&1 || true
 sleep 1
 
 # Write the file from scratch so our keys land inside the [options] section.
@@ -277,10 +278,11 @@ write_rustdesk_config() {
   } | sudo tee "$cfg" >/dev/null
 }
 
-for cfg in "$HOME/.config/rustdesk/RustDesk2.toml" /root/.config/rustdesk/RustDesk2.toml; do
+for cfg in "$HUMAN_HOME/.config/rustdesk/RustDesk2.toml" /root/.config/rustdesk/RustDesk2.toml; do
   log "### 50_rustdesk: writing $cfg"
   write_rustdesk_config "$cfg"
 done
+sudo chown -R "$HUMAN_USER_NAME:$HUMAN_GROUP" "$HUMAN_HOME/.config/rustdesk"
 
 # Start daemon — reads our config on launch
 sudo systemctl set-default graphical.target >/dev/null 2>&1 || true
@@ -299,8 +301,7 @@ for i in $(seq 1 15); do
   sleep 2
 done
 
-rd_user="$USER"
-rd_uid=$(id -u "$rd_user")
+rd_user="$HUMAN_USER_NAME"
 rd_server_ready=0
 
 for i in $(seq 1 15); do
@@ -328,7 +329,7 @@ if [ -n "${RUSTDESK_PASSWORD:-}" ]; then
 
   if set_rustdesk_password sudo rustdesk --password "$RUSTDESK_PASSWORD"; then
     log "### 50_rustdesk: permanent password set via admin service"
-  elif set_rustdesk_password env HOME="$HOME" XDG_RUNTIME_DIR="/run/user/$rd_uid" rustdesk --password "$RUSTDESK_PASSWORD"; then
+  elif set_rustdesk_password human_run rustdesk --password "$RUSTDESK_PASSWORD"; then
     log "### 50_rustdesk: permanent password set via user server"
   else
     log "### 50_rustdesk: warn: --password failed (server-user=$rd_user); client will be prompted to set one"

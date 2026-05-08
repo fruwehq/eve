@@ -12,8 +12,8 @@ apt_install \
   gnome-tweaks \
   papirus-icon-theme
 
-mkdir -p "$HOME/.local/bin" "$HOME/.config/autostart"
-cat >"$HOME/.local/bin/egame-gnome-macos-theme" <<'EOF'
+human_install_dir "$HUMAN_HOME/.local/bin" "$HUMAN_HOME/.config/autostart"
+cat <<'EOF' | human_write_file "$HUMAN_HOME/.local/bin/egame-gnome-macos-theme" 0755
 #!/usr/bin/env sh
 set -eu
 
@@ -29,13 +29,12 @@ gsettings set org.gnome.shell.extensions.dash-to-dock dock-position 'BOTTOM' 2>/
 gsettings set org.gnome.shell.extensions.dash-to-dock extend-height false 2>/dev/null || true
 gsettings set org.gnome.shell.extensions.dash-to-dock dash-max-icon-size 48 2>/dev/null || true
 EOF
-chmod +x "$HOME/.local/bin/egame-gnome-macos-theme"
 
-cat >"$HOME/.config/autostart/egame-gnome-macos-theme.desktop" <<EOF
+cat <<EOF | human_write_file "$HUMAN_HOME/.config/autostart/egame-gnome-macos-theme.desktop" 0644
 [Desktop Entry]
 Type=Application
 Name=Apply macOS-like GNOME defaults
-Exec=$HOME/.local/bin/egame-gnome-macos-theme
+Exec=$HUMAN_HOME/.local/bin/egame-gnome-macos-theme
 Hidden=false
 NoDisplay=true
 X-GNOME-Autostart-enabled=true

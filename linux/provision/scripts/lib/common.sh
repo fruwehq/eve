@@ -10,6 +10,18 @@ LOGS_DIR="$PROVISION_ROOT/logs"
 DOWNLOADS_DIR="$PROVISION_ROOT/downloads"
 REBOOT_FLAG="$STATE_DIR/reboot.flag"
 BUNDLE_PACKAGES_FILE="$STATE_DIR/bundle_packages"
+PROVISION_USER_NAME="${USER:-$(id -un)}"
+HUMAN_USER_NAME="${VM_USER_NAME:-$PROVISION_USER_NAME}"
+if id "$HUMAN_USER_NAME" >/dev/null 2>&1; then
+  HUMAN_HOME="$(getent passwd "$HUMAN_USER_NAME" | awk -F: '{print $6}')"
+  HUMAN_GROUP="$(id -gn "$HUMAN_USER_NAME")"
+  HUMAN_UID="$(id -u "$HUMAN_USER_NAME")"
+else
+  HUMAN_HOME="$HOME"
+  HUMAN_GROUP="$(id -gn)"
+  HUMAN_UID="$(id -u)"
+fi
+HUMAN_HOME="${HUMAN_HOME:-$HOME}"
 
 export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
 
@@ -75,4 +87,27 @@ download() {
 request_reboot() {
   touch "$REBOOT_FLAG"
   log "reboot requested"
+}
+
+human_install_dir() {
+  sudo install -d -o "$HUMAN_USER_NAME" -g "$HUMAN_GROUP" "$@"
+}
+
+human_write_file() {
+  local path="$1"
+  local mode="${2:-0644}"
+  local tmp
+  tmp=$(mktemp)
+  cat > "$tmp"
+  sudo install -D -o "$HUMAN_USER_NAME" -g "$HUMAN_GROUP" -m "$mode" "$tmp" "$path"
+  rm -f "$tmp"
+}
+
+human_run() {
+  sudo -H -u "$HUMAN_USER_NAME" env \
+    HOME="$HUMAN_HOME" \
+    USER="$HUMAN_USER_NAME" \
+    LOGNAME="$HUMAN_USER_NAME" \
+    XDG_RUNTIME_DIR="/run/user/$HUMAN_UID" \
+    "$@"
 }
