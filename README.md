@@ -219,7 +219,10 @@ Terraform provider versions are pinned exactly in the Terramate provider templat
 
 - Local instance choices (for example QEMU/Vagrant) should work without cloud API keys.
 - Cloud providers (AWS/Vultr/TrueNAS) only require their own env vars when used.
-- Keep personal settings in `.env.local`.
+- Keep secrets and credentials in `.env.local`.
+- Non-secret preferences can go in `.egame/config.yaml`, using the same shape
+  as [config/defaults.yaml](config/defaults.yaml). This is intended for
+  UI-editable settings such as display resolution and Moonlight preferences.
 
 ```bash
 # List catalog choices and create a concrete instance

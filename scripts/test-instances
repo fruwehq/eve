@@ -16,7 +16,7 @@ mkdir -p "$GOLDEN_DIR"
 unset TRUENAS_HOST TRUENAS_SSH_PORT TRUENAS_SSH_USER \
       TRUENAS_SSH_PRIVATE_KEY_FILE TRUENAS_SSH_HOST_KEY_FINGERPRINT \
       TRUENAS_API_KEY TRUENAS_API_USER SSH_PUBLIC_KEY_FILE \
-      RASPBERRY_PI_HOST RASPBERRY_PI_IP VM_USER_NAME
+      RASPBERRY_PI_HOST RASPBERRY_PI_IP VM_USER_NAME EGAME_CONFIG_PATH
 
 FAIL=0
 INSTANCES=$(./scripts/instance-list --registry "$FIXTURE" --json | jq -r '.instances[].name')
@@ -62,6 +62,27 @@ tmp_overlay_dir="$(mktemp -d "${TMPDIR:-/tmp}/egame-instance-overlay.XXXXXX")"
 tmp_local_catalog="$tmp_overlay_dir/catalog.local.yaml"
 trap 'rm -f "$tmp_registry" "$tmp_registry.lock" "$tmp_concurrent_registry" "$tmp_concurrent_registry.lock" "$tmp_external_registry" "$invalid_output"; rm -rf "$tmp_overlay_dir"' EXIT
 rm -f "$tmp_registry" "$tmp_concurrent_registry"
+
+tmp_config="$tmp_overlay_dir/config.yaml"
+cat >"$tmp_config" <<'YAML'
+display:
+  resolution: 5120x1440
+global:
+  vm_user_name: egame-user
+moonlight:
+  video_codec: HEVC
+YAML
+
+config_env="$(EGAME_CONFIG_PATH="$tmp_config" ./scripts/config-env --make | LC_ALL=C sort)"
+if printf '%s\n' "$config_env" | grep -qx 'EPHEMERAL_DISPLAY_RESOLUTION=5120x1440' &&
+  printf '%s\n' "$config_env" | grep -qx 'EPHEMERAL_MOONLIGHT_VIDEO_CODEC=HEVC' &&
+  printf '%s\n' "$config_env" | grep -qx 'VM_USER_NAME=egame-user'; then
+  printf '  [OK] structured config emits non-secret environment overrides\n'
+else
+  printf '  [FAIL] structured config emits non-secret environment overrides\n' >&2
+  printf '%s\n' "$config_env" >&2
+  FAIL=$((FAIL + 1))
+fi
 
 if ./scripts/instance-create \
   --registry "$tmp_registry" \

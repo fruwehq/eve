@@ -24,6 +24,13 @@ EMIT ?= env
 
 # Load dotenv files
 -include .env
+
+# Non-secret structured preferences. Values here override .env defaults, while
+# .env.local and command-line make variables remain the highest-precedence user
+# overrides.
+EGAME_CONFIG_EXPORTS := $(shell ./scripts/config-env --make 2>/dev/null)
+$(foreach assignment,$(EGAME_CONFIG_EXPORTS),$(eval export $(assignment)))
+
 -include .env.local
 
 # TIMEZONE is the only "documented in .env" variable that defaults instead of

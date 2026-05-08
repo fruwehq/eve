@@ -1,0 +1,29 @@
+# Non-secret structured defaults. Empty values are ignored.
+#
+# Personal overrides can go in .egame/config.yaml, which is git-ignored and safe
+# for UI-editable preferences. Keep secrets such as API keys and passwords in
+# .env.local.
+
+display:
+  fps:
+  resolution:
+
+global:
+  timezone:
+  vm_user_name:
+
+moonlight:
+  bitrate_kbps:
+  video_codec:
+  video_decoder:
+
+raspberry_pi:
+  hdmi_connector:
+  hdmi_mode:
+  host:
+  ip:
+
+sunshine:
+  max_bitrate_kbps:
+  version:
+

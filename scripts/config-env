@@ -1,0 +1,101 @@
+#!/usr/bin/env ruby
+# Emit non-secret structured config as environment assignments.
+
+require "shellwords"
+require "yaml"
+
+ROOT = File.expand_path("..", __dir__)
+DEFAULT_CONFIG = File.join(ROOT, "config/defaults.yaml")
+LOCAL_CONFIG = ENV.fetch("EGAME_CONFIG_PATH", File.join(ROOT, ".egame/config.yaml"))
+
+MAPPINGS = {
+  %w[display fps] => "EPHEMERAL_DISPLAY_FPS",
+  %w[display resolution] => "EPHEMERAL_DISPLAY_RESOLUTION",
+  %w[global timezone] => "TIMEZONE",
+  %w[global vm_user_name] => "VM_USER_NAME",
+  %w[moonlight bitrate_kbps] => "EPHEMERAL_MOONLIGHT_BITRATE_KBPS",
+  %w[moonlight video_codec] => "EPHEMERAL_MOONLIGHT_VIDEO_CODEC",
+  %w[moonlight video_decoder] => "EPHEMERAL_MOONLIGHT_VIDEO_DECODER",
+  %w[raspberry_pi hdmi_connector] => "RASPBERRY_PI_HDMI_CONNECTOR",
+  %w[raspberry_pi hdmi_mode] => "RASPBERRY_PI_HDMI_MODE",
+  %w[raspberry_pi host] => "RASPBERRY_PI_HOST",
+  %w[raspberry_pi ip] => "RASPBERRY_PI_IP",
+  %w[sunshine max_bitrate_kbps] => "SUNSHINE_MAX_BITRATE_KBPS",
+  %w[sunshine version] => "SUNSHINE_VERSION"
+}.freeze
+
+def usage
+  warn <<~USAGE
+    Usage:
+      scripts/config-env [--make|--shell|--json]
+  USAGE
+end
+
+def load_config(path)
+  return {} unless File.exist?(path)
+
+  data = YAML.safe_load(File.read(path), aliases: false)
+  return {} if data.nil?
+  raise "#{path}: expected a mapping" unless data.is_a?(Hash)
+
+  data
+end
+
+def deep_merge(base, override)
+  base.merge(override) do |_key, left, right|
+    left.is_a?(Hash) && right.is_a?(Hash) ? deep_merge(left, right) : right
+  end
+end
+
+def fetch_path(data, path)
+  path.reduce(data) do |memo, key|
+    return nil unless memo.is_a?(Hash)
+
+    memo[key]
+  end
+end
+
+def scalar_value(value)
+  return nil if value.nil?
+  return nil if value == ""
+  raise "structured config values must be scalars, got #{value.class}" if value.is_a?(Array) || value.is_a?(Hash)
+
+  value.to_s
+end
+
+format = "--make"
+case ARGV.length
+when 0
+  # default
+when 1
+  format = ARGV.first
+else
+  usage
+  exit 2
+end
+
+unless %w[--make --shell --json].include?(format)
+  usage
+  exit 2
+end
+
+begin
+  config = deep_merge(load_config(DEFAULT_CONFIG), load_config(LOCAL_CONFIG))
+  env = MAPPINGS.each_with_object({}) do |(path, name), out|
+    value = scalar_value(fetch_path(config, path))
+    out[name] = value if value
+  end
+
+  case format
+  when "--json"
+    require "json"
+    puts JSON.pretty_generate(env)
+  when "--shell"
+    env.sort.each { |key, value| puts "export #{key}=#{Shellwords.escape(value)}" }
+  when "--make"
+    env.sort.each { |key, value| puts "#{key}=#{value}" }
+  end
+rescue StandardError => e
+  warn "config-env: #{e.message}"
+  exit 1
+end

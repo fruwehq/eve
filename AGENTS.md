@@ -2,9 +2,10 @@
 
 ## Configuration and defaults
 
-**All configurable defaults live in `.env`.** Never use shell `${VAR:-default}` to encode a meaningful default inside a script. If a variable needs a default, declare it (commented or uncommented) in `.env` so it is discoverable in one place.
+**All configurable defaults live in `.env`, `config/defaults.yaml`, or the catalog.** Never use shell `${VAR:-default}` to encode a meaningful default inside a script. If a variable needs a default, declare it (commented or uncommented) in one of those files so it is discoverable in one place.
 
 - User-specific overrides go in `.env.local` (git-ignored).
+- Non-secret structured preferences go in `.egame/config.yaml` (git-ignored), using `config/defaults.yaml` as the documented shape.
 - Machine-level defaults (cpu, memory, disk_gb, network, state) belong in `config/catalog.yaml` under the machine's `defaults:` block.
 - Local catalog overrides (different machine sizes, personal zvol paths, etc.) go in `config/catalog.local.yaml` (git-ignored).
 - Scripts and terraform modules may declare variable defaults as a safety net (e.g. a terraform `default = "..."`) but the canonical, human-readable default always lives in `.env` or the catalog.
