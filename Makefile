@@ -390,6 +390,9 @@ test.update-golden: ## Regenerate tests/golden/instances/*.env from current inst
 tui: ## Open the v3 Textual instance manager
 	@poetry run python ./scripts/egame-tui
 
+eve: ## Open Eve, the Textual instance manager
+	@./scripts/eve
+
 up: ## Create and start provider resources for an instance
 	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make up INSTANCE=<name>"; exit 2; fi; \
 	./scripts/instance-run up $(INSTANCE)

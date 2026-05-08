@@ -22,12 +22,16 @@ from typing import Any, ClassVar, Literal, cast
 ROOT = Path(__file__).resolve().parents[1]
 NEW_INSTANCE_KEY = "__new_instance__"
 PACKAGE_ACTION_BUTTONS = 9
+APP_NAME = "Eve"
+APP_EXPANSION = "Ephemeral VM Environment"
+APP_TAGLINE = "create -> provision -> connect"
 
 
 def usage() -> str:
     return """Usage: scripts/egame-tui [--check]
+       scripts/eve [--check]
 
-Open an optional Textual interface for v3 concrete instances.
+Open Eve, the optional Textual interface for v3 concrete instances.
 
 Options:
   --check   Validate that the script is syntactically importable without
@@ -1327,8 +1331,8 @@ def run_tui() -> int:
             yield Header(show_clock=True)
             with Container(id="root"):
                 yield Static(
-                    "[primary]◇[/] ephemeral vm cockpit  [success]starting[/]  "
-                    "[dim]create -> provision -> connect[/dim]",
+                    f"[primary]◇[/] {APP_NAME}  [dim]{APP_EXPANSION}[/]  "
+                    f"[success]starting[/]  [dim]{APP_TAGLINE}[/dim]",
                     id="hero",
                 )
                 yield Static("Loading instances...", id="summary")
@@ -1498,10 +1502,10 @@ def run_tui() -> int:
 
         def animate_hero(self) -> None:
             frames = [
-                "[primary]◇[/] ephemeral vm cockpit  [success]ready[/]  [dim]create -> provision -> connect[/dim]",
-                "[primary]◈[/] ephemeral vm cockpit  [success]ready[/]  [dim]create -> provision -> connect[/dim]",
-                "[primary]◆[/] ephemeral vm cockpit  [success]ready[/]  [dim]create -> provision -> connect[/dim]",
-                "[primary]◈[/] ephemeral vm cockpit  [success]ready[/]  [dim]create -> provision -> connect[/dim]",
+                f"[primary]◇[/] {APP_NAME}  [dim]{APP_EXPANSION}[/]  [success]ready[/]  [dim]{APP_TAGLINE}[/dim]",
+                f"[primary]◈[/] {APP_NAME}  [dim]{APP_EXPANSION}[/]  [success]ready[/]  [dim]{APP_TAGLINE}[/dim]",
+                f"[primary]◆[/] {APP_NAME}  [dim]{APP_EXPANSION}[/]  [success]ready[/]  [dim]{APP_TAGLINE}[/dim]",
+                f"[primary]◈[/] {APP_NAME}  [dim]{APP_EXPANSION}[/]  [success]ready[/]  [dim]{APP_TAGLINE}[/dim]",
             ]
             self.query_one("#hero", Static).update(frames[self.hero_frame % len(frames)])
             self.hero_frame += 1

@@ -32,6 +32,8 @@ make instance.validate INSTANCE=dev-a
 
 # Browse and operate instances from the optional Textual TUI
 make tui
+# or
+make eve
 
 # Run lifecycle targets through the selected concrete instance
 make init INSTANCE=dev-a
@@ -184,8 +186,10 @@ status-check every installable package supported by each instance OS/arch.
 Optional host-side AI agent sandboxing is documented in
 [docs/ai-sandboxes.md](docs/ai-sandboxes.md).
 
-The optional `make tui` target opens a Textual instance manager for browsing
-instances, combined state, package state, and safe provider/package actions.
+The optional `make eve` target opens **Eve** (Ephemeral VM Environment), a
+Textual instance manager for browsing instances, combined state, package state,
+and safe provider/package actions. `make tui` remains available as a
+compatibility alias.
 Use `poetry install` once to install the optional Python dependencies; the rest
 of the v3 command surface has no Python package dependency.
 
