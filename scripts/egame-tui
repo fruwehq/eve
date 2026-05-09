@@ -1112,12 +1112,9 @@ def run_tui() -> int:
             layout: vertical;
         }
 
-        #root.busy #hero {
-            display: none;
-        }
-
+        #root.busy #hero,
         #root.busy #body {
-            height: 1fr;
+            display: none;
         }
 
         #root.busy #summary {
@@ -1130,7 +1127,7 @@ def run_tui() -> int:
         }
 
         #root.busy #output {
-            height: 2fr;
+            height: 1fr;
             border: round $accent;
         }
 
@@ -1358,15 +1355,15 @@ def run_tui() -> int:
             Binding("/", "focus_filter", "Filter", show=True),
             Binding("?", "help", "Help", show=True),
             Binding("h", "toggle_hidden", "Hidden"),
-            Binding("r", "refresh", "Refresh"),
-            Binding("u", "provider('up')", "Up"),
-            Binding("t", "provider('stop')", "Stop"),
-            Binding("p", "provision", "Provision"),
+            Binding("r", "queue_refresh", "Refresh"),
+            Binding("u", "queue_provider('up')", "Up"),
+            Binding("t", "queue_provider('stop')", "Stop"),
+            Binding("p", "queue_provision", "Provision"),
             Binding("x", "down_instance", "Down"),
             Binding("d", "delete_instance", "Delete Local"),
-            Binding("c", "cancel_command", "Cancel", priority=True),
-            Binding("ctrl+c", "cancel_command", "Cancel", priority=True),
-            Binding("escape", "cancel_command", "Cancel", priority=True),
+            Binding("c", "queue_cancel_command", "Cancel", priority=True),
+            Binding("ctrl+c", "queue_cancel_command", "Cancel", priority=True),
+            Binding("escape", "queue_cancel_command", "Cancel", priority=True),
             Binding("l", "focus_log", "Log", priority=True),
             Binding("y", "copy_log", "Copy Log", priority=True),
             Binding("ctrl+y", "copy_log", "Copy Log", priority=True),
@@ -1454,7 +1451,6 @@ def run_tui() -> int:
                                         yield Button("Update", id="update-tools")
                                         yield Button("Upload", id="upload")
                                         yield Button("Password", id="show-password")
-                                        yield Button("Cancel", id="cancel-command", variant="error")
                                 with Vertical(id="package-actions-group", classes="action-group"):
                                     yield Static("Actions", classes="action-title")
                                     with Grid(id="remote-strip"):
@@ -2309,57 +2305,57 @@ def run_tui() -> int:
             if button_id.startswith("tab-"):
                 self.set_detail_tab(button_id.split("-", 1)[1])
             elif button_id == "refresh":
-                await self.action_refresh()
-            elif button_id in {"cancel-command", "busy-cancel-command"}:
-                await self.action_cancel_command()
+                self.start_task(self.action_refresh())
+            elif button_id == "busy-cancel-command":
+                self.start_task(self.action_cancel_command())
             elif button_id == "provider-up":
-                await self.action_provider("up")
+                self.start_task(self.action_provider("up"))
             elif button_id == "provider-stop":
-                await self.action_provider("stop")
+                self.start_task(self.action_provider("stop"))
             elif button_id == "provider-down":
                 self.action_down_instance()
             elif button_id == "provider-status":
-                await self.action_provider("status")
+                self.start_task(self.action_provider("status"))
             elif button_id == "provider-plan":
-                await self.action_provider("plan")
+                self.start_task(self.action_provider("plan"))
             elif button_id == "provider-init":
-                await self.action_provider("init")
+                self.start_task(self.action_provider("init"))
             elif button_id == "reboot":
                 self.action_confirm_instance_command("Reboot instance?", "reboot", "reboot")
             elif button_id == "update-tools":
                 self.action_confirm_instance_command("Update instance tools?", "update", "update")
             elif button_id == "show-password":
-                await self.action_instance_command("show-password", "show-password")
+                self.start_task(self.action_instance_command("show-password", "show-password"))
             elif button_id == "upload":
                 self.action_upload()
             elif button_id == "instance-recover":
                 self.action_confirm_instance_command("Recover local operation state?", "instance.recover", "instance.recover")
             elif button_id == "provision":
-                await self.action_provision()
+                self.start_task(self.action_provision())
             elif button_id == "logs":
-                await self.action_logs()
+                self.start_task(self.action_logs())
             elif button_id == "delete-instance":
                 self.action_delete_instance()
             elif button_id == "connect-ssh":
-                await self.action_connect_ssh()
+                self.start_task(self.action_connect_ssh())
             elif button_id.startswith("pkg-action-"):
-                await self.action_package_remote(int(button_id.rsplit("-", 1)[1]))
+                self.start_task(self.action_package_remote(int(button_id.rsplit("-", 1)[1])))
             elif button_id == "package-status":
-                await self.action_package("package.status")
+                self.start_task(self.action_package("package.status"))
             elif button_id == "package-select":
-                await self.action_package("package.select")
+                self.start_task(self.action_package("package.select"))
             elif button_id == "package-unselect":
-                await self.action_package("package.unselect")
+                self.start_task(self.action_package("package.unselect"))
             elif button_id == "package-install":
-                await self.action_package("package.install")
+                self.start_task(self.action_package("package.install"))
             elif button_id == "package-reinstall":
                 self.action_package_reinstall()
             elif button_id == "package-down":
                 self.action_package_down()
             elif button_id == "bundle-select":
-                await self.action_bundle("bundle.select")
+                self.start_task(self.action_bundle("bundle.select"))
             elif button_id == "bundle-unselect":
-                await self.action_bundle("bundle.unselect")
+                self.start_task(self.action_bundle("bundle.unselect"))
 
         async def action_refresh(self) -> None:
             if self.command_running:
@@ -2377,6 +2373,9 @@ def run_tui() -> int:
                 self.current_command_label = None
                 self.update_action_state()
 
+        def action_queue_refresh(self) -> None:
+            self.start_task(self.action_refresh())
+
         async def action_cancel_command(self) -> None:
             proc = self.current_process
             if not self.command_running or proc is None or proc.returncode is not None:
@@ -2392,6 +2391,9 @@ def run_tui() -> int:
                 self.log_line("[warning]Command did not stop; killing it.[/]")
                 with suppress(ProcessLookupError):
                     os.killpg(proc.pid, signal.SIGKILL)
+
+        def action_queue_cancel_command(self) -> None:
+            self.start_task(self.action_cancel_command())
 
         def action_new_instance(self) -> None:
             self.push_screen(
@@ -2536,6 +2538,9 @@ def run_tui() -> int:
                 )
                 self.keep_instance_selected(instance)
 
+        def action_queue_provider(self, command: str) -> None:
+            self.start_task(self.action_provider(command))
+
         def keep_instance_selected(self, instance: str) -> None:
             if not any(str(row.get("name", "")) == instance for row in self.instances):
                 return
@@ -2585,6 +2590,9 @@ def run_tui() -> int:
                     make_args("instance.provision", instance),
                     refresh_instance=instance,
                 )
+
+        def action_queue_provision(self) -> None:
+            self.start_task(self.action_provision())
 
         async def action_logs(self) -> None:
             if self.current_instance:
@@ -2856,7 +2864,6 @@ def run_tui() -> int:
             busy = self.command_running
             self.update_busy_layout()
             self.set_button("refresh", disabled=busy)
-            self.set_button("cancel-command", disabled=not busy)
             self.set_button("busy-cancel-command", disabled=not busy, hide_when_disabled=False)
             self.set_button("provider-status", disabled=busy or not has_instance)
             self.set_button("provider-plan", disabled=busy or not has_instance or provider_busy)
@@ -2961,7 +2968,7 @@ def run_tui() -> int:
                 label = self.current_command_label or "command"
                 summary.update(f"[warning]Running {label}[/]  [dim]press Ctrl-C or c to cancel; y copies output[/dim]")
                 output_help.update(
-                    "Output is expanded while the command runs; controls stay visible above.\n"
+                    "Output is expanded while the command runs.\n"
                     "Press Ctrl-C or c to cancel, l to focus/scroll, y to copy selected/all log text."
                 )
             else:
