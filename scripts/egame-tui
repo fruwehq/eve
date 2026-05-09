@@ -2257,6 +2257,7 @@ def run_tui() -> int:
                 next_instance = None if row_key == NEW_INSTANCE_KEY else row_key
                 if next_instance != self.current_instance:
                     self.current_instance = next_instance
+                    self.set_detail_tab("overview", focus=False)
                     self.current_status = self.statuses.get(next_instance) if next_instance else None
                     if next_instance is None:
                         self.render_empty_detail()
@@ -2282,6 +2283,7 @@ def run_tui() -> int:
                     self.action_new_instance()
                     return
                 self.current_instance = row_key
+                self.set_detail_tab("overview", focus=False)
                 self.current_status = self.statuses.get(row_key)
                 if status_instance_name(self.current_status) == row_key:
                     self.render_detail()
@@ -2416,6 +2418,7 @@ def run_tui() -> int:
             code = await self.stream_command("instance.create", args)
             if code == 0:
                 self.current_instance = result["name"]
+                self.set_detail_tab("overview", focus=False)
                 await self.refresh_instances(preserve_selection=True)
                 self.select_instance_row(result["name"])
 
