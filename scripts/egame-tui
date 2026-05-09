@@ -2548,21 +2548,23 @@ def run_tui() -> int:
             self.render_instances(sync_cursor=True)
             self.update_action_state()
 
-        async def refresh_provider_until(self, instance: str, expected_state: str | None) -> None:
+        async def refresh_provider_until(self, instance: str, expected_state: str | None) -> bool:
             if not expected_state:
-                return
-            deadline = time.monotonic() + 20
+                return True
+            deadline = time.monotonic() + 60
             while time.monotonic() < deadline:
                 await self.refresh_status_for(instance, repaint_table=True)
                 status = self.statuses.get(instance, {})
                 state = status.get("state", {})
                 if isinstance(state, dict) and effective_provider_state(state) == expected_state:
-                    return
+                    return True
                 await asyncio.sleep(2)
+            return False
 
         async def action_provision(self) -> None:
             if self.current_instance:
                 instance = self.current_instance
+                await self.refresh_status_for(instance, repaint_table=True, resolve_ip=False)
                 state = self.current_status.get("state", {}) if self.current_status else {}
                 provider_state = effective_provider_state(cast(dict[str, Any], state))
                 if provider_state != "running":
@@ -2571,7 +2573,12 @@ def run_tui() -> int:
                     self.keep_instance_selected(instance)
                     if code != 0:
                         return
-                    await self.refresh_provider_until(instance, "running")
+                    if not await self.refresh_provider_until(instance, "running"):
+                        self.log_line(
+                            "[error]Provider did not report running after the lifecycle command; "
+                            "press Refresh and retry Provision.[/]"
+                        )
+                        return
                     self.keep_instance_selected(instance)
                 await self.stream_command(
                     "instance.provision",
