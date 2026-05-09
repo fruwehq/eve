@@ -72,9 +72,11 @@ case "$OS_FAMILY" in
       local plugin_root="$2"
       local existing
 
-      for existing in "${ordered_steps[@]}"; do
-        [ "$existing" = "$step" ] && return 0
-      done
+      if [ "${#ordered_steps[@]}" -gt 0 ]; then
+        for existing in "${ordered_steps[@]}"; do
+          [ "$existing" = "$step" ] && return 0
+        done
+      fi
 
       ordered_steps+=("$step")
       ordered_plugin_roots+=("$plugin_root")
