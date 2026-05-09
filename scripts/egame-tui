@@ -2522,6 +2522,16 @@ def run_tui() -> int:
         async def action_provision(self) -> None:
             if self.current_instance:
                 instance = self.current_instance
+                state = self.current_status.get("state", {}) if self.current_status else {}
+                provider_state = effective_provider_state(cast(dict[str, Any], state))
+                if provider_state != "running":
+                    command = "start" if provider_state == "stopped" else "up"
+                    code = await self.stream_command(f"provider.{command}", make_args(command, instance), refresh_instance=instance)
+                    self.keep_instance_selected(instance)
+                    if code != 0:
+                        return
+                    await self.refresh_provider_until(instance, "running")
+                    self.keep_instance_selected(instance)
                 await self.stream_command(
                     "instance.provision",
                     make_args("instance.provision", instance),
@@ -2793,7 +2803,6 @@ def run_tui() -> int:
             display_provider_state = effective_provider_state(cast(dict[str, Any], state))
             provider_available = provider_actions_available(cast(dict[str, Any], state))
             provider_busy = display_provider_state == "changing"
-            provider_absent = display_provider_state == "absent"
             self.current_remote_actions = self.installed_package_actions()
 
             busy = self.command_running
@@ -2829,7 +2838,6 @@ def run_tui() -> int:
                     busy
                     or not has_instance
                     or provider_busy
-                    or provider_absent
                     or provision_state == "provisioning"
                 ),
             )
