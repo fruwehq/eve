@@ -1230,7 +1230,7 @@ def run_tui() -> int:
         }
 
         #utility-actions-group {
-            height: 7;
+            height: 8;
         }
 
         #package-actions-group {
