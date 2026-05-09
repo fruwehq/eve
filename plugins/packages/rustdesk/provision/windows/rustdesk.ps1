@@ -17,11 +17,11 @@ Write-Host "Installing RustDesk..."
 # Candidate install locations: SYSTEM profile (Scheduled Task context) and
 # the Administrator user profile (interactive session context).
 $candidateDirs = @(
-  "${env:LOCALAPPDATA}\rustdesk",
-  "C:\Windows\System32\config\systemprofile\AppData\Local\rustdesk",
-  "C:\Users\Administrator\AppData\Local\rustdesk",
   "C:\Program Files\RustDesk",
-  "C:\Program Files (x86)\RustDesk"
+  "C:\Program Files (x86)\RustDesk",
+  "C:\Users\Administrator\AppData\Local\rustdesk",
+  "C:\Windows\System32\config\systemprofile\AppData\Local\rustdesk",
+  "${env:LOCALAPPDATA}\rustdesk"
 )
 
 $rustdeskDir = $null
@@ -103,6 +103,39 @@ if (-not $rustdeskExe) {
   Write-Host "RustDesk installed at $rustdeskDir"
 } else {
   Write-Host "RustDesk already installed at $rustdeskDir. Skipping installer."
+}
+
+$programFilesExe = "C:\Program Files\RustDesk\rustdesk.exe"
+if (-not (Test-Path $programFilesExe)) {
+  Write-Host "Installing RustDesk machine-wide..."
+  Start-Process -FilePath $rustdeskExe -ArgumentList "--silent-install"
+  Start-Sleep -Seconds 20
+}
+
+if (Test-Path $programFilesExe) {
+  $rustdeskExe = $programFilesExe
+  $rustdeskDir = Split-Path $rustdeskExe
+  Write-Host "Using machine-wide RustDesk at $rustdeskExe"
+}
+
+$serviceName = "Rustdesk"
+$service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+if (-not $service) {
+  Write-Host "Installing RustDesk Windows service..."
+  Start-Process -FilePath $rustdeskExe -ArgumentList "--install-service"
+  Start-Sleep -Seconds 20
+  $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+}
+
+if ($service) {
+  Set-Service -Name $serviceName -StartupType Automatic
+  if ($service.Status -ne "Running") {
+    Write-Host "Starting RustDesk Windows service..."
+    Start-Service -Name $serviceName
+    Start-Sleep -Seconds 5
+  }
+} else {
+  Write-Warning "RustDesk Windows service was not found after install-service."
 }
 
 # Put RustDesk on the system PATH so SSH-invoked clients can call `rustdesk` directly
@@ -233,6 +266,16 @@ if ($rustdeskServer -or $rustdeskKey -or $rustdeskPassword) {
     }
   } else {
     Write-Host "RustDesk config already matches desired state -- leaving password/salt intact."
+  }
+}
+
+$service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+if ($service) {
+  Set-Service -Name $serviceName -StartupType Automatic
+  if ($service.Status -ne "Running") {
+    Write-Host "Starting RustDesk Windows service after config update..."
+    Start-Service -Name $serviceName
+    Start-Sleep -Seconds 5
   }
 }
 
