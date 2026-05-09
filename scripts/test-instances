@@ -713,6 +713,49 @@ else
   FAIL=$((FAIL + 1))
 fi
 
+wait_probe="$tmp_overlay_dir/wait-probe"
+cat >"$wait_probe" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+os_family="$1"
+offset="$2"
+[ "$os_family" = "ubuntu" ] || exit 2
+printf 'STATE\t'
+if [ "$offset" -ge 2 ]; then
+  printf 'DONE\n'
+  printf 'LINES\t4\n'
+else
+  printf 'RUNNING\n'
+  printf 'LINES\t2\n'
+fi
+printf 'LAST\t2026-05-09 10:00:00 Running step [0/1] base.sh\n'
+printf '__EGAME_LOG_BEGIN__\n'
+if [ "$offset" -eq 0 ]; then
+  printf '2026-05-09 10:00:00 Running step [0/1] base.sh\n'
+  printf '2026-05-09 10:00:01 apt is streaming\n'
+else
+  printf '2026-05-09 10:00:02 package output continues\n'
+  printf '2026-05-09 10:00:03 Provisioning complete.\n'
+fi
+SH
+chmod +x "$wait_probe"
+wait_out="$(
+  EGAME_INSTANCE_REGISTRY="$FIXTURE" \
+    EGAME_CATALOG_LOCAL="$overlay" \
+    EGAME_WAIT_FOR_PROVISION_PROBE_SCRIPT="$wait_probe" \
+    EGAME_PROVISION_WAIT_POLL_INTERVAL=0 \
+    ./scripts/wait-for-provision dev-a 5
+)"
+if printf '%s\n' "$wait_out" | grep -q '^2026-05-09 10:00:01 apt is streaming$' &&
+  printf '%s\n' "$wait_out" | grep -q '^2026-05-09 10:00:02 package output continues$' &&
+  printf '%s\n' "$wait_out" | grep -q '^Provisioning complete for profile dev-a'; then
+  printf '  [OK] wait-for-provision streams appended remote log lines\n'
+else
+  printf '  [FAIL] wait-for-provision did not stream appended log lines\n' >&2
+  printf '%s\n' "$wait_out" >&2
+  FAIL=$((FAIL + 1))
+fi
+
 tmp_bin_missing="$(mktemp -d "${TMPDIR:-/tmp}/egame-integration-bin-missing.XXXXXX")"
 cat >"$tmp_bin_missing/make" <<'SH'
 #!/usr/bin/env bash

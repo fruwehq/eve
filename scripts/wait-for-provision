@@ -15,35 +15,113 @@ cd "$(git rev-parse --show-toplevel)"
 RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
 OS_FAMILY=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^OS_FAMILY=/{print $2}')
 
-# Each probe returns two lines:
-#   line 1: DONE | RUNNING | FAILED | MISSING
-#   line 2: latest "Running step ..." line from the log (or empty)
+# Each probe returns a small tab-separated header followed by newly appended
+# log lines after __EGAME_LOG_BEGIN__. This keeps the TUI responsive while
+# still showing the real apt/PowerShell output produced by the remote runner.
 #
 # DONE requires "Provisioning complete." to appear AFTER the most recent
 # "Running step" line — `provision` (without clear-state) doesn't wipe the log
 # file, so a stale completion marker from a prior run can otherwise short-
 # circuit the wait while a new run is mid-flight.
-case "$OS_FAMILY" in
-  ubuntu)
-    # shellcheck disable=SC2016 # $log/$HOME are expanded by the remote shell.
-    PROBE='log="$HOME/provision/logs/provision.log"; if [ ! -f "$log" ]; then echo MISSING; exit 0; fi; last_step=$(awk "/Running step / {n=NR} END {print n+0}" "$log"); last_done=$(awk "/Provisioning complete\\./ {n=NR} END {print n+0}" "$log"); last_error=$(awk "/ERROR: step / {n=NR} END {print n+0}" "$log"); if [ "$last_done" -gt "$last_step" ] && [ "$last_done" -gt 0 ]; then echo DONE; elif systemctl is-failed --quiet ephemeral-provision.service 2>/dev/null; then echo FAILED; elif [ "$last_error" -gt "$last_step" ] && [ "$last_error" -gt "$last_done" ]; then echo FAILED; else echo RUNNING; fi; grep -E "Running step |ERROR: step " "$log" | tail -n 1 || true'
-    ;;
-  windows)
-    # shellcheck disable=SC2016 # $log/$lines/$lastStep/$lastDone are remote PowerShell vars.
-    PROBE='$log = "C:\Users\Administrator\provision\logs\provision.log"; if (-not (Test-Path $log)) { "MISSING"; exit 0 }; $lines = Get-Content $log; $lastStep = -1; $lastDone = -1; $lastError = -1; for ($i = 0; $i -lt $lines.Count; $i++) { if ($lines[$i] -match "Running step ") { $lastStep = $i }; if ($lines[$i] -match "Provisioning complete\.") { $lastDone = $i }; if ($lines[$i] -match "ERROR: step ") { $lastError = $i } }; if ($lastDone -gt $lastStep -and $lastDone -ge 0) { "DONE" } elseif ($lastError -gt $lastStep -and $lastError -gt $lastDone) { "FAILED" } else { "RUNNING" }; $last = $lines | Select-String -Pattern "Running step|ERROR: step" | Select-Object -Last 1; if ($last) { $last.Line }'
-    ;;
-  *)
-    echo "wait-for-provision: unknown os_family: $OS_FAMILY" >&2
-    exit 2
-    ;;
-esac
+build_probe() {
+  local offset="$1"
+  case "$OS_FAMILY" in
+    ubuntu)
+      cat <<EOF
+offset=$offset
+log="\$HOME/provision/logs/provision.log"
+if [ ! -f "\$log" ]; then
+  printf 'STATE\tMISSING\nLINES\t0\nLAST\t\n__EGAME_LOG_BEGIN__\n'
+  exit 0
+fi
+line_count=\$(wc -l < "\$log" | tr -d ' ')
+last_step=\$(awk "/Running step / {n=NR} END {print n+0}" "\$log")
+last_done=\$(awk "/Provisioning complete\\./ {n=NR} END {print n+0}" "\$log")
+last_error=\$(awk "/ERROR: step / {n=NR} END {print n+0}" "\$log")
+if [ "\$last_done" -gt "\$last_step" ] && [ "\$last_done" -gt 0 ]; then
+  state=DONE
+elif systemctl is-failed --quiet ephemeral-provision.service 2>/dev/null; then
+  state=FAILED
+elif [ "\$last_error" -gt "\$last_step" ] && [ "\$last_error" -gt "\$last_done" ]; then
+  state=FAILED
+else
+  state=RUNNING
+fi
+last_line=\$(grep -E "Running step |ERROR: step " "\$log" | tail -n 1 || true)
+printf 'STATE\t%s\n' "\$state"
+printf 'LINES\t%s\n' "\$line_count"
+printf 'LAST\t%s\n' "\$last_line"
+printf '__EGAME_LOG_BEGIN__\n'
+if [ "\$line_count" -gt "\$offset" ]; then
+  start=\$((offset + 1))
+  sed -n "\${start},\${line_count}p" "\$log"
+fi
+EOF
+      ;;
+    windows)
+      printf '%s = %s\n' "\$offset" "$offset"
+      cat <<'EOF'
+$tab = [char]9
+$log = "C:\Users\Administrator\provision\logs\provision.log"
+if (-not (Test-Path $log)) {
+  "STATE${tab}MISSING"
+  "LINES${tab}0"
+  "LAST${tab}"
+  "__EGAME_LOG_BEGIN__"
+  exit 0
+}
+$lines = @(Get-Content $log)
+$lineCount = $lines.Count
+$lastStep = -1
+$lastDone = -1
+$lastError = -1
+for ($i = 0; $i -lt $lines.Count; $i++) {
+  if ($lines[$i] -match "Running step ") { $lastStep = $i }
+  if ($lines[$i] -match "Provisioning complete\.") { $lastDone = $i }
+  if ($lines[$i] -match "ERROR: step ") { $lastError = $i }
+}
+if ($lastDone -gt $lastStep -and $lastDone -ge 0) {
+  $state = "DONE"
+} elseif ($lastError -gt $lastStep -and $lastError -gt $lastDone) {
+  $state = "FAILED"
+} else {
+  $state = "RUNNING"
+}
+$last = $lines | Select-String -Pattern "Running step|ERROR: step" | Select-Object -Last 1
+if ($last) { $lastLine = $last.Line } else { $lastLine = "" }
+"STATE${tab}$state"
+"LINES${tab}$lineCount"
+"LAST${tab}$lastLine"
+"__EGAME_LOG_BEGIN__"
+if ($lineCount -gt $offset) {
+  $start = [Math]::Max($offset, 0)
+  for ($i = $start; $i -lt $lineCount; $i++) { $lines[$i] }
+}
+EOF
+      ;;
+    *)
+      echo "wait-for-provision: unknown os_family: $OS_FAMILY" >&2
+      exit 2
+      ;;
+  esac
+}
 
 # Strip leading timestamp ("YYYY-MM-DD HH:MM:SS ") and the redundant
 # "Running step " prefix from a log line, leaving e.g. "[11/12] rustdesk.ps1".
 clean_step() { sed -E -e 's/^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9:]+ //' -e 's/^Running step //'; }
 
+run_probe() {
+  local offset="$1"
+  if [ -n "${EGAME_WAIT_FOR_PROVISION_PROBE_SCRIPT:-}" ]; then
+    "$EGAME_WAIT_FOR_PROVISION_PROBE_SCRIPT" "$OS_FAMILY" "$offset"
+  else
+    ./scripts/instance-ssh "$PROFILE" -- "$(build_probe "$offset")"
+  fi
+}
+
 SECONDS=0
 last_step="(none yet)"
+log_offset=0
 interactive_output=0
 if [ -t 1 ]; then
   interactive_output=1
@@ -63,11 +141,23 @@ while [ "$SECONDS" -lt "$MAX_SECONDS" ]; do
   if [ "$interactive_output" -eq 1 ]; then
     print_status "probing"
   fi
-  if result=$(./scripts/instance-ssh "$PROFILE" -- "$PROBE" 2>/dev/null); then
-    state=$(printf '%s\n' "$result" | sed -n '1p' | tr -d '\r')
-    step_line=$(printf '%s\n' "$result" | sed -n '2p' | tr -d '\r')
+  if result=$(run_probe "$log_offset" 2>/dev/null); then
+    result=$(printf '%s\n' "$result" | tr -d '\r')
+    state=$(printf '%s\n' "$result" | awk -F '\t' '$1 == "STATE" {print $2; exit}')
+    line_count=$(printf '%s\n' "$result" | awk -F '\t' '$1 == "LINES" {print $2; exit}')
+    step_line=$(printf '%s\n' "$result" | awk -F '\t' '$1 == "LAST" {print substr($0, index($0, "\t") + 1); exit}')
+    new_log=$(printf '%s\n' "$result" | sed -n '/^__EGAME_LOG_BEGIN__$/,$p' | sed '1d')
     if [ -n "$step_line" ]; then
       last_step=$(printf '%s' "$step_line" | clean_step)
+    fi
+    if [ -n "$line_count" ] && [ "$line_count" -ge 0 ] 2>/dev/null; then
+      log_offset="$line_count"
+    fi
+    if [ -n "$new_log" ]; then
+      if [ "$interactive_output" -eq 1 ]; then
+        printf "\n"
+      fi
+      printf '%s\n' "$new_log"
     fi
     if [ "$state" = "DONE" ]; then
       if [ "$interactive_output" -eq 1 ]; then
