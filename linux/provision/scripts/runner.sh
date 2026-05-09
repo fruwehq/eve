@@ -29,6 +29,14 @@ log() {
   printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" | tee -a "$LOG_FILE"
 }
 
+line_buffered() {
+  if command -v stdbuf >/dev/null 2>&1; then
+    stdbuf -oL -eL "$@"
+  else
+    "$@"
+  fi
+}
+
 read_step() {
   if command -v jq >/dev/null 2>&1; then
     jq -r '.currentStep' "$STATE_FILE"
@@ -72,7 +80,7 @@ while : ; do
   step="${STEPS[$current]}"
   log "Running step [$current/$((TOTAL - 1))] $(basename "$step")"
 
-  if ! /usr/bin/env bash "$step" 2>&1 | tee -a "$LOG_FILE"; then
+  if ! line_buffered /usr/bin/env bash "$step" 2>&1 | line_buffered tee -a "$LOG_FILE"; then
     log "ERROR: step $(basename "$step") failed"
     exit 1
   fi

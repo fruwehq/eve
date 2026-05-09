@@ -1660,11 +1660,14 @@ def run_tui() -> int:
                     while "\n" in partial_line:
                         line, partial_line = partial_line.split("\n", 1)
                         self.log_line(line)
+                        await asyncio.sleep(0)
                     if len(partial_line) >= 4096:
                         self.log_line(partial_line)
+                        await asyncio.sleep(0)
                         partial_line = ""
                 if partial_line:
                     self.log_line(partial_line)
+                    await asyncio.sleep(0)
                 code = await proc.wait()
                 if code == 0:
                     self.log_line(f"[success]{label} completed.[/]")
