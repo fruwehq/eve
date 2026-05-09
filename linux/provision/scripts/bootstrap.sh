@@ -18,6 +18,9 @@ LOGS_DIR="$PROVISION_ROOT/logs"
 STATE_FILE="$STATE_DIR/state.json"
 
 mkdir -p "$STATE_DIR" "$LOGS_DIR"
+sudo touch "$LOGS_DIR/provision.log"
+sudo chown "$USER:$(id -gn)" "$STATE_DIR" "$LOGS_DIR" "$LOGS_DIR/provision.log"
+chmod u+rw "$LOGS_DIR/provision.log"
 
 if [ ! -f "$STATE_FILE" ]; then
   printf '{"currentStep":0}\n' > "$STATE_FILE"

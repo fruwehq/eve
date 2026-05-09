@@ -26,7 +26,7 @@ OS_FAMILY=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^OS_FAMILY=/{print $2}')
 case "$OS_FAMILY" in
   ubuntu)
     # shellcheck disable=SC2016 # $log/$HOME are expanded by the remote shell.
-    PROBE='log="$HOME/provision/logs/provision.log"; if [ ! -f "$log" ]; then echo MISSING; exit 0; fi; last_step=$(awk "/Running step / {n=NR} END {print n+0}" "$log"); last_done=$(awk "/Provisioning complete\\./ {n=NR} END {print n+0}" "$log"); last_error=$(awk "/ERROR: step / {n=NR} END {print n+0}" "$log"); if [ "$last_done" -gt "$last_step" ] && [ "$last_done" -gt 0 ]; then echo DONE; elif [ "$last_error" -gt "$last_step" ] && [ "$last_error" -gt "$last_done" ]; then echo FAILED; else echo RUNNING; fi; grep -E "Running step |ERROR: step " "$log" | tail -n 1 || true'
+    PROBE='log="$HOME/provision/logs/provision.log"; if [ ! -f "$log" ]; then echo MISSING; exit 0; fi; last_step=$(awk "/Running step / {n=NR} END {print n+0}" "$log"); last_done=$(awk "/Provisioning complete\\./ {n=NR} END {print n+0}" "$log"); last_error=$(awk "/ERROR: step / {n=NR} END {print n+0}" "$log"); if [ "$last_done" -gt "$last_step" ] && [ "$last_done" -gt 0 ]; then echo DONE; elif systemctl is-failed --quiet ephemeral-provision.service 2>/dev/null; then echo FAILED; elif [ "$last_error" -gt "$last_step" ] && [ "$last_error" -gt "$last_done" ]; then echo FAILED; else echo RUNNING; fi; grep -E "Running step |ERROR: step " "$log" | tail -n 1 || true'
     ;;
   windows)
     # shellcheck disable=SC2016 # $log/$lines/$lastStep/$lastDone are remote PowerShell vars.
