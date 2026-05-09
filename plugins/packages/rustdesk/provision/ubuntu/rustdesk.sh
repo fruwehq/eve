@@ -24,7 +24,7 @@ fi
 
 if ! command -v lightdm >/dev/null 2>&1; then
   log "### rustdesk: installing LightDM display manager"
-  printf 'shared/default-x-display-manager select lightdm\n' | sudo debconf-set-selections
+  printf 'lightdm shared/default-x-display-manager select lightdm\n' | sudo debconf-set-selections
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y lightdm
 fi
 
@@ -246,7 +246,7 @@ sudo chattr -i "$HUMAN_HOME/.config/rustdesk/RustDesk2.toml" 2>/dev/null || true
 sudo chattr -i /root/.config/rustdesk/RustDesk2.toml 2>/dev/null || true
 
 # Stop the daemon so it doesn't rewrite the file while we edit it
-sudo systemctl stop rustdesk 2>/dev/null || true
+sudo systemctl stop rustdesk >/dev/null 2>&1 || true
 sudo killall -9 rustdesk 2>/dev/null || true
 sudo systemctl disable --now rustdesk-vnc-server.service >/dev/null 2>&1 || true
 sudo rm -f "$HUMAN_HOME/.config/systemd/user/rustdesk-vnc-server.service"
