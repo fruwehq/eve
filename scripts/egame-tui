@@ -1586,6 +1586,8 @@ def run_tui() -> int:
             self.park_terminal_cursor()
 
         def log_line(self, message: str) -> None:
+            if not message.strip():
+                return
             output = self.query_one("#output", TextArea)
             should_autoscroll = not output.has_focus or output.is_vertical_scroll_end
             lines = output.document.lines
@@ -1653,7 +1655,8 @@ def run_tui() -> int:
                     chunk = await proc.stdout.read(4096)
                     if not chunk:
                         break
-                    partial_line += chunk.decode(errors="replace").replace("\r", "\n")
+                    text = chunk.decode(errors="replace").replace("\r\n", "\n").replace("\r", "\n")
+                    partial_line += text
                     while "\n" in partial_line:
                         line, partial_line = partial_line.split("\n", 1)
                         self.log_line(line)
