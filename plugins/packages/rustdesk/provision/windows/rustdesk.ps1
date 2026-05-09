@@ -186,6 +186,42 @@ function Escape-ForSingleQuotedPowerShell {
   return $Value.Replace("'", "''")
 }
 
+function Get-PasswordMarkerValue {
+  param([Parameter(Mandatory = $true)][string]$Password)
+
+  $hashBytes = [System.Security.Cryptography.SHA256]::Create().ComputeHash([System.Text.Encoding]::UTF8.GetBytes($Password))
+  $hash = ([System.BitConverter]::ToString($hashBytes)).Replace('-', '').ToLowerInvariant()
+  return "v2:$hash"
+}
+
+function Set-RustDeskPasswordIfNeeded {
+  param(
+    [Parameter(Mandatory = $true)][string]$Exe,
+    [Parameter(Mandatory = $true)][string]$Password,
+    [Parameter(Mandatory = $true)][string]$MarkerDir,
+    [Parameter(Mandatory = $true)][string]$Context
+  )
+
+  if (-not (Test-Path $MarkerDir)) {
+    New-Item -ItemType Directory -Path $MarkerDir -Force | Out-Null
+  }
+
+  $passwordMarker = Join-Path $MarkerDir 'egame-password.sha256'
+  $desired = Get-PasswordMarkerValue -Password $Password
+  $existing = if (Test-Path $passwordMarker) { (Get-Content $passwordMarker -Raw).Trim() } else { '' }
+  if ($existing -eq $desired) {
+    Write-Host "RustDesk permanent password already applied for $Context."
+    return
+  }
+
+  Write-Host "Setting RustDesk permanent password for $Context..."
+  $output = & $Exe --password $Password 2>&1 | Out-String
+  if ($null -ne $LASTEXITCODE -and $LASTEXITCODE -ne 0) {
+    throw "RustDesk --password failed for ${Context}: $output"
+  }
+  Set-Content -Path $passwordMarker -Value $desired -Encoding ASCII -NoNewline
+}
+
 Write-Host "Waiting for RustDesk process..."
 for ($i = 1; $i -le 15; $i++) {
   $proc = Get-Process rustdesk -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -198,11 +234,9 @@ for ($i = 1; $i -le 15; $i++) {
 # config dir. Write the TOML directly into every plausible config location so
 # whichever the running process uses gets the right rendezvous_server/key/password.
 #
-# Idempotency note: the password+salt hash gets a fresh salt every time `--password`
-# runs, which invalidates whatever per-peer hash the local RustDesk client cached on
-# its last successful connect -- meaning the local "Remember password" stops working
-# and the user gets prompted again. So we only rewrite config / reset password when
-# the desired settings actually differ from what's already on disk.
+# Password note: RustDesk stores the permanent password separately from
+# RustDesk2.toml. Use a versioned local marker so provisioning can force a
+# one-time password reset when this script's password handling changes.
 if ($rustdeskServer -or $rustdeskKey -or $rustdeskPassword) {
   $tomlBuilder = New-Object System.Text.StringBuilder
   if ($rustdeskServer) {
@@ -258,11 +292,11 @@ if ($rustdeskServer -or $rustdeskKey -or $rustdeskPassword) {
     Start-Sleep -Seconds 3
 
     if ($rustdeskPassword) {
-      # Setting the permanent password generates a fresh salt server-side, which
-      # is why we only do this when the config changed (i.e. first install or a
-      # genuine password rotation) -- not on every reprovision.
-      Write-Host "Setting permanent password via CLI..."
-      & $rustdeskExe --password $rustdeskPassword | Out-Null
+      Set-RustDeskPasswordIfNeeded `
+        -Exe $rustdeskExe `
+        -Password $rustdeskPassword `
+        -MarkerDir "C:\Windows\System32\config\systemprofile\AppData\Roaming\RustDesk" `
+        -Context "SYSTEM"
     }
   } else {
     Write-Host "RustDesk config already matches desired state -- leaving password/salt intact."
@@ -320,11 +354,13 @@ if (Test-Path `$envFile) {
       if (-not (Test-Path `$markerDir)) { New-Item -ItemType Directory -Path `$markerDir -Force | Out-Null }
       `$passwordMarker = Join-Path `$markerDir 'egame-password.sha256'
       `$hashBytes = [System.Security.Cryptography.SHA256]::Create().ComputeHash([System.Text.Encoding]::UTF8.GetBytes(`$password))
-      `$hash = ([System.BitConverter]::ToString(`$hashBytes)).Replace('-', '').ToLowerInvariant()
+      `$hash = 'v2:' + ([System.BitConverter]::ToString(`$hashBytes)).Replace('-', '').ToLowerInvariant()
       `$existing = if (Test-Path `$passwordMarker) { (Get-Content `$passwordMarker -Raw).Trim() } else { '' }
       if (`$existing -ne `$hash) {
-        & `$exe --password `$password | Out-Null
-        Set-Content -Path `$passwordMarker -Value `$hash -Encoding ASCII -NoNewline
+        `$output = & `$exe --password `$password 2>&1 | Out-String
+        if (`$null -eq `$LASTEXITCODE -or `$LASTEXITCODE -eq 0) {
+          Set-Content -Path `$passwordMarker -Value `$hash -Encoding ASCII -NoNewline
+        }
       }
     }
   } catch {
