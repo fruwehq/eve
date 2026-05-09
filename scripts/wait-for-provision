@@ -9,7 +9,7 @@ set -euo pipefail
 
 PROFILE="${1:?Usage: scripts/wait-for-provision <profile> [max-wait-seconds]}"
 MAX_SECONDS=${2:-3600}
-POLL_INTERVAL=10
+POLL_INTERVAL=${EGAME_PROVISION_WAIT_POLL_INTERVAL:-5}
 cd "$(git rev-parse --show-toplevel)"
 
 RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
@@ -44,14 +44,25 @@ clean_step() { sed -E -e 's/^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9:]+ //' -e 's/^Runni
 
 SECONDS=0
 last_step="(none yet)"
+interactive_output=0
+if [ -t 1 ]; then
+  interactive_output=1
+fi
 
 print_status() {
-  printf "\r[%ds/%ds] %s — last step: %s                                                       " \
-    "$SECONDS" "$MAX_SECONDS" "$1" "$last_step"
+  if [ "$interactive_output" -eq 1 ]; then
+    printf "\r[%ds/%ds] %s — last step: %s                                                       " \
+      "$SECONDS" "$MAX_SECONDS" "$1" "$last_step"
+  else
+    printf "[%ds/%ds] %s — last step: %s\n" \
+      "$SECONDS" "$MAX_SECONDS" "$1" "$last_step"
+  fi
 }
 
 while [ "$SECONDS" -lt "$MAX_SECONDS" ]; do
-  print_status "probing"
+  if [ "$interactive_output" -eq 1 ]; then
+    print_status "probing"
+  fi
   if result=$(./scripts/instance-ssh "$PROFILE" -- "$PROBE" 2>/dev/null); then
     state=$(printf '%s\n' "$result" | sed -n '1p' | tr -d '\r')
     step_line=$(printf '%s\n' "$result" | sed -n '2p' | tr -d '\r')
@@ -59,7 +70,11 @@ while [ "$SECONDS" -lt "$MAX_SECONDS" ]; do
       last_step=$(printf '%s' "$step_line" | clean_step)
     fi
     if [ "$state" = "DONE" ]; then
-      printf "\rProvisioning complete for profile %s (%ds, last step: %s)                                       \n" "$PROFILE" "$SECONDS" "$last_step"
+      if [ "$interactive_output" -eq 1 ]; then
+        printf "\rProvisioning complete for profile %s (%ds, last step: %s)                                       \n" "$PROFILE" "$SECONDS" "$last_step"
+      else
+        printf "Provisioning complete for profile %s (%ds, last step: %s)\n" "$PROFILE" "$SECONDS" "$last_step"
+      fi
       exit 0
     fi
     print_status "connected"
