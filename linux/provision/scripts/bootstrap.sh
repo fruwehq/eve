@@ -24,8 +24,7 @@ if [ ! -f "$STATE_FILE" ]; then
 fi
 
 UNIT_PATH="/etc/systemd/system/ephemeral-provision.service"
-if [ ! -f "$UNIT_PATH" ]; then
-  sudo tee "$UNIT_PATH" >/dev/null <<EOF
+sudo tee "$UNIT_PATH" >/dev/null <<EOF
 [Unit]
 Description=Ephemeral VM provisioning runner
 After=network-online.target
@@ -43,8 +42,8 @@ StandardError=append:$LOGS_DIR/provision.log
 [Install]
 WantedBy=multi-user.target
 EOF
-  sudo systemctl daemon-reload
-  sudo systemctl enable ephemeral-provision.service >/dev/null
-fi
+sudo systemctl daemon-reload
+sudo systemctl enable ephemeral-provision.service >/dev/null
 
-exec /usr/bin/env bash "$SCRIPTS_DIR/runner.sh"
+sudo systemctl restart --no-block ephemeral-provision.service
+echo "Provisioning runner started via systemd."

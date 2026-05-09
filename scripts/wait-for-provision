@@ -16,7 +16,7 @@ RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
 OS_FAMILY=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^OS_FAMILY=/{print $2}')
 
 # Each probe returns two lines:
-#   line 1: DONE | RUNNING | MISSING
+#   line 1: DONE | RUNNING | FAILED | MISSING
 #   line 2: latest "Running step ..." line from the log (or empty)
 #
 # DONE requires "Provisioning complete." to appear AFTER the most recent
@@ -26,11 +26,11 @@ OS_FAMILY=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^OS_FAMILY=/{print $2}')
 case "$OS_FAMILY" in
   ubuntu)
     # shellcheck disable=SC2016 # $log/$HOME are expanded by the remote shell.
-    PROBE='log="$HOME/provision/logs/provision.log"; if [ ! -f "$log" ]; then echo MISSING; exit 0; fi; last_step=$(awk "/Running step / {n=NR} END {print n+0}" "$log"); last_done=$(awk "/Provisioning complete\\./ {n=NR} END {print n+0}" "$log"); if [ "$last_done" -gt "$last_step" ] && [ "$last_done" -gt 0 ]; then echo DONE; else echo RUNNING; fi; grep -E "Running step " "$log" | tail -n 1 || true'
+    PROBE='log="$HOME/provision/logs/provision.log"; if [ ! -f "$log" ]; then echo MISSING; exit 0; fi; last_step=$(awk "/Running step / {n=NR} END {print n+0}" "$log"); last_done=$(awk "/Provisioning complete\\./ {n=NR} END {print n+0}" "$log"); last_error=$(awk "/ERROR: step / {n=NR} END {print n+0}" "$log"); if [ "$last_done" -gt "$last_step" ] && [ "$last_done" -gt 0 ]; then echo DONE; elif [ "$last_error" -gt "$last_step" ] && [ "$last_error" -gt "$last_done" ]; then echo FAILED; else echo RUNNING; fi; grep -E "Running step |ERROR: step " "$log" | tail -n 1 || true'
     ;;
   windows)
     # shellcheck disable=SC2016 # $log/$lines/$lastStep/$lastDone are remote PowerShell vars.
-    PROBE='$log = "C:\Users\Administrator\provision\logs\provision.log"; if (-not (Test-Path $log)) { "MISSING"; exit 0 }; $lines = Get-Content $log; $lastStep = -1; $lastDone = -1; for ($i = 0; $i -lt $lines.Count; $i++) { if ($lines[$i] -match "Running step ") { $lastStep = $i }; if ($lines[$i] -match "Provisioning complete\.") { $lastDone = $i } }; if ($lastDone -gt $lastStep -and $lastDone -ge 0) { "DONE" } else { "RUNNING" }; $last = $lines | Select-String -Pattern "Running step" | Select-Object -Last 1; if ($last) { $last.Line }'
+    PROBE='$log = "C:\Users\Administrator\provision\logs\provision.log"; if (-not (Test-Path $log)) { "MISSING"; exit 0 }; $lines = Get-Content $log; $lastStep = -1; $lastDone = -1; $lastError = -1; for ($i = 0; $i -lt $lines.Count; $i++) { if ($lines[$i] -match "Running step ") { $lastStep = $i }; if ($lines[$i] -match "Provisioning complete\.") { $lastDone = $i }; if ($lines[$i] -match "ERROR: step ") { $lastError = $i } }; if ($lastDone -gt $lastStep -and $lastDone -ge 0) { "DONE" } elseif ($lastError -gt $lastStep -and $lastError -gt $lastDone) { "FAILED" } else { "RUNNING" }; $last = $lines | Select-String -Pattern "Running step|ERROR: step" | Select-Object -Last 1; if ($last) { $last.Line }'
     ;;
   *)
     echo "wait-for-provision: unknown os_family: $OS_FAMILY" >&2
@@ -76,6 +76,12 @@ while [ "$SECONDS" -lt "$MAX_SECONDS" ]; do
         printf "Provisioning complete for profile %s (%ds, last step: %s)\n" "$PROFILE" "$SECONDS" "$last_step"
       fi
       exit 0
+    fi
+    if [ "$state" = "FAILED" ]; then
+      printf "\n"
+      echo "Provisioning failed for profile $PROFILE (${SECONDS}s)" >&2
+      echo "Last seen step: $last_step" >&2
+      exit 1
     fi
     print_status "connected"
   else

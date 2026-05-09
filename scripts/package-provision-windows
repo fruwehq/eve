@@ -223,17 +223,17 @@ reset_cmd="if (Test-Path '$remote_step_dir') { Remove-Item -Recurse -Force '$rem
 if [ "$needs_env" -eq 1 ]; then
   reset_cmd="$reset_cmd ; New-Item -ItemType Directory -Force '$remote_state_dir' | Out-Null"
 fi
-./scripts/instance-ssh "$INSTANCE_NAME" -- "$reset_cmd"
-./scripts/instance-ssh "$INSTANCE_NAME" --scp "$STAGE/scripts/lib" "/C:/Users/Administrator/provision/scripts-package/"
+./scripts/ssh-retry "prepare windows package provision directory" ./scripts/instance-ssh "$INSTANCE_NAME" -- "$reset_cmd"
+./scripts/ssh-retry "upload windows package lib" ./scripts/instance-ssh "$INSTANCE_NAME" --scp "$STAGE/scripts/lib" "/C:/Users/Administrator/provision/scripts-package/"
 if [ -d "$STAGE/scripts/templates" ]; then
-  ./scripts/instance-ssh "$INSTANCE_NAME" --scp "$STAGE/scripts/templates" "/C:/Users/Administrator/provision/scripts-package/"
+  ./scripts/ssh-retry "upload windows package templates" ./scripts/instance-ssh "$INSTANCE_NAME" --scp "$STAGE/scripts/templates" "/C:/Users/Administrator/provision/scripts-package/"
 fi
 for step in "${steps[@]}"; do
   step_file=$(basename "$step")
-  ./scripts/instance-ssh "$INSTANCE_NAME" --scp "$STAGE/scripts/steps/$step_file" "/C:/Users/Administrator/provision/scripts-package/steps/$step_file"
+  ./scripts/ssh-retry "upload windows package step $step_file" ./scripts/instance-ssh "$INSTANCE_NAME" --scp "$STAGE/scripts/steps/$step_file" "/C:/Users/Administrator/provision/scripts-package/steps/$step_file"
 done
 if [ "$needs_env" -eq 1 ]; then
-  ./scripts/instance-ssh "$INSTANCE_NAME" --scp "$STAGE/state/env.json" "/C:/Users/Administrator/provision/state/env.json"
+  ./scripts/ssh-retry "upload windows package env.json" ./scripts/instance-ssh "$INSTANCE_NAME" --scp "$STAGE/state/env.json" "/C:/Users/Administrator/provision/state/env.json"
 fi
 
 for step in "${steps[@]}"; do

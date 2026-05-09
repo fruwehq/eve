@@ -75,6 +75,10 @@ else
   [ -n "$IP" ] || { echo "instance-ssh: could not resolve IP for $PROFILE" >&2; exit 1; }
 fi
 
+WORKDIR="$(egame_instance_workdir "$PROFILE")"
+mkdir -p "$WORKDIR/ssh"
+KNOWN_HOSTS_FILE="$WORKDIR/ssh/known_hosts"
+
 KEY_FILE="${SSH_PUBLIC_KEY_FILE:-}"
 if [ -n "$KEY_FILE" ] && [ "${KEY_FILE%.pub}" != "$KEY_FILE" ]; then
   PRIV_KEY="${KEY_FILE%.pub}"
@@ -84,6 +88,7 @@ fi
 
 SSH_OPTS=(
   -o StrictHostKeyChecking=no
+  -o UserKnownHostsFile="$KNOWN_HOSTS_FILE"
   -o ConnectTimeout=10
   -o ConnectionAttempts=1
   -o ServerAliveInterval=10

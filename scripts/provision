@@ -140,13 +140,15 @@ EOF
 
     echo "[provision] uploading linux/provision/ to remote"
     # Remote paths are relative to $HOME (SFTP/SCP default) to avoid shell-expansion pitfalls.
-    ./scripts/instance-ssh "$PROFILE" -- 'rm -rf ~/provision/state ~/provision/scripts && mkdir -p ~/provision/state'
-    ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/scripts" 'provision/'
-    ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/state/bundle_packages" 'provision/state/'
-    ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/state/env" 'provision/state/'
-    ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/state/steps.list" 'provision/state/'
+    ./scripts/ssh-retry "prepare linux provision directory" ./scripts/instance-ssh "$PROFILE" -- 'rm -rf ~/provision/state ~/provision/scripts && mkdir -p ~/provision/state'
+    ./scripts/ssh-retry "upload linux scripts" ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/scripts" 'provision/'
+    ./scripts/ssh-retry "upload linux bundle package list" ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/state/bundle_packages" 'provision/state/'
+    ./scripts/ssh-retry "upload linux environment" ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/state/env" 'provision/state/'
+    ./scripts/ssh-retry "upload linux step list" ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/state/steps.list" 'provision/state/'
     echo "[provision] running bootstrap.sh"
-    ./scripts/instance-ssh "$PROFILE" -- 'chmod +x ~/provision/scripts/bootstrap.sh ~/provision/scripts/runner.sh ~/provision/scripts/steps/*.sh ~/provision/scripts/lib/*.sh && ~/provision/scripts/bootstrap.sh'
+    ./scripts/ssh-retry "start linux provisioning runner" ./scripts/instance-ssh "$PROFILE" -- 'chmod +x ~/provision/scripts/bootstrap.sh ~/provision/scripts/runner.sh ~/provision/scripts/steps/*.sh ~/provision/scripts/lib/*.sh && ~/provision/scripts/bootstrap.sh'
+    echo "[provision] waiting for linux provisioning to finish (polling remote log every ${EGAME_PROVISION_WAIT_POLL_INTERVAL:-5}s)"
+    ./scripts/wait-for-provision "$PROFILE"
     ;;
   windows)
     # Windows password: env var override, else terraform output (vultr only).
@@ -229,9 +231,9 @@ EOF
     echo "[provision] uploading windows/provision/ to remote"
     # Clear scripts AND state — without state reset, currentStep can outrun the
     # available step files when new steps are added, silently skipping them.
-    ./scripts/instance-ssh "$PROFILE" -- 'New-Item -ItemType Directory -Force C:\Users\Administrator\provision | Out-Null; if (Test-Path "C:\Users\Administrator\provision\scripts") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\scripts" }; if (Test-Path "C:\Users\Administrator\provision\state") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\state" }; New-Item -ItemType Directory -Force C:\Users\Administrator\provision\state | Out-Null'
-    ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/provision" '/C:/Users/Administrator/'
-    ./scripts/instance-ssh "$PROFILE" --scp ./tmp/env.json '/C:/Users/Administrator/provision/state/env.json'
+    ./scripts/ssh-retry "prepare windows provision directory" ./scripts/instance-ssh "$PROFILE" -- 'New-Item -ItemType Directory -Force C:\Users\Administrator\provision | Out-Null; if (Test-Path "C:\Users\Administrator\provision\scripts") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\scripts" }; if (Test-Path "C:\Users\Administrator\provision\state") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\state" }; New-Item -ItemType Directory -Force C:\Users\Administrator\provision\state | Out-Null'
+    ./scripts/ssh-retry "upload windows provision tree" ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/provision" '/C:/Users/Administrator/'
+    ./scripts/ssh-retry "upload windows env.json" ./scripts/instance-ssh "$PROFILE" --scp ./tmp/env.json '/C:/Users/Administrator/provision/state/env.json'
     echo "[provision] running bootstrap.ps1"
     # The Windows runner may trigger a reboot mid-step, which drops the SSH
     # connection (exit 255). The Scheduled Task resumes the runner after

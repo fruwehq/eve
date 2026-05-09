@@ -172,10 +172,10 @@ export TIMEZONE="$_HOST_TZ"
 EOF
 
 echo "[package-provision] uploading linux/provision scripts for package=$PACKAGE"
-./scripts/instance-ssh "$INSTANCE_NAME" -- 'rm -rf ~/provision/scripts && mkdir -p ~/provision/state ~/provision/logs ~/provision/downloads'
-./scripts/instance-ssh "$INSTANCE_NAME" --scp "$STAGE/scripts" 'provision/'
-./scripts/instance-ssh "$INSTANCE_NAME" --scp "$STAGE/state/bundle_packages" 'provision/state/'
-./scripts/instance-ssh "$INSTANCE_NAME" --scp "$STAGE/state/env" 'provision/state/'
+./scripts/ssh-retry "prepare linux package provision directory" ./scripts/instance-ssh "$INSTANCE_NAME" -- 'rm -rf ~/provision/scripts && mkdir -p ~/provision/state ~/provision/logs ~/provision/downloads'
+./scripts/ssh-retry "upload linux package scripts" ./scripts/instance-ssh "$INSTANCE_NAME" --scp "$STAGE/scripts" 'provision/'
+./scripts/ssh-retry "upload linux package bundle list" ./scripts/instance-ssh "$INSTANCE_NAME" --scp "$STAGE/state/bundle_packages" 'provision/state/'
+./scripts/ssh-retry "upload linux package environment" ./scripts/instance-ssh "$INSTANCE_NAME" --scp "$STAGE/state/env" 'provision/state/'
 
 remote_steps=""
 for step in "${steps[@]}"; do
