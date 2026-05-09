@@ -1571,7 +1571,9 @@ def run_tui() -> int:
         def log_line(self, message: str) -> None:
             output = self.query_one("#output", TextArea)
             should_autoscroll = not output.has_focus or output.is_vertical_scroll_end
-            output.load_text(output.text + plain_log_line(message) + "\n")
+            lines = output.document.lines
+            location = (len(lines) - 1, len(lines[-1]) if lines else 0)
+            output.insert(plain_log_line(message) + "\n", location=location)
             if should_autoscroll:
                 output.scroll_end(animate=False, force=True)
             self.park_terminal_cursor()
@@ -1629,11 +1631,20 @@ def run_tui() -> int:
                 )
                 self.current_process = proc
                 assert proc.stdout is not None
+                partial_line = ""
                 while True:
-                    line = await proc.stdout.readline()
-                    if not line:
+                    chunk = await proc.stdout.read(4096)
+                    if not chunk:
                         break
-                    self.log_line(line.decode(errors="replace").rstrip())
+                    partial_line += chunk.decode(errors="replace").replace("\r", "\n")
+                    while "\n" in partial_line:
+                        line, partial_line = partial_line.split("\n", 1)
+                        self.log_line(line)
+                    if len(partial_line) >= 4096:
+                        self.log_line(partial_line)
+                        partial_line = ""
+                if partial_line:
+                    self.log_line(partial_line)
                 code = await proc.wait()
                 if code == 0:
                     self.log_line(f"[success]{label} completed.[/]")
