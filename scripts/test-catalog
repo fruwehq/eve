@@ -20,6 +20,7 @@ if printf '%s\n' "$catalog_options_json" |
     all(.bundles[]; .id != "desktop-rustdesk-vnc" and .id != "desktop-vnc" and .id != "remote-rdp" and .id != "remote-waypipe" and .id != "dev-ai-arm64") and
     any(.packages[]; .id == "codex-cli" and .supports.os_families == ["ubuntu"]) and
     any(.packages[]; .id == "xpra" and .supports.ubuntu_versions == ["22.04", "24.04"]) and
+    any(.packages[]; .id == "rdp" and .supports.os_families == ["ubuntu", "windows"] and .installable_os_families == ["ubuntu"]) and
     any(.packages[]; .id == "steam" and .supports.arches == ["amd64"])
   ' >/dev/null; then
   printf '  [OK] catalog-options emits provider/platform/content choices with package support metadata\n'

@@ -163,12 +163,14 @@ packages = catalog["packages"].map do |package|
   supports = plugin["supports"].is_a?(Hash) ? plugin["supports"] : {}
   actions = plugin["actions"].is_a?(Array) ? plugin["actions"] : []
   install = plugin["install"].is_a?(Hash) ? plugin["install"] : nil
+  installable_os_families = install ? install.keys : []
 
   {
     "id" => package["id"],
     "display_name" => plugin["display_name"] || package["id"],
     "supports" => supports,
     "installable" => !install.nil?,
+    "installable_os_families" => installable_os_families,
     "actions" => actions
   }
 end

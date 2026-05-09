@@ -777,6 +777,23 @@ def run_tui() -> int:
         def package_supported(self, package_id: str) -> bool:
             return self.support_reason(package_id) is None
 
+        def package_installable_on_platform(self, package_id: str) -> bool:
+            platform_choice = self.selected_platform()
+            os_family = str(platform_choice.get("os_family") or "")
+            package = self.package_map.get(package_id, {})
+            installable_os_families = package.get("installable_os_families", [])
+            if isinstance(installable_os_families, list):
+                return os_family in [str(value) for value in installable_os_families]
+            return False
+
+        def package_select_reason(self, package_id: str) -> str | None:
+            reason = self.support_reason(package_id)
+            if reason:
+                return reason
+            if not self.package_installable_on_platform(package_id):
+                return "native action only on this OS"
+            return None
+
         def bundle_support_reason(self, bundle_id: str) -> str | None:
             for package_id in self.bundle_includes(bundle_id):
                 reason = self.support_reason(package_id)
@@ -789,7 +806,7 @@ def run_tui() -> int:
 
         def selected_packages(self) -> list[str]:
             selected = self.query_one("#package-select", SelectionList).selected
-            return [str(package) for package in selected if self.package_supported(str(package))]
+            return [str(package) for package in selected if self.package_installable_on_platform(str(package))]
 
         def selected_bundles(self) -> list[str]:
             selected = self.query_one("#bundle-select", SelectionList).selected
@@ -858,7 +875,7 @@ def run_tui() -> int:
             package_list = self.query_one("#package-select", SelectionList)
             bundled = set(self.bundled_packages())
             selected = set(self.selected_packages())
-            reasons = {package_id: self.support_reason(package_id) for package_id in self.package_ids}
+            reasons = {package_id: self.package_select_reason(package_id) for package_id in self.package_ids}
             signature = (
                 self.selected_platform_id,
                 tuple(sorted(bundled)),
@@ -2882,10 +2899,11 @@ def run_tui() -> int:
             package = self.package_entry()
             has_package = package is not None
             supported = bool(package.get("supported")) if package else False
+            installable = bool(package.get("installable")) if package else False
             selected = bool(package.get("selected")) if package else False
             selected_by = package.get("selected_by", []) if package else []
             directly_selected = isinstance(selected_by, list) and "direct" in selected_by
-            package_disabled = busy or not has_instance or not has_package or not supported
+            package_disabled = busy or not has_instance or not has_package or not supported or not installable
 
             self.set_button("package-status", disabled=package_disabled)
             self.set_button("package-select", disabled=package_disabled or selected)
