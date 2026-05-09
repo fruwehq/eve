@@ -119,12 +119,12 @@ if ./scripts/instance-create \
   --init ssh-ubuntu-cloud-init \
   --location tokyo \
   --bundles desktop-streaming,dev-ai \
-  --packages gnome-desktop \
+  --packages macos-desktop-theme \
   --disk-gb 64 \
   --memory-mb 4096 >/dev/null; then
   if ./scripts/instance-resolve --registry "$tmp_registry" --instance test-dev --validate >/dev/null &&
     ./scripts/instance-resolve --registry "$tmp_registry" --instance test-dev --emit json |
-      jq -e '.composition.packages == ["gnome-desktop"] and (.bundle_packages | index("gnome-desktop")) and .package_sources["gnome-desktop"] == ["direct"]' >/dev/null; then
+      jq -e '.composition.packages == ["macos-desktop-theme"] and (.bundle_packages | index("macos-desktop-theme")) and .package_sources["macos-desktop-theme"] == ["direct"]' >/dev/null; then
     printf '  [OK] create valid instance\n'
   else
     printf '  [FAIL] created instance did not validate\n' >&2
@@ -198,12 +198,12 @@ else
   FAIL=$((FAIL + 1))
 fi
 
-if EGAME_INSTANCE_REGISTRY="$tmp_registry" make package.unselect INSTANCE=test-dev PACKAGE=gnome-desktop >/dev/null &&
+if EGAME_INSTANCE_REGISTRY="$tmp_registry" make package.unselect INSTANCE=test-dev PACKAGE=macos-desktop-theme >/dev/null &&
   ! ./scripts/instance-resolve --registry "$tmp_registry" --instance test-dev --emit json |
-    jq -e '.bundle_packages | index("gnome-desktop")' >/dev/null &&
-  EGAME_INSTANCE_REGISTRY="$tmp_registry" make package.select INSTANCE=test-dev PACKAGE=gnome-desktop >/dev/null &&
+    jq -e '.bundle_packages | index("macos-desktop-theme")' >/dev/null &&
+  EGAME_INSTANCE_REGISTRY="$tmp_registry" make package.select INSTANCE=test-dev PACKAGE=macos-desktop-theme >/dev/null &&
   ./scripts/instance-resolve --registry "$tmp_registry" --instance test-dev --emit json |
-    jq -e '.composition.packages == ["gnome-desktop"] and (.bundle_packages | index("gnome-desktop")) and .package_sources["gnome-desktop"] == ["direct"]' >/dev/null; then
+    jq -e '.composition.packages == ["macos-desktop-theme"] and (.bundle_packages | index("macos-desktop-theme")) and .package_sources["macos-desktop-theme"] == ["direct"]' >/dev/null; then
   printf '  [OK] package selection updates direct instance packages\n'
 else
   printf '  [FAIL] package selection updates direct instance packages\n' >&2
@@ -216,7 +216,7 @@ if EGAME_INSTANCE_REGISTRY="$tmp_registry" make bundle.unselect INSTANCE=test-de
     jq -e '(.composition.bundles == ["desktop-streaming"]) and (.bundle_packages | index("docker") | not)' >/dev/null &&
   EGAME_INSTANCE_REGISTRY="$tmp_registry" make bundle.select INSTANCE=test-dev BUNDLE=desktop-gnome >/dev/null &&
   ./scripts/instance-resolve --registry "$tmp_registry" --instance test-dev --emit json |
-    jq -e '(.composition.bundles | index("desktop-gnome")) and (.bundle_packages | index("gnome-desktop")) and (.package_sources["gnome-desktop"] | index("direct")) and (.package_sources["gnome-desktop"] | index("bundle:desktop-gnome"))' >/dev/null; then
+    jq -e '(.composition.bundles | index("desktop-gnome")) and (.bundle_packages | index("gnome-desktop")) and (.package_sources["gnome-desktop"] | index("bundle:desktop-streaming")) and (.package_sources["gnome-desktop"] | index("bundle:desktop-gnome"))' >/dev/null; then
   printf '  [OK] bundle selection updates instance bundles\n'
 else
   printf '  [FAIL] bundle selection updates instance bundles\n' >&2

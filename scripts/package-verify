@@ -1,0 +1,247 @@
+#!/usr/bin/env bash
+# Live package smoke verification for one concrete instance.
+
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+usage() {
+  cat >&2 <<'USAGE'
+Usage: scripts/package-verify --instance <name> [--package <id>]
+
+Verifies selected package plugins with lightweight live probes.
+USAGE
+}
+
+INSTANCE=""
+PACKAGE=""
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --instance)
+      INSTANCE="${2:-}"
+      shift 2
+      ;;
+    --package)
+      PACKAGE="${2:-}"
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      usage
+      exit 2
+      ;;
+  esac
+done
+
+if [ -z "$INSTANCE" ]; then
+  usage
+  exit 2
+fi
+
+PATHS_JSON=$(./scripts/instance-paths --instance "$INSTANCE" --emit json)
+OVERLAY=$(printf '%s' "$PATHS_JSON" | jq -r '.INSTANCE_OVERLAY_PATH')
+mkdir -p "$(dirname "$OVERLAY")"
+./scripts/instance-profile-overlay --instance "$INSTANCE" --output "$OVERLAY" >/dev/null
+export EGAME_CATALOG_LOCAL="$OVERLAY"
+export EGAME_INSTANCE_NAME="$INSTANCE"
+
+RESOLVED_JSON=$(./scripts/instance-resolve --instance "$INSTANCE" --emit json)
+OS_FAMILY=$(printf '%s' "$RESOLVED_JSON" | jq -r '.os.family')
+RESOLVED_ENV=$(./scripts/profile-resolve --profile "$INSTANCE" --emit env 2>/dev/null || true)
+RESOLVED_VM_USER=$(printf '%s\n' "$RESOLVED_ENV" | awk -F= '/^VM_USER_NAME=/{print $2}')
+RESOLVED_SSH_USER=$(printf '%s\n' "$RESOLVED_ENV" | awk -F= '/^SSH_USER=/{print $2}')
+HUMAN_USER="${RESOLVED_VM_USER:-${VM_USER_NAME:-${RESOLVED_SSH_USER:-}}}"
+
+PACKAGE_LIST=$(./scripts/package-list --instance "$INSTANCE" --json)
+if [ -n "$PACKAGE" ]; then
+  PACKAGES=$(printf '%s' "$PACKAGE_LIST" | jq -r --arg package "$PACKAGE" '.packages[] | select(.id == $package) | .id')
+  if [ -z "$PACKAGES" ]; then
+    echo "package.verify: unknown package for $INSTANCE: $PACKAGE" >&2
+    exit 2
+  fi
+else
+  PACKAGES=$(printf '%s' "$PACKAGE_LIST" | jq -r '.packages[] | select(.selected and .supported) | .id')
+fi
+
+if [ -z "$PACKAGES" ]; then
+  echo "No selected supported packages to verify for $INSTANCE."
+  exit 0
+fi
+
+SSH_CMD=(./scripts/instance-ssh "$INSTANCE" --)
+failures=0
+PACKAGE_STATUS_DETAILS=""
+
+pass() {
+  printf 'ok   %-14s %s\n' "$1" "$2"
+}
+
+fail() {
+  printf 'fail %-14s %s\n' "$1" "$2"
+  failures=$((failures + 1))
+}
+
+remote_check() {
+  local command="$1"
+  "${SSH_CMD[@]}" "$command" >/dev/null 2>&1
+}
+
+shell_quote() {
+  printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+}
+
+status_for_package() {
+  local package="$1"
+  local output status
+  PACKAGE_STATUS_DETAILS=""
+  if ! output=$(./scripts/package-dispatch --instance "$INSTANCE" --package "$package" --command status 2>&1); then
+    printf '%s\n' "$output" >&2
+    printf 'failed'
+    return
+  fi
+  status=$(printf '%s\n' "$output" | awk '
+    /^\{/ { capture=1; json=$0; next }
+    capture { json=json "\n" $0 }
+    END { print json }
+  ' | jq -r '.status // "unknown"' 2>/dev/null || true)
+  PACKAGE_STATUS_DETAILS=$(printf '%s\n' "$output" | awk '
+    /^\{/ { capture=1; json=$0; next }
+    capture { json=json "\n" $0 }
+    END { print json }
+  ' | jq -r '.details // ""' 2>/dev/null || true)
+  printf '%s' "${status:-unknown}"
+}
+
+verify_installed() {
+  local package="$1"
+  local status
+  status=$(status_for_package "$package")
+  case "$status" in
+    installed)
+      pass "$package" "installed"
+      ;;
+    *)
+      fail "$package" "status is $status"
+      if [ -n "$PACKAGE_STATUS_DETAILS" ]; then
+        printf '     %-14s %s\n' "" "$PACKAGE_STATUS_DETAILS"
+      fi
+      return 1
+      ;;
+  esac
+}
+
+verify_rdp() {
+  verify_installed rdp || return
+  case "$OS_FAMILY" in
+    windows)
+      pass rdp "Windows RDP helper can use Administrator password"
+      ;;
+    ubuntu)
+      if [ -z "${VM_USER_PASSWORD:-}" ]; then
+        fail rdp "VM_USER_PASSWORD is not set; Ubuntu xrdp login will prompt and fail"
+      else
+        pass rdp "VM_USER_PASSWORD is set for Ubuntu xrdp login"
+      fi
+      if [ -z "$HUMAN_USER" ]; then
+        fail rdp "VM_USER_NAME is not known, cannot verify Linux password state"
+      else
+        local human_user_q
+        human_user_q=$(shell_quote "$HUMAN_USER")
+        if remote_check "human_user=$human_user_q; sudo getent shadow \"\$human_user\" | awk -F: 'length(\$2) > 0 && \$2 !~ /^(!|\\*)/ { ok=1 } END { exit !ok }'"; then
+          pass rdp "Linux password hash is present for $HUMAN_USER"
+        else
+          fail rdp "Linux password is locked or missing for $HUMAN_USER; rerun provisioning after setting VM_USER_PASSWORD"
+        fi
+      fi
+      if remote_check 'systemctl is-active --quiet xrdp && ss -tln | grep -q ":3389 "'; then
+        pass rdp "xrdp active on tcp/3389"
+      else
+        fail rdp "xrdp is not active/listening on tcp/3389"
+      fi
+      ;;
+    *)
+      fail rdp "unsupported OS family: $OS_FAMILY"
+      ;;
+  esac
+}
+
+verify_rustdesk() {
+  verify_installed rustdesk || return
+  local output
+  if output=$(./scripts/remote-rustdesk "$INSTANCE" 2>&1) && printf '%s\n' "$output" | grep -q '^RustDesk ID:[[:space:]]*[0-9]'; then
+    pass rustdesk "RustDesk ID available"
+  else
+    printf '%s\n' "$output" >&2
+    fail rustdesk "RustDesk ID is not available"
+  fi
+}
+
+verify_sunshine() {
+  verify_installed sunshine || return
+  if ./scripts/remote-sunshine-wait "$INSTANCE" >/dev/null 2>&1; then
+    pass sunshine "Sunshine API reachable"
+  else
+    fail sunshine "Sunshine API is not reachable"
+  fi
+  if [ "$OS_FAMILY" = "ubuntu" ]; then
+    if [ -z "$HUMAN_USER" ]; then
+      fail sunshine "VM_USER_NAME is not known, cannot verify X display"
+      return
+    fi
+    local human_user_q
+    human_user_q=$(shell_quote "$HUMAN_USER")
+    if remote_check "human_user=$human_user_q; uid=\$(id -u \"\$human_user\"); home=\$(getent passwd \"\$human_user\" | cut -d: -f6); sudo -H -u \"\$human_user\" env HOME=\"\$home\" USER=\"\$human_user\" LOGNAME=\"\$human_user\" XDG_RUNTIME_DIR=\"/run/user/\$uid\" DISPLAY=\"\${SUNSHINE_DISPLAY:-:0}\" XAUTHORITY=\"\${XAUTHORITY:-\$home/.Xauthority}\" xrandr --query >/dev/null 2>&1"; then
+      pass sunshine "X display is available for capture"
+    else
+      fail sunshine "no usable X display for capture"
+    fi
+  fi
+}
+
+verify_vnc() {
+  verify_installed vnc || return
+  if remote_check 'systemctl is-active --quiet vncserver.service && ss -tln | grep -q ":5901 "'; then
+    pass vnc "TigerVNC active on tcp/5901"
+  else
+    fail vnc "TigerVNC is not active/listening on tcp/5901"
+  fi
+  if [ -z "$HUMAN_USER" ]; then
+    fail vnc "VM_USER_NAME is not known, cannot verify XFCE session"
+    return
+  fi
+  local human_user_q
+  human_user_q=$(shell_quote "$HUMAN_USER")
+  if remote_check "human_user=$human_user_q; pgrep -u \"\$human_user\" -f 'xfce4-session|xfwm4|xfdesktop' >/dev/null 2>&1"; then
+    pass vnc "XFCE session process is running"
+  else
+    fail vnc "no XFCE session process found; VNC may show a black screen"
+  fi
+}
+
+verify_generic() {
+  verify_installed "$1" || true
+}
+
+echo "Verifying packages for $INSTANCE ($OS_FAMILY)"
+while IFS= read -r package; do
+  [ -n "$package" ] || continue
+  case "$package" in
+    rdp) verify_rdp ;;
+    rustdesk) verify_rustdesk ;;
+    sunshine) verify_sunshine ;;
+    vnc) verify_vnc ;;
+    *) verify_generic "$package" ;;
+  esac
+done <<EOF
+$PACKAGES
+EOF
+
+if [ "$failures" -gt 0 ]; then
+  echo "package.verify failed with $failures failure(s)."
+  exit 1
+fi
+
+echo "package.verify passed."

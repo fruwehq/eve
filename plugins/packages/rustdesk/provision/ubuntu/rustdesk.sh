@@ -32,6 +32,10 @@ desktop_session="xfce"
 if has_pkg gnome-desktop; then
   desktop_session="gnome"
 fi
+if [ "$desktop_session" = "xfce" ] && ! command -v startxfce4 >/dev/null 2>&1; then
+  log "### rustdesk: installing XFCE desktop for autologin session"
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y xfce4
+fi
 
 log "### rustdesk: configuring LightDM autologin session=$desktop_session"
 sudo mkdir -p /etc/lightdm/lightdm.conf.d

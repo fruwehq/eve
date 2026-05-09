@@ -1,26 +1,63 @@
 #!/usr/bin/env bash
-# Open an RDP session to a Windows instance.
+# Open an RDP session to an instance.
 set -euo pipefail
 
 PROFILE="${1:?Usage: scripts/remote-rdp <profile>}"
 cd "$(git rev-parse --show-toplevel)"
 
+RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
+OS_FAMILY=$(printf '%s\n' "$RESOLVED_ENV" | awk -F= '/^OS_FAMILY=/{print $2}')
 IP=$(./scripts/instance-ip "$PROFILE")
-PW=$(./scripts/instance-password "$PROFILE")
+
+case "$OS_FAMILY" in
+  windows)
+    USERNAME="Administrator"
+    PW=$(./scripts/instance-password "$PROFILE")
+    ADMIN_SESSION=1
+    ;;
+  ubuntu)
+    USERNAME=$(printf '%s\n' "$RESOLVED_ENV" | awk -F= '/^VM_USER_NAME=/{print $2}')
+    if [ -z "$USERNAME" ]; then
+      USERNAME="${VM_USER_NAME:-}"
+    fi
+    if [ -z "$USERNAME" ]; then
+      echo "remote-rdp: VM_USER_NAME is required for Ubuntu RDP" >&2
+      exit 2
+    fi
+    if [ -z "${VM_USER_PASSWORD:-}" ]; then
+      echo "remote-rdp: VM_USER_PASSWORD is required for Ubuntu RDP/xrdp login" >&2
+      echo "remote-rdp: RustDesk uses RUSTDESK_PASSWORD; Linux login/RDP uses VM_USER_PASSWORD." >&2
+      exit 2
+    fi
+    PW="$VM_USER_PASSWORD"
+    ADMIN_SESSION=0
+    ;;
+  *)
+    echo "remote-rdp: unsupported OS family '$OS_FAMILY'" >&2
+    exit 2
+    ;;
+esac
 
 mkdir -p ./tmp
 printf '%s\n' \
   "full address:s:$IP" \
-  "username:s:Administrator" \
+  "username:s:$USERNAME" \
   "prompt for credentials on client:i:1" \
-  "administrative session:i:1" \
+  "administrative session:i:$ADMIN_SESSION" \
   "screen mode id:i:2" \
   "session bpp:i:32" \
   "redirectclipboard:i:1" \
   "audiomode:i:0" \
   > ./tmp/windows.rdp
 
-printf '%s' "$PW" | pbcopy
-open -a "Microsoft Remote Desktop" ./tmp/windows.rdp || open ./tmp/windows.rdp
-sleep 3
-osascript -e 'tell application "System Events" to keystroke "v" using command down' -e 'tell application "System Events" to key code 36'
+if [ "$(uname -s)" = "Darwin" ]; then
+  printf '%s' "$PW" | pbcopy
+  open -a "Microsoft Remote Desktop" ./tmp/windows.rdp || open ./tmp/windows.rdp
+  sleep 3
+  osascript -e 'tell application "System Events" to keystroke "v" using command down' -e 'tell application "System Events" to key code 36'
+elif command -v xfreerdp >/dev/null 2>&1; then
+  exec xfreerdp /v:"$IP" /u:"$USERNAME" /p:"$PW" +clipboard /cert:ignore
+else
+  echo "remote-rdp: install Microsoft Remote Desktop on macOS or xfreerdp on Linux" >&2
+  exit 2
+fi

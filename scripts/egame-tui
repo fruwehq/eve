@@ -1164,6 +1164,10 @@ def run_tui() -> int:
             margin-bottom: 1;
         }
 
+        #refresh {
+            margin-bottom: 1;
+        }
+
         #providers {
             height: 7;
             margin-bottom: 1;
@@ -1410,6 +1414,7 @@ def run_tui() -> int:
                         yield DataTable(id="providers")
                         yield Static("Instances", classes="section-title")
                         yield Input(placeholder="Filter instances", id="filter")
+                        yield Button("Refresh", id="refresh", variant="primary")
                         yield DataTable(id="instances")
                     with Vertical(id="right"):
                         yield Static(
@@ -1447,7 +1452,6 @@ def run_tui() -> int:
                                     yield Static("Utilities", classes="action-title")
                                     with Grid(id="utility-strip"):
                                         yield Button("Logs", id="logs")
-                                        yield Button("Refresh", id="refresh", variant="primary")
                                         yield Button("Update", id="update-tools")
                                         yield Button("Upload", id="upload")
                                         yield Button("Password", id="show-password")

@@ -198,7 +198,7 @@ bundles:
     includes: [gnome-desktop, macos-desktop-theme, rustdesk]
 
   - id: desktop-streaming
-    includes: [sunshine, rustdesk, vnc, rdp, waypipe]
+    includes: [gnome-desktop, sunshine, rustdesk, vnc, rdp, waypipe]
 
   - id: remote-xpra
     includes: [xpra]

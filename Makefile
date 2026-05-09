@@ -6,7 +6,7 @@
 				instance.recover instance.state instance.status instance.validate integration.packages integration.plan \
 				integration.test ip lint logs package.action package.down package.install package.list package.reinstall \
 				package.select package.status package.uninstall package.unselect plugins.list plugins.sync plugins.validate \
-				provider.status providers.status provision provision.clear-state provision.restart provision.wait reboot \
+				package.verify provider.status providers.status provision provision.clear-state provision.restart provision.wait reboot \
 				show-password ssh ssh.run ssh.truenas ssh.wait start status stop test test.catalog test.instances test.lint \
 				test.plugins test.plugins-sync test.python test.shellcheck test.terraform test.tf-isolation test.tui \
 				test.update-golden tui up update upload validate
@@ -301,6 +301,12 @@ package.uninstall: package.down ## Alias for package.down
 package.unselect: ## Remove a package from an instance's desired direct package list
 	@if [ -z "$(INSTANCE)" ] || [ -z "$(PACKAGE)" ]; then echo "Usage: make package.unselect INSTANCE=<name> PACKAGE=<id>"; exit 2; fi; \
 	./scripts/package-selection --instance $(INSTANCE) --package $(PACKAGE) --remove
+
+package.verify: ## Live smoke-check selected packages for an instance (PACKAGE=<id> optional)
+	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make package.verify INSTANCE=<name> [PACKAGE=<id>]"; exit 2; fi; \
+	args="--instance $(INSTANCE)"; \
+	if [ -n "$(PACKAGE)" ]; then args="$$args --package $(PACKAGE)"; fi; \
+	./scripts/package-verify $$args
 
 plugins.list: ## List provider and package plugins
 	@./scripts/plugin-list
