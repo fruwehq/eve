@@ -14,6 +14,8 @@ commands:
   ip: {exec: ../_common/commands/ip}
   ssh: {exec: ../_common/commands/ssh}
   host-ssh: {exec: commands/host-ssh}
+  tf-env: {exec: commands/tf-env}
+  validate: {exec: ../_common/commands/validate-os, args: [all, cloud image URL, cloud_image_url]}
 actions:
   - id: status-details
     label: Status

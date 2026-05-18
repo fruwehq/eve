@@ -125,7 +125,7 @@
         "required": ["access", "env"],
         "properties": {
           "commands": {
-            "required": ["resolve", "init", "plan", "up", "down", "start", "stop", "status", "ip", "ssh"]
+            "required": ["resolve", "init", "plan", "up", "down", "start", "stop", "status", "ip", "ssh", "validate"]
           },
           "supports": { "$ref": "#/$defs/provider_supports" }
         }

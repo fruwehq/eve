@@ -1,0 +1,31 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+$LOAD_PATH.unshift(File.expand_path("../../_terraform-common/lib", __dir__))
+require "tf_env"
+
+env = EgameProviderTfEnv.env
+
+if ENV["TRUENAS_SSH_USER"].to_s.empty?
+  warn "Error: required environment variable(s) not set:\n  - TRUENAS_SSH_USER\n\nSet them in .env.local (or your shell environment) and retry."
+  exit 1
+end
+
+EgameProviderTfEnv.print_kv("TF_VAR_cloud_image_url", env["CLOUD_IMAGE_URL"].to_s)
+EgameProviderTfEnv.print_kv("TF_VAR_provision_user_name", env["SSH_USER"].to_s)
+EgameProviderTfEnv.print_kv("TF_VAR_truenas_host", env["TRUENAS_HOST"].to_s)
+EgameProviderTfEnv.print_kv("TF_VAR_truenas_ssh_host_key_fingerprint", ENV["TRUENAS_SSH_HOST_KEY_FINGERPRINT"].to_s)
+EgameProviderTfEnv.print_kv("TF_VAR_truenas_ssh_port", env["TRUENAS_SSH_PORT"].to_s)
+EgameProviderTfEnv.print_kv("TF_VAR_truenas_ssh_private_key_file", EgameProviderTfEnv.normalize_path(ENV["TRUENAS_SSH_PRIVATE_KEY_FILE"].to_s))
+EgameProviderTfEnv.print_kv("TF_VAR_truenas_ssh_user", env["TRUENAS_SSH_USER"].to_s)
+EgameProviderTfEnv.print_kv("TF_VAR_vm_autostart", env["VM_AUTOSTART"].to_s)
+EgameProviderTfEnv.print_kv("TF_VAR_vm_base_dir", ENV["TRUENAS_VM_BASE_DIR"].to_s)
+EgameProviderTfEnv.print_kv("TF_VAR_vm_cpu_cores", env["VM_CPU_CORES"].to_s)
+EgameProviderTfEnv.print_kv("TF_VAR_vm_cpu_mode", env["VM_CPU_MODE"].to_s)
+EgameProviderTfEnv.print_kv("TF_VAR_vm_disk_gb", env["VM_DISK_GB"].to_s)
+EgameProviderTfEnv.print_kv("TF_VAR_vm_memory_mb", env["VM_MEMORY_MB"].to_s)
+EgameProviderTfEnv.print_kv("TF_VAR_vm_nic_attach", env["VM_NIC_ATTACH"].to_s)
+EgameProviderTfEnv.print_kv("TF_VAR_vm_pool", ENV["TRUENAS_VM_POOL"].to_s)
+EgameProviderTfEnv.print_kv("TF_VAR_vm_state", env["VM_STATE"].to_s)
+EgameProviderTfEnv.print_kv("TF_VAR_vm_vcpus", env["VM_VCPUS"].to_s)
+EgameProviderTfEnv.print_kv("TF_VAR_vm_zvol_prefix", ENV["TRUENAS_VM_ZVOL_PREFIX"].to_s)

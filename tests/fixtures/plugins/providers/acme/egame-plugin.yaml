@@ -3,16 +3,17 @@ kind: provider
 id: acme
 display_name: ACME Test Provider
 commands:
-  resolve: {exec: scripts/provider-plugin, args: [acme, resolve]}
-  init: {exec: scripts/provider-plugin, args: [acme, init]}
-  plan: {exec: scripts/provider-plugin, args: [acme, plan]}
-  up: {exec: scripts/provider-plugin, args: [acme, up]}
-  down: {exec: scripts/provider-plugin, args: [acme, down]}
-  start: {exec: scripts/provider-plugin, args: [acme, start]}
-  stop: {exec: scripts/provider-plugin, args: [acme, stop]}
-  status: {exec: scripts/provider-plugin, args: [acme, status]}
-  ip: {exec: scripts/provider-plugin, args: [acme, ip]}
-  ssh: {exec: scripts/provider-plugin, args: [acme, ssh]}
+  resolve: {exec: commands/provider-command, args: [resolve]}
+  init: {exec: commands/provider-command, args: [init]}
+  plan: {exec: commands/provider-command, args: [plan]}
+  up: {exec: commands/provider-command, args: [up]}
+  down: {exec: commands/provider-command, args: [down]}
+  start: {exec: commands/provider-command, args: [start]}
+  stop: {exec: commands/provider-command, args: [stop]}
+  status: {exec: commands/provider-command, args: [status]}
+  ip: {exec: commands/provider-command, args: [ip]}
+  ssh: {exec: commands/provider-command, args: [ssh]}
+  validate: {exec: plugins/providers/_common/commands/validate-os, args: [all, Vagrant box, vagrant_box]}
 access:
   ubuntu:
     bootstrap_user: {env: VM_USER_NAME}

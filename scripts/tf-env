@@ -7,6 +7,7 @@
 # original sh implementation.
 
 require "open3"
+require "json"
 
 ROOT = File.expand_path("..", __dir__)
 
@@ -25,6 +26,32 @@ def run_cmd(*args)
   return out.strip if status.success?
   warn "tf-env: command failed: #{args.join(' ')}"
   exit status.exitstatus || 1
+end
+
+def run_json(*args)
+  out, status = Open3.capture2e(*args)
+  raise out unless status.success?
+
+  JSON.parse(out)
+end
+
+def command_vector(plugin, spec)
+  exec_path = spec.fetch("exec")
+  unless exec_path.start_with?("/")
+    plugin_exec = File.join(File.dirname(plugin.fetch("path")), exec_path)
+    root_exec = File.join(ROOT, exec_path)
+    exec_path = File.exist?(plugin_exec) ? plugin_exec : root_exec
+  end
+  unless File.file?(exec_path) && File.executable?(exec_path)
+    warn "tf-env: provider plugin #{plugin.fetch("id")} command is not executable: #{spec.fetch("exec")}"
+    exit 1
+  end
+  [exec_path, *(spec["args"] || [])]
+end
+
+def provider_plugin_for(provider)
+  plugin_doc = run_json(File.join(ROOT, "scripts/plugin-list"), "--kind", "provider", "--json")
+  plugin_doc.fetch("plugins").find { |entry| entry["id"] == provider }
 end
 
 if ENV["EGAME_RUNTIME_ENV_LOADED"] != "1"
@@ -82,6 +109,27 @@ def print_kv(key, value)
   puts "export #{key}=#{quote(value)};"
 end
 
+def print_provider_tf_env(provider, env)
+  plugin = provider_plugin_for(provider)
+  unless plugin
+    warn "tf-env: provider plugin not found: #{provider}"
+    exit 1
+  end
+
+  spec = plugin.fetch("commands")["tf-env"]
+  unless spec
+    warn "tf-env: provider plugin #{provider} has no tf-env command"
+    exit 1
+  end
+
+  out, err, status = Open3.capture3({ "EGAME_TF_ENV_JSON" => JSON.generate(env) }, *command_vector(plugin, spec), chdir: ROOT)
+  print out
+  return if status.success?
+
+  warn err unless err.strip.empty?
+  exit status.exitstatus || 1
+end
+
 def normalize_path(value)
   return value if value.nil? || value.empty?
   home = ENV["HOME"].to_s
@@ -128,64 +176,4 @@ print_kv("TF_VAR_os_id", env["OS_ID"].to_s)
 print_kv("TF_VAR_profile_name", profile)
 print_kv("TF_VAR_ssh_public_key_file", normalize_path(ENV["SSH_PUBLIC_KEY_FILE"].to_s))
 print_kv("TF_VAR_vm_user_name", vm_user_name.to_s)
-
-case provider
-when "aws"
-  print_kv("TF_VAR_availability_zone", env["LOCATION_AVAILABILITY_ZONE"].to_s)
-  print_kv("TF_VAR_disk_gb", env["VM_DISK_GB"].to_s)
-  print_kv("TF_VAR_instance_type", env["VM_INSTANCE_TYPE"].to_s)
-  print_kv("TF_VAR_region", env["LOCATION_REGION"].to_s)
-  print_kv("TF_VAR_root_volume_type", env["VM_ROOT_VOLUME_TYPE"].to_s)
-when "gcp"
-  project_id = ENV["GOOGLE_CLOUD_PROJECT"] || ENV["GOOGLE_PROJECT"] || ""
-  if project_id.empty? && system("command -v gcloud >/dev/null 2>&1")
-    out, status = Open3.capture2("gcloud config get-value project 2>/dev/null")
-    project_id = out.strip if status.success?
-  end
-  if project_id.nil? || project_id.empty?
-    warn "tf-env: missing GOOGLE_CLOUD_PROJECT or GOOGLE_PROJECT for gcp provider"
-    exit 2
-  end
-  print_kv("TF_VAR_disk_gb", env["VM_DISK_GB"].to_s)
-  print_kv("TF_VAR_disk_type", env["VM_DISK_TYPE"].to_s)
-  print_kv("TF_VAR_image_family", env["GCP_IMAGE_FAMILY"].to_s)
-  print_kv("TF_VAR_image_project", env["GCP_IMAGE_PROJECT"].to_s)
-  print_kv("TF_VAR_machine_type", env["VM_MACHINE_TYPE"].to_s)
-  print_kv("TF_VAR_project_id", project_id)
-  print_kv("TF_VAR_region", env["LOCATION_REGION"].to_s)
-  my_ip = ENV["MY_IP"].to_s
-  if my_ip.empty?
-    warn "tf-env: missing MY_IP for gcp provider"
-    exit 2
-  end
-  print_kv("TF_VAR_ssh_allowed_cidr", "#{my_ip}/32")
-  print_kv("TF_VAR_zone", env["LOCATION_ZONE"].to_s)
-when "vultr"
-  print_kv("TF_VAR_plan", env["VM_PLAN"].to_s)
-  print_kv("TF_VAR_region", env["LOCATION_REGION"].to_s)
-  print_kv("TF_VAR_vultr_os_id", env["VULTR_OS_ID"].to_s)
-when "truenas"
-  truenas_ssh_user_val = ENV["TRUENAS_SSH_USER"]
-  if truenas_ssh_user_val.nil? || truenas_ssh_user_val.empty?
-    warn "Error: required environment variable(s) not set:\n  - TRUENAS_SSH_USER\n\nSet them in .env.local (or your shell environment) and retry."
-    exit 1
-  end
-  print_kv("TF_VAR_cloud_image_url", env["CLOUD_IMAGE_URL"].to_s)
-  print_kv("TF_VAR_provision_user_name", ssh_user.to_s)
-  print_kv("TF_VAR_truenas_host", env["TRUENAS_HOST"].to_s)
-  print_kv("TF_VAR_truenas_ssh_host_key_fingerprint", ENV["TRUENAS_SSH_HOST_KEY_FINGERPRINT"].to_s)
-  print_kv("TF_VAR_truenas_ssh_port", env["TRUENAS_SSH_PORT"].to_s)
-  print_kv("TF_VAR_truenas_ssh_private_key_file", normalize_path(ENV["TRUENAS_SSH_PRIVATE_KEY_FILE"].to_s))
-  print_kv("TF_VAR_truenas_ssh_user", env["TRUENAS_SSH_USER"].to_s)
-  print_kv("TF_VAR_vm_autostart", env["VM_AUTOSTART"].to_s)
-  print_kv("TF_VAR_vm_base_dir", ENV["TRUENAS_VM_BASE_DIR"].to_s)
-  print_kv("TF_VAR_vm_cpu_cores", env["VM_CPU_CORES"].to_s)
-  print_kv("TF_VAR_vm_cpu_mode", env["VM_CPU_MODE"].to_s)
-  print_kv("TF_VAR_vm_disk_gb", env["VM_DISK_GB"].to_s)
-  print_kv("TF_VAR_vm_memory_mb", env["VM_MEMORY_MB"].to_s)
-  print_kv("TF_VAR_vm_nic_attach", env["VM_NIC_ATTACH"].to_s)
-  print_kv("TF_VAR_vm_pool", ENV["TRUENAS_VM_POOL"].to_s)
-  print_kv("TF_VAR_vm_state", env["VM_STATE"].to_s)
-  print_kv("TF_VAR_vm_vcpus", env["VM_VCPUS"].to_s)
-  print_kv("TF_VAR_vm_zvol_prefix", ENV["TRUENAS_VM_ZVOL_PREFIX"].to_s)
-end
+print_provider_tf_env(provider, env)

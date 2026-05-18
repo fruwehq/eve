@@ -1,0 +1,25 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "json"
+
+command = ARGV.shift
+unless command
+  warn "Usage: provider-command <command>"
+  exit 2
+end
+
+json = ENV["EGAME_RESOLVED_JSON"]
+json = $stdin.read if json.nil? || json.empty?
+resolved = JSON.parse(json)
+
+payload = {
+  "kind" => "provider",
+  "provider" => resolved.dig("machine", "provider") || "acme",
+  "command" => command,
+  "instance" => resolved.dig("instance", "name") || "unknown",
+  "profile" => resolved.dig("instance", "name") || "unknown",
+  "engine" => resolved["engine"] || "terraform",
+  "dry_run" => ENV["EGAME_PLUGIN_DRY_RUN"] == "1"
+}
+puts JSON.generate(payload)

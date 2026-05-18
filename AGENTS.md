@@ -54,7 +54,7 @@ scripts/
   catalog-options             # List provider/platform/content choices
   profile-resolve             # Lower-level compatibility resolver for generated overlays
   instance-ip / instance-ssh    # Instance IP + SSH wrappers (engine/provider aware)
-  tf-env                      # Emits TF_VAR_* exports, gated by provider
+  tf-env                      # Emits common TF_VAR_* exports, then calls provider tf-env hooks
   provision                   # Upload + run the OS-appropriate provisioning tree
   ssh-wait                    # Poll SSH until reachable
   logs                        # Stream remote provisioning logs
@@ -77,7 +77,7 @@ tests/golden/                  # Frozen instance env snapshots
 
 1. Add it (commented, with its default) to `.env` with a short inline comment.
 2. Export it in the `Makefile` export block.
-3. Thread it through `scripts/tf-env` as a `TF_VAR_*` if terraform needs it (remember to gate it inside the right `PROVIDER` case), or use it directly via the exported environment.
+3. Thread it through the provider plugin's `tf-env` command as a `TF_VAR_*` if terraform needs it, or use it directly via the exported environment.
 4. Do **not** use `${VAR:-fallback}` in scripts — the fallback belongs in `.env`.
 
 ## Adding a new machine / OS / init / bundle
@@ -101,7 +101,7 @@ Init entries are bootstrap/access methods, not user-facing workload choices. The
 
 - Provider blocks and `required_providers` live in `providers.tm.hcl` files, not in stack or resource config files.
 - Each provider's variables (host, key paths, ports) are declared alongside the provider block in the same generated file.
-- Instance-driven values (region, instance type, plan, OS id, AZ) are threaded through as `TF_VAR_*` from `scripts/tf-env`; do **not** hardcode them in stack globals.
+- Instance-driven values (region, instance type, plan, OS id, AZ) are threaded through as `TF_VAR_*` from provider plugin `tf-env` commands; do **not** hardcode them in stack globals.
 - Terraform/Terramate provider implementations live with their provider plugins under `plugins/providers/<id>/stacks/` and `plugins/providers/<id>/modules/`. The remaining top-level `stacks/config.tm.hcl` is legacy shared global context only; do not add new provider implementation files there.
 - TrueNAS is a special case inside that layout: the parent `providers.tm.hcl` generates only `required_version`; the child `20-services/providers.tm.hcl` generates the full provider + variables (which the module then relies on — see the note at `null_resource.cloudinit_iso` about `var.truenas_host`).
 

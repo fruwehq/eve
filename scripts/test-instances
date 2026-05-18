@@ -341,6 +341,36 @@ else
 fi
 
 cat >"$tmp_local_catalog" <<'YAML'
+oses:
+  - id: ubuntu-no-vagrant
+    family: ubuntu
+    version: "26.04"
+    arch: arm64
+YAML
+cat >"$tmp_external_registry" <<'YAML'
+version: 1
+instances:
+  - name: qemu-invalid-os
+    machine: local-qemu-medium
+    os: ubuntu-no-vagrant
+    init: ssh-ubuntu-cloud-init
+    location: tokyo
+    bundles: []
+    packages: []
+YAML
+if EGAME_CATALOG_LOCAL="$tmp_local_catalog" \
+  ./scripts/instance-resolve --registry "$tmp_external_registry" --instance qemu-invalid-os --validate 2>"$invalid_output"; then
+  printf '  [FAIL] instance resolver accepted provider-invalid OS metadata\n' >&2
+  FAIL=$((FAIL + 1))
+elif grep -q 'OS/provider mismatch: OS ubuntu-no-vagrant has no Vagrant box' "$invalid_output"; then
+  printf '  [OK] instance resolver runs provider OS metadata validation hook\n'
+else
+  printf '  [FAIL] instance resolver provider OS validation hook mismatch\n' >&2
+  cat "$invalid_output" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+cat >"$tmp_local_catalog" <<'YAML'
 machines:
   - name: acme-small
     provider: acme

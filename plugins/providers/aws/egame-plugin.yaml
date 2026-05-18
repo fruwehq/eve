@@ -14,6 +14,8 @@ commands:
   ip: {exec: ../_common/commands/ip}
   ssh: {exec: ../_common/commands/ssh}
   login: {exec: commands/login}
+  tf-env: {exec: commands/tf-env}
+  validate: {exec: ../_common/commands/validate-os, args: [any, AWS image selector, aws_ami_name_pattern, aws_ami_id, aws_ssm_parameter]}
 actions:
   - id: status-details
     label: Status

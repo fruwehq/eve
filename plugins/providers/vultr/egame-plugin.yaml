@@ -13,6 +13,8 @@ commands:
   status: {exec: ../_common/commands/status}
   ip: {exec: ../_common/commands/ip}
   ssh: {exec: ../_common/commands/ssh}
+  tf-env: {exec: commands/tf-env}
+  validate: {exec: ../_common/commands/validate-os, args: [all, Vultr OS id, vultr_os_id]}
 actions:
   - id: status-details
     label: Status

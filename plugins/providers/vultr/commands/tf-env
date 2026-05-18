@@ -1,0 +1,11 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+$LOAD_PATH.unshift(File.expand_path("../../_terraform-common/lib", __dir__))
+require "tf_env"
+
+env = EgameProviderTfEnv.env
+
+EgameProviderTfEnv.print_kv("TF_VAR_plan", env["VM_PLAN"].to_s)
+EgameProviderTfEnv.print_kv("TF_VAR_region", env["LOCATION_REGION"].to_s)
+EgameProviderTfEnv.print_kv("TF_VAR_vultr_os_id", env["VULTR_OS_ID"].to_s)

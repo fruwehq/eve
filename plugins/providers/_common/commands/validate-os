@@ -1,0 +1,29 @@
+#!/usr/bin/env ruby
+# Validate provider-specific OS metadata declared by the provider manifest.
+
+require "json"
+
+mode = ARGV.shift
+label = ARGV.shift
+keys = ARGV
+
+unless %w[all any].include?(mode) && label && !keys.empty?
+  warn "validate-os: usage: validate-os <all|any> <label> <key> [key...]"
+  exit 2
+end
+
+json = ENV["EGAME_RESOLVED_JSON"]
+json = $stdin.read if json.nil? || json.empty?
+resolved = JSON.parse(json)
+os = resolved.fetch("os")
+
+valid = if mode == "any"
+          keys.any? { |key| os.key?(key) && !os[key].to_s.empty? }
+        else
+          keys.all? { |key| os.key?(key) && !os[key].to_s.empty? }
+        end
+
+unless valid
+  warn "OS/provider mismatch: OS #{os.fetch("id")} has no #{label}"
+  exit 1
+end

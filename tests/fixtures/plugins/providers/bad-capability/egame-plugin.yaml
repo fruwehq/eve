@@ -3,16 +3,22 @@ kind: provider
 id: bad-capability
 display_name: Bad Capability Provider
 commands:
-  resolve: {exec: scripts/provider-plugin, args: [aws, resolve]}
-  init: {exec: scripts/provider-plugin, args: [aws, init]}
-  plan: {exec: scripts/provider-plugin, args: [aws, plan]}
-  up: {exec: scripts/provider-plugin, args: [aws, up]}
-  down: {exec: scripts/provider-plugin, args: [aws, down]}
-  start: {exec: scripts/provider-plugin, args: [aws, start]}
-  stop: {exec: scripts/provider-plugin, args: [aws, stop]}
-  status: {exec: scripts/provider-plugin, args: [aws, status]}
-  ip: {exec: scripts/provider-plugin, args: [aws, ip]}
-  ssh: {exec: scripts/provider-plugin, args: [aws, ssh]}
+  resolve: {exec: tests/fixtures/plugins/providers/acme/commands/provider-command, args: [resolve]}
+  init: {exec: tests/fixtures/plugins/providers/acme/commands/provider-command, args: [init]}
+  plan: {exec: tests/fixtures/plugins/providers/acme/commands/provider-command, args: [plan]}
+  up: {exec: tests/fixtures/plugins/providers/acme/commands/provider-command, args: [up]}
+  down: {exec: tests/fixtures/plugins/providers/acme/commands/provider-command, args: [down]}
+  start: {exec: tests/fixtures/plugins/providers/acme/commands/provider-command, args: [start]}
+  stop: {exec: tests/fixtures/plugins/providers/acme/commands/provider-command, args: [stop]}
+  status: {exec: tests/fixtures/plugins/providers/acme/commands/provider-command, args: [status]}
+  ip: {exec: tests/fixtures/plugins/providers/acme/commands/provider-command, args: [ip]}
+  ssh: {exec: tests/fixtures/plugins/providers/acme/commands/provider-command, args: [ssh]}
+  validate: {exec: plugins/providers/_common/commands/validate-os, args: [any, AWS image selector, aws_ami_name_pattern, aws_ami_id, aws_ssm_parameter]}
+access:
+  ubuntu:
+    bootstrap_user: {env: VM_USER_NAME}
+    provision_user: {env: VM_USER_NAME}
+    human_user: {env: VM_USER_NAME, fallback: provision_user}
 capabilities: [teleport]
 supports:
   engines: [terraform]

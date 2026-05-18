@@ -21,16 +21,6 @@ fi
 
 TAGS=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^STACK_TAGS=/{print $2}')
 echo "[tf-plan] profile=$PROFILE tags=$TAGS"
-PROVIDER=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^PROVIDER=/{print $2}')
-if [ "$PROVIDER" = "gcp" ]; then
-  PROJECT="${GOOGLE_CLOUD_PROJECT:-${GOOGLE_PROJECT:-}}"
-  if [ -z "$PROJECT" ] && command -v gcloud >/dev/null 2>&1; then
-    PROJECT="$(gcloud config get-value project 2>/dev/null || true)"
-  fi
-  REGION=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^LOCATION_REGION=/{print $2}')
-  ZONE=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^LOCATION_ZONE=/{print $2}')
-  echo "[tf-plan] gcp project=$PROJECT region=$REGION zone=$ZONE"
-fi
 
 terramate generate
 

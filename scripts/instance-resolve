@@ -103,6 +103,30 @@ def package_plugins
   plugin_doc.fetch("plugins")
 end
 
+def plugin_command_argv(plugin, spec)
+  exec_path = spec.fetch("exec").to_s
+  resolved_exec = if exec_path.start_with?("/")
+                    exec_path
+                  else
+                    plugin_exec = File.join(File.dirname(plugin.fetch("path")), exec_path)
+                    root_exec = File.join(ROOT, exec_path)
+                    File.exist?(plugin_exec) ? plugin_exec : root_exec
+                  end
+  raise "Provider plugin #{plugin.fetch("id")} command exec not found: #{exec_path}" unless File.file?(resolved_exec)
+
+  [resolved_exec] + Array(spec["args"])
+end
+
+def validate_provider_metadata!(provider_plugin, resolved)
+  spec = provider_plugin.fetch("commands").fetch("validate")
+  argv = plugin_command_argv(provider_plugin, spec)
+  out, err, status = Open3.capture3({ "EGAME_RESOLVED_JSON" => JSON.generate(resolved) }, *argv)
+  return if status.success?
+
+  message = [err, out].reject { |part| part.to_s.strip.empty? }.join("\n").strip
+  raise(message.empty? ? "Provider plugin #{provider_plugin.fetch("id")} validate failed" : message)
+end
+
 def env_or(name, fallback)
   value = ENV[name]
   value && !value.empty? ? value : fallback
@@ -198,25 +222,6 @@ def validate!(catalog, composition, machine, os, init, location, bundle_packages
   supported_os_ids = supports["os_ids"].is_a?(Array) ? supports["os_ids"] : []
   if !supported_os_ids.empty? && !supported_os_ids.include?(os["id"])
     raise "Machine/OS mismatch: machine #{machine["name"]} does not support OS #{os["id"]}"
-  end
-
-  case provider
-  when "aws"
-    unless os.key?("aws_ami_name_pattern") || os.key?("aws_ami_id") || os.key?("aws_ssm_parameter")
-      raise "OS/provider mismatch: OS #{os["id"]} has no AWS image selector"
-    end
-  when "gcp"
-    unless os.key?("gcp_image_project") && os.key?("gcp_image_family")
-      raise "OS/provider mismatch: OS #{os["id"]} has no GCP image selector"
-    end
-  when "vultr"
-    raise "OS/provider mismatch: OS #{os["id"]} has no Vultr OS id" unless os.key?("vultr_os_id")
-  when "local-qemu"
-    raise "OS/provider mismatch: OS #{os["id"]} has no Vagrant box" unless os.key?("vagrant_box")
-  when "truenas"
-    raise "OS/provider mismatch: OS #{os["id"]} has no cloud image URL" unless os.key?("cloud_image_url")
-  when "raspberry-pi"
-    raise "OS/provider mismatch: OS #{os["id"]} has no metal image" unless os.key?("metal_image")
   end
 
   package_catalog = (catalog["packages"] || []).map { |pkg| pkg["id"] }
@@ -468,6 +473,7 @@ begin
     "engine" => engine,
     "stack_tags" => provider
   }
+  validate_provider_metadata!(provider_plugin, resolved)
 
   puts "Instance validated: #{instance_name}" if validate
 

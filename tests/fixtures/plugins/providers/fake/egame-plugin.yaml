@@ -13,6 +13,7 @@ commands:
   status: {exec: commands/provider-command, args: [status]}
   ip: {exec: commands/provider-command, args: [ip]}
   ssh: {exec: commands/provider-command, args: [ssh]}
+  validate: {exec: plugins/providers/_common/commands/validate-os, args: [all, Vagrant box, vagrant_box]}
 access:
   ubuntu:
     bootstrap_user: {env: VM_USER_NAME}

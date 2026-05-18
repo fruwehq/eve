@@ -24,9 +24,6 @@ scripts/providers-status:provider/OS reference - provider-specific connectivity 
 scripts/provision:provider/OS reference - vultr-specific password retrieval - Part 2 moves into vultr plugin
 scripts/remote-console:provider/OS reference - local-qemu not-implemented guard - Part 2 moves into local-qemu plugin
 scripts/remote-waypipe:provider/OS reference - raspberry-pi IP handling - Part 2 moves into raspberry-pi plugin
-scripts/tf-apply:provider/OS reference - gcp-specific env setup - Part 2 moves into gcp plugin
-scripts/tf-env:provider/OS reference - provider-specific TF_VAR emission - Part 2 moves into provider plugins
-scripts/tf-plan:provider/OS reference - gcp-specific env setup - Part 2 moves into gcp plugin
 scripts/vagrant-up:provider/OS reference - local-qemu Vagrant dispatch - Part 2 moves into local-qemu plugin
 
 # --- Bash shebangs (language policy: no new bash in scripts/) ---

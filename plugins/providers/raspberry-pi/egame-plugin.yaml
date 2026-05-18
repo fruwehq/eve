@@ -13,6 +13,7 @@ commands:
   status: {exec: ../_common/commands/status}
   ip: {exec: ../_common/commands/ip}
   ssh: {exec: ../_common/commands/ssh}
+  validate: {exec: ../_common/commands/validate-os, args: [all, metal image, metal_image]}
 actions:
   - id: status-details
     label: Status
