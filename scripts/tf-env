@@ -1,147 +1,191 @@
-#!/usr/bin/env sh
-set -eu
+#!/usr/bin/env ruby
+# tf-env: emit TF_VAR_* exports for a profile, gated by provider.
+# Usage: scripts/tf-env <profile>
+#
+# Emits shell-compatible "export KEY='value';" lines suitable for eval.
+# Preserves the same CLI, env output format, behavior, and exit codes as the
+# original sh implementation.
 
-PROFILE="${1:-}"
+require "open3"
 
-if [ -z "$PROFILE" ]; then
-  echo "usage: scripts/tf-env <profile>" >&2
+ROOT = File.expand_path("..", __dir__)
+
+def usage
+  warn "usage: scripts/tf-env <profile>"
   exit 2
-fi
+end
 
-cd "$(git rev-parse --show-toplevel)"
-# shellcheck source=lib/load-runtime-env.sh
-. ./scripts/lib/load-runtime-env.sh
+profile = ARGV[0]
+usage if profile.nil? || profile.empty?
 
-RESOLVED_ENV="$(./scripts/profile-resolve --profile "$PROFILE" --emit env)"
+Dir.chdir(ROOT)
 
-getv() {
-  printf '%s\n' "$RESOLVED_ENV" | awk -F= -v key="$1" '$1 == key { print substr($0, index($0, "=") + 1) }'
-}
+def run_cmd(*args)
+  out, status = Open3.capture2(*args)
+  return out.strip if status.success?
+  warn "tf-env: command failed: #{args.join(' ')}"
+  exit status.exitstatus || 1
+end
 
-normalize_path() {
-  value="$1"
-  # shellcheck disable=SC2088,SC2016
-  # The patterns below are deliberately unexpanded string literals we match against.
-  case "$value" in
-    '~'|'~/'*)
-      printf '%s\n' "$HOME${value#\~}"
-      ;;
-    '$HOME'|'$HOME/'*)
-      printf '%s\n' "$HOME${value#\$HOME}"
-      ;;
-    '$(HOME)'|'$(HOME)/'*)
-      printf '%s\n' "$HOME${value#\$\(HOME\)}"
-      ;;
-    *)
-      printf '%s\n' "$value"
-      ;;
-  esac
-}
+if ENV["EGAME_RUNTIME_ENV_LOADED"] != "1"
+  loader = File.join(ROOT, "scripts/lib/load-runtime-env.sh")
+  out, err, status = Open3.capture3(
+    "sh",
+    "-eu",
+    "-c",
+    '. "$1" && env -0',
+    "tf-env-loader",
+    loader,
+  )
+  unless status.success?
+    warn "tf-env: runtime env loader failed:"
+    warn err unless err.strip.empty?
+    exit status.exitstatus || 1
+  end
+  out.split("\0").each do |entry|
+    idx = entry.index("=")
+    next unless idx
+    key = entry[0...idx]
+    val = entry[(idx + 1)..]
+    ENV[key] = val
+  end
+end
 
-quote() {
-  printf "%s" "$1" | sed "s/'/'\\''/g; 1s/^/'/; \$s/\$/'/"
-}
+resolved_env_raw = run_cmd("./scripts/profile-resolve", "--profile", profile, "--emit", "env")
 
-print_kv() {
-  key="$1"
-  value="$2"
-  printf 'export %s=%s;\n' "$key" "$(quote "$value")"
-}
+env = {}
+resolved_env_raw.each_line do |line|
+  line.chomp!
+  idx = line.index("=")
+  next unless idx
+  key = line[0...idx]
+  val = line[(idx + 1)..]
+  env[key] = val
+end
 
-PROVIDER="$(getv PROVIDER)"
-OS_FAMILY="$(getv OS_FAMILY)"
-SSH_USER="$(getv SSH_USER)"
-VM_USER_NAME_VALUE="$(getv VM_USER_NAME)"
+provider = env["PROVIDER"]
+os_family = env["OS_FAMILY"]
+ssh_user = env["SSH_USER"]
+vm_user_name = env["VM_USER_NAME"]
 
-if [ "$OS_FAMILY" != "windows" ] && [ -z "$SSH_USER" ]; then
-  echo "tf-env: missing VM_USER_NAME for $PROFILE ($OS_FAMILY)" >&2
+if os_family != "windows" && (ssh_user.nil? || ssh_user.empty?)
+  warn "tf-env: missing VM_USER_NAME for #{profile} (#{os_family})"
   exit 2
-fi
-if [ -z "$VM_USER_NAME_VALUE" ]; then
-  VM_USER_NAME_VALUE="$SSH_USER"
-fi
+end
+vm_user_name = ssh_user if vm_user_name.nil? || vm_user_name.empty?
 
-# Per-instance state isolation: when EGAME_INSTANCE_NAME is set the caller is
-# in v3 INSTANCE= mode. Route Terraform to a dedicated workspace plus
-# per-instance data/backend roots so two instances on the same provider do not
-# clobber each other's state. PROFILE= callers leave EGAME_INSTANCE_NAME unset
-# and continue to use the default compatibility paths.
-if [ -n "${EGAME_INSTANCE_NAME:-}" ]; then
-  if [ -n "${EGAME_INSTANCE_REGISTRY:-}" ]; then
-    INSTANCE_PATHS="$(./scripts/instance-paths --instance "$EGAME_INSTANCE_NAME" --emit env --registry "$EGAME_INSTANCE_REGISTRY")"
-  else
-    INSTANCE_PATHS="$(./scripts/instance-paths --instance "$EGAME_INSTANCE_NAME" --emit env)"
-  fi
-  getp() {
-    printf '%s\n' "$INSTANCE_PATHS" | awk -F= -v key="$1" '$1 == key { print substr($0, index($0, "=") + 1) }'
-  }
+def quote(value)
+  "'" + value.gsub("'", "'\\''") + "'"
+end
 
-  print_kv TF_WORKSPACE "$EGAME_INSTANCE_NAME"
-  print_kv EGAME_TF_DATA_BASE "$(getp INSTANCE_TF_DATA_BASE)"
-  print_kv EGAME_TF_STATE_BASE "$(getp INSTANCE_TF_STATE_BASE)"
-fi
+def print_kv(key, value)
+  puts "export #{key}=#{quote(value)};"
+end
 
-# Common — shared by every terraform-based provider
-print_kv TF_VAR_bundle_packages "$(getv BUNDLE_PACKAGES)"
-print_kv TF_VAR_location_name "$(getv LOCATION_NAME)"
-print_kv TF_VAR_os_family "$OS_FAMILY"
-print_kv TF_VAR_os_id "$(getv OS_ID)"
-print_kv TF_VAR_profile_name "$PROFILE"
-print_kv TF_VAR_ssh_public_key_file "$(normalize_path "${SSH_PUBLIC_KEY_FILE:-}")"
-print_kv TF_VAR_vm_user_name "$VM_USER_NAME_VALUE"
+def normalize_path(value)
+  return value if value.nil? || value.empty?
+  home = ENV["HOME"].to_s
+  case value
+  when "~"
+    home
+  when /\A~\// then home + value[1..]
+  when "$HOME"
+    home
+  when /\A\$HOME\// then home + value[5..]
+  when "$(HOME)"
+    home
+  when /\A\$\(HOME\)\// then home + value[7..]
+  else value
+  end
+end
 
-case "$PROVIDER" in
-  aws)
-    print_kv TF_VAR_availability_zone "$(getv LOCATION_AVAILABILITY_ZONE)"
-    print_kv TF_VAR_disk_gb "$(getv VM_DISK_GB)"
-    print_kv TF_VAR_instance_type "$(getv VM_INSTANCE_TYPE)"
-    print_kv TF_VAR_region "$(getv LOCATION_REGION)"
-    print_kv TF_VAR_root_volume_type "$(getv VM_ROOT_VOLUME_TYPE)"
-    ;;
-  gcp)
-    PROJECT_ID="${GOOGLE_CLOUD_PROJECT:-${GOOGLE_PROJECT:-}}"
-    if [ -z "$PROJECT_ID" ] && command -v gcloud >/dev/null 2>&1; then
-      PROJECT_ID="$(gcloud config get-value project 2>/dev/null || true)"
-    fi
-    if [ -z "$PROJECT_ID" ]; then
-      echo "tf-env: missing GOOGLE_CLOUD_PROJECT or GOOGLE_PROJECT for gcp provider" >&2
-      exit 2
-    fi
-    print_kv TF_VAR_disk_gb "$(getv VM_DISK_GB)"
-    print_kv TF_VAR_disk_type "$(getv VM_DISK_TYPE)"
-    print_kv TF_VAR_image_family "$(getv GCP_IMAGE_FAMILY)"
-    print_kv TF_VAR_image_project "$(getv GCP_IMAGE_PROJECT)"
-    print_kv TF_VAR_machine_type "$(getv VM_MACHINE_TYPE)"
-    print_kv TF_VAR_project_id "$PROJECT_ID"
-    print_kv TF_VAR_region "$(getv LOCATION_REGION)"
-    print_kv TF_VAR_ssh_allowed_cidr "${MY_IP}/32"
-    print_kv TF_VAR_zone "$(getv LOCATION_ZONE)"
-    ;;
-  vultr)
-    print_kv TF_VAR_plan "$(getv VM_PLAN)"
-    print_kv TF_VAR_region "$(getv LOCATION_REGION)"
-    print_kv TF_VAR_vultr_os_id "$(getv VULTR_OS_ID)"
-    ;;
-  truenas)
-    ./scripts/env-require TRUENAS_SSH_USER
-    print_kv TF_VAR_cloud_image_url "$(getv CLOUD_IMAGE_URL)"
-    print_kv TF_VAR_provision_user_name "$SSH_USER"
-    print_kv TF_VAR_truenas_host "$(getv TRUENAS_HOST)"
-    print_kv TF_VAR_truenas_ssh_host_key_fingerprint "${TRUENAS_SSH_HOST_KEY_FINGERPRINT:-}"
-    print_kv TF_VAR_truenas_ssh_port "$(getv TRUENAS_SSH_PORT)"
-    print_kv TF_VAR_truenas_ssh_private_key_file \
-      "$(normalize_path "${TRUENAS_SSH_PRIVATE_KEY_FILE:-}")"
-    print_kv TF_VAR_truenas_ssh_user "$(getv TRUENAS_SSH_USER)"
-    print_kv TF_VAR_vm_autostart "$(getv VM_AUTOSTART)"
-    print_kv TF_VAR_vm_base_dir "${TRUENAS_VM_BASE_DIR:-}"
-    print_kv TF_VAR_vm_cpu_cores "$(getv VM_CPU_CORES)"
-    print_kv TF_VAR_vm_cpu_mode "$(getv VM_CPU_MODE)"
-    print_kv TF_VAR_vm_disk_gb "$(getv VM_DISK_GB)"
-    print_kv TF_VAR_vm_memory_mb "$(getv VM_MEMORY_MB)"
-    print_kv TF_VAR_vm_nic_attach "$(getv VM_NIC_ATTACH)"
-    print_kv TF_VAR_vm_pool "${TRUENAS_VM_POOL:-}"
-    print_kv TF_VAR_vm_state "$(getv VM_STATE)"
-    print_kv TF_VAR_vm_vcpus "$(getv VM_VCPUS)"
-    print_kv TF_VAR_vm_zvol_prefix "${TRUENAS_VM_ZVOL_PREFIX:-}"
-    ;;
-esac
+instance_name = ENV["EGAME_INSTANCE_NAME"]
+unless instance_name.nil? || instance_name.empty?
+  ip_args = ["./scripts/instance-paths", "--instance", instance_name, "--emit", "env"]
+  registry = ENV["EGAME_INSTANCE_REGISTRY"]
+  ip_args += ["--registry", registry] if registry && !registry.empty?
+  instance_paths_raw = run_cmd(*ip_args)
+
+  paths = {}
+  instance_paths_raw.each_line do |line|
+    line.chomp!
+    idx = line.index("=")
+    next unless idx
+    key = line[0...idx]
+    val = line[(idx + 1)..]
+    paths[key] = val
+  end
+
+  print_kv("TF_WORKSPACE", instance_name)
+  print_kv("EGAME_TF_DATA_BASE", paths["INSTANCE_TF_DATA_BASE"].to_s)
+  print_kv("EGAME_TF_STATE_BASE", paths["INSTANCE_TF_STATE_BASE"].to_s)
+end
+
+print_kv("TF_VAR_bundle_packages", env["BUNDLE_PACKAGES"].to_s)
+print_kv("TF_VAR_location_name", env["LOCATION_NAME"].to_s)
+print_kv("TF_VAR_os_family", os_family.to_s)
+print_kv("TF_VAR_os_id", env["OS_ID"].to_s)
+print_kv("TF_VAR_profile_name", profile)
+print_kv("TF_VAR_ssh_public_key_file", normalize_path(ENV["SSH_PUBLIC_KEY_FILE"].to_s))
+print_kv("TF_VAR_vm_user_name", vm_user_name.to_s)
+
+case provider
+when "aws"
+  print_kv("TF_VAR_availability_zone", env["LOCATION_AVAILABILITY_ZONE"].to_s)
+  print_kv("TF_VAR_disk_gb", env["VM_DISK_GB"].to_s)
+  print_kv("TF_VAR_instance_type", env["VM_INSTANCE_TYPE"].to_s)
+  print_kv("TF_VAR_region", env["LOCATION_REGION"].to_s)
+  print_kv("TF_VAR_root_volume_type", env["VM_ROOT_VOLUME_TYPE"].to_s)
+when "gcp"
+  project_id = ENV["GOOGLE_CLOUD_PROJECT"] || ENV["GOOGLE_PROJECT"] || ""
+  if project_id.empty? && system("command -v gcloud >/dev/null 2>&1")
+    out, status = Open3.capture2("gcloud config get-value project 2>/dev/null")
+    project_id = out.strip if status.success?
+  end
+  if project_id.nil? || project_id.empty?
+    warn "tf-env: missing GOOGLE_CLOUD_PROJECT or GOOGLE_PROJECT for gcp provider"
+    exit 2
+  end
+  print_kv("TF_VAR_disk_gb", env["VM_DISK_GB"].to_s)
+  print_kv("TF_VAR_disk_type", env["VM_DISK_TYPE"].to_s)
+  print_kv("TF_VAR_image_family", env["GCP_IMAGE_FAMILY"].to_s)
+  print_kv("TF_VAR_image_project", env["GCP_IMAGE_PROJECT"].to_s)
+  print_kv("TF_VAR_machine_type", env["VM_MACHINE_TYPE"].to_s)
+  print_kv("TF_VAR_project_id", project_id)
+  print_kv("TF_VAR_region", env["LOCATION_REGION"].to_s)
+  my_ip = ENV["MY_IP"].to_s
+  if my_ip.empty?
+    warn "tf-env: missing MY_IP for gcp provider"
+    exit 2
+  end
+  print_kv("TF_VAR_ssh_allowed_cidr", "#{my_ip}/32")
+  print_kv("TF_VAR_zone", env["LOCATION_ZONE"].to_s)
+when "vultr"
+  print_kv("TF_VAR_plan", env["VM_PLAN"].to_s)
+  print_kv("TF_VAR_region", env["LOCATION_REGION"].to_s)
+  print_kv("TF_VAR_vultr_os_id", env["VULTR_OS_ID"].to_s)
+when "truenas"
+  truenas_ssh_user_val = ENV["TRUENAS_SSH_USER"]
+  if truenas_ssh_user_val.nil? || truenas_ssh_user_val.empty?
+    warn "Error: required environment variable(s) not set:\n  - TRUENAS_SSH_USER\n\nSet them in .env.local (or your shell environment) and retry."
+    exit 1
+  end
+  print_kv("TF_VAR_cloud_image_url", env["CLOUD_IMAGE_URL"].to_s)
+  print_kv("TF_VAR_provision_user_name", ssh_user.to_s)
+  print_kv("TF_VAR_truenas_host", env["TRUENAS_HOST"].to_s)
+  print_kv("TF_VAR_truenas_ssh_host_key_fingerprint", ENV["TRUENAS_SSH_HOST_KEY_FINGERPRINT"].to_s)
+  print_kv("TF_VAR_truenas_ssh_port", env["TRUENAS_SSH_PORT"].to_s)
+  print_kv("TF_VAR_truenas_ssh_private_key_file", normalize_path(ENV["TRUENAS_SSH_PRIVATE_KEY_FILE"].to_s))
+  print_kv("TF_VAR_truenas_ssh_user", env["TRUENAS_SSH_USER"].to_s)
+  print_kv("TF_VAR_vm_autostart", env["VM_AUTOSTART"].to_s)
+  print_kv("TF_VAR_vm_base_dir", ENV["TRUENAS_VM_BASE_DIR"].to_s)
+  print_kv("TF_VAR_vm_cpu_cores", env["VM_CPU_CORES"].to_s)
+  print_kv("TF_VAR_vm_cpu_mode", env["VM_CPU_MODE"].to_s)
+  print_kv("TF_VAR_vm_disk_gb", env["VM_DISK_GB"].to_s)
+  print_kv("TF_VAR_vm_memory_mb", env["VM_MEMORY_MB"].to_s)
+  print_kv("TF_VAR_vm_nic_attach", env["VM_NIC_ATTACH"].to_s)
+  print_kv("TF_VAR_vm_pool", ENV["TRUENAS_VM_POOL"].to_s)
+  print_kv("TF_VAR_vm_state", env["VM_STATE"].to_s)
+  print_kv("TF_VAR_vm_vcpus", env["VM_VCPUS"].to_s)
+  print_kv("TF_VAR_vm_zvol_prefix", ENV["TRUENAS_VM_ZVOL_PREFIX"].to_s)
+end

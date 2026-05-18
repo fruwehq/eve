@@ -40,5 +40,8 @@ jobs:
           pipx install poetry
           poetry install --no-interaction --no-root
 
+      - name: Install Ruby dependencies
+        run: bundle install --jobs 4 --retry 3
+
       - name: Run make test
         run: make test

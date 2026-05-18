@@ -64,7 +64,7 @@ scripts/
   vagrant-up / vagrant-destroy  # Vagrant dispatchers for local-qemu
   truenas-cloudinit-upload    # Generates NoCloud seed ISO and uploads to TrueNAS REST API
   truenas-cloudinit-delete    # Removes cloud-init ISO from TrueNAS on destroy
-  test / test-catalog / test-instances / test-lint  # Test suite
+  test / test-catalog / test-core-boundary / test-instances / test-lint  # Test suite
 oses/<catalog-os-id>/provision/       # Bash state-machine runner (systemd unit)
   scripts/bootstrap.sh / runner.sh / lib/common.sh / steps/NN_*.sh
 oses/windows-server-2025/provision/             # PowerShell state-machine runner (Scheduled Task)
@@ -124,6 +124,13 @@ Machine entries declare a `kind:` field. Current supported kinds:
 
 See [docs/raspberry-pi-provider.md](docs/raspberry-pi-provider.md) for the metal design guardrails.
 
+## Language policy
+
+- **Core orchestration:** Ruby. All new orchestration scripts under `scripts/` must be Ruby (`#!/usr/bin/env ruby`).
+- **Guest-side provisioning:** bash under `oses/<catalog-os-id>/provision/` for Linux, PowerShell under `oses/windows-server-2025/provision/` for Windows. These are the only places new bash is acceptable.
+- **TUI:** Python. The TUI (`scripts/egame-tui`) stays Python because Textual is Python.
+- **No new bash in `scripts/`.** The boundary lint (`make test.core-boundary`) enforces this; existing bash scripts are enumerated in `scripts/test-core-boundary.allowlist` and will be ported to Ruby over time.
+
 ## Post-boot provisioning
 
 Per-instance post-boot provisioning is OS-family driven:
@@ -150,10 +157,12 @@ Adding a new Linux step:
 `make test` runs the suites from `scripts/test`:
 
 - **catalog** (`test-catalog`) — validates provider/platform/content choice emission and provider-specific OS image metadata gating.
+- **core-boundary** (`test-core-boundary`) — fails if central `scripts/` reference provider or catalog OS IDs outside a committed allowlist of known violations.
 - **instances** (`test-instances`) — validates local instance registry fixtures, generated overlays, provider dispatch routing, and state contracts.
 - **terraform** (`test-terraform`) — `terramate generate` + `terraform init -backend=false` + `terraform validate` across `aws-services`, `gcp-services`, `vultr-services`, and `truenas-services`. Uses a fake `MY_IP` and a tempfile SSH key. No cloud credentials required.
 - **shellcheck** (`test-shellcheck`) — runs `shellcheck -x --source-path=SCRIPTDIR` over every shell script with a bash/sh shebang in `scripts/` and `oses/<catalog-os-id>/provision/`.
 - **python** (`test-python`) — runs ruff and strict mypy for Python TUI code.
+- **schemas** (`test-schemas`) — validates JSON Schemas (draft 2020-12) for resolved instance, observed state, plugin manifests, and command I/O. Checks all shipped manifests, fixture instances, and negative-test fixtures. Uses Ruby `json_schemer`.
 - **lint** (`test-lint`) — checks Ruby syntax, YAML syntax, Terraform formatting, and Terramate formatting.
 
 CI runs the same target via [.github/workflows/test.yml](.github/workflows/test.yml) on push to `main` and every pull request.

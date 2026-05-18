@@ -97,4 +97,31 @@ else
   FAIL=$((FAIL + 1))
 fi
 
+# 6. Path normalization: ~/foo, $HOME/foo, $(HOME)/foo all resolve to $HOME/foo.
+#    Set EGAME_RUNTIME_ENV_LOADED=1 so the loader does not override our test value.
+NORM_EXPECTED="${HOME}/foo"
+# shellcheck disable=SC2088,SC2016
+for norm_val in '~/foo' "\$HOME/foo" '$(HOME)/foo'; do
+  export SSH_PUBLIC_KEY_FILE="$norm_val"
+  norm_out=$(EGAME_RUNTIME_ENV_LOADED=1 ./scripts/tf-env "$PROFILE" 2>/dev/null)
+  norm_actual=$(printf '%s\n' "$norm_out" | sed -n "s/^export TF_VAR_ssh_public_key_file='\\(.*\\)';$/\\1/p")
+  if [ "$norm_actual" = "$NORM_EXPECTED" ]; then
+    printf '  [OK] tf-env normalizes SSH_PUBLIC_KEY_FILE=%s to %s\n' "$norm_val" "$NORM_EXPECTED"
+  else
+    printf '  [FAIL] tf-env SSH_PUBLIC_KEY_FILE=%s: expected %s, got %s\n' "$norm_val" "$NORM_EXPECTED" "$norm_actual" >&2
+    FAIL=$((FAIL + 1))
+  fi
+done
+export SSH_PUBLIC_KEY_FILE="$TMPKEY"
+
+# 7. tf-env preserves child exit status (e.g. profile-resolve exits 5 for bad profile).
+bad_rc=0
+EGAME_RUNTIME_ENV_LOADED=1 ./scripts/tf-env definitely-not-a-profile >/dev/null 2>&1 || bad_rc=$?
+if [ "$bad_rc" -eq 5 ]; then
+  printf '  [OK] tf-env preserves profile-resolve exit status 5\n'
+else
+  printf '  [FAIL] tf-env exit status: expected 5, got %s\n' "$bad_rc" >&2
+  FAIL=$((FAIL + 1))
+fi
+
 [ "$FAIL" -eq 0 ]

@@ -1,0 +1,104 @@
+# Allowlist: central scripts with known provider/OS coupling and bash shebangs.
+#
+# Format:
+#   <path>:<reason>
+#
+# Reason prefixes determine which check accepts the entry:
+#   provider/OS reference - ...  — accepted by the provider/OS ID check
+#   bash shebang - ...           — accepted by the bash language policy check
+#
+# Each entry is a TODO for future porting / Part 2 plugin relocation.
+
+# --- Provider/OS coupling ---
+scripts/catalog-options:provider/OS reference - provider-specific OS image metadata gating - Part 2 moves key checks into provider plugins
+scripts/config-env:provider/OS reference - provider-to-config-key mapping - Part 2 moves into provider plugin config
+scripts/config-migrate:provider/OS reference - provider-to-config-key mapping - Part 2 moves into provider plugin config
+scripts/doctor:provider/OS reference - provider-specific CLI tool checks - Part 2 moves into provider plugins
+scripts/instance-create:provider/OS reference - provider-specific CLI usage hints - Part 2 derives from provider manifests
+scripts/instance-ip:provider/OS reference - provider-specific IP resolution - Part 2 moves into provider plugins
+scripts/instance-password:provider/OS reference - vultr-specific password retrieval - Part 2 moves into vultr plugin
+scripts/instance-profile-overlay:provider/OS reference - raspberry-pi host validation - Part 2 moves into raspberry-pi plugin
+scripts/instance-resolve:provider/OS reference - provider-specific OS key validation - Part 2 moves into per-plugin validate hooks
+scripts/instance-ssh:provider/OS reference - raspberry-pi SSH handling - Part 2 moves into raspberry-pi plugin
+scripts/package-provision:provider/OS reference - raspberry-pi password handling - Part 2 moves into raspberry-pi plugin
+scripts/profile-resolve:provider/OS reference - provider-specific env emission - Part 2 moves into provider plugins
+scripts/providers-status:provider/OS reference - provider-specific connectivity checks - Part 2 moves into provider plugins
+scripts/provision:provider/OS reference - vultr-specific password retrieval - Part 2 moves into vultr plugin
+scripts/remote-console:provider/OS reference - local-qemu not-implemented guard - Part 2 moves into local-qemu plugin
+scripts/remote-waypipe:provider/OS reference - raspberry-pi IP handling - Part 2 moves into raspberry-pi plugin
+scripts/start:provider/OS reference - provider case dispatch - Part 2 moves into provider plugins
+scripts/status:provider/OS reference - provider case dispatch - Part 2 moves into provider plugins
+scripts/stop:provider/OS reference - provider case dispatch - Part 2 moves into provider plugins
+scripts/tf-apply:provider/OS reference - gcp-specific env setup - Part 2 moves into gcp plugin
+scripts/tf-env:provider/OS reference - provider-specific TF_VAR emission - Part 2 moves into provider plugins
+scripts/tf-plan:provider/OS reference - gcp-specific env setup - Part 2 moves into gcp plugin
+scripts/truenas-cloudinit-delete:provider/OS reference - truenas-specific helper - Part 2 moves into truenas plugin
+scripts/truenas-cloudinit-upload:provider/OS reference - truenas-specific helper - Part 2 moves into truenas plugin
+scripts/truenas-dataset-verify:provider/OS reference - truenas-specific helper - Part 2 moves into truenas plugin
+scripts/truenas-vm-disk-prepare:provider/OS reference - truenas-specific helper - Part 2 moves into truenas plugin
+scripts/vagrant-up:provider/OS reference - local-qemu Vagrant dispatch - Part 2 moves into local-qemu plugin
+
+# --- Bash shebangs (language policy: no new bash in scripts/) ---
+scripts/doctor:bash shebang - provider-specific CLI tool checks - port to Ruby
+scripts/env-require:bash shebang - env variable guard - port to Ruby
+scripts/eve:bash shebang - dev convenience wrapper - port to Ruby
+scripts/eve-docker:bash shebang - dev docker wrapper - port to Ruby
+scripts/instance-ip:bash shebang - provider-specific IP resolution - port to Ruby
+scripts/instance-password:bash shebang - vultr-specific password retrieval - port to Ruby
+scripts/instance-provision:bash shebang - provision dispatch - port to Ruby
+scripts/instance-run:bash shebang - instance run wrapper - port to Ruby
+scripts/instance-ssh:bash shebang - provider-specific SSH handling - port to Ruby
+scripts/logs:bash shebang - remote log streaming - port to Ruby
+scripts/package-down-command:bash shebang - package down dispatch - port to Ruby
+scripts/package-down-windows:bash shebang - Windows package down - port to Ruby
+scripts/package-provision:bash shebang - package provision dispatch - port to Ruby
+scripts/package-provision-windows:bash shebang - Windows package provision - port to Ruby
+scripts/package-status-command:bash shebang - package status dispatch - port to Ruby
+scripts/package-status-windows:bash shebang - Windows package status - port to Ruby
+scripts/package-verify:bash shebang - package verification - port to Ruby
+scripts/profile-resolve:bash shebang - catalog resolution and env emission - port to Ruby
+scripts/providers-status:bash shebang - provider connectivity checks - port to Ruby
+scripts/provision:bash shebang - provision upload and bootstrap - port to Ruby
+scripts/remote-console:bash shebang - remote console helper - port to Ruby
+scripts/remote-moonlight:bash shebang - moonlight launcher - port to Ruby
+scripts/remote-moonlight-pair:bash shebang - moonlight pairing - port to Ruby
+scripts/remote-rdp:bash shebang - RDP launcher - port to Ruby
+scripts/remote-rustdesk:bash shebang - RustDesk launcher - port to Ruby
+scripts/remote-sunshine-wait:bash shebang - Sunshine readiness check - port to Ruby
+scripts/remote-thinlinc:bash shebang - ThinLinc launcher - port to Ruby
+scripts/remote-thinlinc-client:bash shebang - ThinLinc client launcher - port to Ruby
+scripts/remote-vnc:bash shebang - VNC launcher - port to Ruby
+scripts/remote-waypipe:bash shebang - Waypipe launcher - port to Ruby
+scripts/remote-xpra:bash shebang - Xpra launcher - port to Ruby
+scripts/ssh-retry:bash shebang - SSH retry loop - port to Ruby
+scripts/ssh-wait:bash shebang - SSH reachability poll - port to Ruby
+scripts/start:bash shebang - provider case dispatch - port to Ruby
+scripts/status:bash shebang - provider case dispatch - port to Ruby
+scripts/stop:bash shebang - provider case dispatch - port to Ruby
+scripts/tf-apply:bash shebang - terraform apply dispatcher - port to Ruby
+scripts/tf-destroy:bash shebang - terraform destroy dispatcher - port to Ruby
+scripts/tf-init:bash shebang - terraform init dispatcher - port to Ruby
+scripts/tf-plan:bash shebang - terraform plan dispatcher - port to Ruby
+scripts/test:bash shebang - test runner - port to Ruby
+scripts/test-catalog:bash shebang - catalog validation - port to Ruby
+scripts/test-core-boundary:bash shebang - boundary lint - port to Ruby
+scripts/test-instances:bash shebang - instance validation - port to Ruby
+scripts/test-lint:bash shebang - lint checks - port to Ruby
+scripts/test-plugins:bash shebang - plugin validation - port to Ruby
+scripts/test-plugins-sync:bash shebang - plugin sync validation - port to Ruby
+scripts/test-python:bash shebang - Python lint - port to Ruby
+scripts/test-schemas:bash shebang - schema validation - port to Ruby
+scripts/test-shellcheck:bash shebang - shellcheck runner - port to Ruby
+scripts/test-terraform:bash shebang - terraform validation - port to Ruby
+scripts/test-tf-isolation:bash shebang - tf-env isolation tests - port to Ruby
+scripts/test-tui:bash shebang - TUI tests - port to Ruby
+scripts/truenas-cloudinit-delete:bash shebang - truenas cloud-init ISO removal - port to Ruby
+scripts/truenas-cloudinit-upload:bash shebang - truenas cloud-init ISO upload - port to Ruby
+scripts/truenas-dataset-verify:bash shebang - truenas dataset verification - port to Ruby
+scripts/truenas-vm-disk-prepare:bash shebang - truenas VM disk preparation - port to Ruby
+scripts/update-tools:bash shebang - tool version updater - port to Ruby
+scripts/upload:bash shebang - file upload helper - port to Ruby
+scripts/vagrant-destroy:bash shebang - vagrant destroy dispatcher - port to Ruby
+scripts/vagrant-stop:bash shebang - vagrant stop dispatcher - port to Ruby
+scripts/vagrant-up:bash shebang - vagrant up dispatcher - port to Ruby
+scripts/wait-for-provision:bash shebang - provision completion poll - port to Ruby

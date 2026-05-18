@@ -3,12 +3,13 @@
 .PHONY: ai.sandbox aws.login bundle.select bundle.unselect catalog.list clean config.migrate default docker.build \
 				docker.shell docker.test doctor down env eve generate help info init.all install-cli instance.create \
 				instance.delete instance.env instance.info instance.list instance.observe instance.paths instance.provision \
-				instance.recover instance.state instance.status instance.validate integration.packages integration.plan \
-				integration.test ip lint logs package.action package.down package.install package.list package.reinstall \
-				package.select package.status package.uninstall package.unselect plugins.list plugins.sync plugins.validate \
-				package.verify provider.status providers.status provision provision.clear-state provision.restart provision.wait reboot \
-				show-password ssh ssh.run ssh.truenas ssh.wait start status stop test test.catalog test.instances test.lint \
-				test.plugins test.plugins-sync test.python test.shellcheck test.terraform test.tf-isolation test.tui \
+				instance.recover instance.state instance.status instance.validate instance.view integration.packages \
+				integration.plan integration.test ip lint logs package.action package.down package.install package.list \
+				package.reinstall package.select package.status package.uninstall package.unselect package.verify \
+				plugins.list plugins.sync plugins.validate provider.status providers.status provision \
+				provision.clear-state provision.restart provision.wait reboot show-password ssh ssh.run ssh.truenas \
+				ssh.wait start status stop test test.catalog test.core-boundary test.instances test.lint test.plugins \
+				test.plugins-sync test.python test.schemas test.shellcheck test.state-concurrency test.terraform test.tf-isolation test.tui \
 				test.update-golden tui up update upload validate
 
 TM_PARALLEL ?= 8
@@ -236,6 +237,10 @@ instance.validate: ## Validate a concrete instance from .egame/instances.yaml
 	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make instance.validate INSTANCE=<name>"; exit 2; fi; \
 	./scripts/instance-resolve --instance $(INSTANCE) --validate
 
+instance.view: ## Emit the shared view object for status/TUI rendering (EMIT=json)
+	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make instance.view INSTANCE=<name>"; exit 2; fi; \
+	./scripts/instance-view --instance $(INSTANCE)
+
 integration.packages: ## Optional live smoke: install/status every supported package (INSTANCES=a,b YES=1)
 	@if [ -z "$(INSTANCES)" ]; then echo "Usage: make integration.packages INSTANCES=<linux>,<windows> YES=1 [DELETE_INSTANCES=1]"; exit 2; fi; \
 	args=""; \
@@ -381,7 +386,7 @@ start: ## Start (power on) a stopped instance
 
 status: ## Show VM status (running/stopped/not created) and IP
 	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make status INSTANCE=<name>"; exit 2; fi; \
-	./scripts/instance-run status $(INSTANCE)
+	./scripts/instance-status --instance $(INSTANCE)
 
 stop: ## Stop (power off) a running instance without destroying
 	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make stop INSTANCE=<name>"; exit 2; fi; \
@@ -392,6 +397,9 @@ test: ## Run all tests (catalog, instances, plugins, terraform, lint)
 
 test.catalog: ## Validate catalog provider/platform/content choices
 	@./scripts/test-catalog
+
+test.core-boundary: ## Fail if central scripts reference provider/OS IDs outside allowlist
+	@./scripts/test-core-boundary
 
 test.instances: ## Validate fixture instances and compare emitted env to golden snapshots
 	@./scripts/test-instances
@@ -408,8 +416,14 @@ test.plugins-sync: ## Validate external plugin synchronization
 test.python: ## Run Python lint and type checks
 	@./scripts/test-python
 
+test.schemas: ## Validate JSON schemas and their fixtures
+	@./scripts/test-schemas
+
 test.shellcheck: ## Run shellcheck over scripts/ and OS provisioning trees
 	@./scripts/test-shellcheck
+
+test.state-concurrency: ## Run parallel-writer state file concurrency test
+	@./scripts/test-state-concurrency
 
 test.terraform: ## terramate generate + terraform validate across provider stacks
 	@./scripts/test-terraform

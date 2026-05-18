@@ -9,7 +9,7 @@ cd "$(git rev-parse --show-toplevel)"
 
 FAIL=0
 if [ "$#" -eq 0 ]; then
-  SUITES=(catalog instances plugins plugins-sync terraform tf-isolation tui python shellcheck lint)
+  SUITES=(catalog core-boundary instances plugins plugins-sync state-concurrency terraform tf-isolation tui python schemas shellcheck lint)
 else
   SUITES=("$@")
 fi
@@ -28,14 +28,17 @@ run() {
 for suite in "${SUITES[@]}"; do
   case "$suite" in
     catalog)   run "catalog"   ./scripts/test-catalog   ;;
+    core-boundary) run "core-boundary" ./scripts/test-core-boundary ;;
     instances)  run "instances"  ./scripts/test-instances  ;;
     plugins)    run "plugins"    ./scripts/test-plugins    ;;
     plugins-sync) run "plugins-sync" ./scripts/test-plugins-sync ;;
+    python) run "python" ./scripts/test-python ;;
+    schemas) run "schemas" ./scripts/test-schemas ;;
+    shellcheck) run "shellcheck" ./scripts/test-shellcheck ;;
+    state-concurrency) run "state-concurrency" ./scripts/test-state-concurrency ;;
     terraform)  run "terraform"  ./scripts/test-terraform  ;;
     tf-isolation) run "tf-isolation" ./scripts/test-tf-isolation ;;
     tui) run "tui" ./scripts/test-tui ;;
-    python) run "python" ./scripts/test-python ;;
-    shellcheck) run "shellcheck" ./scripts/test-shellcheck ;;
     lint) run "lint" ./scripts/test-lint ;;
     *) echo "unknown suite: $suite" >&2; exit 2 ;;
   esac
