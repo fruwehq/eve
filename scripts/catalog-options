@@ -170,6 +170,7 @@ packages = catalog["packages"].map do |package|
     "id" => package["id"],
     "display_name" => plugin["display_name"] || package["id"],
     "supports" => supports,
+    "conflicts_with" => plugin["conflicts_with"].is_a?(Array) ? plugin["conflicts_with"] : [],
     "installable" => !install.nil?,
     "installable_os_families" => installable_os_families,
     "actions" => actions,

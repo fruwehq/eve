@@ -112,6 +112,7 @@ Supported metadata:
 ```yaml
 supports:
   os_families: [ubuntu, windows]
+conflicts_with: [other-package]
 compatibility_enforced: true
 compatibility:
   - platform: ubuntu
@@ -130,6 +131,12 @@ Set `compatibility_enforced: true` when package availability should be filtered
 by the matrix. Eve and `package-list` then require a `supported` row matching
 the selected OS family, desktop, and session. Leave it unset for ordinary
 packages whose compatibility rows are informational.
+
+`conflicts_with` is optional package metadata for mutually exclusive choices.
+It is used for desktop-mode packages such as XFCE, GNOME, KDE, and their
+headless variants. `instance-resolve`, `package-list`, and Eve all consume the
+same manifest field, so these selection rules stay in configuration instead of
+being embedded as package-name blocks in the UI.
 
 Package `status` commands should emit one JSON object with:
 

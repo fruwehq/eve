@@ -792,6 +792,12 @@ def run_tui() -> int:
             reason = self.support_reason(package_id)
             if reason:
                 return reason
+            conflict_reason = self.package_conflict_reason(
+                package_id,
+                self.content_package_ids(extra_package_id=package_id),
+            )
+            if conflict_reason:
+                return conflict_reason
             if not self.package_installable_on_platform(package_id):
                 return "native action only on this OS"
             compatibility_reason = self.package_compatibility_reason(
@@ -808,6 +814,9 @@ def run_tui() -> int:
                 reason = self.support_reason(package_id)
                 if reason:
                     return f"{package_id}: {reason}"
+                conflict_reason = self.package_conflict_reason(package_id, prospective_packages)
+                if conflict_reason:
+                    return f"{package_id}: {conflict_reason}"
                 compatibility_reason = self.package_compatibility_reason(package_id, prospective_packages)
                 if compatibility_reason:
                     return f"{package_id}: {compatibility_reason}"
@@ -840,11 +849,29 @@ def run_tui() -> int:
             os_family = str(platform_choice.get("os_family") or "")
             if os_family == "windows":
                 return {"platform": "windows", "desktop": "Windows", "session": "Native"}
+            if os_family == "ubuntu" and "gnome-desktop-headless" in package_ids:
+                return {"platform": "ubuntu", "desktop": "GNOME Headless", "session": "Wayland"}
             if os_family == "ubuntu" and "gnome-desktop" in package_ids:
                 return {"platform": "ubuntu", "desktop": "GNOME", "session": "Wayland"}
+            if os_family == "ubuntu" and "kde-desktop-headless" in package_ids:
+                return {"platform": "ubuntu", "desktop": "KDE Plasma Headless", "session": "Wayland"}
+            if os_family == "ubuntu" and "kde-desktop" in package_ids:
+                return {"platform": "ubuntu", "desktop": "KDE Plasma", "session": "Wayland"}
+            if os_family == "ubuntu" and "xfce-desktop-headless" in package_ids:
+                return {"platform": "ubuntu", "desktop": "XFCE Headless", "session": "X11"}
             if os_family == "ubuntu":
                 return {"platform": "ubuntu", "desktop": "XFCE", "session": "X11"}
             return {"platform": os_family, "desktop": "", "session": ""}
+
+        def package_conflict_reason(self, package_id: str, package_ids: set[str]) -> str | None:
+            package = self.package_map.get(package_id, {})
+            conflicts = package.get("conflicts_with", [])
+            if not isinstance(conflicts, list):
+                return None
+            for conflict in [str(value) for value in conflicts]:
+                if conflict in package_ids and conflict != package_id:
+                    return f"conflicts with {conflict}"
+            return None
 
         def package_compatibility_reason(self, package_id: str, package_ids: set[str]) -> str | None:
             package = self.package_map.get(package_id, {})

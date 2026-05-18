@@ -7,7 +7,14 @@ cd "$(git rev-parse --show-toplevel)"
 
 RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
 OS_FAMILY=$(printf '%s\n' "$RESOLVED_ENV" | awk -F= '/^OS_FAMILY=/{print $2}')
+BUNDLE_PACKAGES=$(printf '%s\n' "$RESOLVED_ENV" | awk -F= '/^BUNDLE_PACKAGES=/{print $2}')
 IP=$(./scripts/instance-ip "$PROFILE")
+is_selected() {
+  case ",$BUNDLE_PACKAGES," in
+    *,"$1",*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
 
 case "$OS_FAMILY" in
   windows)
@@ -17,7 +24,28 @@ case "$OS_FAMILY" in
     ;;
   ubuntu)
     VM_USERNAME=$(printf '%s\n' "$RESOLVED_ENV" | awk -F= '/^VM_USER_NAME=/{print $2}')
-    USERNAME="${RDP_GATE_USER:-$VM_USERNAME}"
+    if is_selected gnome-desktop || is_selected gnome-desktop-headless; then
+      USERNAME="${RDP_GATE_USER:-rdpuser}"
+      PW="${RDP_GATE_PASSWORD:-${VM_USER_PASSWORD:-}}"
+      CREDSSP=0
+      REDIRECT=0
+      FREERDP_EXTRA=()
+      WINDOWS_APP_OK=1
+    elif is_selected kde-desktop || is_selected kde-desktop-headless; then
+      USERNAME="$VM_USERNAME"
+      PW="${VM_USER_PASSWORD:-}"
+      CREDSSP=1
+      REDIRECT=1
+      FREERDP_EXTRA=(/gfx:AVC444)
+      WINDOWS_APP_OK=0
+    else
+      USERNAME="$VM_USERNAME"
+      PW="${VM_USER_PASSWORD:-}"
+      CREDSSP=1
+      REDIRECT=1
+      FREERDP_EXTRA=()
+      WINDOWS_APP_OK=1
+    fi
     if [ -z "$USERNAME" ]; then
       USERNAME="${VM_USER_NAME:-}"
     fi
@@ -25,7 +53,6 @@ case "$OS_FAMILY" in
       echo "remote-rdp: VM_USER_NAME is required for Ubuntu RDP" >&2
       exit 2
     fi
-    PW="${RDP_GATE_PASSWORD:-${VM_USER_PASSWORD:-}}"
     if [ -z "$PW" ]; then
       echo "remote-rdp: VM_USER_PASSWORD or RDP_GATE_PASSWORD is required for Ubuntu RDP login" >&2
       echo "remote-rdp: RustDesk uses RUSTDESK_PASSWORD; Linux login/RDP uses VM_USER_PASSWORD by default." >&2
@@ -38,12 +65,18 @@ case "$OS_FAMILY" in
     exit 2
     ;;
 esac
+: "${CREDSSP:=1}"
+: "${REDIRECT:=0}"
+: "${WINDOWS_APP_OK:=1}"
+: "${FREERDP_EXTRA:=}"
 
 mkdir -p ./tmp
 printf '%s\n' \
   "full address:s:$IP" \
   "username:s:$USERNAME" \
   "prompt for credentials on client:i:1" \
+  "enablecredsspsupport:i:$CREDSSP" \
+  "use redirection server name:i:$REDIRECT" \
   "administrative session:i:$ADMIN_SESSION" \
   "screen mode id:i:2" \
   "session bpp:i:32" \
@@ -51,13 +84,18 @@ printf '%s\n' \
   "audiomode:i:0" \
   > ./tmp/windows.rdp
 
-if [ "$(uname -s)" = "Darwin" ]; then
+if [ "$WINDOWS_APP_OK" = "0" ] && command -v xfreerdp >/dev/null 2>&1; then
+  exec xfreerdp /v:"$IP" /u:"$USERNAME" /p:"$PW" +clipboard /cert:ignore "${FREERDP_EXTRA[@]}"
+elif [ "$WINDOWS_APP_OK" = "0" ]; then
+  echo "remote-rdp: this KDE/krdp profile is not compatible with macOS Windows App; install xfreerdp." >&2
+  exit 2
+elif [ "$(uname -s)" = "Darwin" ]; then
   printf '%s' "$PW" | pbcopy
   open -a "Microsoft Remote Desktop" ./tmp/windows.rdp || open ./tmp/windows.rdp
   sleep 3
   osascript -e 'tell application "System Events" to keystroke "v" using command down' -e 'tell application "System Events" to key code 36'
 elif command -v xfreerdp >/dev/null 2>&1; then
-  exec xfreerdp /v:"$IP" /u:"$USERNAME" /p:"$PW" +clipboard /cert:ignore
+  exec xfreerdp /v:"$IP" /u:"$USERNAME" /p:"$PW" +clipboard /cert:ignore "${FREERDP_EXTRA[@]}"
 else
   echo "remote-rdp: install Microsoft Remote Desktop on macOS or xfreerdp on Linux" >&2
   exit 2

@@ -68,6 +68,7 @@ OS_FAMILY=$(env_value OS_FAMILY)
 OS_ID=$(env_value OS_ID)
 PROFILE_NAME=$(env_value PROFILE_NAME)
 PROVIDER=$(env_value PROVIDER)
+BUNDLE_PACKAGES=$(env_value BUNDLE_PACKAGES)
 OS_PROVISION_DIR="oses/$OS_ID/provision"
 
 if [ "$OS_FAMILY" != "ubuntu" ]; then
@@ -163,6 +164,7 @@ done
 # The provision steps are package-gated. Include only the requested package and
 # explicit dependency markers so installs do not accidentally run the full bundle.
 printf '%s\n' "${package_markers[@]}" > "$STAGE/state/bundle_packages"
+printf '%s\n' "$BUNDLE_PACKAGES" | tr ',' '\n' > "$STAGE/state/selected_packages"
 
 _HOST_TZ="${TIMEZONE:-}"
 if [ -z "$_HOST_TZ" ]; then
@@ -198,6 +200,8 @@ export THINLINC_SERVER_BUNDLE_PATH="${THINLINC_REMOTE_SERVER_BUNDLE_PATH:-${THIN
 export THINLINC_SERVER_BUNDLE_URL="${THINLINC_SERVER_BUNDLE_URL:-}"
 export THINLINC_WEBACCESS_PORT="${THINLINC_WEBACCESS_PORT:-}"
 export TIMEZONE="$_HOST_TZ"
+export VIRTUAL_MONITOR_WIDTH="${VIRTUAL_MONITOR_WIDTH:-1920}"
+export VIRTUAL_MONITOR_HEIGHT="${VIRTUAL_MONITOR_HEIGHT:-1080}"
 EOF
 
 echo "[package-provision] uploading $OS_PROVISION_DIR scripts for package=$PACKAGE"
@@ -217,6 +221,7 @@ if [ "$PACKAGE" = "thinlinc" ] && [ -n "${THINLINC_SERVER_BUNDLE_PATH:-}" ]; the
 fi
 ./scripts/ssh-retry "upload linux package scripts" ./scripts/instance-ssh "$INSTANCE_NAME" --scp "$STAGE/scripts" 'provision/'
 ./scripts/ssh-retry "upload linux package bundle list" ./scripts/instance-ssh "$INSTANCE_NAME" --scp "$STAGE/state/bundle_packages" 'provision/state/'
+./scripts/ssh-retry "upload linux selected package list" ./scripts/instance-ssh "$INSTANCE_NAME" --scp "$STAGE/state/selected_packages" 'provision/state/'
 ./scripts/ssh-retry "upload linux package environment" ./scripts/instance-ssh "$INSTANCE_NAME" --scp "$STAGE/state/env" 'provision/state/'
 
 remote_steps=""

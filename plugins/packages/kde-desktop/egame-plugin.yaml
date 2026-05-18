@@ -1,0 +1,21 @@
+api_version: egame.plugin/v1
+kind: package
+id: kde-desktop
+display_name: KDE Plasma Desktop
+commands:
+  install: {exec: scripts/package-plugin, args: [kde-desktop, install]}
+  status: {exec: scripts/package-plugin, args: [kde-desktop, status]}
+  down: {exec: scripts/package-plugin, args: [kde-desktop, down]}
+supports: {os_families: [ubuntu], arches: [amd64]}
+conflicts_with: [xfce-desktop, xfce-desktop-headless, gnome-desktop, gnome-desktop-headless, kde-desktop-headless]
+compatibility:
+  - platform: ubuntu
+    desktop: KDE Plasma
+    session: Wayland
+    status: supported
+    notes: Installs KDE Plasma with SDDM autologin; RDP uses krdp.
+down: {destructive: true}
+env: []
+install:
+  ubuntu:
+    steps: [base.sh, timezone.sh, provision/ubuntu/kde-desktop.sh]

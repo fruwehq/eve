@@ -17,6 +17,11 @@ compatibility:
     status: supported
     notes: Stable ThinLinc session path on amd64.
   - platform: ubuntu
+    desktop: XFCE Headless
+    session: X11
+    status: supported
+    notes: Stable ThinLinc session path on amd64 without a local display manager.
+  - platform: ubuntu
     desktop: GNOME
     session: X11
     status: wip

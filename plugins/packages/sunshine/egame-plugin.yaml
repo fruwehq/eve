@@ -20,6 +20,11 @@ compatibility:
     status: wip
     notes: Current Linux path uses X11 capture; ultrawide 5120x1440 still needs live validation.
   - platform: ubuntu
+    desktop: XFCE Headless
+    session: X11
+    status: wip
+    notes: Current Linux path uses X11 capture; ultrawide 5120x1440 still needs live validation.
+  - platform: ubuntu
     desktop: GNOME
     session: Wayland
     status: wip

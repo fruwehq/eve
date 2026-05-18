@@ -89,6 +89,7 @@ def validate_plugin!(plugin)
   validate_provider_supports!(plugin) if kind == "provider"
   validate_package_supports!(plugin) if kind == "package"
   require_string_list!(plugin["env"], plugin["_path"], "env")
+  require_string_list!(plugin["conflicts_with"], plugin["_path"], "conflicts_with") if kind == "package" && plugin.key?("conflicts_with")
   if kind == "package" && plugin.key?("compatibility_enforced") &&
      plugin["compatibility_enforced"] != true && plugin["compatibility_enforced"] != false
     raise "#{plugin["_path"]}: compatibility_enforced must be boolean"

@@ -10,6 +10,7 @@ LOGS_DIR="$PROVISION_ROOT/logs"
 DOWNLOADS_DIR="$PROVISION_ROOT/downloads"
 REBOOT_FLAG="$STATE_DIR/reboot.flag"
 BUNDLE_PACKAGES_FILE="$STATE_DIR/bundle_packages"
+SELECTED_PACKAGES_FILE="$STATE_DIR/selected_packages"
 PROVISION_USER_NAME="${USER:-$(id -un)}"
 HUMAN_USER_NAME="${VM_USER_NAME:-$PROVISION_USER_NAME}"
 if id "$HUMAN_USER_NAME" >/dev/null 2>&1; then
@@ -34,6 +35,14 @@ log() {
 has_pkg() {
   [ -f "$BUNDLE_PACKAGES_FILE" ] || return 1
   grep -Fqx "$1" "$BUNDLE_PACKAGES_FILE"
+}
+
+has_selected_pkg() {
+  if [ -f "$SELECTED_PACKAGES_FILE" ]; then
+    grep -Fqx "$1" "$SELECTED_PACKAGES_FILE"
+    return
+  fi
+  has_pkg "$1"
 }
 
 skip_unless_pkg() {
@@ -165,5 +174,148 @@ human_run() {
     USER="$HUMAN_USER_NAME" \
     LOGNAME="$HUMAN_USER_NAME" \
     XDG_RUNTIME_DIR="/run/user/$HUMAN_UID" \
+    DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$HUMAN_UID/bus" \
     "$@"
+}
+
+start_human_user_manager() {
+  sudo loginctl enable-linger "$HUMAN_USER_NAME" >/dev/null 2>&1 || true
+  sudo systemctl start "user@$HUMAN_UID.service" >/dev/null 2>&1 || true
+}
+
+generate_tls_cert() {
+  local key_path="$1"
+  local crt_path="$2"
+  local owner="${3:-$HUMAN_USER_NAME}"
+  local group="${4:-$HUMAN_GROUP}"
+
+  sudo install -d -o "$owner" -g "$group" -m 0700 "$(dirname "$key_path")"
+  sudo openssl req -x509 -nodes -newkey rsa:4096 \
+    -keyout "$key_path" \
+    -out "$crt_path" \
+    -days 3650 \
+    -subj "/CN=$(hostname)" >/dev/null 2>&1
+  sudo chown "$owner:$group" "$key_path" "$crt_path"
+  sudo chmod 0600 "$key_path"
+  sudo chmod 0644 "$crt_path"
+}
+
+configure_gdm_autologin() {
+  sudo systemctl set-default graphical.target
+  sudo mkdir -p /etc/gdm3
+  sudo tee /etc/gdm3/custom.conf >/dev/null <<EOF
+[daemon]
+AutomaticLoginEnable=True
+AutomaticLogin=$HUMAN_USER_NAME
+WaylandEnable=true
+
+[security]
+
+[xdmcp]
+
+[chooser]
+
+[debug]
+EOF
+  sudo install -d -m 0755 /var/lib/AccountsService/users
+  sudo tee "/var/lib/AccountsService/users/$HUMAN_USER_NAME" >/dev/null <<EOF
+[User]
+Session=ubuntu
+XSession=ubuntu
+SystemAccount=false
+EOF
+  printf '/usr/sbin/gdm3\n' | sudo tee /etc/X11/default-display-manager >/dev/null
+  sudo systemctl disable --now lightdm.service sddm.service xrdp.service >/dev/null 2>&1 || true
+  sudo systemctl enable --now gdm.service >/dev/null 2>&1 ||
+    sudo systemctl enable --now gdm3.service >/dev/null 2>&1 || true
+}
+
+disable_gnome_first_run_and_locks() {
+  repair_human_desktop_dirs
+  human_run gsettings set org.gnome.desktop.session idle-delay 0 >/dev/null 2>&1 || true
+  human_run gsettings set org.gnome.desktop.screensaver lock-enabled false >/dev/null 2>&1 || true
+  if human_run gsettings list-keys org.gnome.desktop.screensaver 2>/dev/null | grep -qx "ubuntu-lock-on-suspend"; then
+    human_run gsettings set org.gnome.desktop.screensaver ubuntu-lock-on-suspend false >/dev/null 2>&1 || true
+  fi
+  sudo touch "$HUMAN_HOME/.config/gnome-initial-setup-done"
+  sudo install -d -o "$HUMAN_USER_NAME" -g "$HUMAN_GROUP" -m 0700 "$HUMAN_HOME/.config/gnome-initial-setup"
+  if [ -r /etc/os-release ]; then
+    # shellcheck disable=SC1091
+    . /etc/os-release
+    [ -z "${VERSION_ID:-}" ] || sudo touch "$HUMAN_HOME/.config/gnome-initial-setup/upgrade-${VERSION_ID}-done"
+  fi
+  sudo chown -R "$HUMAN_USER_NAME:$HUMAN_GROUP" \
+    "$HUMAN_HOME/.config/gnome-initial-setup" \
+    "$HUMAN_HOME/.config/gnome-initial-setup-done"
+}
+
+configure_lightdm_autologin() {
+  sudo systemctl set-default graphical.target
+  sudo install -d -m 0755 /etc/lightdm/lightdm.conf.d
+  sudo tee /etc/lightdm/lightdm.conf.d/autologin.conf >/dev/null <<EOF
+[SeatDefaults]
+autologin-user=$HUMAN_USER_NAME
+autologin-user-timeout=0
+EOF
+  printf '/usr/sbin/lightdm\n' | sudo tee /etc/X11/default-display-manager >/dev/null
+  sudo systemctl disable --now gdm.service gdm3.service sddm.service >/dev/null 2>&1 || true
+  sudo systemctl enable lightdm.service >/dev/null 2>&1 || true
+}
+
+configure_sddm_autologin() {
+  sudo systemctl set-default graphical.target
+  sudo mkdir -p /etc/sddm.conf.d
+  sudo tee /etc/sddm.conf.d/krdp-autologin.conf >/dev/null <<EOF
+[Autologin]
+User=$HUMAN_USER_NAME
+Session=plasma
+Relogin=true
+EOF
+  printf '/usr/bin/sddm\n' | sudo tee /etc/X11/default-display-manager >/dev/null
+  sudo systemctl disable --now gdm.service gdm3.service lightdm.service xrdp.service >/dev/null 2>&1 || true
+  sudo systemctl enable sddm.service >/dev/null 2>&1 || true
+}
+
+configure_xfce_xsession() {
+  repair_human_desktop_dirs
+  cat <<'EOF' | human_write_file "$HUMAN_HOME/.xsession" 0644
+#!/usr/bin/env sh
+unset DBUS_SESSION_BUS_ADDRESS
+unset SESSION_MANAGER
+export XDG_SESSION_TYPE=x11
+export XDG_CURRENT_DESKTOP=XFCE
+exec dbus-run-session -- startxfce4
+EOF
+  ensure_xfce_terminal
+}
+
+disable_xfce_locks() {
+  sudo install -d -o "$HUMAN_USER_NAME" -g "$HUMAN_GROUP" -m 0700 "$HUMAN_HOME/.config/xfce4/xfconf/xfce-perchannel-xml"
+  cat <<'EOF' | human_write_file "$HUMAN_HOME/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-screensaver.xml" 0644
+<?xml version="1.0" encoding="UTF-8"?>
+<channel name="xfce4-screensaver" version="1.0">
+  <property name="saver" type="empty">
+    <property name="mode" type="int" value="0"/>
+    <property name="enabled" type="bool" value="false"/>
+  </property>
+  <property name="lock" type="empty">
+    <property name="enabled" type="bool" value="false"/>
+  </property>
+</channel>
+EOF
+  cat <<'EOF' | human_write_file "$HUMAN_HOME/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-power-manager.xml" 0644
+<?xml version="1.0" encoding="UTF-8"?>
+<channel name="xfce4-power-manager" version="1.0">
+  <property name="xfce4-power-manager" type="empty">
+    <property name="blank-on-ac" type="int" value="0"/>
+    <property name="blank-on-battery" type="int" value="0"/>
+    <property name="dpms-on-ac-sleep" type="int" value="0"/>
+    <property name="dpms-on-battery-sleep" type="int" value="0"/>
+    <property name="dpms-on-ac-off" type="int" value="0"/>
+    <property name="dpms-on-battery-off" type="int" value="0"/>
+    <property name="lock-screen-suspend-hibernate" type="bool" value="false"/>
+    <property name="logind-handle-lid-switch" type="bool" value="false"/>
+  </property>
+</channel>
+EOF
 }

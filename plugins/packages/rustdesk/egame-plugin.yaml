@@ -20,10 +20,30 @@ compatibility:
     status: supported
     notes: Uses LightDM autologin plus an X11 desktop session.
   - platform: ubuntu
+    desktop: XFCE Headless
+    session: X11
+    status: unsupported
+    notes: RustDesk needs an active local desktop session; use RDP for headless XFCE.
+  - platform: ubuntu
     desktop: GNOME
     session: Wayland
     status: unsupported
     notes: RustDesk cannot unattended-share GNOME Wayland without peer-side screen selection.
+  - platform: ubuntu
+    desktop: GNOME Headless
+    session: Wayland
+    status: unsupported
+    notes: RustDesk cannot unattended-share GNOME Wayland without peer-side screen selection.
+  - platform: ubuntu
+    desktop: KDE Plasma
+    session: Wayland
+    status: unsupported
+    notes: RustDesk unattended Wayland sharing is not a supported KDE path.
+  - platform: ubuntu
+    desktop: KDE Plasma Headless
+    session: Wayland
+    status: unsupported
+    notes: RustDesk unattended Wayland sharing is not a supported KDE path.
 down: {destructive: true}
 env: [RUSTDESK_SERVER, RUSTDESK_KEY, RUSTDESK_PASSWORD]
 actions:

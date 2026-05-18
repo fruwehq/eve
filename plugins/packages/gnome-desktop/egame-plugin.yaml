@@ -7,6 +7,7 @@ commands:
   status: {exec: scripts/package-plugin, args: [gnome-desktop, status]}
   down: {exec: scripts/package-plugin, args: [gnome-desktop, down]}
 supports: {os_families: [ubuntu]}
+conflicts_with: [xfce-desktop, xfce-desktop-headless, gnome-desktop-headless, kde-desktop, kde-desktop-headless]
 compatibility:
   - platform: ubuntu
     desktop: GNOME

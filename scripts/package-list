@@ -70,8 +70,16 @@ begin
   compatibility_target = lambda do |package_ids|
     if os_family == "windows"
       { "platform" => "windows", "desktop" => "Windows", "session" => "Native" }
+    elsif os_family == "ubuntu" && package_ids.include?("gnome-desktop-headless")
+      { "platform" => "ubuntu", "desktop" => "GNOME Headless", "session" => "Wayland" }
     elsif os_family == "ubuntu" && package_ids.include?("gnome-desktop")
       { "platform" => "ubuntu", "desktop" => "GNOME", "session" => "Wayland" }
+    elsif os_family == "ubuntu" && package_ids.include?("kde-desktop-headless")
+      { "platform" => "ubuntu", "desktop" => "KDE Plasma Headless", "session" => "Wayland" }
+    elsif os_family == "ubuntu" && package_ids.include?("kde-desktop")
+      { "platform" => "ubuntu", "desktop" => "KDE Plasma", "session" => "Wayland" }
+    elsif os_family == "ubuntu" && package_ids.include?("xfce-desktop-headless")
+      { "platform" => "ubuntu", "desktop" => "XFCE Headless", "session" => "X11" }
     elsif os_family == "ubuntu"
       { "platform" => "ubuntu", "desktop" => "XFCE", "session" => "X11" }
     else
@@ -103,6 +111,13 @@ begin
                 support_allowed.call(supports, "#{os_family}_versions", os_version)
     installable = plugin.dig("install", os_family).is_a?(Hash)
     actions = plugin.fetch("actions", [])
+    conflicts = plugin["conflicts_with"].is_a?(Array) ? plugin["conflicts_with"] : []
+    conflict = (conflicts & selected_ids).first
+    if conflict
+      supported = false
+      installable = false
+      actions = []
+    end
     unless compatibility_match.call(plugin, compatibility_target.call(selected_ids))
       supported = false
       installable = false

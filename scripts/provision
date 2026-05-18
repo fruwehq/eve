@@ -121,6 +121,7 @@ case "$OS_FAMILY" in
 
     # bundle_packages: one package per line for cheap grep lookup in step scripts
     printf '%s\n' "$BUNDLE_PACKAGES" | tr ',' '\n' > "$STAGE/state/bundle_packages"
+    printf '%s\n' "$BUNDLE_PACKAGES" | tr ',' '\n' > "$STAGE/state/selected_packages"
 
     THINLINC_REMOTE_SERVER_BUNDLE_PATH="${THINLINC_SERVER_BUNDLE_PATH:-}"
     UPLOAD_THINLINC_BUNDLE=0
@@ -159,6 +160,7 @@ export PROFILE_NAME="$PROFILE_NAME"
 export VM_USER_NAME="$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^VM_USER_NAME=/{print $2}')"
 export VM_USER_PASSWORD="${VM_USER_PASSWORD:-}"
 export EPHEMERAL_DISPLAY_RESOLUTION="${EPHEMERAL_DISPLAY_RESOLUTION:-}"
+export EPHEMERAL_DISPLAY_FPS="${EPHEMERAL_DISPLAY_FPS:-}"
 export PROVIDER="$PROVIDER"
 export EPHEMERAL_SUNSHINE_PASSWORD="${EPHEMERAL_SUNSHINE_PASSWORD:-}"
 export RDP_GATE_PASSWORD="${RDP_GATE_PASSWORD:-}"
@@ -176,6 +178,8 @@ export THINLINC_SERVER_BUNDLE_PATH="${THINLINC_REMOTE_SERVER_BUNDLE_PATH:-}"
 export THINLINC_SERVER_BUNDLE_URL="${THINLINC_SERVER_BUNDLE_URL:-}"
 export THINLINC_WEBACCESS_PORT="${THINLINC_WEBACCESS_PORT:-}"
 export TIMEZONE="$_HOST_TZ"
+export VIRTUAL_MONITOR_WIDTH="${VIRTUAL_MONITOR_WIDTH:-1920}"
+export VIRTUAL_MONITOR_HEIGHT="${VIRTUAL_MONITOR_HEIGHT:-1080}"
 EOF
 
     echo "[provision] uploading $OS_PROVISION_DIR/ to remote"
@@ -187,6 +191,7 @@ EOF
     fi
     ./scripts/ssh-retry "upload linux scripts" ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/scripts" 'provision/'
     ./scripts/ssh-retry "upload linux bundle package list" ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/state/bundle_packages" 'provision/state/'
+    ./scripts/ssh-retry "upload linux selected package list" ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/state/selected_packages" 'provision/state/'
     ./scripts/ssh-retry "upload linux environment" ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/state/env" 'provision/state/'
     ./scripts/ssh-retry "upload linux step list" ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/state/steps.list" 'provision/state/'
     echo "[provision] running bootstrap.sh"

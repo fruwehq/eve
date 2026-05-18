@@ -266,8 +266,9 @@ end
 
 def validate_package_plugins!(bundle_packages, os)
   plugins = package_plugins
+  plugin_by_id = plugins.to_h { |entry| [entry.fetch("id"), entry] }
   bundle_packages.each do |package_id|
-    plugin = plugins.find { |entry| entry.fetch("id") == package_id }
+    plugin = plugin_by_id[package_id]
     raise "Package plugin not found: #{package_id}" unless plugin
 
     supports = plugin.fetch("supports", {})
@@ -277,6 +278,10 @@ def validate_package_plugins!(bundle_packages, os)
     validate_package_support_value!(package_id, supports, os.fetch("id"), "os_ids", "OS")
     validate_package_support_value!(package_id, supports, os.fetch("version", ""), "os_versions", "OS version")
     validate_package_support_value!(package_id, supports, os.fetch("version", ""), "#{os_family}_versions", "#{os_family} version")
+
+    conflicts = plugin["conflicts_with"].is_a?(Array) ? plugin["conflicts_with"] : []
+    conflict = conflicts.find { |candidate| bundle_packages.include?(candidate) }
+    raise "Package conflict: #{package_id} conflicts with #{conflict}" if conflict
   end
 end
 

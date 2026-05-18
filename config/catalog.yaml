@@ -174,8 +174,11 @@ packages:
   - id: discord
   - id: docker
   - id: gnome-desktop
+  - id: gnome-desktop-headless
   - id: goose
   - id: hermes
+  - id: kde-desktop
+  - id: kde-desktop-headless
   - id: macos-desktop-theme
   - id: opencode
   - id: rdp
@@ -186,17 +189,34 @@ packages:
   - id: vscode
   - id: vnc
   - id: waypipe
+  - id: xfce-desktop
+  - id: xfce-desktop-headless
   - id: xpra
 
 # -----------------------------------------------------------------------------
 # Bundle catalog (composable package groups)
 # -----------------------------------------------------------------------------
 bundles:
+  - id: desktop-xfce
+    includes: [xfce-desktop, rdp]
+
+  - id: desktop-xfce-headless
+    includes: [xfce-desktop-headless, rdp]
+
   - id: desktop-gnome
-    includes: [gnome-desktop]
+    includes: [gnome-desktop, rdp]
+
+  - id: desktop-gnome-headless
+    includes: [gnome-desktop-headless, rdp]
 
   - id: desktop-gnome-mac
-    includes: [gnome-desktop, macos-desktop-theme]
+    includes: [gnome-desktop, macos-desktop-theme, rdp]
+
+  - id: desktop-kde
+    includes: [kde-desktop, rdp]
+
+  - id: desktop-kde-headless
+    includes: [kde-desktop-headless, rdp]
 
   - id: desktop-streaming
     includes: [sunshine, rustdesk, vnc, rdp, waypipe]

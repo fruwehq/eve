@@ -52,13 +52,13 @@ RESOLVED_RASPBERRY_PI_IP=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^RASPBERRY_
 
 normalize_path() {
   case "$1" in
-    '~'|'~/'*)
+    \~|\~/*)
       printf '%s\n' "$HOME${1#\~}"
       ;;
-    '$HOME'|'$HOME/'*)
+    \$HOME|\$HOME/*)
       printf '%s\n' "$HOME${1#\$HOME}"
       ;;
-    '$(HOME)'|'$(HOME)/'*)
+    \$\(HOME\)|\$\(HOME\)/*)
       printf '%s\n' "$HOME${1#\$\(HOME\)}"
       ;;
     *)
