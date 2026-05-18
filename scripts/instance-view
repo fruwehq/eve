@@ -33,6 +33,15 @@ def load_any(path)
   YAML.safe_load(File.read(path), permitted_classes: [], aliases: true) || {}
 end
 
+def provider_actions(provider_id)
+  plugin_doc = run_json(File.join(ROOT, "scripts/plugin-list"), "--kind", "provider", "--json")
+  plugin = plugin_doc.fetch("plugins").find { |entry| entry["id"] == provider_id }
+  return [] unless plugin
+
+  actions = plugin["actions"]
+  actions.is_a?(Array) ? actions : []
+end
+
 instance_name = nil
 registry_path = ENV["EGAME_INSTANCE_REGISTRY"] && !ENV["EGAME_INSTANCE_REGISTRY"].empty? \
                 ? File.expand_path(ENV["EGAME_INSTANCE_REGISTRY"], Dir.pwd) \
@@ -122,6 +131,7 @@ begin
   resolved = run_json(*resolve_cmd)
   paths = run_json(*paths_cmd)
   packages = run_json(*package_cmd).fetch("packages")
+  actions = provider_actions(resolved.fetch("provider_plugin"))
 
   view = Egame::SDK::State.build_view(
     instance_name: instance_name,
@@ -129,6 +139,7 @@ begin
     packages: packages,
     paths: paths
   )
+  view["provider_actions"] = actions
 
   puts JSON.pretty_generate(view)
 rescue StandardError => e

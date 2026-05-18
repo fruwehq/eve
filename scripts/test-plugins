@@ -360,6 +360,51 @@ else
   FAIL=$((FAIL + 1))
 fi
 
+if provider_action_err="$(
+  ruby <<'RUBY' 2>&1
+require "yaml"
+
+Dir.glob("plugins/providers/*/egame-plugin.yaml").sort.each do |manifest|
+  provider_dir = File.dirname(manifest)
+  plugin = YAML.load_file(manifest)
+  actions = plugin["actions"]
+  raise "#{manifest}: provider actions must be declared" unless actions.is_a?(Array) && !actions.empty?
+
+  actions.each do |action|
+    target = action.fetch("target")
+    next unless target.start_with?("provider.")
+
+    command = target.split(".", 2).fetch(1)
+    spec = plugin.fetch("commands")[command]
+    raise "#{manifest}: action #{action.fetch("id")} targets missing provider command #{command}" unless spec
+
+    exec_path = spec.fetch("exec")
+    path = exec_path.start_with?("/") ? exec_path : File.expand_path(exec_path, provider_dir)
+    raise "#{manifest}: action #{action.fetch("id")} command is not executable: #{exec_path}" unless File.file?(path) && File.executable?(path)
+  end
+end
+RUBY
+)"; then
+  printf '  [OK] provider action metadata targets executable provider commands\n'
+else
+  printf '  [FAIL] provider action metadata targets executable provider commands\n' >&2
+  printf '%s\n' "$provider_action_err" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+provider_actions_view="$(
+  EGAME_INSTANCE_REGISTRY="$FIXTURE" EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-provider-action-view" EGAME_STATE_DIR="${TMPDIR:-/tmp}/egame-provider-action-state" \
+    ./scripts/instance-view --registry "$FIXTURE" --instance aws-gpu-a
+)"
+if printf '%s\n' "$provider_actions_view" |
+  jq -e 'any(.provider_actions[]; .id == "login" and .target == "provider.login") and any(.provider_actions[]; .id == "status-details" and .target == "provider.status")' >/dev/null; then
+  printf '  [OK] instance-view exposes provider action metadata\n'
+else
+  printf '  [FAIL] instance-view exposes provider action metadata\n' >&2
+  printf '%s\n' "$provider_actions_view" >&2
+  FAIL=$((FAIL + 1))
+fi
+
 package_status="$(
   EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-package-dispatch-test" \
     ./scripts/package-dispatch --registry "$FIXTURE" --instance dev-a --package docker --command status --dry-run

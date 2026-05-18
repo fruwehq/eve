@@ -110,7 +110,17 @@ unless instance_name && command
   exit 2
 end
 
-INTERACTIVE_COMMANDS = %w[ssh].freeze
+  INTERACTIVE_COMMANDS = %w[ssh].freeze
+
+def interactive_command?(plugin, command)
+  return true if INTERACTIVE_COMMANDS.include?(command)
+
+  plugin.fetch("actions", []).any? do |action|
+    action.is_a?(Hash) &&
+      action["interactive"] == true &&
+      action["target"] == "provider.#{command}"
+  end
+end
 
 def validate_provider_output(output)
   return if output.nil? || output.empty?
@@ -194,7 +204,7 @@ begin
   cmd += extra_args
   desired_state = desired_state_for(command)
 
-  if INTERACTIVE_COMMANDS.include?(command) && !dry_run
+  if interactive_command?(plugin, command) && !dry_run
     env["EGAME_RESOLVED_JSON"] = JSON.generate(resolved)
     exec(env, *cmd, chdir: ROOT)
   end

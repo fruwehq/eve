@@ -13,6 +13,16 @@ commands:
   status: {exec: ../_common/commands/status}
   ip: {exec: ../_common/commands/ip}
   ssh: {exec: ../_common/commands/ssh}
+actions:
+  - id: status-details
+    label: Status
+    target: provider.status
+  - id: plan
+    label: Plan
+    target: provider.plan
+  - id: init
+    label: Init
+    target: provider.init
 capabilities: [password]
 supports:
   engines: [terraform]

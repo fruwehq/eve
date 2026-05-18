@@ -22,6 +22,7 @@ from typing import Any, ClassVar, Literal, cast
 ROOT = Path(__file__).resolve().parents[1]
 NEW_INSTANCE_KEY = "__new_instance__"
 PACKAGE_ACTION_BUTTONS = 9
+PROVIDER_ACTION_BUTTONS = 5
 APP_NAME = "Eve"
 APP_EXPANSION = "Ephemeral VM Environment"
 APP_TAGLINE = "create -> provision -> connect"
@@ -1488,6 +1489,7 @@ def run_tui() -> int:
             self.command_running = False
             self.current_command_label: str | None = None
             self.current_process: asyncio.subprocess.Process | None = None
+            self.current_provider_actions: list[dict[str, Any]] = []
             self.current_remote_actions: list[dict[str, Any]] = []
             self.instance_ips: dict[str, str] = {}
             self.background_tasks: set[asyncio.Task[None]] = set()
@@ -1585,9 +1587,8 @@ def run_tui() -> int:
                                 with Vertical(id="provider-debug-group", classes="action-group"):
                                     yield Static("Provider Debug", classes="action-title")
                                     with Grid(id="provider-debug-strip"):
-                                        yield Button("Status", id="provider-status")
-                                        yield Button("Plan", id="provider-plan")
-                                        yield Button("Init", id="provider-init")
+                                        for index in range(PROVIDER_ACTION_BUTTONS):
+                                            yield Button("", id=f"provider-action-{index}")
                                 with Grid(id="danger-strip"):
                                     yield Button("Down", id="provider-down", variant="error")
                                     yield Button("Recover", id="instance-recover")
@@ -2423,12 +2424,8 @@ def run_tui() -> int:
                 self.start_task(self.action_provider("stop"))
             elif button_id == "provider-down":
                 self.action_down_instance()
-            elif button_id == "provider-status":
-                self.start_task(self.action_provider("status"))
-            elif button_id == "provider-plan":
-                self.start_task(self.action_provider("plan"))
-            elif button_id == "provider-init":
-                self.start_task(self.action_provider("init"))
+            elif button_id.startswith("provider-action-"):
+                self.start_task(self.action_provider_manifest(int(button_id.rsplit("-", 1)[1])))
             elif button_id == "reboot":
                 self.action_confirm_instance_command("Reboot instance?", "reboot", "reboot")
             elif button_id == "update-tools":
@@ -2635,7 +2632,7 @@ def run_tui() -> int:
                     command = "start"
             args = (
                 provider_dispatch_args(command, instance)
-                if command in {"init", "plan", "status"}
+                if command in {"init", "login", "plan", "status"}
                 else make_args(command, instance)
             )
             code = await self.stream_command(f"provider.{command}", args, refresh_instance=instance)
@@ -2649,6 +2646,31 @@ def run_tui() -> int:
 
         def action_queue_provider(self, command: str) -> None:
             self.start_task(self.action_provider(command))
+
+        async def action_provider_manifest(self, index: int) -> None:
+            if not self.current_instance or index >= len(self.current_provider_actions):
+                return
+            instance = self.current_instance
+            action = self.current_provider_actions[index]
+            target = str(action.get("target") or "")
+            label = str(action.get("label") or target or "provider action")
+            if target.startswith("provider."):
+                command = target.split(".", 1)[1]
+                if bool(action.get("interactive")):
+                    self.log_line(f"[primary]Opening {label} for {instance}. Exit the session to return to the TUI.[/]")
+                    self.refresh()
+                    await asyncio.sleep(0.05)
+                    with self.suspend():
+                        code = subprocess.call(provider_dispatch_args(command, instance), cwd=ROOT, env=os.environ.copy())
+                    if code == 0:
+                        self.log_line(f"[success]{label} session closed.[/]")
+                    else:
+                        self.log_line(f"[error]{label} failed with exit {code}.[/]")
+                    await self.refresh_current_status(resolve_ip=False)
+                    return
+                await self.action_provider(command)
+                return
+            await self.stream_command(label, make_args(target, instance), refresh_instance=instance)
 
         def keep_instance_selected(self, instance: str) -> None:
             if not any(str(row.get("name", "")) == instance for row in self.instances):
@@ -2897,6 +2919,27 @@ def run_tui() -> int:
                         actions.append(next_action)
             return actions[:PACKAGE_ACTION_BUTTONS]
 
+        def provider_manifest_actions(self) -> list[dict[str, Any]]:
+            if not self.current_status:
+                return []
+            action_rows = self.current_status.get("provider_actions", [])
+            actions: list[dict[str, Any]] = []
+            if not isinstance(action_rows, list):
+                return actions
+            for action in action_rows:
+                if not isinstance(action, dict):
+                    continue
+                action_id = str(action.get("id") or "")
+                label = str(action.get("label") or "")
+                target = str(action.get("target") or "")
+                if action_id and label and target:
+                    next_action = dict(action)
+                    next_action["id"] = action_id
+                    next_action["label"] = label
+                    next_action["target"] = target
+                    actions.append(next_action)
+            return actions[:PROVIDER_ACTION_BUTTONS]
+
         def set_button(self, button_id: str, *, disabled: bool, hide_when_disabled: bool = True) -> None:
             button = self.query_one(f"#{button_id}", Button)
             button.disabled = disabled
@@ -2925,6 +2968,7 @@ def run_tui() -> int:
                 "upload",
                 "show-password",
                 "logs",
+                *(f"provider-action-{index}" for index in range(PROVIDER_ACTION_BUTTONS)),
                 *(f"pkg-action-{index}" for index in range(PACKAGE_ACTION_BUTTONS)),
                 "bundle-select",
                 "bundle-unselect",
@@ -2969,15 +3013,26 @@ def run_tui() -> int:
             display_provider_state = str(state.get("effective_provider_state", "unknown"))
             provider_available = provider_actions_available(cast(dict[str, Any], state))
             provider_busy = display_provider_state == "changing"
+            self.current_provider_actions = self.provider_manifest_actions()
             self.current_remote_actions = self.installed_package_actions()
 
             busy = self.command_running
             self.update_busy_layout()
             self.set_button("refresh", disabled=busy)
             self.set_button("busy-cancel-command", disabled=not busy, hide_when_disabled=False)
-            self.set_button("provider-status", disabled=busy or not has_instance)
-            self.set_button("provider-plan", disabled=busy or not has_instance or provider_busy)
-            self.set_button("provider-init", disabled=busy or not has_instance or provider_busy)
+            for index in range(PROVIDER_ACTION_BUTTONS):
+                button = self.query_one(f"#provider-action-{index}", Button)
+                if index < len(self.current_provider_actions):
+                    action = self.current_provider_actions[index]
+                    target = str(action.get("target") or "")
+                    button.label = str(action["label"])
+                    disabled = busy or not has_instance or (provider_busy and target != "provider.status")
+                    button.display = self.show_disabled or not disabled
+                    button.disabled = disabled
+                else:
+                    button.label = ""
+                    button.display = False
+                    button.disabled = True
             provider_up = self.query_one("#provider-up", Button)
             provider_up.label = "Start" if display_provider_state == "stopped" else "Up"
             self.set_button(

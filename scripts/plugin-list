@@ -98,7 +98,8 @@ def validate_plugin!(plugin)
   end
 
   validate_package_install!(plugin) if kind == "package" && plugin.key?("install")
-  validate_package_actions!(plugin) if kind == "package" && plugin.key?("actions")
+  validate_actions!(plugin) if plugin.key?("actions")
+  validate_provider_action_targets!(plugin) if kind == "provider" && plugin.key?("actions")
   validate_package_compatibility!(plugin) if kind == "package" && plugin.key?("compatibility")
 end
 
@@ -215,7 +216,7 @@ def validate_package_install!(plugin)
   end
 end
 
-def validate_package_actions!(plugin)
+def validate_actions!(plugin)
   actions = plugin["actions"]
   path = plugin["_path"]
   raise "#{path}: actions must be a list" unless actions.is_a?(Array)
@@ -230,7 +231,28 @@ def validate_package_actions!(plugin)
     unless action["id"].match?(/\A[a-z][a-z0-9-]*\z/)
       raise "#{path}: #{field}.id must match [a-z][a-z0-9-]*"
     end
-    validate_package_action_prompt!(action["prompt"], path, "#{field}.prompt") if action.key?("prompt")
+    %w[destructive interactive native].each do |key|
+      next unless action.key?(key)
+      raise "#{path}: #{field}.#{key} must be boolean" unless action[key] == true || action[key] == false
+    end
+    %w[expected_output help].each do |key|
+      next unless action.key?(key)
+      raise "#{path}: #{field}.#{key} must be a string" unless action[key].is_a?(String) && !action[key].empty?
+    end
+    raise "#{path}: #{field}.requires must be a map" if action.key?("requires") && !action["requires"].is_a?(Hash)
+    validate_action_prompt!(action["prompt"], path, "#{field}.prompt") if action.key?("prompt")
+  end
+end
+
+def validate_provider_action_targets!(plugin)
+  commands = plugin.fetch("commands")
+  path = plugin["_path"]
+  plugin.fetch("actions").each_with_index do |action, index|
+    target = action.fetch("target")
+    next unless target.start_with?("provider.")
+
+    command = target.split(".", 2).fetch(1)
+    raise "#{path}: actions[#{index}].target references missing provider command #{command}" unless commands.key?(command)
   end
 end
 
@@ -254,7 +276,7 @@ def validate_package_compatibility!(plugin)
   end
 end
 
-def validate_package_action_prompt!(prompt, path, field)
+def validate_action_prompt!(prompt, path, field)
   raise "#{path}: #{field} must be a map" unless prompt.is_a?(Hash)
 
   %w[title message env choices].each do |key|

@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+./scripts/env-require TRUENAS_HOST TRUENAS_SSH_USER
+
+SSH_OPTS=(-o StrictHostKeyChecking=no -o IdentitiesOnly=yes)
+if [ -n "${TRUENAS_SSH_PRIVATE_KEY_FILE:-}" ]; then
+  SSH_KEY="${TRUENAS_SSH_PRIVATE_KEY_FILE}"
+  # shellcheck disable=SC2088,SC2016
+  case "$SSH_KEY" in
+    '$(HOME)'|'$(HOME)/'*) SSH_KEY="$HOME${SSH_KEY#\$\(HOME\)}" ;;
+    '$HOME'|'$HOME/'*) SSH_KEY="$HOME${SSH_KEY#\$HOME}" ;;
+    '~'|'~/'*) SSH_KEY="$HOME${SSH_KEY#\~}" ;;
+  esac
+  SSH_OPTS+=(-i "$SSH_KEY")
+fi
+if [ -n "${TRUENAS_SSH_PORT:-}" ] && [ "$TRUENAS_SSH_PORT" != "22" ]; then
+  SSH_OPTS+=(-p "$TRUENAS_SSH_PORT")
+fi
+
+exec ssh "${SSH_OPTS[@]}" "$TRUENAS_SSH_USER@$TRUENAS_HOST"

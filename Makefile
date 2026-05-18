@@ -1,13 +1,13 @@
 # Makefile
 .DEFAULT_GOAL := default
-.PHONY: ai.sandbox aws.login bundle.select bundle.unselect catalog.list clean config.migrate default docker.build \
+.PHONY: ai.sandbox bundle.select bundle.unselect catalog.list clean config.migrate default docker.build \
 				docker.shell docker.test doctor down env eve generate help info init.all install-cli instance.create \
 				instance.delete instance.env instance.info instance.list instance.observe instance.paths instance.provision \
 				instance.recover instance.state instance.status instance.validate instance.view integration.packages \
 				integration.plan integration.test ip lint logs package.action package.down package.install package.list \
 				package.reinstall package.select package.status package.uninstall package.unselect package.verify \
 				plugins.list plugins.sync plugins.validate provider.status providers.status provision \
-				provision.clear-state provision.restart provision.wait reboot show-password ssh ssh.run ssh.truenas \
+				provision.clear-state provision.restart provision.wait reboot show-password ssh ssh.run \
 				ssh.wait start status stop test test.catalog test.core-boundary test.instances test.lifecycle test.lint test.plugins \
 				test.plugins-sync test.provision-runner test.python test.schemas test.shellcheck test.state-concurrency test.terraform test.tf-isolation test.tui \
 				test.update-golden tui up update upload validate
@@ -95,9 +95,6 @@ ai.sandbox: ## Run a coding agent in Docker Sandboxes (AGENT=codex|opencode|clau
 		exit 2; \
 	fi; \
 	exec sbx run $(AGENT) .
-
-aws.login: ## Refresh AWS CLI login session for the selected profile
-	aws login --profile $(AWS_PROFILE)
 
 bundle.select: ## Add a bundle to an instance's desired bundle list
 	@if [ -z "$(INSTANCE)" ] || [ -z "$(BUNDLE)" ]; then echo "Usage: make bundle.select INSTANCE=<name> BUNDLE=<id>"; exit 2; fi; \
@@ -368,13 +365,6 @@ ssh: ## SSH into the instance
 ssh.run: ## Run a remote command on the instance (command read from stdin)
 	@if [ -z "$(INSTANCE)" ]; then echo "Usage: echo '<command>' | make ssh.run INSTANCE=<name>"; exit 2; fi; \
 	./scripts/instance-run ssh.run $(INSTANCE)
-
-ssh.truenas: ## SSH directly into the TrueNAS host (no profile needed)
-	@./scripts/env-require TRUENAS_HOST TRUENAS_SSH_USER; \
-	opts="-o StrictHostKeyChecking=no -o IdentitiesOnly=yes"; \
-	if [ -n "$$TRUENAS_SSH_PRIVATE_KEY_FILE" ]; then opts="$$opts -i $$TRUENAS_SSH_PRIVATE_KEY_FILE"; fi; \
-	if [ -n "$$TRUENAS_SSH_PORT" ]; then opts="$$opts -p $$TRUENAS_SSH_PORT"; fi; \
-	exec ssh $$opts "$${TRUENAS_SSH_USER}@$${TRUENAS_HOST}"
 
 ssh.wait: ## Wait until SSH on the instance accepts connections
 	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make ssh.wait INSTANCE=<name>"; exit 2; fi; \

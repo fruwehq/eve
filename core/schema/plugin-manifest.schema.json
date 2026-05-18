@@ -52,7 +52,7 @@
     },
 
     "actions": {
-      "description": "UI actions exposed by this plugin (package plugins only today).",
+      "description": "UI actions exposed by provider and package plugins.",
       "type": "array",
       "items": { "$ref": "#/$defs/action" }
     },
@@ -237,13 +237,34 @@
         "target": {
           "type": "string",
           "minLength": 1,
-          "description": "Action target dispatched by package-action."
+          "description": "Action target dispatched by package-action, provider dispatch, or a compatibility Make target."
+        },
+        "destructive": {
+          "type": "boolean",
+          "description": "Whether the UI must confirm before running this action."
+        },
+        "expected_output": {
+          "type": "string",
+          "description": "Expected output shape for callers that need to parse the action result."
+        },
+        "help": {
+          "type": "string",
+          "description": "Short operator-facing help text for the action."
+        },
+        "interactive": {
+          "type": "boolean",
+          "description": "Whether this action needs an attached terminal/browser-capable interactive session."
         },
         "native": {
           "type": "boolean",
           "description": "Whether this action uses a native protocol handler."
         },
-        "prompt": { "$ref": "#/$defs/action_prompt" }
+        "prompt": { "$ref": "#/$defs/action_prompt" },
+        "requires": {
+          "type": "object",
+          "description": "Optional state predicates that control when this action is available.",
+          "additionalProperties": true
+        }
       }
     },
 
