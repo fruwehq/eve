@@ -5,10 +5,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 import os
-import re
-import shlex
 import shutil
 import signal
 import subprocess
@@ -20,6 +17,41 @@ from pathlib import Path
 from typing import Any, ClassVar, Literal, cast
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from tui.commands import (
+    bundle_make_args,
+    catalog_options,
+    create_instance_args,
+    instance_ip,
+    instance_observe_view,
+    instance_rows,
+    make_args,
+    package_make_args,
+    provider_dispatch_args,
+    provider_has_capability,
+    provider_status_table,
+    upload_folders,
+)
+from tui.render import (
+    command_label,
+    display_state,
+    format_aggregate,
+    glyph_for_status,
+    markup_for_status,
+    package_source_label,
+    package_summary_label,
+    plain_log_line,
+)
+from tui.state import (
+    action_allowed_for_instance,
+    aggregate_summary,
+    password_supported,
+    provider_actions_available,
+    status_instance_name,
+)
+
 NEW_INSTANCE_KEY = "__new_instance__"
 PACKAGE_ACTION_BUTTONS = 9
 PROVIDER_ACTION_BUTTONS = 5
@@ -38,265 +70,6 @@ Options:
   --check   Validate that the script is syntactically importable without
             requiring Textual to be installed.
 """
-
-
-def run_command(args: list[str], *, env: dict[str, str] | None = None) -> tuple[int, str, str]:
-    proc = subprocess.run(
-        args,
-        cwd=ROOT,
-        env={**os.environ, **(env or {})},
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    return proc.returncode, proc.stdout, proc.stderr
-
-
-def load_json(args: list[str]) -> dict[str, Any]:
-    code, out, err = run_command(args)
-    if code != 0:
-        raise RuntimeError(err.strip() or out.strip() or f"{args[0]} exited {code}")
-    parsed = json.loads(out)
-    if not isinstance(parsed, dict):
-        raise RuntimeError(f"{args[0]} did not return a JSON object")
-    return cast(dict[str, Any], parsed)
-
-
-def instance_rows() -> list[dict[str, Any]]:
-    doc = load_json([str(ROOT / "scripts/instance-list"), "--json"])
-    rows = doc.get("instances", [])
-    return rows if isinstance(rows, list) else []
-
-
-def catalog_options() -> dict[str, Any]:
-    return load_json([str(ROOT / "scripts/catalog-options"), "--json"])
-
-
-_provider_capabilities_cache: dict[str, list[str]] | None = None
-
-
-def provider_capabilities_map() -> dict[str, list[str]]:
-    global _provider_capabilities_cache
-    if _provider_capabilities_cache is not None:
-        return _provider_capabilities_cache
-    doc = load_json([str(ROOT / "scripts/plugin-list"), "--kind", "provider", "--json"])
-    result: dict[str, list[str]] = {}
-    for plugin in doc.get("plugins", []):
-        if not isinstance(plugin, dict):
-            continue
-        plugin_id = str(plugin.get("id", ""))
-        capabilities = plugin.get("capabilities", [])
-        if isinstance(capabilities, list):
-            result[plugin_id] = sorted(str(c) for c in capabilities)
-    _provider_capabilities_cache = result
-    return result
-
-
-def provider_has_capability(provider_id: str, capability: str) -> bool:
-    return capability in provider_capabilities_map().get(provider_id, [])
-
-
-def instance_view(instance: str) -> dict[str, Any]:
-    return load_json([str(ROOT / "scripts/instance-view"), "--instance", instance])
-
-
-def instance_observe_view(instance: str) -> dict[str, Any]:
-    return load_json([str(ROOT / "scripts/instance-view"), "--instance", instance, "--observe"])
-
-
-def provider_status_table() -> str:
-    code, out, err = run_command(["make", "--no-print-directory", "providers.status"])
-    if code != 0:
-        raise RuntimeError(err.strip() or out.strip() or f"make providers.status exited {code}")
-    return out.strip()
-
-
-def upload_folders() -> list[str]:
-    upload_dir = Path(os.environ.get("EGAME_UPLOAD_DIR", ROOT / "upload"))
-    if not upload_dir.exists():
-        return []
-    return sorted(path.name for path in upload_dir.iterdir() if path.is_dir())
-
-
-def instance_ip(instance: str) -> str:
-    code, out, err = run_command(
-        ["make", "--no-print-directory", "ip", f"INSTANCE={instance}"],
-        env={"EGAME_DISABLE_STATE": "1"},
-    )
-    if code != 0:
-        raise RuntimeError(err.strip() or out.strip() or f"make ip exited {code}")
-    return out.strip()
-
-
-
-def make_args(target: str, instance: str, *extra: str) -> list[str]:
-    return ["make", "--no-print-directory", target, f"INSTANCE={instance}", *extra]
-
-
-def provider_dispatch_args(command: str, instance: str, *extra: str) -> list[str]:
-    return [
-        str(ROOT / "scripts/provider-dispatch"),
-        "--instance",
-        instance,
-        "--command",
-        command,
-        *extra,
-    ]
-
-
-def package_make_args(target: str, instance: str, package: str, *extra: str) -> list[str]:
-    return ["make", "--no-print-directory", target, f"INSTANCE={instance}", f"PACKAGE={package}", *extra]
-
-
-def bundle_make_args(target: str, instance: str, bundle: str) -> list[str]:
-    return ["make", "--no-print-directory", target, f"INSTANCE={instance}", f"BUNDLE={bundle}"]
-
-
-def create_instance_args(
-    name: str,
-    platform_choice: dict[str, Any],
-    bundles: str,
-    packages: str,
-    disk_gb: str,
-    memory_mb: str,
-    provider_ip: str = "",
-) -> list[str]:
-    args = [
-        "make",
-        "--no-print-directory",
-        "instance.create",
-        f"INSTANCE={name}",
-        f"MACHINE={platform_choice.get('machine', '')}",
-        f"OS={platform_choice.get('os', '')}",
-        f"LOCATION={platform_choice.get('location', '')}",
-    ]
-    if bundles:
-        args.append(f"BUNDLES={bundles}")
-    if packages:
-        args.append(f"PACKAGES={packages}")
-    if disk_gb:
-        args.append(f"DISK_GB={disk_gb}")
-    if memory_mb:
-        args.append(f"MEMORY_MB={memory_mb}")
-    if provider_ip:
-        args.append(f"PROVIDER_IP={provider_ip}")
-    return args
-
-
-def command_label(args: list[str]) -> str:
-    return " ".join(shlex.quote(arg) for arg in args)
-
-
-def glyph_for_status(status: str) -> str:
-    if status in {"running", "provisioned", "installed", "succeeded"}:
-        return "●"
-    if status in {"stopped", "removed", "missing", "absent"}:
-        return "○"
-    if status in {"failed", "error"}:
-        return "!"
-    if status in {"changing", "provisioning", "running-op"}:
-        return "…"
-    return "?"
-
-
-def markup_for_status(status: str) -> str:
-    if status in {"running", "provisioned", "installed", "succeeded"}:
-        return f"[success]{status}[/]"
-    if status in {"stopped", "removed", "missing", "absent"}:
-        return f"[warning]{status}[/]"
-    if status in {"failed", "error"}:
-        return f"[error]{status}[/]"
-    if status in {"changing", "provisioning"}:
-        return f"[primary]{status}[/]"
-    return status
-
-
-def display_state(status: str) -> str:
-    return "new" if status == "unknown" else status
-
-
-STYLE_TAG_RE = re.compile(r"\[(?:/?(?:primary|success|warning|error|b|dim)|/)\]")
-
-
-def plain_log_line(message: str) -> str:
-    return STYLE_TAG_RE.sub("", message)
-
-
-def status_instance_name(status: dict[str, Any] | None) -> str | None:
-    if not status:
-        return None
-    instance = status.get("instance", {})
-    if not isinstance(instance, dict):
-        return None
-    name = instance.get("name")
-    return str(name) if name else None
-
-
-def package_source_label(selected_by: Any) -> str:
-    if not isinstance(selected_by, list) or not selected_by:
-        return "available"
-    labels: list[str] = []
-    bundles: list[str] = []
-    for source in selected_by:
-        source_text = str(source)
-        if source_text == "direct":
-            labels.append("extra")
-        elif source_text.startswith("bundle:"):
-            bundles.append(source_text.split(":", 1)[1])
-    if bundles:
-        labels.append("bundle: " + ", ".join(bundles))
-    return "; ".join(labels) if labels else "selected"
-
-
-def package_summary_label(summary: dict[str, Any]) -> str:
-    parts: list[str] = []
-    for key, label in (
-        ("failed", "failed"),
-        ("installed", "installed"),
-        ("missing", "missing"),
-        ("unknown", "unknown"),
-        ("removed", "removed"),
-        ("reinstalled", "reinstalled"),
-    ):
-        count = int(summary.get(key, 0) or 0)
-        if count:
-            parts.append(f"{count} {label}")
-    return " / ".join(parts) if parts else "none selected"
-
-
-def provider_actions_available(state: dict[str, Any]) -> bool:
-    return bool(state.get("provider_actions_available"))
-
-
-def aggregate_summary() -> dict[str, int]:
-    doc = load_json([str(ROOT / "scripts/instance-view"), "--aggregate"])
-    return {k: int(v) for k, v in doc.get("aggregate", {}).items()}
-
-
-def format_aggregate(counts: dict[str, int]) -> str:
-    return (
-        f"[success]● {counts.get('running', 0)} running[/]  "
-        f"[warning]○ {counts.get('stopped', 0)} stopped[/]  "
-        f"[error]! {counts.get('failed', 0)} failed[/]  "
-        f"? {counts.get('other', 0)} unknown"
-    )
-
-
-def action_allowed_for_instance(action: dict[str, Any], package_id: str, os_family: str) -> bool:
-    return True
-
-
-def password_supported(status: dict[str, Any] | None) -> bool:
-    if os.environ.get("EPHEMERAL_WINDOWS_PASSWORD"):
-        return status_instance_name(status) is not None
-    if not status:
-        return False
-    instance = status.get("instance", {})
-    if not isinstance(instance, dict):
-        return False
-    provider = str(instance.get("provider") or "")
-    return provider_has_capability(provider, "password") and instance.get("os_family") == "windows"
-
 
 
 def run_tui() -> int:
@@ -1467,7 +1240,7 @@ def run_tui() -> int:
             Binding("t", "queue_provider('stop')", "Stop"),
             Binding("p", "queue_provision", "Provision"),
             Binding("x", "down_instance", "Down"),
-            Binding("d", "delete_instance", "Delete Local"),
+            Binding("d", "delete_instance", "Delete Local Entry"),
             Binding("c", "queue_cancel_command", "Cancel", priority=True),
             Binding("ctrl+c", "queue_cancel_command", "Cancel", priority=True),
             Binding("escape", "queue_cancel_command", "Cancel", priority=True),
@@ -1592,7 +1365,7 @@ def run_tui() -> int:
                                 with Grid(id="danger-strip"):
                                     yield Button("Down", id="provider-down", variant="error")
                                     yield Button("Recover", id="instance-recover")
-                                    yield Button("Delete Local", id="delete-instance", variant="error")
+                                    yield Button("Delete Entry", id="delete-instance", variant="error")
                 yield Static(
                     "Output  |  press l to focus, arrows/PageUp/PageDown to scroll, y to copy selected/all log text",
                     id="output-help",
