@@ -77,6 +77,12 @@
       "type": "boolean"
     },
 
+    "access": {
+      "description": "Provider-owned VM access identity rules used to populate resolved access.bootstrap_user, provision_user, and human_user.",
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/access_rules" }
+    },
+
     "conflicts_with": {
       "description": "Package ids that cannot coexist with this package (package plugins only).",
       "type": "array",
@@ -116,7 +122,7 @@
     {
       "if": { "properties": { "kind": { "const": "provider" } } },
       "then": {
-        "required": ["env"],
+        "required": ["access", "env"],
         "properties": {
           "commands": {
             "required": ["resolve", "init", "plan", "up", "down", "start", "stop", "status", "ip", "ssh"]
@@ -155,6 +161,34 @@
           "items": { "type": "string" },
           "description": "Arguments passed to the executable."
         }
+      }
+    },
+
+    "access_rules": {
+      "description": "Access identity rules for one OS family.",
+      "type": "object",
+      "required": ["bootstrap_user", "provision_user", "human_user"],
+      "additionalProperties": false,
+      "properties": {
+        "bootstrap_user": { "$ref": "#/$defs/access_user_rule" },
+        "provision_user": { "$ref": "#/$defs/access_user_rule" },
+        "human_user": { "$ref": "#/$defs/access_user_rule" }
+      }
+    },
+
+    "access_user_rule": {
+      "description": "Rule for resolving one user identity. env reads an environment variable, value is a constant, location reads a provider location field, and fallback references another access field.",
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": false,
+      "properties": {
+        "env": { "type": "string" },
+        "fallback": {
+          "type": "string",
+          "enum": ["bootstrap_user", "provision_user", "human_user"]
+        },
+        "location": { "type": "string" },
+        "value": { "type": "string" }
       }
     },
 

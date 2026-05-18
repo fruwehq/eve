@@ -13,6 +13,9 @@ PROFILE="${1:?Usage: scripts/provision <profile>}"
 cd "$(git rev-parse --show-toplevel)"
 
 RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
+env_value() {
+  printf '%s\n' "$RESOLVED_ENV" | awk -F= -v key="$1" '$1 == key { print substr($0, index($0, "=") + 1) }'
+}
 OS_FAMILY=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^OS_FAMILY=/{print $2}')
 OS_ID=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^OS_ID=/{print $2}')
 BUNDLE_PACKAGES=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^BUNDLE_PACKAGES=/{print $2}')
@@ -174,9 +177,14 @@ case "$OS_FAMILY" in
     esac
     # env file: sourced by runner.sh so steps see PROFILE_NAME and local config.
     cat > "$STAGE/state/env" <<EOF
+export ACCESS_BOOTSTRAP_USER="$(env_value ACCESS_BOOTSTRAP_USER)"
+export ACCESS_HUMAN_USER="$(env_value ACCESS_HUMAN_USER)"
+export ACCESS_PROVISION_USER="$(env_value ACCESS_PROVISION_USER)"
 export OS_FAMILY="$OS_FAMILY"
 export PROFILE_NAME="$PROFILE_NAME"
-export VM_USER_NAME="$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^VM_USER_NAME=/{print $2}')"
+export HUMAN_USER_NAME="$(env_value HUMAN_USER_NAME)"
+export PROVISION_USER_NAME="$(env_value PROVISION_USER_NAME)"
+export VM_USER_NAME="$(env_value VM_USER_NAME)"
 export VM_USER_PASSWORD="${VM_USER_PASSWORD:-}"
 export EPHEMERAL_DISPLAY_RESOLUTION="${EPHEMERAL_DISPLAY_RESOLUTION:-}"
 export EPHEMERAL_DISPLAY_FPS="${EPHEMERAL_DISPLAY_FPS:-}"

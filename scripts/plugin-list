@@ -89,6 +89,8 @@ def validate_plugin!(plugin)
   raise "#{plugin["_path"]}: supports must be a map" unless plugin["supports"].is_a?(Hash)
   validate_provider_supports!(plugin) if kind == "provider"
   validate_package_supports!(plugin) if kind == "package"
+  raise "#{plugin["_path"]}: provider manifests require access" if kind == "provider" && !plugin.key?("access")
+  validate_access!(plugin) if kind == "provider"
   validate_capabilities!(plugin) if plugin.key?("capabilities")
   require_string_list!(plugin["env"], plugin["_path"], "env")
   require_string_list!(plugin["conflicts_with"], plugin["_path"], "conflicts_with") if kind == "package" && plugin.key?("conflicts_with")
@@ -147,6 +149,37 @@ def validate_capabilities!(plugin)
   path = plugin["_path"]
   require_string_list!(capabilities, path, "capabilities")
   require_allowed_entries!(capabilities, PROVIDER_CAPABILITIES, path, "capabilities")
+end
+
+def validate_access!(plugin)
+  access = plugin["access"]
+  path = plugin["_path"]
+  raise "#{path}: access must be a map" unless access.is_a?(Hash)
+
+  access.each do |family, rules|
+    raise "#{path}: access family must be a string" unless family.is_a?(String) && !family.empty?
+    raise "#{path}: access.#{family} must be a map" unless rules.is_a?(Hash)
+
+    %w[bootstrap_user provision_user human_user].each do |field|
+      rule = rules[field]
+      raise "#{path}: access.#{family}.#{field} must be a map" unless rule.is_a?(Hash)
+      allowed = %w[env fallback location value]
+      unsupported = rule.keys - allowed
+      unless unsupported.empty?
+        raise "#{path}: access.#{family}.#{field} contains unsupported keys: #{unsupported.join(", ")}"
+      end
+      if rule.empty?
+        raise "#{path}: access.#{family}.#{field} must not be empty"
+      end
+      rule.each do |key, value|
+        raise "#{path}: access.#{family}.#{field}.#{key} must be a string" unless value.is_a?(String) && !value.empty?
+      end
+      fallback = rule["fallback"]
+      if fallback && !%w[bootstrap_user provision_user human_user].include?(fallback)
+        raise "#{path}: access.#{family}.#{field}.fallback must reference an access field"
+      end
+    end
+  end
 end
 
 def validate_package_supports!(plugin)

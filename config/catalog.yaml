@@ -257,3 +257,4 @@ locations:
       # Used by module defaults if machine.network is omitted
       bridge: br0
       pool: main
+      provision_user: egame-provision

@@ -33,6 +33,22 @@ module Egame
         @raw.fetch("instance").fetch("name")
       end
 
+      def access
+        @raw.fetch("access")
+      end
+
+      def bootstrap_user
+        access.fetch("bootstrap_user")
+      end
+
+      def provision_user
+        access.fetch("provision_user")
+      end
+
+      def human_user
+        access.fetch("human_user")
+      end
+
       def provider
         @raw.fetch("machine").fetch("provider")
       end

@@ -13,6 +13,11 @@ commands:
   status: {exec: scripts/provider-plugin, args: [acme, status]}
   ip: {exec: scripts/provider-plugin, args: [acme, ip]}
   ssh: {exec: scripts/provider-plugin, args: [acme, ssh]}
+access:
+  ubuntu:
+    bootstrap_user: {env: VM_USER_NAME}
+    provision_user: {env: VM_USER_NAME}
+    human_user: {env: VM_USER_NAME, fallback: provision_user}
 supports:
   engines: [terraform]
   kinds: [vm]

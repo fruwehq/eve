@@ -7,6 +7,7 @@
   "type": "object",
   "required": [
     "instance",
+    "access",
     "composition",
     "machine",
     "os",
@@ -23,6 +24,18 @@
   "additionalProperties": false,
 
   "properties": {
+    "access": {
+      "description": "Resolved VM access identities. bootstrap_user is the initial login user, provision_user runs automation, and human_user owns desktop/session state.",
+      "type": "object",
+      "required": ["bootstrap_user", "provision_user", "human_user"],
+      "additionalProperties": false,
+      "properties": {
+        "bootstrap_user": { "type": "string" },
+        "provision_user": { "type": "string" },
+        "human_user": { "type": "string" }
+      }
+    },
+
     "instance": {
       "description": "The raw instance registry entry from .egame/instances.yaml or the fixture registry.",
       "type": "object",

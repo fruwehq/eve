@@ -28,13 +28,19 @@ actions:
     label: TrueNAS SSH
     target: provider.host-ssh
     interactive: true
+access:
+  ubuntu:
+    bootstrap_user: {env: EGAME_PROVISION_USER, location: provision_user}
+    provision_user: {env: EGAME_PROVISION_USER, location: provision_user}
+    human_user: {env: VM_USER_NAME, fallback: provision_user}
 capabilities: [host-ssh]
 supports:
   engines: [terraform]
   kinds: [vm]
 env:
+  - EGAME_PROVISION_USER
   - TRUENAS_HOST
-  - TRUENAS_SSH_USER
+  - TRUENAS_SSH_HOST_KEY_FINGERPRINT
   - TRUENAS_SSH_PORT
   - TRUENAS_SSH_PRIVATE_KEY_FILE
-  - TRUENAS_SSH_HOST_KEY_FINGERPRINT
+  - TRUENAS_SSH_USER

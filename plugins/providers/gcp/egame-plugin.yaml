@@ -28,8 +28,13 @@ actions:
     label: GCP Login
     target: provider.login
     interactive: true
+access:
+  ubuntu:
+    bootstrap_user: {env: VM_USER_NAME}
+    provision_user: {env: VM_USER_NAME}
+    human_user: {env: VM_USER_NAME, fallback: provision_user}
 capabilities: [login]
 supports:
   engines: [terraform]
   kinds: [vm]
-env: [GOOGLE_CLOUD_PROJECT, GOOGLE_APPLICATION_CREDENTIALS, SSH_PUBLIC_KEY_FILE, MY_IP]
+env: [GOOGLE_APPLICATION_CREDENTIALS, GOOGLE_CLOUD_PROJECT, MY_IP, SSH_PUBLIC_KEY_FILE]

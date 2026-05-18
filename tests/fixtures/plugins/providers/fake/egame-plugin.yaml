@@ -13,6 +13,11 @@ commands:
   status: {exec: commands/provider-command, args: [status]}
   ip: {exec: commands/provider-command, args: [ip]}
   ssh: {exec: commands/provider-command, args: [ssh]}
+access:
+  ubuntu:
+    bootstrap_user: {env: VM_USER_NAME}
+    provision_user: {env: VM_USER_NAME}
+    human_user: {env: VM_USER_NAME, fallback: provision_user}
 supports:
   engines: [terraform]
   kinds: [vm]

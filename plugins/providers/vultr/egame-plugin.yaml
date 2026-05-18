@@ -23,6 +23,15 @@ actions:
   - id: init
     label: Init
     target: provider.init
+access:
+  ubuntu:
+    bootstrap_user: {env: VM_USER_NAME}
+    provision_user: {env: VM_USER_NAME}
+    human_user: {env: VM_USER_NAME, fallback: provision_user}
+  windows:
+    bootstrap_user: {value: Administrator}
+    provision_user: {value: Administrator}
+    human_user: {value: Administrator}
 capabilities: [password]
 supports:
   engines: [terraform]

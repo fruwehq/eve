@@ -90,6 +90,26 @@ for instance in $INSTANCES; do
   printf '  [OK] %s\n' "$instance"
 done
 
+truenas_access_json="$(./scripts/instance-resolve --registry "$FIXTURE" --instance truenas-all-a --emit json)"
+if printf '%s\n' "$truenas_access_json" |
+  jq -e '.access.bootstrap_user == "egame-provision" and .access.provision_user == "egame-provision" and .access.human_user == "egame-provision"' >/dev/null; then
+  printf '  [OK] TrueNAS access defaults resolve from catalog\n'
+else
+  printf '  [FAIL] TrueNAS access defaults did not resolve from catalog\n' >&2
+  printf '%s\n' "$truenas_access_json" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+truenas_human_access_json="$(VM_USER_NAME=chris ./scripts/instance-resolve --registry "$FIXTURE" --instance truenas-all-a --emit json)"
+if printf '%s\n' "$truenas_human_access_json" |
+  jq -e '.access.bootstrap_user == "egame-provision" and .access.provision_user == "egame-provision" and .access.human_user == "chris"' >/dev/null; then
+  printf '  [OK] TrueNAS human user can differ from provision user\n'
+else
+  printf '  [FAIL] TrueNAS human user override mismatch\n' >&2
+  printf '%s\n' "$truenas_human_access_json" >&2
+  FAIL=$((FAIL + 1))
+fi
+
 tmp_registry="$(mktemp "${TMPDIR:-/tmp}/egame-instance-test.XXXXXX")"
 tmp_concurrent_registry="$(mktemp "${TMPDIR:-/tmp}/egame-instance-concurrent.XXXXXX")"
 tmp_external_registry="$(mktemp "${TMPDIR:-/tmp}/egame-instance-external.XXXXXX")"

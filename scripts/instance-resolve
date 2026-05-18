@@ -108,6 +108,11 @@ def env_or(name, fallback)
   value && !value.empty? ? value : fallback
 end
 
+def env_value(name)
+  value = ENV[name]
+  value && !value.empty? ? value : nil
+end
+
 def resolve_bundle_packages(catalog, bundle_ids)
   bundle_ids.flat_map do |bundle_id|
     bundle = by_key(catalog, "bundles", "id", bundle_id)
@@ -255,6 +260,44 @@ def validate_provider_plugin!(machine, engine)
   unless supported_kinds.empty? || supported_kinds.include?(machine_kind)
     raise "Provider plugin #{provider} does not support machine kind #{machine_kind}"
   end
+
+  plugin
+end
+
+def resolve_access_value(rule, resolved_values, location)
+  value = nil
+  if rule["env"]
+    value = env_value(rule["env"])
+  end
+  if (value.nil? || value.empty?) && rule["value"]
+    value = rule["value"]
+  end
+  if (value.nil? || value.empty?) && rule["location"]
+    value = location[rule["location"]]
+  end
+  if (value.nil? || value.empty?) && rule["fallback"]
+    value = resolved_values[rule["fallback"]]
+  end
+  value.to_s
+end
+
+def resolve_access!(provider_plugin, os_family, location)
+  access = provider_plugin["access"]
+  raise "Provider plugin #{provider_plugin["id"]} has no access rules" unless access.is_a?(Hash)
+
+  rules = access[os_family] || access["default"]
+  unless rules.is_a?(Hash)
+    raise "Provider plugin #{provider_plugin["id"]} has no access rules for OS family #{os_family}"
+  end
+
+  resolved = {}
+  %w[bootstrap_user provision_user human_user].each do |field|
+    rule = rules[field]
+    raise "Provider plugin #{provider_plugin["id"]} access.#{os_family}.#{field} is missing" unless rule.is_a?(Hash)
+
+    resolved[field] = resolve_access_value(rule, resolved, location)
+  end
+  resolved
 end
 
 def validate_package_support_value!(plugin_id, supports, value, field, label)
@@ -293,8 +336,12 @@ def emit_env(resolved)
   pi_ip = provider_config["ip"] || env_or("RASPBERRY_PI_IP", locp["ip"] || "")
   os = resolved["os"]
   machine_defaults = resolved.dig("machine", "defaults") || {}
+  access = resolved.fetch("access")
 
   lines = {
+    "ACCESS_BOOTSTRAP_USER" => access.fetch("bootstrap_user"),
+    "ACCESS_HUMAN_USER" => access.fetch("human_user"),
+    "ACCESS_PROVISION_USER" => access.fetch("provision_user"),
     "INSTANCE_NAME" => resolved.dig("instance", "name"),
     "PROFILE_NAME" => resolved.dig("instance", "name"),
     "ENGINE" => resolved["engine"],
@@ -325,14 +372,10 @@ def emit_env(resolved)
     "LOCATION_REGION" => (locp["region"] || ""),
     "LOCATION_AVAILABILITY_ZONE" => (locp["availability_zone"] || ""),
     "LOCATION_ZONE" => (locp["zone"] || ""),
-    "SSH_USER" => if os["family"] == "windows"
-                    "Administrator"
-                  elsif provider == "truenas"
-                    env_or("EGAME_PROVISION_USER", "egame-provision")
-                  else
-                    env_or("VM_USER_NAME", "")
-                  end,
+    "SSH_USER" => access.fetch("bootstrap_user"),
     "CLOUD_IMAGE_URL" => (os["cloud_image_url"] || ""),
+    "HUMAN_USER_NAME" => access.fetch("human_user"),
+    "PROVISION_USER_NAME" => access.fetch("provision_user"),
     "RASPBERRY_PI_HOST" => pi_host,
     "RASPBERRY_PI_IP" => pi_ip,
     "TRUENAS_HOST" => env_or("TRUENAS_HOST", locp["host"] || ""),
@@ -407,10 +450,11 @@ begin
   provider = machine["provider"]
   provider_config = provider_config_for(instance, provider)
   engine = engine_for(machine)
-  validate_provider_plugin!(machine, engine)
+  provider_plugin = validate_provider_plugin!(machine, engine)
   validate_package_plugins!(bundle_packages, os)
   resolved = {
     "instance" => instance,
+    "access" => resolve_access!(provider_plugin, os.fetch("family"), location.fetch(provider, {})),
     "composition" => composition,
     "machine" => machine,
     "os" => os,

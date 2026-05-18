@@ -222,8 +222,19 @@ fi
 emit_env() {
   echo "$RESOLVED_JSON" | jq -r '
     def env_or($name; $fallback): ((env[$name] | select(. != "")) // $fallback);
+    def provision_user($locp):
+      if (.os.family == "windows") then "Administrator"
+      elif (.machine.provider == "truenas") then env_or("EGAME_PROVISION_USER"; $locp.provision_user // "")
+      else env_or("VM_USER_NAME"; "")
+      end;
+    def human_user($locp):
+      (env_or("VM_USER_NAME"; "")) as $human |
+      if $human != "" then $human else provision_user($locp) end;
     (.machine.provider) as $provider |
     (.location[$provider] // {}) as $locp |
+    "ACCESS_BOOTSTRAP_USER=" + provision_user($locp),
+    "ACCESS_HUMAN_USER=" + human_user($locp),
+    "ACCESS_PROVISION_USER=" + provision_user($locp),
     "PROFILE_NAME=" + .profile.name,
     "ENGINE=" + .engine,
     "PROVIDER=" + $provider,
@@ -253,13 +264,10 @@ emit_env() {
     "LOCATION_REGION=" + ($locp.region // ""),
     "LOCATION_AVAILABILITY_ZONE=" + ($locp.availability_zone // ""),
     "LOCATION_ZONE=" + ($locp.zone // ""),
-    "SSH_USER=" + (
-      if (.os.family == "windows") then "Administrator"
-      elif (.machine.provider == "truenas") then env_or("EGAME_PROVISION_USER"; "egame-provision")
-      else env_or("VM_USER_NAME"; "")
-      end
-    ),
+    "SSH_USER=" + provision_user($locp),
     "CLOUD_IMAGE_URL=" + (.os.cloud_image_url // ""),
+    "HUMAN_USER_NAME=" + human_user($locp),
+    "PROVISION_USER_NAME=" + provision_user($locp),
     "RASPBERRY_PI_HOST=" + (
       if (.machine.provider == "raspberry-pi" and (($locp.host // "") != "")) then $locp.host
       else env_or("RASPBERRY_PI_HOST"; $locp.host // "")

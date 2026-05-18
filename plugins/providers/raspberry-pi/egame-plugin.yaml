@@ -23,6 +23,11 @@ actions:
   - id: init
     label: Init
     target: provider.init
+access:
+  ubuntu:
+    bootstrap_user: {env: VM_USER_NAME}
+    provision_user: {env: VM_USER_NAME}
+    human_user: {env: VM_USER_NAME, fallback: provision_user}
 capabilities: [needs-provider-ip]
 supports:
   engines: [metal]

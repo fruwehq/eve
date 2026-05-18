@@ -263,7 +263,8 @@ module Egame
             "os" => resolved.dig("os", "id"),
             "os_family" => resolved.dig("os", "family"),
             "location" => resolved.dig("location", "name"),
-            "bundles" => resolved.dig("composition", "bundles") || []
+            "bundles" => resolved.dig("composition", "bundles") || [],
+            "access" => resolved.fetch("access", {})
           },
           "state" => reconciled_state,
           "observed_state" => reconciled_state.fetch("observed_state", {}),

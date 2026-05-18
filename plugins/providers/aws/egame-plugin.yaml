@@ -28,8 +28,13 @@ actions:
     label: AWS Login
     target: provider.login
     interactive: true
+access:
+  ubuntu:
+    bootstrap_user: {env: VM_USER_NAME}
+    provision_user: {env: VM_USER_NAME}
+    human_user: {env: VM_USER_NAME, fallback: provision_user}
 capabilities: [login]
 supports:
   engines: [terraform]
   kinds: [vm]
-env: [AWS_PROFILE, AWS_REGION, AWS_CONFIG_FILE, AWS_SHARED_CREDENTIALS_FILE]
+env: [AWS_CONFIG_FILE, AWS_PROFILE, AWS_REGION, AWS_SHARED_CREDENTIALS_FILE]
