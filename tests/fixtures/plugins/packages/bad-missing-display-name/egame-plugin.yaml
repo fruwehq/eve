@@ -1,0 +1,9 @@
+api_version: egame.plugin/v1
+kind: package
+id: bad-missing-display-name
+commands:
+  install: {exec: scripts/package-plugin, args: [bad-missing-display-name, install]}
+  status: {exec: scripts/package-plugin, args: [bad-missing-display-name, status]}
+  down: {exec: scripts/package-plugin, args: [bad-missing-display-name, down]}
+supports: {os_families: [ubuntu]}
+env: []

@@ -1,0 +1,177 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ephemeral.dev/schemas/observed-state.schema.json",
+  "title": "Observed State",
+  "description": "The shape of .egame/state/instances/<name>.json. Written by scripts/instance-state and scripts/instance-observe. Read by the TUI and CLI status commands.",
+
+  "type": "object",
+  "required": [
+    "instance",
+    "desired_state",
+    "provider_state",
+    "provision_state",
+    "package_state",
+    "observed_state",
+    "operation_history"
+  ],
+  "additionalProperties": false,
+
+  "properties": {
+    "instance": {
+      "description": "Instance name (string).",
+      "type": "string"
+    },
+
+    "desired_state": {
+      "description": "Orchestration intent: what lifecycle state the operator requested.",
+      "type": "string",
+      "enum": ["unknown", "running", "stopped", "absent"]
+    },
+
+    "provider_state": {
+      "description": "Last known provider resource state.",
+      "type": "string",
+      "enum": ["unknown", "initializing", "initialized", "planned", "changing", "running", "stopped", "absent", "error"]
+    },
+
+    "provision_state": {
+      "description": "Last known guest provisioning state.",
+      "type": "string",
+      "enum": ["unknown", "provisioning", "provisioned", "error"]
+    },
+
+    "package_state": {
+      "description": "Map from package id to its per-package state record.",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/package_state_entry"
+      }
+    },
+
+    "observed_state": {
+      "description": "Cached observed state from the last non-mutating status/IP refresh.",
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "observed_at": {
+          "description": "ISO 8601 timestamp of this observation.",
+          "type": "string"
+        },
+        "expires_at": {
+          "description": "ISO 8601 timestamp when this observation is considered stale.",
+          "type": "string"
+        },
+        "provider_status": {
+          "description": "Live provider status. Canonical values: running, stopped, absent, unreachable, unknown. Providers may emit provider-specific values (e.g. pending, transitioning) which are passed through as-is.",
+          "type": "string"
+        },
+        "provider_status_raw": {
+          "description": "Raw provider status output text.",
+          "type": ["string", "null"]
+        },
+        "ip": {
+          "description": "Last known IP address.",
+          "type": ["string", "null"]
+        },
+        "control_reachable": {
+          "description": "Whether the provider control plane was reachable.",
+          "type": ["boolean", "null"]
+        },
+        "control_summary": {
+          "description": "Human-readable control reachability summary.",
+          "type": ["string", "null"]
+        },
+        "guest_reachable": {
+          "description": "Whether SSH/RDP guest access was reachable.",
+          "type": ["boolean", "null"]
+        },
+        "refresh_error": {
+          "description": "Last observation error message, null on success.",
+          "type": ["string", "null"]
+        }
+      }
+    },
+
+    "operation_history": {
+      "description": "Ring buffer of recent operation records.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/operation_entry" }
+    },
+
+    "last_operation": {
+      "description": "The most recent operation, or null.",
+      "anyOf": [
+        { "$ref": "#/$defs/operation_entry" },
+        { "type": "null" }
+      ]
+    },
+
+    "last_error": {
+      "description": "The most recent error message, or null.",
+      "type": ["string", "null"]
+    },
+
+    "created_at": {
+      "description": "ISO 8601 timestamp of state file creation.",
+      "type": "string"
+    },
+
+    "updated_at": {
+      "description": "ISO 8601 timestamp of last state update.",
+      "type": "string"
+    }
+  },
+
+  "$defs": {
+    "package_state_entry": {
+      "description": "Per-package state record.",
+      "type": "object",
+      "required": ["status", "updated_at"],
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["unknown", "installed", "missing", "failed", "removed", "reinstalled"]
+        },
+        "updated_at": {
+          "type": "string",
+          "description": "ISO 8601 timestamp of last state change."
+        }
+      }
+    },
+
+    "operation_entry": {
+      "description": "A single operation record in the history ring buffer.",
+      "type": "object",
+      "required": ["id", "name", "type", "status", "at"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "integer",
+          "description": "Monotonically increasing operation id."
+        },
+        "name": {
+          "type": "string",
+          "description": "Dotted operation name (e.g. provider.up, package.install)."
+        },
+        "type": {
+          "type": "string",
+          "description": "Operation category (provider, provision, package).",
+          "enum": ["provider", "provision", "package"]
+        },
+        "status": {
+          "type": "string",
+          "enum": ["running", "succeeded", "failed", "skipped"]
+        },
+        "at": {
+          "type": "string",
+          "description": "ISO 8601 timestamp of this status transition."
+        },
+        "error": {
+          "type": "string",
+          "description": "Error message, present only on failed operations."
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ephemeral.dev/schemas/command-io.schema.json",
+  "title": "Plugin Command I/O",
+  "description": "Documents the JSON in/out contract for plugin commands. The input shape is resolved-instance.schema.json (passed via stdin or EGAME_RESOLVED_JSON). The $defs below describe the output shapes. This schema is documentation-only -- no data fixtures validate against it because provider commands emit mixed text/JSON on stdout.",
+  "$comment": "Documentation-only: defines $defs for reference but has no root type constraint. Do not add a root type or oneOf without also adding corresponding command-output fixtures.",
+
+  "$defs": {
+    "provider_command_output": {
+      "title": "Provider Command Output",
+      "description": "JSON emitted by provider commands on stdout. Most commands stream text; lifecycle commands record state through instance-state rather than structured output. When a provider command emits JSON containing a status or ip field, those fields are validated against this contract.",
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "status": {
+          "description": "Provider status value from the status command.",
+          "type": "string",
+          "enum": ["running", "stopped", "absent", "unknown"]
+        },
+        "ip": {
+          "description": "IP address from the ip command.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+
+    "package_command_output": {
+      "title": "Package Command Output",
+      "description": "JSON emitted by package commands on stdout. The dispatcher scans the last JSON object in stdout for a status field.",
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "status": {
+          "description": "Package status value.",
+          "type": "string",
+          "enum": ["installed", "missing", "unknown", "failed"]
+        }
+      }
+    },
+
+    "desired_state_mapping": {
+      "title": "Desired State Mapping",
+      "description": "Maps provider command to the desired_state the dispatcher records. up/start -> running, stop -> stopped, down -> absent.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "up": { "const": "running" },
+        "start": { "const": "running" },
+        "stop": { "const": "stopped" },
+        "down": { "const": "absent" }
+      }
+    },
+
+    "provider_state_mapping": {
+      "title": "Provider State Mapping",
+      "description": "Maps (command, dispatch_status) to the provider_state recorded by the dispatcher. On success: init -> initialized, plan -> planned, up/start -> running, stop -> stopped, down -> absent. On running: -> changing. On failure: -> error (except resolve/status/ip/ssh which set null).",
+      "type": "object"
+    }
+  }
+}

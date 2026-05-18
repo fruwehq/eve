@@ -1,0 +1,282 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ephemeral.dev/schemas/resolved-instance.schema.json",
+  "title": "Resolved Instance",
+  "description": "The shape of EGAME_RESOLVED_JSON produced by scripts/instance-resolve --emit json. This is the central data contract consumed by every plugin command, the TUI, and the dispatchers.",
+
+  "type": "object",
+  "required": [
+    "instance",
+    "composition",
+    "machine",
+    "os",
+    "init",
+    "location",
+    "provider_config",
+    "bundle_packages",
+    "package_sources",
+    "provider_plugin",
+    "package_plugins",
+    "engine",
+    "stack_tags"
+  ],
+  "additionalProperties": false,
+
+  "properties": {
+    "instance": {
+      "description": "The raw instance registry entry from .egame/instances.yaml or the fixture registry.",
+      "type": "object",
+      "required": ["name", "machine", "os", "init", "location"],
+      "additionalProperties": true,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Unique instance name."
+        },
+        "machine": {
+          "type": "string",
+          "description": "Catalog machine name."
+        },
+        "os": {
+          "type": "string",
+          "description": "Catalog OS id."
+        },
+        "init": {
+          "type": "string",
+          "description": "Catalog init id."
+        },
+        "location": {
+          "type": "string",
+          "description": "Catalog location name."
+        },
+        "bundles": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Bundle ids selected for this instance."
+        },
+        "packages": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Directly selected package ids."
+        },
+        "overrides": {
+          "type": "object",
+          "description": "Machine-level default overrides (disk_gb, memory_mb, etc.).",
+          "additionalProperties": true
+        },
+        "provider_config": {
+          "type": "object",
+          "description": "Per-provider configuration overrides (host, ip, etc.).",
+          "additionalProperties": true
+        },
+        "created_at": {
+          "type": "string",
+          "description": "ISO 8601 timestamp of instance creation."
+        },
+        "updated_at": {
+          "type": "string",
+          "description": "ISO 8601 timestamp of last update."
+        },
+        "state": {
+          "type": "string",
+          "description": "Instance lifecycle state."
+        }
+      }
+    },
+
+    "composition": {
+      "description": "Flattened composition derived from the instance entry (name + catalog selectors minus registry metadata).",
+      "type": "object",
+      "required": ["machine", "os", "init", "location", "name"],
+      "additionalProperties": true,
+      "properties": {
+        "name": { "type": "string" },
+        "machine": { "type": "string" },
+        "os": { "type": "string" },
+        "init": { "type": "string" },
+        "location": { "type": "string" },
+        "bundles": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "packages": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+
+    "machine": {
+      "description": "Resolved catalog machine entry with overrides applied to defaults.",
+      "type": "object",
+      "required": ["name", "provider", "kind"],
+      "additionalProperties": true,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Catalog machine name."
+        },
+        "provider": {
+          "type": "string",
+          "description": "Provider plugin id."
+        },
+        "kind": {
+          "type": "string",
+          "description": "Machine lifecycle kind.",
+          "enum": ["vm", "metal"]
+        },
+        "supports": {
+          "type": "object",
+          "description": "Machine-level support constraints.",
+          "additionalProperties": true,
+          "properties": {
+            "arches": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "os_ids": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          }
+        },
+        "defaults": {
+          "type": "object",
+          "description": "Machine defaults with instance overrides merged in.",
+          "additionalProperties": true,
+          "properties": {
+            "cpu_cores": { "type": "integer" },
+            "cpus": { "type": "integer" },
+            "cpu_mode": { "type": "string" },
+            "vcpus": { "type": "integer" },
+            "memory_mb": { "type": "integer" },
+            "disk_gb": { "type": "integer" },
+            "network": { "type": "string" },
+            "autostart": { "type": "boolean" },
+            "state": { "type": "string" },
+            "pool": { "type": "string" },
+            "plan": { "type": "string" },
+            "machine_type": { "type": "string" },
+            "disk_type": { "type": "string" },
+            "instance_type": { "type": "string" },
+            "root_volume_type": { "type": "string" },
+            "architecture": { "type": "string" }
+          }
+        }
+      }
+    },
+
+    "os": {
+      "description": "Resolved catalog OS entry.",
+      "type": "object",
+      "required": ["id", "family", "version", "arch"],
+      "additionalProperties": true,
+      "properties": {
+        "id": { "type": "string" },
+        "family": { "type": "string" },
+        "version": { "type": "string" },
+        "arch": { "type": "string" },
+        "vagrant_box": { "type": "string" },
+        "metal_image": { "type": "string" },
+        "cloud_image_url": { "type": "string" },
+        "aws_ami_name_pattern": { "type": "string" },
+        "aws_ami_id": { "type": "string" },
+        "aws_ssm_parameter": { "type": "string" },
+        "gcp_image_project": { "type": "string" },
+        "gcp_image_family": { "type": "string" },
+        "vultr_os_id": { "type": "integer" }
+      }
+    },
+
+    "init": {
+      "description": "Resolved catalog init entry.",
+      "type": "object",
+      "required": ["id"],
+      "additionalProperties": true,
+      "properties": {
+        "id": { "type": "string" },
+        "os_family": { "type": "string" },
+        "provider": { "type": "string" },
+        "providers": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+
+    "location": {
+      "description": "Resolved catalog location entry. Contains per-provider region/zone mappings.",
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": true,
+      "properties": {
+        "name": { "type": "string" },
+        "aws": { "$ref": "#/$defs/provider_location" },
+        "gcp": { "$ref": "#/$defs/provider_location" },
+        "vultr": { "$ref": "#/$defs/provider_location" },
+        "local-qemu": { "$ref": "#/$defs/provider_location" },
+        "raspberry-pi": { "$ref": "#/$defs/provider_location" },
+        "truenas": { "$ref": "#/$defs/provider_location" }
+      }
+    },
+
+    "provider_config": {
+      "description": "Per-instance provider configuration extracted from the instance registry entry. Empty object when no provider-specific config is set.",
+      "type": "object",
+      "additionalProperties": true
+    },
+
+    "bundle_packages": {
+      "description": "Sorted, deduplicated list of all resolved package ids from bundles plus direct selection.",
+      "type": "array",
+      "items": { "type": "string" }
+    },
+
+    "package_sources": {
+      "description": "Map from package id to its selection source(s) (bundle:<id> or direct).",
+      "type": "object",
+      "additionalProperties": {
+        "type": "array",
+        "items": { "type": "string" }
+      }
+    },
+
+    "provider_plugin": {
+      "description": "The provider plugin id (same as machine.provider).",
+      "type": "string"
+    },
+
+    "package_plugins": {
+      "description": "List of package plugin references for each selected package.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "plugin"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string" },
+          "plugin": { "type": "string" }
+        }
+      }
+    },
+
+    "engine": {
+      "description": "The execution engine determined from the machine kind and provider.",
+      "type": "string",
+      "enum": ["terraform", "vagrant", "metal"]
+    },
+
+    "stack_tags": {
+      "description": "Terramate stack tag (same as provider_plugin today).",
+      "type": "string"
+    }
+  },
+
+  "$defs": {
+    "provider_location": {
+      "description": "Per-provider location mapping. Fields vary by provider.",
+      "type": "object",
+      "additionalProperties": true
+    }
+  }
+}

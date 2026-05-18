@@ -1,0 +1,5 @@
+{
+  "instance": 42,
+  "desired_state": "invalid",
+  "provider_state": "bogus"
+}

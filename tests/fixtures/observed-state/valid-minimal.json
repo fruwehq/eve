@@ -1,0 +1,9 @@
+{
+  "instance": "minimal-state",
+  "desired_state": "unknown",
+  "provider_state": "unknown",
+  "provision_state": "unknown",
+  "package_state": {},
+  "observed_state": {},
+  "operation_history": []
+}

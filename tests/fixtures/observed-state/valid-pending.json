@@ -1,0 +1,13 @@
+{
+  "instance": "aws-gpu-a",
+  "desired_state": "running",
+  "provider_state": "changing",
+  "provision_state": "unknown",
+  "package_state": {},
+  "observed_state": {
+    "provider_status": "pending",
+    "ip": null,
+    "guest_reachable": null
+  },
+  "operation_history": []
+}

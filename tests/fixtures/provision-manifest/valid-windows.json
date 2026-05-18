@@ -1,0 +1,17 @@
+{
+  "api_version": 1,
+  "os_family": "windows",
+  "created_at": "2025-01-15T10:30:00Z",
+  "steps": [
+    {
+      "order": 0,
+      "name": "01_preferences.ps1",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "order": 1,
+      "name": "99_finish.ps1",
+      "sha256": "a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a"
+    }
+  ]
+}

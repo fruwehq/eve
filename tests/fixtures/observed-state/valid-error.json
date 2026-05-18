@@ -1,0 +1,44 @@
+{
+  "instance": "truenas-all-a",
+  "desired_state": "running",
+  "provider_state": "error",
+  "provision_state": "error",
+  "package_state": {
+    "sunshine": {
+      "status": "failed",
+      "updated_at": "2026-05-18T10:05:00Z"
+    }
+  },
+  "observed_state": {
+    "observed_at": "2026-05-18T12:00:00Z",
+    "expires_at": "2026-05-18T12:00:30Z",
+    "provider_status": "unreachable",
+    "provider_status_raw": "Status: error\nControl: unreachable (timed out)",
+    "ip": "192.168.0.100",
+    "control_reachable": false,
+    "control_summary": "unreachable (timed out)",
+    "guest_reachable": null,
+    "refresh_error": "connection timed out"
+  },
+  "operation_history": [
+    {
+      "id": 1,
+      "name": "provider.up",
+      "type": "provider",
+      "status": "failed",
+      "at": "2026-05-18T09:00:00Z",
+      "error": "connection timed out"
+    }
+  ],
+  "last_operation": {
+    "id": 1,
+    "name": "provider.up",
+    "type": "provider",
+    "status": "failed",
+    "at": "2026-05-18T09:00:00Z",
+    "error": "connection timed out"
+  },
+  "last_error": "connection timed out",
+  "created_at": "2026-05-18T08:00:00Z",
+  "updated_at": "2026-05-18T12:00:00Z"
+}

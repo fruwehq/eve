@@ -1,0 +1,20 @@
+api_version: egame.plugin/v1
+kind: provider
+id: bad-capability
+display_name: Bad Capability Provider
+commands:
+  resolve: {exec: scripts/provider-plugin, args: [aws, resolve]}
+  init: {exec: scripts/provider-plugin, args: [aws, init]}
+  plan: {exec: scripts/provider-plugin, args: [aws, plan]}
+  up: {exec: scripts/provider-plugin, args: [aws, up]}
+  down: {exec: scripts/provider-plugin, args: [aws, down]}
+  start: {exec: scripts/provider-plugin, args: [aws, start]}
+  stop: {exec: scripts/provider-plugin, args: [aws, stop]}
+  status: {exec: scripts/provider-plugin, args: [aws, status]}
+  ip: {exec: scripts/provider-plugin, args: [aws, ip]}
+  ssh: {exec: scripts/provider-plugin, args: [aws, ssh]}
+capabilities: [teleport]
+supports:
+  engines: [terraform]
+  kinds: [vm]
+env: []

@@ -1,0 +1,13 @@
+{
+  "api_version": 1,
+  "os_family": "ubuntu",
+  "started_at": null,
+  "finished_at": null,
+  "status": "running",
+  "steps": [
+    {
+      "step": "base.sh",
+      "phase": "invalid-phase"
+    }
+  ]
+}
