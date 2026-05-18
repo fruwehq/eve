@@ -119,6 +119,25 @@ case "$OS_FAMILY" in
     done
     printf '%s\n' "${ordered_steps[@]##*/}" > "$STAGE/state/steps.list"
 
+    # Write provision manifest with step hashes so the guest runner can
+    # detect host-uploaded-vs-guest-executing drift.
+    manifest_steps="[]"
+    for index in "${!ordered_steps[@]}"; do
+      step_file="$STAGE/scripts/steps/${ordered_steps[$index]##*/}"
+      step_hash=$(shasum -a 256 "$step_file" | awk '{print $1}')
+      manifest_steps=$(printf '%s' "$manifest_steps" | jq \
+        --arg order "$index" \
+        --arg name "${ordered_steps[$index]##*/}" \
+        --arg sha "$step_hash" \
+        '. += [{"order": ($order|tonumber), "name": $name, "sha256": $sha}]')
+    done
+    jq -n \
+      --argjson steps "$manifest_steps" \
+      --arg os_family "$OS_FAMILY" \
+      --arg created_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      '{api_version: 1, os_family: $os_family, created_at: $created_at, steps: $steps}' \
+      > "$STAGE/state/provision-manifest.json"
+
     # bundle_packages: one package per line for cheap grep lookup in step scripts
     printf '%s\n' "$BUNDLE_PACKAGES" | tr ',' '\n' > "$STAGE/state/bundle_packages"
     printf '%s\n' "$BUNDLE_PACKAGES" | tr ',' '\n' > "$STAGE/state/selected_packages"
@@ -194,6 +213,7 @@ EOF
     ./scripts/ssh-retry "upload linux selected package list" ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/state/selected_packages" 'provision/state/'
     ./scripts/ssh-retry "upload linux environment" ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/state/env" 'provision/state/'
     ./scripts/ssh-retry "upload linux step list" ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/state/steps.list" 'provision/state/'
+    ./scripts/ssh-retry "upload linux provision manifest" ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/state/provision-manifest.json" 'provision/state/'
     echo "[provision] running bootstrap.sh"
     ./scripts/ssh-retry "start linux provisioning runner" ./scripts/instance-ssh "$PROFILE" -- 'chmod +x ~/provision/scripts/bootstrap.sh ~/provision/scripts/runner.sh ~/provision/scripts/steps/*.sh ~/provision/scripts/lib/*.sh && ~/provision/scripts/bootstrap.sh'
     echo "[provision] waiting for linux provisioning to finish (polling remote log every ${EGAME_PROVISION_WAIT_POLL_INTERVAL:-5}s)"
@@ -279,6 +299,28 @@ EOF
           [$plugin.path, .] | @tsv
         '
     )
+
+    # Write provision manifest with step hashes so the guest runner can
+    # detect host-uploaded-vs-guest-executing drift.
+    manifest_steps="[]"
+    step_index=0
+    for step_file in "$STAGE/provision/scripts/steps/"*.ps1; do
+      [ -f "$step_file" ] || continue
+      step_hash=$(shasum -a 256 "$step_file" | awk '{print $1}')
+      step_name=$(basename "$step_file")
+      manifest_steps=$(printf '%s' "$manifest_steps" | jq \
+        --arg order "$step_index" \
+        --arg name "$step_name" \
+        --arg sha "$step_hash" \
+        '. += [{"order": ($order|tonumber), "name": $name, "sha256": $sha}]')
+      step_index=$((step_index + 1))
+    done
+    jq -n \
+      --argjson steps "$manifest_steps" \
+      --arg os_family "$OS_FAMILY" \
+      --arg created_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      '{api_version: 1, os_family: $os_family, created_at: $created_at, steps: $steps}' \
+      > "$STAGE/provision/state/provision-manifest.json"
 
     echo "[provision] uploading $OS_PROVISION_DIR/ to remote"
     # Clear scripts AND state — without state reset, currentStep can outrun the

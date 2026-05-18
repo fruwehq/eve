@@ -15,6 +15,45 @@ cd "$(git rev-parse --show-toplevel)"
 RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
 OS_FAMILY=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^OS_FAMILY=/{print $2}')
 
+build_status_probe() {
+  case "$OS_FAMILY" in
+    ubuntu)
+      cat <<'EOF'
+sf="$HOME/provision/state/provision-status.json"
+if [ ! -f "$sf" ]; then
+  printf 'STATUS_FILE\tABSENT\n'
+  exit 0
+fi
+if ! cat "$sf" | jq empty 2>/dev/null; then
+  printf 'STATUS_FILE\tMALFORMED\n'
+  exit 0
+fi
+cat "$sf"
+EOF
+      ;;
+    windows)
+      cat <<'EOF'
+$sf = "C:\Users\Administrator\provision\state\provision-status.json"
+if (-not (Test-Path $sf)) {
+  "STATUS_FILE`tABSENT"
+  exit 0
+}
+try {
+  $null = Get-Content $sf | ConvertFrom-Json
+} catch {
+  "STATUS_FILE`tMALFORMED"
+  exit 0
+}
+Get-Content $sf
+EOF
+      ;;
+    *)
+      echo "wait-for-provision: unknown os_family: $OS_FAMILY" >&2
+      exit 2
+      ;;
+  esac
+}
+
 # Each probe returns a small tab-separated header followed by newly appended
 # log lines after __EGAME_LOG_BEGIN__. This keeps the TUI responsive while
 # still showing the real apt/PowerShell output produced by the remote runner.
@@ -119,6 +158,79 @@ run_probe() {
   fi
 }
 
+run_status_probe() {
+  if [ -n "${EGAME_WAIT_FOR_PROVISION_PROBE_SCRIPT:-}" ]; then
+    "$EGAME_WAIT_FOR_PROVISION_PROBE_SCRIPT" "$OS_FAMILY" "status"
+  else
+    ./scripts/instance-ssh "$PROFILE" -- "$(build_status_probe)"
+  fi
+}
+
+parse_status_json() {
+  local raw="$1"
+  local file_status
+  file_status=$(printf '%s' "$raw" | grep -E '^STATUS_FILE' | awk -F'\t' '{print $2}' || true)
+  if [ "$file_status" = "ABSENT" ]; then
+    printf 'NOT_PRESENT\n'
+    return 0
+  fi
+  if [ "$file_status" = "MALFORMED" ]; then
+    printf 'MALFORMED\n'
+    return 0
+  fi
+  local json
+  if [ -n "$file_status" ]; then
+    json=$(printf '%s' "$raw" | grep -v '^STATUS_FILE' || true)
+  else
+    json="$raw"
+  fi
+  if ! printf '%s' "$json" | jq empty 2>/dev/null; then
+    printf 'MALFORMED\n'
+    return 0
+  fi
+  local valid
+  valid=$(printf '%s' "$json" | jq -e '
+    .api_version == 1
+    and (.os_family | IN("ubuntu","windows"))
+    and has("started_at")
+    and ((.started_at | type) == "string" or (.started_at | type) == "null")
+    and (.status as $s | $s | IN("running","done","failed"))
+    and (.steps | type) == "array"
+    and ([.steps[] | (
+      (.step | type) == "string" and (.step | length) > 0
+      and (.phase as $p | $p | IN("pending","running","succeeded","failed","skipped"))
+      and has("started_at")
+      and has("ended_at")
+      and has("exit_code")
+      and ((.started_at | type) == "string" or (.started_at | type) == "null")
+      and ((.ended_at | type) == "string" or (.ended_at | type) == "null")
+      and ((.exit_code | type) == "number" or (.exit_code | type) == "null")
+      and (if .exit_code != null then (.exit_code | . == floor) else true end)
+    )] | all)
+  ' 2>/dev/null) || true
+  if [ "$valid" != "true" ]; then
+    printf 'MALFORMED\n'
+    return 0
+  fi
+  local overall
+  overall=$(printf '%s' "$json" | jq -r '.status')
+  local last_running
+  last_running=$(printf '%s' "$json" | jq -r '[.steps[] | select(.phase == "running" or .phase == "succeeded" or .phase == "failed")] | last.step // empty')
+  local total_done
+  total_done=$(printf '%s' "$json" | jq '[.steps[] | select(.phase == "succeeded")] | length')
+  local total_steps
+  total_steps=$(printf '%s' "$json" | jq '.steps | length')
+  if [ "$overall" = "done" ]; then
+    printf 'DONE\t%s\t%s/%s\n' "$last_running" "$total_done" "$total_steps"
+  elif [ "$overall" = "failed" ]; then
+    local failed_step
+    failed_step=$(printf '%s' "$json" | jq -r '[.steps[] | select(.phase == "failed")] | last.step // empty')
+    printf 'FAILED\t%s\t%s/%s\n' "$failed_step" "$total_done" "$total_steps"
+  else
+    printf 'RUNNING\t%s\t%s/%s\n' "$last_running" "$total_done" "$total_steps"
+  fi
+}
+
 SECONDS=0
 last_step="(none yet)"
 log_offset=0
@@ -141,41 +253,93 @@ while [ "$SECONDS" -lt "$MAX_SECONDS" ]; do
   if [ "$interactive_output" -eq 1 ]; then
     print_status "probing"
   fi
-  if result=$(run_probe "$log_offset" 2>/dev/null); then
-    result=$(printf '%s\n' "$result" | tr -d '\r')
-    state=$(printf '%s\n' "$result" | awk -F '\t' '$1 == "STATE" {print $2; exit}')
-    line_count=$(printf '%s\n' "$result" | awk -F '\t' '$1 == "LINES" {print $2; exit}')
-    step_line=$(printf '%s\n' "$result" | awk -F '\t' '$1 == "LAST" {print substr($0, index($0, "\t") + 1); exit}')
-    new_log=$(printf '%s\n' "$result" | sed -n '/^__EGAME_LOG_BEGIN__$/,$p' | sed '1d')
-    if [ -n "$step_line" ]; then
-      last_step=$(printf '%s' "$step_line" | clean_step)
-    fi
-    if [ -n "$line_count" ] && [ "$line_count" -ge 0 ] 2>/dev/null; then
-      log_offset="$line_count"
-    fi
-    if [ -n "$new_log" ]; then
-      if [ "$interactive_output" -eq 1 ]; then
+
+  used_status_file=0
+  if status_raw=$(run_status_probe 2>/dev/null); then
+    status_raw=$(printf '%s\n' "$status_raw" | tr -d '\r')
+    status_result=$(parse_status_json "$status_raw")
+    case "$status_result" in
+      MALFORMED*)
         printf "\n"
+        echo "Provision status file exists but is malformed. Refusing to silently ignore." >&2
+        echo "Run: scripts/instance-ssh $PROFILE -- 'cat ~/provision/state/provision-status.json' (or C:\Users\Administrator\...)" >&2
+        exit 1
+        ;;
+      NOT_PRESENT*)
+        used_status_file=0
+        ;;
+      DONE*)
+        used_status_file=1
+        status_step=$(printf '%s' "$status_result" | awk -F'\t' '{print $2}')
+        status_progress=$(printf '%s' "$status_result" | awk -F'\t' '{print $3}')
+        if [ -n "$status_step" ]; then
+          last_step="$status_step"
+        fi
+        if [ "$interactive_output" -eq 1 ]; then
+          printf "\rProvisioning complete for profile %s (%ds, %s, last step: %s)                                       \n" "$PROFILE" "$SECONDS" "$status_progress" "$last_step"
+        else
+          printf "Provisioning complete for profile %s (%ds, %s, last step: %s)\n" "$PROFILE" "$SECONDS" "$status_progress" "$last_step"
+        fi
+        exit 0
+        ;;
+      FAILED*)
+        used_status_file=1
+        status_step=$(printf '%s' "$status_result" | awk -F'\t' '{print $2}')
+        status_progress=$(printf '%s' "$status_result" | awk -F'\t' '{print $3}')
+        printf "\n"
+        echo "Provisioning failed for profile $PROFILE (${SECONDS}s, $status_progress)" >&2
+        [ -n "$status_step" ] && echo "Failed step: $status_step" >&2
+        exit 1
+        ;;
+      RUNNING*)
+        used_status_file=1
+        status_step=$(printf '%s' "$status_result" | awk -F'\t' '{print $2}')
+        status_progress=$(printf '%s' "$status_result" | awk -F'\t' '{print $3}')
+        if [ -n "$status_step" ]; then
+          last_step="$status_step"
+        fi
+        print_status "connected [$status_progress]"
+        ;;
+    esac
+  fi
+
+  if [ "$used_status_file" -eq 0 ]; then
+    if result=$(run_probe "$log_offset" 2>/dev/null); then
+      result=$(printf '%s\n' "$result" | tr -d '\r')
+      state=$(printf '%s\n' "$result" | awk -F '\t' '$1 == "STATE" {print $2; exit}')
+      line_count=$(printf '%s\n' "$result" | awk -F '\t' '$1 == "LINES" {print $2; exit}')
+      step_line=$(printf '%s\n' "$result" | awk -F '\t' '$1 == "LAST" {print substr($0, index($0, "\t") + 1); exit}')
+      new_log=$(printf '%s\n' "$result" | sed -n '/^__EGAME_LOG_BEGIN__$/,$p' | sed '1d')
+      if [ -n "$step_line" ]; then
+        last_step=$(printf '%s' "$step_line" | clean_step)
       fi
-      printf '%s\n' "$new_log"
-    fi
-    if [ "$state" = "DONE" ]; then
-      if [ "$interactive_output" -eq 1 ]; then
-        printf "\rProvisioning complete for profile %s (%ds, last step: %s)                                       \n" "$PROFILE" "$SECONDS" "$last_step"
-      else
-        printf "Provisioning complete for profile %s (%ds, last step: %s)\n" "$PROFILE" "$SECONDS" "$last_step"
+      if [ -n "$line_count" ] && [ "$line_count" -ge 0 ] 2>/dev/null; then
+        log_offset="$line_count"
       fi
-      exit 0
+      if [ -n "$new_log" ]; then
+        if [ "$interactive_output" -eq 1 ]; then
+          printf "\n"
+        fi
+        printf '%s\n' "$new_log"
+      fi
+      if [ "$state" = "DONE" ]; then
+        if [ "$interactive_output" -eq 1 ]; then
+          printf "\rProvisioning complete for profile %s (%ds, last step: %s)                                       \n" "$PROFILE" "$SECONDS" "$last_step"
+        else
+          printf "Provisioning complete for profile %s (%ds, last step: %s)\n" "$PROFILE" "$SECONDS" "$last_step"
+        fi
+        exit 0
+      fi
+      if [ "$state" = "FAILED" ]; then
+        printf "\n"
+        echo "Provisioning failed for profile $PROFILE (${SECONDS}s)" >&2
+        echo "Last seen step: $last_step" >&2
+        exit 1
+      fi
+      print_status "connected"
+    else
+      print_status "waiting for SSH (reboot in progress?)"
     fi
-    if [ "$state" = "FAILED" ]; then
-      printf "\n"
-      echo "Provisioning failed for profile $PROFILE (${SECONDS}s)" >&2
-      echo "Last seen step: $last_step" >&2
-      exit 1
-    fi
-    print_status "connected"
-  else
-    print_status "waiting for SSH (reboot in progress?)"
   fi
   sleep "$POLL_INTERVAL"
 done
