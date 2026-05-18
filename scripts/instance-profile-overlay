@@ -56,12 +56,18 @@ end
 resolved = JSON.parse(resolved_json)
 composition = resolved.fetch("composition")
 machine = resolved.fetch("machine")
+os = resolved.fetch("os")
+init = resolved.fetch("init")
+location = resolved.fetch("location")
 machine_name = "instance-#{instance_name}-machine"
 provider = machine.fetch("provider")
 provider_config = resolved["provider_config"].is_a?(Hash) ? resolved["provider_config"] : {}
 
 overlay_machine = Marshal.load(Marshal.dump(machine))
 overlay_machine["name"] = machine_name
+source_machine = Marshal.load(Marshal.dump(machine))
+overlay_machines = [source_machine, overlay_machine].sort_by { |entry| entry.fetch("name") }
+source_location = Marshal.load(Marshal.dump(location))
 
 overlay_profile = {
   "name" => instance_name,
@@ -75,12 +81,15 @@ overlay_profile["packages"] = composition["packages"] if composition.key?("packa
 overlay_profile["lifecycle"] = composition["lifecycle"] if composition.key?("lifecycle")
 
 overlay = {
-  "machines" => [overlay_machine],
+  "inits" => [Marshal.load(Marshal.dump(init))],
+  "locations" => [source_location],
+  "machines" => overlay_machines,
+  "oses" => [Marshal.load(Marshal.dump(os))],
   "profiles" => [overlay_profile]
 }
 
 unless provider_config.empty?
-  overlay_location = Marshal.load(Marshal.dump(resolved.fetch("location")))
+  overlay_location = Marshal.load(Marshal.dump(location))
   location_name = "instance-#{instance_name}-location"
   overlay_location["name"] = location_name
   overlay_location[provider] = (overlay_location[provider] || {}).merge(provider_config)
@@ -88,7 +97,7 @@ unless provider_config.empty?
     overlay_location[provider]["host"] = overlay_location[provider]["ip"]
   end
   overlay_profile["location"] = location_name
-  overlay["locations"] = [overlay_location]
+  overlay["locations"] = [source_location, overlay_location].sort_by { |entry| entry.fetch("name") }
 end
 
 yaml = overlay.to_yaml

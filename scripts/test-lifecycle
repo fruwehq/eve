@@ -1,0 +1,324 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Fake-provider lifecycle test: exercises up → status → ip → stop → down
+# through provider-dispatch with the fake provider plugin and temporary
+# catalog/registry. Asserts provider state and observed-state cache transitions.
+
+require "json"
+require "yaml"
+require "tmpdir"
+require "fileutils"
+
+ROOT = File.expand_path("..", __dir__)
+$LOAD_PATH.unshift(File.join(ROOT, "core"))
+require "sdk"
+
+FAKE_PLUGIN_PATH = File.join(ROOT, "tests/fixtures/plugins/providers/fake")
+
+failures = 0
+
+def pass(msg)
+  puts "  [OK] #{msg}"
+end
+
+def fail_test(msg)
+  puts "  [FAIL] #{msg}"
+  1
+end
+
+def run_capture(*cmd, env: {})
+  out, err, status = Open3.capture3(env, *cmd, chdir: ROOT)
+  { out: out, err: err, status: status }
+rescue StandardError => e
+  { out: "", err: e.message, status: nil }
+end
+
+require "open3"
+
+puts "\n== lifecycle: fake provider =="
+
+Dir.mktmpdir("egame-lifecycle-test-") do |tmpdir|
+  workdir = File.join(tmpdir, "work")
+  state_dir = File.join(tmpdir, "state")
+  registry_dir = File.join(tmpdir, "registry")
+  catalog_dir = File.join(tmpdir, "catalog")
+  FileUtils.mkdir_p([workdir, state_dir, registry_dir, catalog_dir])
+
+  registry_path = File.join(registry_dir, "instances.yaml")
+  FileUtils.mkdir_p(File.join(workdir, "fake-lifecycle-a"))
+
+  catalog_local = {
+    "machines" => [
+      {
+        "name" => "fake-vm",
+        "provider" => "fake",
+        "kind" => "vm",
+        "defaults" => { "cpu_cores" => 2, "memory_mb" => 4096, "disk_gb" => 30 }
+      }
+    ],
+    "oses" => [
+      {
+        "id" => "fake-os",
+        "family" => "ubuntu",
+        "arch" => "amd64",
+        "version" => "26.04",
+        "vagrant_box" => "test/fake"
+      }
+    ],
+    "inits" => [
+      {
+        "id" => "fake-init",
+        "os_family" => "ubuntu",
+        "providers" => ["fake"]
+      }
+    ],
+    "locations" => [
+      {
+        "name" => "fake-location",
+        "fake" => { "region" => "test" }
+      }
+    ],
+    "packages" => [],
+    "bundles" => []
+  }
+  catalog_path = File.join(catalog_dir, "catalog.local.yaml")
+  File.write(catalog_path, YAML.dump(catalog_local))
+
+  registry = {
+    "instances" => [
+      {
+        "name" => "fake-lifecycle-a",
+        "machine" => "fake-vm",
+        "os" => "fake-os",
+        "init" => "fake-init",
+        "location" => "fake-location",
+        "bundles" => [],
+        "packages" => []
+      }
+    ]
+  }
+  File.write(registry_path, YAML.dump(registry))
+
+  base_env = {
+    "EGAME_INSTANCE_REGISTRY" => registry_path,
+    "EGAME_CATALOG_LOCAL" => catalog_path,
+    "EGAME_INSTANCE_WORKDIR" => workdir,
+    "EGAME_STATE_DIR" => state_dir,
+    "EGAME_PLUGIN_ROOTS" => FAKE_PLUGIN_PATH
+  }
+
+  provision_stub = File.join(tmpdir, "fake-provision")
+  File.write(provision_stub, "#!/usr/bin/env ruby\nexit 0\n")
+  FileUtils.chmod(0o755, provision_stub)
+
+  r = run_capture(
+    File.join(ROOT, "scripts/instance-resolve"),
+    "--instance", "fake-lifecycle-a",
+    "--emit", "json",
+    env: base_env
+  )
+  if r[:status]&.success?
+    resolved = JSON.parse(r[:out])
+    if resolved.dig("machine", "provider") == "fake"
+      pass "instance resolves with fake provider"
+    else
+      failures += fail_test "resolved provider mismatch: #{resolved.dig('machine', 'provider')}"
+    end
+  else
+    failures += fail_test "instance resolve failed: #{r[:err]}"
+  end
+
+  commands_expect = {
+    "up" => { "state" => "running", "provider_state" => "running", "desired_state" => "running" },
+    "status" => { "state_includes" => "running" },
+    "ip" => { "ip" => "127.0.0.1" },
+    "stop" => { "state" => "stopped", "provider_state" => "stopped", "desired_state" => "stopped" },
+    "down" => { "state" => "absent", "provider_state" => "absent", "desired_state" => "absent" }
+  }
+
+  lifecycle_order = %w[up status ip stop down]
+  lifecycle_order.each do |cmd|
+    r = run_capture(
+      File.join(ROOT, "scripts/provider-dispatch"),
+      "--instance", "fake-lifecycle-a",
+      "--command", cmd,
+      env: base_env
+    )
+    expected = commands_expect[cmd]
+
+    if r[:status]&.success?
+      pass "provider-dispatch #{cmd} succeeded"
+
+      provider_state_file = File.join(state_dir, "instances", "fake-lifecycle-a.json")
+      if File.exist?(provider_state_file)
+        state = JSON.parse(File.read(provider_state_file))
+        if expected["provider_state"]
+          actual = state["provider_state"]
+          if actual == expected["provider_state"]
+            pass "#{cmd} sets provider_state=#{actual}"
+          else
+            failures += fail_test "#{cmd} provider_state: expected=#{expected['provider_state']} actual=#{actual}"
+          end
+        end
+        if expected["desired_state"]
+          actual = state["desired_state"]
+          if actual == expected["desired_state"]
+            pass "#{cmd} sets desired_state=#{actual}"
+          else
+            failures += fail_test "#{cmd} desired_state: expected=#{expected['desired_state']} actual=#{actual}"
+          end
+        end
+        if expected["state_includes"]
+          pass "#{cmd} state file exists" if state["provider_state"]
+        end
+      else
+        failures += fail_test "#{cmd} did not write state file"
+      end
+
+      if cmd == "ip"
+        output_json = nil
+        r[:out].each_line.reverse_each do |line|
+          line = line.strip
+          next if line.empty?
+          begin
+            output_json = JSON.parse(line)
+            break if output_json.key?("ip") || output_json.key?("status")
+          rescue JSON::ParserError
+            next
+          end
+        end
+        if output_json && output_json["ip"] == expected["ip"]
+          pass "ip command returns #{expected['ip']}"
+        else
+          failures += fail_test "ip output mismatch: #{r[:out]}"
+        end
+      end
+    else
+      failures += fail_test "provider-dispatch #{cmd} failed: #{r[:err]}"
+    end
+  end
+
+  r_start = run_capture(
+    File.join(ROOT, "scripts/provider-dispatch"),
+    "--instance", "fake-lifecycle-a",
+    "--command", "start",
+    env: base_env
+  )
+  if r_start[:status]&.success?
+    state = JSON.parse(File.read(File.join(state_dir, "instances", "fake-lifecycle-a.json")))
+    if state["provider_state"] == "running"
+      pass "start transitions provider_state back to running"
+    else
+      failures += fail_test "start provider_state: expected=running actual=#{state['provider_state']}"
+    end
+  else
+    failures += fail_test "provider-dispatch start failed: #{r_start[:err]}"
+  end
+
+  r_ssh = run_capture(
+    File.join(ROOT, "scripts/provider-dispatch"),
+    "--instance", "fake-lifecycle-a",
+    "--command", "ssh",
+    "--", "exit", "0",
+    env: base_env
+  )
+  if r_ssh[:status]&.success?
+    pass "provider-dispatch ssh probe succeeds"
+  else
+    failures += fail_test "provider-dispatch ssh probe failed: #{r_ssh[:err]}"
+  end
+
+  r_provision = run_capture(
+    File.join(ROOT, "scripts/instance-provision"),
+    "--instance", "fake-lifecycle-a",
+    env: base_env.merge("EGAME_PROVISION_SCRIPT" => provision_stub)
+  )
+  if r_provision[:status]&.success?
+    state = JSON.parse(File.read(File.join(state_dir, "instances", "fake-lifecycle-a.json")))
+    if state["provision_state"] == "provisioned"
+      pass "instance-provision records provision_state=provisioned"
+    else
+      failures += fail_test "provision_state: expected=provisioned actual=#{state['provision_state']}"
+    end
+  else
+    failures += fail_test "instance-provision failed: #{r_provision[:err]}"
+  end
+
+  r_status = run_capture(
+    File.join(ROOT, "scripts/instance-status"),
+    "--instance", "fake-lifecycle-a",
+    "--json",
+    env: base_env
+  )
+  status_json = r_status[:status]&.success? ? JSON.parse(r_status[:out]) : nil
+  if status_json &&
+     status_json.dig("state", "desired_state") == "running" &&
+     status_json.dig("state", "provider_state") == "running" &&
+     status_json.dig("state", "provision_state") == "provisioned"
+    pass "instance-status renders lifecycle state"
+  else
+    failures += fail_test "instance-status output mismatch: #{r_status[:out]}#{r_status[:err]}"
+  end
+
+  %w[stop down].each do |cmd|
+    r_make = run_capture(
+      File.join(ROOT, "scripts/provider-dispatch"),
+      "--instance", "fake-lifecycle-a",
+      "--command", cmd,
+      env: base_env
+    )
+    if r_make[:status]&.success?
+      pass "post-provision provider-dispatch #{cmd} succeeds"
+    else
+      failures += fail_test "post-provision provider-dispatch #{cmd} failed: #{r_make[:err]}"
+    end
+  end
+
+  state = JSON.parse(File.read(File.join(state_dir, "instances", "fake-lifecycle-a.json")))
+  history = state.fetch("operation_history", [])
+  lifecycle_commands = %w[up status ip stop down start]
+  recorded_commands = history.map { |e| e["name"] }
+  lifecycle_commands.each do |cmd|
+    op_name = "provider.#{cmd}"
+    if recorded_commands.include?(op_name)
+      pass "history records provider.#{cmd}"
+    else
+      failures += fail_test "history missing provider.#{cmd}: recorded=#{recorded_commands.inspect}"
+    end
+  end
+
+  r_dry = run_capture(
+    File.join(ROOT, "scripts/provider-dispatch"),
+    "--instance", "fake-lifecycle-a",
+    "--command", "up",
+    "--dry-run",
+    env: base_env
+  )
+  if r_dry[:status]&.success?
+    dry_json = nil
+    r_dry[:out].each_line do |line|
+      line = line.strip
+      next if line.empty?
+      begin
+        parsed = JSON.parse(line)
+        dry_json = parsed if parsed.key?("dry_run")
+      rescue JSON::ParserError
+        next
+      end
+    end
+    if dry_json && dry_json["dry_run"] == true
+      pass "dry-run mode emits dry_run=true"
+    else
+      failures += fail_test "dry-run output: #{r_dry[:out]}"
+    end
+  else
+    failures += fail_test "dry-run dispatch failed: #{r_dry[:err]}"
+  end
+end
+
+if failures.positive?
+  warn "\n#{failures} check(s) failed."
+  exit 1
+end
+puts "\nAll lifecycle checks passed."

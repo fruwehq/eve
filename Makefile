@@ -8,8 +8,8 @@
 				package.reinstall package.select package.status package.uninstall package.unselect package.verify \
 				plugins.list plugins.sync plugins.validate provider.status providers.status provision \
 				provision.clear-state provision.restart provision.wait reboot show-password ssh ssh.run ssh.truenas \
-				ssh.wait start status stop test test.catalog test.core-boundary test.instances test.lint test.plugins \
-				test.plugins-sync test.python test.schemas test.shellcheck test.state-concurrency test.terraform test.tf-isolation test.tui \
+				ssh.wait start status stop test test.catalog test.core-boundary test.instances test.lifecycle test.lint test.plugins \
+				test.plugins-sync test.provision-runner test.python test.schemas test.shellcheck test.state-concurrency test.terraform test.tf-isolation test.tui \
 				test.update-golden tui up update upload validate
 
 TM_PARALLEL ?= 8
@@ -404,6 +404,9 @@ test.core-boundary: ## Fail if central scripts reference provider/OS IDs outside
 test.instances: ## Validate fixture instances and compare emitted env to golden snapshots
 	@./scripts/test-instances
 
+test.lifecycle: ## Run fake-provider lifecycle test (up/status/ip/stop/down state transitions)
+	@./scripts/test-lifecycle
+
 test.lint: ## Run non-Python language lint and syntax checks
 	@./scripts/test-lint
 
@@ -412,6 +415,9 @@ test.plugins: ## Validate plugin manifests and dry-run dispatch contracts
 
 test.plugins-sync: ## Validate external plugin synchronization
 	@./scripts/test-plugins-sync
+
+test.provision-runner: ## Run provision runner (Ubuntu bash + optional Windows pwsh) tests
+	@./scripts/test-provision-runner
 
 test.python: ## Run Python lint and type checks
 	@./scripts/test-python

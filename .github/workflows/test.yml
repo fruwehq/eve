@@ -43,5 +43,8 @@ jobs:
       - name: Install Ruby dependencies
         run: bundle install --jobs 4 --retry 3
 
+      - name: Run provision runner smoke
+        run: make test.provision-runner
+
       - name: Run make test
         run: make test

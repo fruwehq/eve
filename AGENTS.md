@@ -159,6 +159,9 @@ Adding a new Linux step:
 - **catalog** (`test-catalog`) — validates provider/platform/content choice emission and provider-specific OS image metadata gating.
 - **core-boundary** (`test-core-boundary`) — fails if central `scripts/` reference provider or catalog OS IDs outside a committed allowlist of known violations.
 - **instances** (`test-instances`) — validates local instance registry fixtures, generated overlays, provider dispatch routing, and state contracts.
+- **lifecycle** (`test-lifecycle`) — exercises fake-provider up/status/ip/stop/down/start state transitions through `provider-dispatch`, asserting provider state and observed-state cache transitions. No live VM, no cloud credentials.
+- **plugins** (`test-plugins`) — validates plugin manifests and dry-run dispatch contracts.
+- **provision-runner** (`test-provision-runner`) — directly executes Ubuntu (bash) and optional Windows (PowerShell) provision runners in tempdirs, asserting step status, resume behaviour, manifest validation, and structured status output. Skips host-incompatible checks with `[SKIP]`.
 - **terraform** (`test-terraform`) — `terramate generate` + `terraform init -backend=false` + `terraform validate` across `aws-services`, `gcp-services`, `vultr-services`, and `truenas-services`. Uses a fake `MY_IP` and a tempfile SSH key. No cloud credentials required.
 - **shellcheck** (`test-shellcheck`) — runs `shellcheck -x --source-path=SCRIPTDIR` over every shell script with a bash/sh shebang in `scripts/` and `oses/<catalog-os-id>/provision/`.
 - **python** (`test-python`) — runs ruff and strict mypy for Python TUI code.

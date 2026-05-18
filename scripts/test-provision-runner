@@ -1,0 +1,370 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Provision-runner tests: directly executes the Ubuntu (bash) and optional
+# Windows (PowerShell) provision runners in tempdirs, asserting step status,
+# resume behaviour, manifest validation, and structured status output.
+#
+# Ubuntu runner tests require bash >= 4 (for mapfile). macOS bash 3 skips
+# these with [SKIP]. Windows runner tests require pwsh on PATH.
+
+require "json"
+require "tmpdir"
+require "fileutils"
+require "open3"
+
+ROOT = File.expand_path("..", __dir__)
+
+failures = 0
+skipped = 0
+
+def pass(msg)
+  puts "  [OK] #{msg}"
+end
+
+def fail_test(msg)
+  puts "  [FAIL] #{msg}"
+  1
+end
+
+def skip_test(msg)
+  puts "  [SKIP] #{msg}"
+  1
+end
+
+UBUNTU_RUNNER = File.join(ROOT, "oses/ubuntu-26.04/provision/scripts/runner.sh")
+WINDOWS_RUNNER = File.join(ROOT, "oses/windows-server-2025/provision/scripts/runner.ps1")
+
+def bash_version
+  out, err, status = Open3.capture3("bash", "-c", "echo ${BASH_VERSINFO[0]:-0}")
+  return nil unless status.success?
+  out.strip.to_i
+end
+
+def has_pwsh?
+  system("which pwsh >/dev/null 2>&1")
+end
+
+def make_ubuntu_tree(dir, steps:, steps_list: nil, state_json: '{"currentStep":0}',
+                     existing_status: nil, manifest: nil)
+  bin_dir = File.join(dir, "bin")
+  prov_dir = File.join(dir, "provision")
+  scripts_dir = File.join(prov_dir, "scripts")
+  steps_dir = File.join(scripts_dir, "steps")
+  state_dir = File.join(prov_dir, "state")
+  logs_dir = File.join(prov_dir, "logs")
+
+  FileUtils.mkdir_p([bin_dir, steps_dir, state_dir, logs_dir])
+
+  File.write(File.join(bin_dir, "flock"), "#!/usr/bin/env bash\nexit 0\n")
+  FileUtils.chmod(0o755, File.join(bin_dir, "flock"))
+
+  steps.each do |name, content|
+    File.write(File.join(steps_dir, name), "#!/usr/bin/env bash\n#{content}")
+    FileUtils.chmod(0o755, File.join(steps_dir, name))
+  end
+
+  list = steps_list || steps.keys.join("\n")
+  File.write(File.join(state_dir, "steps.list"), "#{list}\n")
+  File.write(File.join(state_dir, "state.json"), "#{state_json}\n")
+  File.write(File.join(state_dir, "provision-status.json"), existing_status) if existing_status
+  File.write(File.join(state_dir, "provision-manifest.json"), manifest) if manifest
+
+  { bin: bin_dir, provision: prov_dir, state: state_dir }
+end
+
+def run_ubuntu_runner(test_dir)
+  env = {
+    "PROVISION_ROOT" => File.join(test_dir, "provision"),
+    "PATH" => "#{File.join(test_dir, 'bin')}:#{ENV['PATH']}"
+  }
+  out, err, status = Open3.capture3(env, "bash", UBUNTU_RUNNER)
+  { out: out, err: err, status: status }
+end
+
+def read_status(state_dir)
+  path = File.join(state_dir, "provision-status.json")
+  return nil unless File.exist?(path)
+  JSON.parse(File.read(path))
+end
+
+puts "\n== provision-runner: ubuntu (bash) =="
+
+bv = bash_version
+if bv.nil? || bv < 4
+  skipped += skip_test "Ubuntu runner tests require bash >= 4 (host has #{bv || 'unknown'})"
+else
+  Dir.mktmpdir("egame-runner-exit-") do |dir|
+    make_ubuntu_tree(dir,
+      steps: { "00_fail.sh" => "exit 42" })
+
+    r = run_ubuntu_runner(dir)
+    status = read_status(File.join(dir, "provision/state"))
+
+    if status && status["status"] == "failed"
+      pass "runner captures failing step (status=failed)"
+    else
+      failures += fail_test "runner failing step status: expected=failed actual=#{status&.fetch('status', 'nil')}"
+    end
+
+    if status && status.dig("steps", 0, "exit_code") == 42
+      pass "runner captures exit_code=42"
+    else
+      failures += fail_test "runner exit_code: expected=42 actual=#{status&.dig('steps', 0, 'exit_code')}"
+    end
+  end
+
+  Dir.mktmpdir("egame-runner-success-") do |dir|
+    make_ubuntu_tree(dir,
+      steps: { "00_ok.sh" => "exit 0" })
+
+    r = run_ubuntu_runner(dir)
+    status = read_status(File.join(dir, "provision/state"))
+
+    if r[:status].success?
+      pass "runner succeeds for passing step"
+    else
+      failures += fail_test "runner success path: exit=#{r[:status].exitstatus} err=#{r[:err]}"
+    end
+
+    if status && status["status"] == "done"
+      pass "runner marks status=done on success"
+    else
+      failures += fail_test "runner done status: actual=#{status&.fetch('status', 'nil')}"
+    end
+  end
+
+  Dir.mktmpdir("egame-runner-resume-") do |dir|
+    prior_status = {
+      "api_version" => 1,
+      "os_family" => "ubuntu",
+      "started_at" => "2026-01-15T10:00:00Z",
+      "finished_at" => nil,
+      "status" => "running",
+      "steps" => [
+        {
+          "step" => "00_first.sh",
+          "phase" => "succeeded",
+          "started_at" => "2026-01-15T10:00:00Z",
+          "ended_at" => "2026-01-15T10:01:00Z",
+          "exit_code" => 0
+        },
+        {
+          "step" => "01_second.sh",
+          "phase" => "pending",
+          "started_at" => nil,
+          "ended_at" => nil,
+          "exit_code" => nil
+        }
+      ]
+    }
+
+    make_ubuntu_tree(dir,
+      steps: { "00_first.sh" => "exit 0", "01_second.sh" => "exit 0" },
+      state_json: '{"currentStep":1}',
+      existing_status: JSON.generate(prior_status))
+
+    r = run_ubuntu_runner(dir)
+    status = read_status(File.join(dir, "provision/state"))
+
+    step0 = status&.dig("steps", 0)
+    if step0 && step0["phase"] == "succeeded" && step0["exit_code"] == 0
+      pass "runner resume preserves prior step status (step 0 still succeeded)"
+    else
+      failures += fail_test "runner resume step0: phase=#{step0&.fetch('phase')} exit=#{step0&.fetch('exit_code')}"
+    end
+
+    if status && status["status"] == "done"
+      pass "runner resume completes all remaining steps"
+    else
+      failures += fail_test "runner resume final status: expected=done actual=#{status&.fetch('status')}"
+    end
+  end
+
+  Dir.mktmpdir("egame-runner-manifest-hash-") do |dir|
+    manifest = {
+      "api_version" => 1,
+      "os_family" => "ubuntu",
+      "steps" => [
+        {
+          "name" => "00_base.sh",
+          "order" => 0,
+          "sha256" => "deadbeef00000000000000000000000000000000000000000000000000000000"
+        }
+      ]
+    }
+
+    make_ubuntu_tree(dir,
+      steps: { "00_base.sh" => "exit 0" },
+      manifest: JSON.generate(manifest))
+
+    r = run_ubuntu_runner(dir)
+    status = read_status(File.join(dir, "provision/state"))
+
+    if !r[:status].success?
+      pass "runner manifest hash mismatch exits non-zero"
+    else
+      failures += fail_test "runner manifest hash mismatch should have failed"
+    end
+
+    if status && status["status"] == "failed"
+      pass "runner manifest hash mismatch emits structured failed status"
+    else
+      failures += fail_test "runner manifest hash status: expected=failed actual=#{status&.fetch('status', 'nil')}"
+    end
+  end
+
+  Dir.mktmpdir("egame-runner-manifest-order-") do |dir|
+    manifest = {
+      "api_version" => 1,
+      "os_family" => "ubuntu",
+      "steps" => [
+        { "name" => "00_base.sh", "order" => 1, "sha256" => "x" * 64 }
+      ]
+    }
+
+    make_ubuntu_tree(dir,
+      steps: { "00_base.sh" => "exit 0" },
+      manifest: JSON.generate(manifest))
+
+    r = run_ubuntu_runner(dir)
+    status = read_status(File.join(dir, "provision/state"))
+
+    if !r[:status].success?
+      pass "runner manifest order mismatch exits non-zero"
+    else
+      failures += fail_test "runner manifest order mismatch should have failed"
+    end
+
+    if status && status["status"] == "failed"
+      pass "runner manifest order mismatch emits structured failed status"
+    else
+      failures += fail_test "runner manifest order status: expected=failed actual=#{status&.fetch('status', 'nil')}"
+    end
+  end
+
+  Dir.mktmpdir("egame-runner-manifest-name-") do |dir|
+    manifest = {
+      "api_version" => 1,
+      "os_family" => "ubuntu",
+      "steps" => [
+        { "name" => "00_wrong_name.sh", "order" => 0, "sha256" => "x" * 64 }
+      ]
+    }
+
+    make_ubuntu_tree(dir,
+      steps: { "00_base.sh" => "exit 0" },
+      manifest: JSON.generate(manifest))
+
+    r = run_ubuntu_runner(dir)
+    status = read_status(File.join(dir, "provision/state"))
+
+    if !r[:status].success?
+      pass "runner manifest name mismatch exits non-zero"
+    else
+      failures += fail_test "runner manifest name mismatch should have failed"
+    end
+
+    if status && status["status"] == "failed"
+      pass "runner manifest name mismatch emits structured failed status"
+    else
+      failures += fail_test "runner manifest name status: expected=failed actual=#{status&.fetch('status', 'nil')}"
+    end
+  end
+
+  Dir.mktmpdir("egame-runner-schema-invalid-status-") do |dir|
+    bad_status = '{"api_version":1,"os_family":"ubuntu","started_at":"2026-01-15T10:00:00Z","finished_at":null,"status":"bogus","steps":[{"step":"00_base.sh","phase":"pending","started_at":null,"ended_at":null,"exit_code":null}]}'
+
+    make_ubuntu_tree(dir,
+      steps: { "00_base.sh" => "exit 0" },
+      existing_status: bad_status)
+
+    r = run_ubuntu_runner(dir)
+
+    if !r[:status].success?
+      pass "runner rejects schema-invalid existing status"
+    else
+      failures += fail_test "runner accepted schema-invalid existing status"
+    end
+  end
+end
+
+puts "\n== provision-runner: windows (powershell) =="
+
+if has_pwsh?
+  Dir.mktmpdir("egame-runner-pwsh-") do |dir|
+    prov_dir = File.join(dir, "provision")
+    scripts_dir = File.join(prov_dir, "scripts")
+    steps_dir = File.join(scripts_dir, "steps")
+    state_dir = File.join(prov_dir, "state")
+    logs_dir = File.join(prov_dir, "logs")
+    FileUtils.mkdir_p([steps_dir, state_dir, logs_dir])
+
+    File.write(File.join(steps_dir, "00_ok.ps1"), "Write-Host 'ok'; exit 0")
+    File.write(File.join(state_dir, "state.json"), '{"currentStep":0}')
+    File.write(File.join(state_dir, "steps.list"), "00_ok.ps1\n")
+
+    env = { "ProvisionPath" => prov_dir }
+    out, err, status = Open3.capture3(
+      env,
+      "pwsh", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", WINDOWS_RUNNER
+    )
+
+    status_file = File.join(state_dir, "provision-status.json")
+    if File.exist?(status_file)
+      s = JSON.parse(File.read(status_file))
+      if s["status"] == "done"
+        pass "Windows runner succeeds for passing step"
+      else
+        failures += fail_test "Windows runner status: expected=done actual=#{s['status']}"
+      end
+    else
+      failures += fail_test "Windows runner did not write provision-status.json"
+    end
+  end
+
+  Dir.mktmpdir("egame-runner-pwsh-fail-") do |dir|
+    prov_dir = File.join(dir, "provision")
+    scripts_dir = File.join(prov_dir, "scripts")
+    steps_dir = File.join(scripts_dir, "steps")
+    state_dir = File.join(prov_dir, "state")
+    logs_dir = File.join(prov_dir, "logs")
+    FileUtils.mkdir_p([steps_dir, state_dir, logs_dir])
+
+    File.write(File.join(steps_dir, "00_fail.ps1"), "Write-Error 'fail'; exit 42")
+    File.write(File.join(state_dir, "state.json"), '{"currentStep":0}')
+    File.write(File.join(state_dir, "steps.list"), "00_fail.ps1\n")
+
+    env = { "ProvisionPath" => prov_dir }
+    _out, _err, _status = Open3.capture3(
+      env,
+      "pwsh", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", WINDOWS_RUNNER
+    )
+
+    status_file = File.join(state_dir, "provision-status.json")
+    if File.exist?(status_file)
+      s = JSON.parse(File.read(status_file))
+      if s["status"] == "failed"
+        pass "Windows runner captures failing step"
+      else
+        failures += fail_test "Windows runner fail status: expected=failed actual=#{s['status']}"
+      end
+      if s.dig("steps", 0, "exit_code") == 42
+        pass "Windows runner captures exit_code=42"
+      else
+        failures += fail_test "Windows runner exit_code: expected=42 actual=#{s.dig('steps', 0, 'exit_code')}"
+      end
+    else
+      failures += fail_test "Windows runner fail did not write provision-status.json"
+    end
+  end
+else
+  skipped += skip_test "Windows runner tests require pwsh on PATH"
+end
+
+if failures.positive?
+  warn "\n#{failures} check(s) failed."
+  exit 1
+end
+msg = skipped.positive? ? "\nAll ran checks passed (#{skipped} skipped)." : "\nAll provision-runner checks passed."
+puts msg

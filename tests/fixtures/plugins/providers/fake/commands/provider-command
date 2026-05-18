@@ -1,0 +1,117 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "json"
+require "fileutils"
+require "tmpdir"
+
+command = ARGV.shift
+unless command
+  warn "Usage: #{File.basename($PROGRAM_NAME)} <command>"
+  exit 2
+end
+
+def load_resolved
+  json_source = ENV["EGAME_RESOLVED_JSON"]
+  raw = if json_source
+          JSON.parse(json_source)
+        else
+          JSON.parse($stdin.read)
+        end
+  {
+    "instance" => raw.dig("instance", "name") || "unknown",
+    "provider" => raw.dig("machine", "provider") || "fake",
+    "engine" => raw["engine"] || "terraform",
+    "os_family" => raw.dig("os", "family") || "ubuntu"
+  }
+rescue StandardError => e
+  warn "fake-provider: failed to parse resolved JSON: #{e.message}"
+  exit 1
+end
+
+def state_dir
+  workdir = ENV["EGAME_INSTANCE_WORKDIR"]
+  dir = workdir && !workdir.empty? ? File.join(workdir, ".fake-provider") : File.join(Dir.tmpdir, "egame-fake-provider")
+  FileUtils.mkdir_p(dir)
+  dir
+end
+
+def state_file
+  File.join(state_dir, "lifecycle.json")
+end
+
+def read_state
+  return {} unless File.exist?(state_file)
+  JSON.parse(File.read(state_file))
+rescue JSON::ParserError
+  {}
+end
+
+def write_state(state)
+  File.write(state_file, JSON.pretty_generate(state) + "\n")
+end
+
+if ENV["EGAME_PLUGIN_DRY_RUN"] == "1" || command == "resolve"
+  resolved = load_resolved
+  payload = {
+    "kind" => "provider",
+    "provider" => "fake",
+    "command" => command,
+    "instance" => resolved["instance"],
+    "profile" => resolved["instance"],
+    "engine" => resolved["engine"],
+    "dry_run" => ENV["EGAME_PLUGIN_DRY_RUN"] == "1"
+  }
+  puts JSON.generate(payload)
+  exit 0
+end
+
+resolved = load_resolved
+instance = resolved["instance"]
+state = read_state
+
+case command
+when "init", "plan"
+  puts JSON.generate({ "status" => "ok", "command" => command })
+when "up"
+  write_state(state.merge("running" => true, "ip" => "127.0.0.1"))
+  puts JSON.generate({ "status" => "running" })
+when "start"
+  write_state(state.merge("running" => true))
+  puts JSON.generate({ "status" => "running" })
+when "stop"
+  write_state(state.merge("running" => false))
+  puts JSON.generate({ "status" => "stopped" })
+when "down"
+  write_state(state.merge("running" => false, "ip" => nil))
+  puts JSON.generate({ "status" => "absent" })
+when "status"
+  running = state["running"]
+  status = case running
+           when true then "running"
+           when false then "stopped"
+           else "absent"
+           end
+  puts JSON.generate({ "status" => status })
+when "ip"
+  ip = state["ip"]
+  if ip
+    puts JSON.generate({ "ip" => ip })
+  else
+    warn "fake-provider: no IP (instance not up)"
+    exit 1
+  end
+when "ssh"
+  unless state["running"]
+    warn "fake-provider: ssh unavailable (instance not running)"
+    exit 1
+  end
+
+  state["ssh_commands"] ||= []
+  state["ssh_commands"] << ARGV.join(" ")
+  write_state(state)
+  exit 0
+else
+  warn "fake-provider: unsupported command: #{command}"
+  exit 2
+end
