@@ -1,0 +1,5 @@
+#!/usr/bin/env sh
+set -eu
+
+cat >/dev/null
+printf '{"status":"not-a-valid-status"}\n'

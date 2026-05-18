@@ -1,10 +1,13 @@
 #!/usr/bin/env ruby
 # Dispatch package lifecycle commands through package plugins.
+# State writes go through core/sdk/state.rb (sole state owner).
 
 require "json"
 require "open3"
 
 ROOT = File.expand_path("..", __dir__)
+$LOAD_PATH.unshift(File.join(ROOT, "core"))
+require "sdk"
 
 def usage
   warn <<~USAGE
@@ -33,15 +36,12 @@ end
 def record_state(instance_name, operation, status, package_id, package_state = nil, error = nil)
   return if ENV["EGAME_DISABLE_STATE"] == "1"
 
-  cmd = [
-    File.join(ROOT, "scripts/instance-state"),
-    "--instance", instance_name,
-    "--operation", operation,
-    "--status", status
-  ]
-  cmd += ["--package", package_id, "--package-state", package_state] if package_state
-  cmd += ["--error", error] if error
-  system(*cmd, out: File::NULL, err: File::NULL)
+  Egame::SDK::State.record_operation(
+    instance_name, operation, status,
+    package: package_id,
+    package_state: package_state,
+    error: error
+  )
 end
 
 PACKAGE_STATUS_VALUES = %w[installed missing unknown failed].freeze
@@ -85,6 +85,11 @@ end
 def package_status_from_output(output)
   return nil if output.nil? || output.empty?
 
+  validate_pkg_output = lambda do |parsed|
+    return nil unless parsed.key?("status")
+    Egame::SDK::Contract.validate_output!(parsed, def_name: "package_command_output")
+  end
+
   (output.length - 1).downto(0) do |index|
     next unless output[index] == "{"
 
@@ -93,6 +98,7 @@ def package_status_from_output(output)
     rescue JSON::ParserError
       next
     end
+    next unless validate_pkg_output.call(parsed)
     status = parsed["status"]
     return status if PACKAGE_STATUS_VALUES.include?(status)
   end
@@ -106,6 +112,7 @@ def package_status_from_output(output)
     rescue JSON::ParserError
       next
     end
+    next unless validate_pkg_output.call(parsed)
     status = parsed["status"]
     return status if PACKAGE_STATUS_VALUES.include?(status)
   end
@@ -179,6 +186,13 @@ begin
   resolve_cmd += ["--registry", registry_path] if registry_path
   resolved = run_json(*resolve_cmd)
 
+  begin
+    Egame::SDK::Contract.validate_input!(resolved)
+  rescue Egame::SDK::ContractError => e
+    warn "package-dispatch: #{e.message}"
+    exit 1
+  end
+
   plugin_doc = run_json(File.join(ROOT, "scripts/plugin-list"), "--kind", "package", "--json")
   plugin = plugin_doc.fetch("plugins").find { |entry| entry["id"] == package_id }
   raise "package plugin not found: #{package_id}" unless plugin
@@ -219,14 +233,20 @@ begin
                   end
   record_state(instance_name, "package.#{command}", "succeeded", package_id, package_state) unless dry_run
 rescue StandardError => e
-  record_state(
-    instance_name,
-    "package.#{command || "unknown"}",
-    "failed",
-    package_id || "unknown",
-    "failed",
-    e.message
-  ) if instance_name && package_id && !dry_run
+  if instance_name && package_id && !dry_run
+    begin
+      record_state(
+        instance_name,
+        "package.#{command || "unknown"}",
+        "failed",
+        package_id || "unknown",
+        "failed",
+        e.message
+      )
+    rescue StandardError => se
+      warn "package-dispatch: failed to record failure state: #{se.message}"
+    end
+  end
   warn "package-dispatch: #{e.message}"
   exit 1
 end

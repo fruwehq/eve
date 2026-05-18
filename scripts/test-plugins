@@ -14,7 +14,9 @@ BAD_PLUGIN_FIXTURE="tests/fixtures/plugins/packages/bad"
 BAD_INSTALL_UBUNTU_FIXTURE="tests/fixtures/plugins/packages/bad-install-ubuntu"
 BAD_INSTALL_WINDOWS_STATE_FIXTURE="tests/fixtures/plugins/packages/bad-install-windows-state"
 BAD_INSTALL_NON_STRING_FIXTURE="tests/fixtures/plugins/packages/bad-install-non-string"
+BAD_STATUS_FIXTURE="tests/fixtures/plugins/packages/invalid-status-output"
 BAD_PACKAGE_SUPPORTS_FIXTURE="tests/fixtures/plugins/packages/bad-supports"
+BAD_PROVIDER_STATUS_FIXTURE="tests/fixtures/plugins/providers/acme-invalid-status-output"
 BAD_PROVIDER_SUPPORTS_FIXTURE="tests/fixtures/plugins/providers/bad-supports"
 WIN_ONLY_PLUGIN_FIXTURE="tests/fixtures/plugins/packages/win-only"
 profile_catalog_dir="$(mktemp -d "${TMPDIR:-/tmp}/egame-plugin-profiles.XXXXXX")"
@@ -922,6 +924,212 @@ if printf '%s\n' "$failed_provider_state" | jq -e '.last_operation.name == "prov
 else
   printf '  [FAIL] provider dispatch failed state mismatch\n' >&2
   printf '%s\n' "$failed_provider_state" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+contract_grep="$(rg 'Contract\.validate' core/sdk/provider.rb scripts/package-dispatch scripts/provider-dispatch || true)"
+if [ -n "$contract_grep" ]; then
+  printf '  [OK] Contract.validate has real callers in provider and package dispatch\n'
+else
+  printf '  [FAIL] Contract.validate has no callers outside contract.rb\n' >&2
+  FAIL=$((FAIL + 1))
+fi
+
+# shellcheck disable=SC2016
+invalid_status_err="$(printf '{"status":"not-a-valid-status"}' | ruby -rjson -e '
+  $LOAD_PATH.unshift(File.join(ENV["PWD"] || ".", "core"))
+  require "sdk"
+  begin
+    Egame::SDK::Contract.validate_output!(JSON.parse(STDIN.read), def_name: "package_command_output")
+    exit 0
+  rescue Egame::SDK::ContractError => e
+    warn e.message
+    exit 1
+  end
+' 2>&1 || true)"
+if printf '%s\n' "$invalid_status_err" | grep -q "failed schema validation"; then
+  printf '  [OK] Contract rejects invalid package command output\n'
+else
+  printf '  [FAIL] Contract should reject invalid package command output\n' >&2
+  printf '%s\n' "$invalid_status_err" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+bad_status_dispatch_err="$(
+  EGAME_PLUGIN_ROOTS="$BAD_STATUS_FIXTURE" \
+    EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-package-dispatch-test" \
+    EGAME_DISABLE_STATE=1 \
+    ./scripts/package-dispatch --registry "$FIXTURE" --instance dev-a --package invalid-status-output --command status 2>&1 >/dev/null || true
+)"
+if printf '%s\n' "$bad_status_dispatch_err" | grep -q "failed schema validation"; then
+  printf '  [OK] package dispatch rejects invalid status from plugin command output\n'
+else
+  printf '  [FAIL] package dispatch should reject invalid status from plugin command output\n' >&2
+  printf '%s\n' "$bad_status_dispatch_err" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+# shellcheck disable=SC2016
+invalid_provider_status_err="$(printf '{"status":"not-a-valid-status"}' | ruby -rjson -e '
+  $LOAD_PATH.unshift(File.join(ENV["PWD"] || ".", "core"))
+  require "sdk"
+  begin
+    Egame::SDK::Contract.validate_output!(JSON.parse(STDIN.read), def_name: "provider_command_output")
+    exit 0
+  rescue Egame::SDK::ContractError => e
+    warn e.message
+    exit 1
+  end
+' 2>&1 || true)"
+if printf '%s\n' "$invalid_provider_status_err" | grep -q "failed schema validation"; then
+  printf '  [OK] Contract rejects invalid provider command output status\n'
+else
+  printf '  [FAIL] Contract should reject invalid provider command output status\n' >&2
+  printf '%s\n' "$invalid_provider_status_err" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+# shellcheck disable=SC2016
+empty_ip_err="$(printf '{"ip":""}' | ruby -rjson -e '
+  $LOAD_PATH.unshift(File.join(ENV["PWD"] || ".", "core"))
+  require "sdk"
+  begin
+    Egame::SDK::Contract.validate_output!(JSON.parse(STDIN.read), def_name: "provider_command_output")
+    exit 0
+  rescue Egame::SDK::ContractError => e
+    warn e.message
+    exit 1
+  end
+' 2>&1 || true)"
+if printf '%s\n' "$empty_ip_err" | grep -q "failed schema validation"; then
+  printf '  [OK] Contract rejects empty provider command output ip\n'
+else
+  printf '  [FAIL] Contract should reject empty provider command output ip\n' >&2
+  printf '%s\n' "$empty_ip_err" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+# shellcheck disable=SC2016
+valid_provider_output_err="$(printf '{"status":"running"}' | ruby -rjson -e '
+  $LOAD_PATH.unshift(File.join(ENV["PWD"] || ".", "core"))
+  require "sdk"
+  begin
+    Egame::SDK::Contract.validate_output!(JSON.parse(STDIN.read), def_name: "provider_command_output")
+    exit 0
+  rescue Egame::SDK::ContractError => e
+    warn e.message
+    exit 1
+  end
+' 2>&1 || true)"
+if [ -z "$valid_provider_output_err" ]; then
+  printf '  [OK] Contract accepts valid provider command output\n'
+else
+  printf '  [FAIL] Contract should accept valid provider command output\n' >&2
+  printf '%s\n' "$valid_provider_output_err" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+provider_status_catalog="$profile_catalog_dir/provider-status-catalog.local.yaml"
+provider_status_registry="$profile_catalog_dir/provider-status-instances.yaml"
+cat >"$provider_status_catalog" <<'YAML'
+machines:
+  - name: acme-small
+    provider: acme
+    kind: vm
+    defaults:
+      disk_gb: 30
+      memory_mb: 4096
+locations:
+  - name: tokyo
+    acme:
+      region: test-region
+inits:
+  - id: ssh-ubuntu-cloud-init
+    providers: [acme]
+YAML
+cat >"$provider_status_registry" <<'YAML'
+version: 1
+instances:
+  - name: acme-a
+    machine: acme-small
+    os: ubuntu-26.04-amd64
+    init: ssh-ubuntu-cloud-init
+    packages: [docker]
+    location: tokyo
+YAML
+provider_dispatch_output_err="$(
+  EGAME_PLUGIN_ROOTS="$BAD_PROVIDER_STATUS_FIXTURE" \
+    EGAME_CATALOG_LOCAL="$provider_status_catalog" \
+    EGAME_INSTANCE_WORKDIR="$profile_catalog_dir/provider-dispatch-workdir" \
+    EGAME_DISABLE_STATE=1 \
+    ./scripts/provider-dispatch --registry "$provider_status_registry" --instance acme-a --command status 2>&1 >/dev/null || true
+)"
+if printf '%s\n' "$provider_dispatch_output_err" | grep -q "failed schema validation"; then
+  printf '  [OK] provider dispatch rejects invalid status from provider command output\n'
+else
+  printf '  [FAIL] provider dispatch should reject invalid status from provider command output\n' >&2
+  printf '%s\n' "$provider_dispatch_output_err" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+# shellcheck disable=SC2016
+prov_status_jq='
+  .api_version == 1
+  and (.os_family | IN("ubuntu","windows"))
+  and has("started_at")
+  and ((.started_at | type) == "string" or (.started_at | type) == "null")
+  and (.status as $s | $s | IN("running","done","failed"))
+  and (.steps | type) == "array"
+  and ([.steps[] | (
+    (.step | type) == "string" and (.step | length) > 0
+    and (.phase as $p | $p | IN("pending","running","succeeded","failed","skipped"))
+    and has("started_at")
+    and has("ended_at")
+    and has("exit_code")
+    and ((.started_at | type) == "string" or (.started_at | type) == "null")
+    and ((.ended_at | type) == "string" or (.ended_at | type) == "null")
+    and ((.exit_code | type) == "number" or (.exit_code | type) == "null")
+    and (if .exit_code != null then (.exit_code | . == floor) else true end)
+  )] | all)
+'
+
+missing_os_family='{"api_version":1,"started_at":null,"status":"running","steps":[]}'
+if printf '%s' "$missing_os_family" | jq -e "$prov_status_jq" >/dev/null 2>&1; then
+  printf '  [FAIL] provision-status jq accepts missing os_family\n' >&2
+  FAIL=$((FAIL + 1))
+else
+  printf '  [OK] provision-status jq rejects missing os_family\n'
+fi
+
+missing_started_at='{"api_version":1,"os_family":"ubuntu","status":"running","steps":[]}'
+if printf '%s' "$missing_started_at" | jq -e "$prov_status_jq" >/dev/null 2>&1; then
+  printf '  [FAIL] provision-status jq accepts missing started_at\n' >&2
+  FAIL=$((FAIL + 1))
+else
+  printf '  [OK] provision-status jq rejects missing started_at\n'
+fi
+
+step_missing_timing='{"api_version":1,"os_family":"ubuntu","started_at":"2025-01-15T10:30:00Z","status":"running","steps":[{"step":"base.sh","phase":"running","exit_code":null}]}'
+if printf '%s' "$step_missing_timing" | jq -e "$prov_status_jq" >/dev/null 2>&1; then
+  printf '  [FAIL] provision-status jq accepts step missing started_at/ended_at\n' >&2
+  FAIL=$((FAIL + 1))
+else
+  printf '  [OK] provision-status jq rejects step missing started_at/ended_at\n'
+fi
+
+step_bad_timing_type='{"api_version":1,"os_family":"ubuntu","started_at":"2025-01-15T10:30:00Z","status":"running","steps":[{"step":"base.sh","phase":"running","started_at":123,"ended_at":null,"exit_code":null}]}'
+if printf '%s' "$step_bad_timing_type" | jq -e "$prov_status_jq" >/dev/null 2>&1; then
+  printf '  [FAIL] provision-status jq accepts non-string step started_at\n' >&2
+  FAIL=$((FAIL + 1))
+else
+  printf '  [OK] provision-status jq rejects non-string step started_at\n'
+fi
+
+valid_running='{"api_version":1,"os_family":"ubuntu","started_at":"2025-01-15T10:30:00Z","status":"running","steps":[{"step":"base.sh","phase":"succeeded","started_at":"2025-01-15T10:30:00Z","ended_at":"2025-01-15T10:31:00Z","exit_code":0},{"step":"human-user.sh","phase":"running","started_at":"2025-01-15T10:31:01Z","ended_at":null,"exit_code":null}]}'
+if printf '%s' "$valid_running" | jq -e "$prov_status_jq" >/dev/null 2>&1; then
+  printf '  [OK] provision-status jq accepts valid running status\n'
+else
+  printf '  [FAIL] provision-status jq rejects valid running status\n' >&2
   FAIL=$((FAIL + 1))
 fi
 

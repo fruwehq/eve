@@ -1,10 +1,13 @@
 #!/usr/bin/env ruby
 # Dispatch an instance provider command through the configured provider plugin.
+# State writes go through core/sdk/state.rb (sole state owner).
 
 require "json"
 require "open3"
 
 ROOT = File.expand_path("..", __dir__)
+$LOAD_PATH.unshift(File.join(ROOT, "core"))
+require "sdk"
 
 def usage
   warn <<~USAGE
@@ -61,16 +64,12 @@ end
 def record_state(instance_name, operation, status, error = nil, desired_state = nil, provider_state = nil)
   return if ENV["EGAME_DISABLE_STATE"] == "1"
 
-  cmd = [
-    File.join(ROOT, "scripts/instance-state"),
-    "--instance", instance_name,
-    "--operation", operation,
-    "--status", status
-  ]
-  cmd += ["--desired-state", desired_state] if desired_state
-  cmd += ["--provider-state", provider_state] if provider_state
-  cmd += ["--error", error] if error
-  system(*cmd, out: File::NULL, err: File::NULL)
+  Egame::SDK::State.record_operation(
+    instance_name, operation, status,
+    error: error,
+    desired_state: desired_state,
+    provider_state: provider_state
+  )
 end
 
 instance_name = nil
@@ -109,6 +108,39 @@ unless instance_name && command
 end
 
 INTERACTIVE_COMMANDS = %w[ssh].freeze
+
+def validate_provider_output(output)
+  return if output.nil? || output.empty?
+
+  (output.length - 1).downto(0) do |index|
+    next unless output[index] == "{"
+
+    begin
+      parsed = JSON.parse(output[index..].strip)
+    rescue JSON::ParserError
+      next
+    end
+    next unless parsed.key?("status") || parsed.key?("ip")
+
+    Egame::SDK::Contract.validate_output!(parsed, def_name: "provider_command_output")
+    return
+  end
+
+  output.each_line.reverse_each do |line|
+    line = line.strip
+    next if line.empty?
+
+    begin
+      parsed = JSON.parse(line)
+    rescue JSON::ParserError
+      next
+    end
+    next unless parsed.key?("status") || parsed.key?("ip")
+
+    Egame::SDK::Contract.validate_output!(parsed, def_name: "provider_command_output")
+    return
+  end
+end
 
 begin
   resolve_cmd = [File.join(ROOT, "scripts/instance-resolve"), "--instance", instance_name, "--emit", "json"]
@@ -157,17 +189,38 @@ begin
     provider_state_for(command, "running")
   ) unless dry_run
 
+  captured_out = +""
   exit_status = 0
   Open3.popen3(env, *cmd, chdir: ROOT) do |stdin, stdout, stderr, wait_thr|
     stdin.write(JSON.generate(resolved))
     stdin.close
-    out_t = Thread.new { IO.copy_stream(stdout, $stdout) }
+    out_t = Thread.new do
+      stdout.each_line do |line|
+        captured_out << line
+        print line
+      end
+    end
     err_t = Thread.new { IO.copy_stream(stderr, $stderr) }
     out_t.join
     err_t.join
     exit_status = wait_thr.value.exitstatus || 1
   end
+
   if exit_status.zero?
+    begin
+      validate_provider_output(captured_out)
+    rescue Egame::SDK::ContractError => e
+      record_state(
+        instance_name,
+        "provider.#{command}",
+        "failed",
+        "invalid provider output: #{e.message}",
+        desired_state,
+        provider_state_for(command, "failed")
+      ) unless dry_run
+      warn "provider-dispatch: #{e.message}"
+      exit 1
+    end
     record_state(
       instance_name,
       "provider.#{command}",
@@ -177,25 +230,35 @@ begin
       provider_state_for(command, "succeeded")
     ) unless dry_run
   else
-    record_state(
-      instance_name,
-      "provider.#{command}",
-      "failed",
-      "exit #{exit_status}",
-      desired_state,
-      provider_state_for(command, "failed")
-    ) unless dry_run
+    begin
+      record_state(
+        instance_name,
+        "provider.#{command}",
+        "failed",
+        "exit #{exit_status}",
+        desired_state,
+        provider_state_for(command, "failed")
+      ) unless dry_run
+    rescue StandardError => se
+      warn "provider-dispatch: failed to record failure state: #{se.message}"
+    end
   end
   exit(exit_status)
 rescue StandardError => e
-  record_state(
-    instance_name,
-    "provider.#{command || "unknown"}",
-    "failed",
-    e.message,
-    desired_state_for(command),
-    provider_state_for(command, "failed")
-  ) if instance_name && !dry_run
+  if instance_name && !dry_run
+    begin
+      record_state(
+        instance_name,
+        "provider.#{command || "unknown"}",
+        "failed",
+        e.message,
+        desired_state_for(command),
+        provider_state_for(command, "failed")
+      )
+    rescue StandardError => se
+      warn "provider-dispatch: failed to record failure state: #{se.message}"
+    end
+  end
   warn "provider-dispatch: #{e.message}"
   exit 1
 end
