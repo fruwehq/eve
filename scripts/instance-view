@@ -1,0 +1,137 @@
+#!/usr/bin/env ruby
+# Emit the shared view object for a concrete instance.
+# Both CLI status and TUI rendering consume this stable JSON shape.
+# State reads go through core/sdk/state.rb (sole state owner).
+
+require "json"
+require "open3"
+require "yaml"
+
+ROOT = File.expand_path("..", __dir__)
+$LOAD_PATH.unshift(File.join(ROOT, "core"))
+require "sdk"
+
+DEFAULT_REGISTRY_PATH = File.join(ROOT, ".egame/instances.yaml")
+
+def usage
+  warn <<~USAGE
+    Usage:
+      scripts/instance-view --instance <name> [--registry <path>] [--emit json] [--observe]
+      scripts/instance-view --aggregate [--registry <path>]
+  USAGE
+end
+
+def run_json(*cmd)
+  out, status = Open3.capture2e(*cmd)
+  raise out unless status.success?
+
+  JSON.parse(out)
+end
+
+def load_any(path)
+  return {} unless File.exist?(path)
+  YAML.safe_load(File.read(path), permitted_classes: [], aliases: true) || {}
+end
+
+instance_name = nil
+registry_path = ENV["EGAME_INSTANCE_REGISTRY"] && !ENV["EGAME_INSTANCE_REGISTRY"].empty? \
+                ? File.expand_path(ENV["EGAME_INSTANCE_REGISTRY"], Dir.pwd) \
+                : DEFAULT_REGISTRY_PATH
+emit = "json"
+aggregate = false
+observe = false
+
+args = ARGV.dup
+until args.empty?
+  case args.shift
+  when "--aggregate"
+    aggregate = true
+  when "--observe"
+    observe = true
+  when "--instance"
+    instance_name = args.shift
+  when "--registry"
+    registry_path = File.expand_path(args.shift, Dir.pwd)
+  when "--emit"
+    emit = args.shift
+  when "-h", "--help"
+    usage
+    exit 0
+  else
+    usage
+    exit 2
+  end
+end
+
+if aggregate
+  begin
+    registry = load_any(registry_path)
+    instances = registry["instances"] || []
+    statuses = {}
+    instances.each do |inst|
+      name = inst.fetch("name", nil)
+      next unless name
+      state = Egame::SDK::State.read(name)
+      observed = state.fetch("observed_state", {})
+      reconciled = Egame::SDK::StateMachine.status_with_observed_state(
+        { "state" => state, "observed_state" => observed },
+        { "observed_state" => observed }
+      )
+      statuses[name] = reconciled
+    end
+    counts = Egame::SDK::StateMachine.aggregate_summary(statuses)
+    puts JSON.pretty_generate({ "aggregate" => counts })
+  rescue StandardError => e
+    warn "instance-view: #{e.message}"
+    exit 1
+  end
+  exit 0
+end
+
+unless instance_name
+  usage
+  exit 2
+end
+
+unless emit == "json"
+  warn "instance-view: unsupported emit format: #{emit} (only json is supported)"
+  usage
+  exit 2
+end
+
+begin
+  if observe
+    observe_cmd = [File.join(ROOT, "scripts/instance-observe"), "--instance", instance_name]
+    observe_env = {}
+    observe_env["EGAME_INSTANCE_REGISTRY"] = registry_path if registry_path != DEFAULT_REGISTRY_PATH
+    observe_out, observe_err, observe_status = Open3.capture3(observe_env, *observe_cmd, chdir: ROOT)
+    unless observe_status.success?
+      raise "observe failed for #{instance_name}: #{observe_err.empty? ? observe_out : observe_err}".strip
+    end
+  end
+
+  resolve_cmd = [File.join(ROOT, "scripts/instance-resolve"), "--instance", instance_name, "--emit", "json"]
+  paths_cmd = [File.join(ROOT, "scripts/instance-paths"), "--instance", instance_name, "--emit", "json"]
+  package_cmd = [File.join(ROOT, "scripts/package-list"), "--instance", instance_name, "--json"]
+  if registry_path != DEFAULT_REGISTRY_PATH
+    resolve_cmd += ["--registry", registry_path]
+    paths_cmd += ["--registry", registry_path]
+    package_cmd += ["--registry", registry_path]
+  end
+
+  resolved = run_json(*resolve_cmd)
+  paths = run_json(*paths_cmd)
+  packages = run_json(*package_cmd).fetch("packages")
+
+  view = Egame::SDK::State.build_view(
+    instance_name: instance_name,
+    resolved: resolved,
+    packages: packages,
+    paths: paths
+  )
+
+  puts JSON.pretty_generate(view)
+rescue StandardError => e
+  warn "instance-view: #{e.message}"
+  exit 1
+end

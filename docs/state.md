@@ -60,9 +60,7 @@ Operation entries include:
 - `at`: UTC timestamp
 - `error`: present only for failed or error-bearing entries
 
-The history keeps the latest 50 entries by default. Set
-`EGAME_STATE_HISTORY_LIMIT` to tune this locally; values are clamped between 1
-and 500.
+The history keeps the latest 50 entries by default.
 
 ## Current Transition Ownership
 

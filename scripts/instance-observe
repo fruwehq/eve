@@ -1,11 +1,15 @@
 #!/usr/bin/env ruby
 # Refresh cached observed state for an instance without recording lifecycle ops.
+# State writes go through core/sdk/state.rb (sole state owner).
 
 require "json"
 require "open3"
 require "time"
 
 ROOT = File.expand_path("..", __dir__)
+$LOAD_PATH.unshift(File.join(ROOT, "core"))
+require "sdk"
+
 DEFAULT_TTL_SECONDS = 30
 
 def usage
@@ -78,57 +82,52 @@ unless instance
   exit 2
 end
 
-now = Time.now.utc
-observed = {
-  "observed_at" => now.iso8601,
-  "expires_at" => (now + ttl).iso8601
-}
-env = ENV.to_h.merge("EGAME_DISABLE_STATE" => "1")
+begin
+  now = Time.now.utc
+  observed = {
+    "observed_at" => now.iso8601,
+    "expires_at" => (now + ttl).iso8601
+  }
+  env = ENV.to_h.merge("EGAME_DISABLE_STATE" => "1")
 
-stdout, stderr, status = run_command(
-  env,
-  "make",
-  "--no-print-directory",
-  "provider.status",
-  "INSTANCE=#{instance}"
-)
+  stdout, stderr, status = run_command(
+    env,
+    "make",
+    "--no-print-directory",
+    "provider.status",
+    "INSTANCE=#{instance}"
+  )
 
-if status.success?
-  observed.merge!(parse_status_output(stdout))
-  observed["provider_status_raw"] = stdout.strip
-  observed["refresh_error"] = nil
+  if status.success?
+    observed.merge!(parse_status_output(stdout))
+    observed["provider_status_raw"] = stdout.strip
+    observed["refresh_error"] = nil
 
-  if observed["provider_status"] == "running" && !observed["ip"]
-    ip_out, ip_err, ip_status = run_command(
-      env,
-      "make",
-      "--no-print-directory",
-      "ip",
-      "INSTANCE=#{instance}"
-    )
-    if ip_status.success? && !ip_out.strip.empty?
-      observed["ip"] = ip_out.strip
-    else
-      observed["refresh_error"] = (ip_err.strip.empty? ? ip_out.strip : ip_err.strip)
+    if observed["provider_status"] == "running" && !observed["ip"]
+      ip_out, ip_err, ip_status = run_command(
+        env,
+        "make",
+        "--no-print-directory",
+        "ip",
+        "INSTANCE=#{instance}"
+      )
+      if ip_status.success? && !ip_out.strip.empty?
+        observed["ip"] = ip_out.strip
+      else
+        observed["refresh_error"] = (ip_err.strip.empty? ? ip_out.strip : ip_err.strip)
+      end
     end
+  else
+    error = stderr.strip.empty? ? stdout.strip : stderr.strip
+    observed["refresh_error"] = error
+    observed["control_reachable"] = false if error.match?(/unreachable|timed out|timeout|connect/i)
   end
-else
-  error = stderr.strip.empty? ? stdout.strip : stderr.strip
-  observed["refresh_error"] = error
-  observed["control_reachable"] = false if error.match?(/unreachable|timed out|timeout|connect/i)
+
+  observed["provider_status"] ||= "unknown"
+
+  state = Egame::SDK::State.update_observed(instance, observed)
+  puts JSON.pretty_generate(state)
+rescue Egame::SDK::StateError, Egame::SDK::SchemaValidationError => e
+  warn "instance-observe: #{e.message}"
+  exit 2
 end
-
-observed["provider_status"] ||= "unknown"
-
-state_out, state_status = Open3.capture2e(
-  File.join(ROOT, "scripts/instance-state"),
-  "--instance", instance,
-  "--observed-json", JSON.generate(observed),
-  chdir: ROOT
-)
-unless state_status.success?
-  warn state_out
-  exit state_status.exitstatus || 1
-end
-
-puts state_out

@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import copy
 import json
 import os
 import re
@@ -72,12 +71,36 @@ def catalog_options() -> dict[str, Any]:
     return load_json([str(ROOT / "scripts/catalog-options"), "--json"])
 
 
-def instance_status(instance: str) -> dict[str, Any]:
-    return load_json([str(ROOT / "scripts/instance-status"), "--instance", instance, "--json"])
+_provider_capabilities_cache: dict[str, list[str]] | None = None
 
 
-def instance_observe(instance: str) -> dict[str, Any]:
-    return load_json([str(ROOT / "scripts/instance-observe"), "--instance", instance])
+def provider_capabilities_map() -> dict[str, list[str]]:
+    global _provider_capabilities_cache
+    if _provider_capabilities_cache is not None:
+        return _provider_capabilities_cache
+    doc = load_json([str(ROOT / "scripts/plugin-list"), "--kind", "provider", "--json"])
+    result: dict[str, list[str]] = {}
+    for plugin in doc.get("plugins", []):
+        if not isinstance(plugin, dict):
+            continue
+        plugin_id = str(plugin.get("id", ""))
+        capabilities = plugin.get("capabilities", [])
+        if isinstance(capabilities, list):
+            result[plugin_id] = sorted(str(c) for c in capabilities)
+    _provider_capabilities_cache = result
+    return result
+
+
+def provider_has_capability(provider_id: str, capability: str) -> bool:
+    return capability in provider_capabilities_map().get(provider_id, [])
+
+
+def instance_view(instance: str) -> dict[str, Any]:
+    return load_json([str(ROOT / "scripts/instance-view"), "--instance", instance])
+
+
+def instance_observe_view(instance: str) -> dict[str, Any]:
+    return load_json([str(ROOT / "scripts/instance-view"), "--instance", instance, "--observe"])
 
 
 def provider_status_table() -> str:
@@ -103,16 +126,6 @@ def instance_ip(instance: str) -> str:
         raise RuntimeError(err.strip() or out.strip() or f"make ip exited {code}")
     return out.strip()
 
-
-def normalize_provider_state(status: str) -> str:
-    normalized = status.strip().lower()
-    if normalized in {"running", "stopped"}:
-        return normalized
-    if normalized in {"not created", "not-created", "absent"}:
-        return "absent"
-    if normalized in {"unreachable", "error", "failed"}:
-        return "error"
-    return normalized or "unknown"
 
 
 def make_args(target: str, instance: str, *extra: str) -> list[str]:
@@ -251,58 +264,21 @@ def package_summary_label(summary: dict[str, Any]) -> str:
 
 
 def provider_actions_available(state: dict[str, Any]) -> bool:
-    provider_state = effective_provider_state(state)
-    desired_state = str(state.get("desired_state", "unknown"))
-    provision_state = str(state.get("provision_state", "unknown"))
-    return provider_state == "running" or (
-        provider_state == "error" and desired_state == "running" and provision_state == "provisioned"
+    return bool(state.get("provider_actions_available"))
+
+
+def aggregate_summary() -> dict[str, int]:
+    doc = load_json([str(ROOT / "scripts/instance-view"), "--aggregate"])
+    return {k: int(v) for k, v in doc.get("aggregate", {}).items()}
+
+
+def format_aggregate(counts: dict[str, int]) -> str:
+    return (
+        f"[success]● {counts.get('running', 0)} running[/]  "
+        f"[warning]○ {counts.get('stopped', 0)} stopped[/]  "
+        f"[error]! {counts.get('failed', 0)} failed[/]  "
+        f"? {counts.get('other', 0)} unknown"
     )
-
-
-def effective_provider_state(state: dict[str, Any]) -> str:
-    provider_state = str(state.get("provider_state", "unknown"))
-    desired_state = str(state.get("desired_state", "unknown"))
-    provision_state = str(state.get("provision_state", "unknown"))
-    if provider_state == "error" and desired_state == "running" and provision_state == "provisioned":
-        return "running"
-    return provider_state
-
-
-def should_apply_live_provider_state(status: dict[str, Any], live_state: str) -> bool:
-    state = status.get("state", {})
-    if not isinstance(state, dict):
-        return True
-    local_state = effective_provider_state(state)
-    if live_state == "absent" and local_state == "running":
-        return False
-    if live_state == "error" and local_state in {"stopped", "absent"}:
-        return False
-    return live_state in {"running", "stopped", "absent", "error"}
-
-
-def status_with_provider_state(status: dict[str, Any], provider_state: str) -> dict[str, Any]:
-    next_status = copy.deepcopy(status)
-    state = next_status.setdefault("state", {})
-    if isinstance(state, dict):
-        state["provider_state"] = provider_state
-        if provider_state in {"running", "stopped", "absent"} and state.get("last_error"):
-            state["last_error"] = None
-    return next_status
-
-
-def status_with_observed_state(status: dict[str, Any], state_doc: dict[str, Any]) -> dict[str, Any]:
-    next_status = copy.deepcopy(status)
-    observed = state_doc.get("observed_state", {})
-    if isinstance(observed, dict):
-        next_status["observed_state"] = observed
-        state = next_status.setdefault("state", {})
-        if isinstance(state, dict):
-            state["observed_state"] = observed
-    provider_status = str(observed.get("provider_status", "")) if isinstance(observed, dict) else ""
-    provider_state = "error" if provider_status == "unreachable" else provider_status
-    if provider_state and should_apply_live_provider_state(next_status, provider_state):
-        next_status = status_with_provider_state(next_status, provider_state)
-    return next_status
 
 
 def action_allowed_for_instance(action: dict[str, Any], package_id: str, os_family: str) -> bool:
@@ -317,29 +293,9 @@ def password_supported(status: dict[str, Any] | None) -> bool:
     instance = status.get("instance", {})
     if not isinstance(instance, dict):
         return False
-    return instance.get("provider") == "vultr" and instance.get("os_family") == "windows"
+    provider = str(instance.get("provider") or "")
+    return provider_has_capability(provider, "password") and instance.get("os_family") == "windows"
 
-
-def aggregate_state(statuses: dict[str, dict[str, Any]]) -> str:
-    counts = {"running": 0, "stopped": 0, "failed": 0, "other": 0}
-    for status in statuses.values():
-        state = status.get("state", {})
-        provider_state = str(state.get("provider_state", "unknown"))
-        last_error = state.get("last_error")
-        if last_error or provider_state in {"failed", "error"}:
-            counts["failed"] += 1
-        elif provider_state == "running":
-            counts["running"] += 1
-        elif provider_state in {"stopped", "absent"}:
-            counts["stopped"] += 1
-        else:
-            counts["other"] += 1
-    return (
-        f"[success]● {counts['running']} running[/]  "
-        f"[warning]○ {counts['stopped']} stopped[/]  "
-        f"[error]! {counts['failed']} failed[/]  "
-        f"? {counts['other']} unknown"
-    )
 
 
 def run_tui() -> int:
@@ -666,8 +622,8 @@ def run_tui() -> int:
                     yield DataTable(id="platform-cards")
                     yield Static("", id="platform-defaults")
                 with Vertical(id="step-content"):
-                    yield Input(placeholder="Raspberry Pi IP address", id="provider-ip")
-                    yield Static("Required for Raspberry Pi metal instances. The shared SSH key remains global.", id="provider-ip-help", classes="muted")
+                    yield Input(placeholder="Provider IP address", id="provider-ip")
+                    yield Static("Required for metal instances that need a provider IP. The shared SSH key remains global.", id="provider-ip-help", classes="muted")
                     with Horizontal(id="content-selects"):
                         with Vertical(classes="content-column"):
                             yield Static("Bundles", classes="muted")
@@ -1065,7 +1021,7 @@ def run_tui() -> int:
             provider = str(platform_choice.get("provider") or "")
             provider_ip_widget = self.query_one("#provider-ip", Input)
             provider_ip_help = self.query_one("#provider-ip-help", Static)
-            provider_ip_required = provider == "raspberry-pi"
+            provider_ip_required = provider_has_capability(provider, "needs-provider-ip")
             provider_ip_widget.display = provider_ip_required
             provider_ip_help.display = provider_ip_required
             defaults = platform_choice.get("defaults", {}) if isinstance(platform_choice.get("defaults"), dict) else {}
@@ -1123,7 +1079,7 @@ def run_tui() -> int:
                     [
                         f"Instance: {name}",
                         *self.platform_default_lines(platform_choice),
-                        *([f"Raspberry Pi IP: {provider_ip or '(required)'}"] if provider_ip_required else []),
+                        *([f"Provider IP: {provider_ip or '(required)'}"] if provider_ip_required else []),
                         f"Bundles: {bundle_text}",
                         f"Bundle packages: {bundled_text}",
                         f"Disk override: {disk or '(use platform default)'}",
@@ -1207,10 +1163,12 @@ def run_tui() -> int:
                     return
                 if (
                     self.step == 2
-                    and self.selected_platform().get("provider") == "raspberry-pi"
+                    and provider_has_capability(
+                        str(self.selected_platform().get("provider") or ""), "needs-provider-ip"
+                    )
                     and not self.query_one("#provider-ip", Input).value.strip()
                 ):
-                    self.notify("Raspberry Pi IP address is required", severity="error")
+                    self.notify("Provider IP address is required", severity="error")
                     return
                 self.set_step(self.step + 1)
                 return
@@ -1222,8 +1180,8 @@ def run_tui() -> int:
                 self.notify("Name and platform are required", severity="error")
                 return
             provider_ip = self.query_one("#provider-ip", Input).value.strip()
-            if platform_choice.get("provider") == "raspberry-pi" and not provider_ip:
-                self.notify("Raspberry Pi IP address is required", severity="error")
+            if provider_has_capability(str(platform_choice.get("provider") or ""), "needs-provider-ip") and not provider_ip:
+                self.notify("Provider IP address is required", severity="error")
                 return
             packages = ",".join(self.selected_packages())
             bundles = ",".join(self.selected_bundles())
@@ -1238,7 +1196,7 @@ def run_tui() -> int:
                     "packages": packages,
                     "disk_gb": self.query_one("#new-disk", Input).value.strip(),
                     "memory_mb": self.query_one("#new-memory", Input).value.strip(),
-                    "provider_ip": provider_ip if platform_choice.get("provider") == "raspberry-pi" else "",
+                    "provider_ip": provider_ip if provider_has_capability(str(platform_choice.get("provider") or ""), "needs-provider-ip") else "",
                 }
             )
 
@@ -1539,6 +1497,7 @@ def run_tui() -> int:
             self._detail_refresh_seq = 0
             self._status_refreshing: set[str] = set()
             self._list_status_task: asyncio.Task[None] | None = None
+            self._cached_aggregate: dict[str, int] = {"running": 0, "stopped": 0, "failed": 0, "other": 0}
             self.detail_tab = "overview"
             self.show_disabled = False
 
@@ -1899,25 +1858,33 @@ def run_tui() -> int:
                 self.update_action_state()
             await self.refresh_current_status(allow_fetch=False)
             if not self.command_running:
-                self.query_one("#summary", Static).update(aggregate_state(self.statuses))
+                try:
+                    counts = await asyncio.to_thread(aggregate_summary)
+                    self._cached_aggregate = counts
+                    self.query_one("#summary", Static).update(format_aggregate(counts))
+                except Exception as exc:
+                    self.log_line(f"[warning]aggregate refresh failed:[/] {exc}")
 
         async def refresh_list_statuses(self, instance_names: list[str]) -> None:
             updated: dict[str, dict[str, Any]] = {}
             try:
                 for name in instance_names:
                     try:
-                        status = await asyncio.to_thread(instance_status, name)
-                        with suppress(Exception):
-                            state_doc = await asyncio.to_thread(instance_observe, name)
-                            status = status_with_observed_state(status, state_doc)
+                        status = await asyncio.to_thread(instance_observe_view, name)
                         updated[name] = status
                     except Exception as exc:
+                        self.log_line(f"[warning]observe/view failed for {name}:[/] {exc}")
                         updated[name] = {"instance": {"name": name}, "state": {"last_error": str(exc)}}
                 self.statuses.update(updated)
                 self._status_refreshing.difference_update(instance_names)
                 self.render_instances(sync_cursor=True)
                 if not self.command_running:
-                    self.query_one("#summary", Static).update(aggregate_state(self.statuses))
+                    try:
+                        counts = await asyncio.to_thread(aggregate_summary)
+                        self._cached_aggregate = counts
+                        self.query_one("#summary", Static).update(format_aggregate(counts))
+                    except Exception as exc:
+                        self.log_line(f"[warning]aggregate refresh failed:[/] {exc}")
                 if self.current_instance and self.current_instance in updated:
                     self.current_status = updated[self.current_instance]
                     self.render_detail()
@@ -1955,7 +1922,7 @@ def run_tui() -> int:
                     current_visible = True
                 status = self.statuses.get(name, {})
                 state = status.get("state", {})
-                provider_state = effective_provider_state(cast(dict[str, Any], state))
+                provider_state = str(state.get("effective_provider_state", "unknown"))
                 provision_state = str(state.get("provision_state", "unknown"))
                 loading = name in self._status_refreshing or not status
                 display_state_text = "loading" if loading else (provider_state if provider_state != "unknown" else "")
@@ -1991,14 +1958,14 @@ def run_tui() -> int:
             next_status = self.statuses.get(instance_name)
             if status_instance_name(next_status) not in {None, instance_name}:
                 next_status = None
-            if not next_status and allow_fetch:
+            if allow_fetch:
                 try:
-                    next_status = await asyncio.to_thread(instance_status, instance_name)
+                    next_status = await asyncio.to_thread(instance_observe_view, instance_name)
                     if refresh_seq != self._detail_refresh_seq or instance_name != self.current_instance:
                         return
                     if status_instance_name(next_status) != instance_name:
                         self.log_line(
-                            f"[error]instance-status returned {status_instance_name(next_status) or 'unknown'} "
+                            f"[error]instance-view returned {status_instance_name(next_status) or 'unknown'} "
                             f"while {instance_name} was selected[/]"
                         )
                         return
@@ -2006,7 +1973,7 @@ def run_tui() -> int:
                 except Exception as exc:
                     if refresh_seq != self._detail_refresh_seq or instance_name != self.current_instance:
                         return
-                    self.log_line(f"[error]instance-status failed:[/] {exc}")
+                    self.log_line(f"[error]instance-view failed:[/] {exc}")
                     return
             if not next_status:
                 self.render_loading_detail(instance_name)
@@ -2014,16 +1981,8 @@ def run_tui() -> int:
                 return
             if refresh_seq != self._detail_refresh_seq or instance_name != self.current_instance:
                 return
-            try:
-                state_doc = await asyncio.to_thread(instance_observe, instance_name)
-                next_status = status_with_observed_state(next_status, state_doc)
-                self.statuses[instance_name] = next_status
-            except Exception as exc:
-                self.log_line(f"[warning]instance.observe failed:[/] {exc}")
-                if refresh_seq != self._detail_refresh_seq or instance_name != self.current_instance:
-                    return
             self.current_status = next_status
-            provider_state = effective_provider_state(cast(dict[str, Any], next_status.get("state", {})))
+            provider_state = str(next_status.get("state", {}).get("effective_provider_state", "unknown"))
             if resolve_ip and provider_state == "running":
                 try:
                     ip = await asyncio.to_thread(instance_ip, instance_name)
@@ -2050,31 +2009,33 @@ def run_tui() -> int:
         ) -> None:
             self._status_refreshing.add(instance_name)
             try:
-                status = await asyncio.to_thread(instance_status, instance_name)
+                status = await asyncio.to_thread(instance_observe_view, instance_name)
             except Exception as exc:
-                self.log_line(f"[error]instance-status failed for {instance_name}:[/] {exc}")
+                self.log_line(f"[error]instance-view failed for {instance_name}:[/] {exc}")
                 self._status_refreshing.discard(instance_name)
                 if repaint_table:
                     self.render_instances(sync_cursor=True)
                 return
             if status_instance_name(status) != instance_name:
                 self.log_line(
-                    f"[error]instance-status returned {status_instance_name(status) or 'unknown'} "
+                    f"[error]instance-view returned {status_instance_name(status) or 'unknown'} "
                     f"while refreshing {instance_name}[/]"
                 )
                 self._status_refreshing.discard(instance_name)
                 if repaint_table:
                     self.render_instances(sync_cursor=True)
                 return
-            with suppress(Exception):
-                state_doc = await asyncio.to_thread(instance_observe, instance_name)
-                status = status_with_observed_state(status, state_doc)
             self.statuses[instance_name] = status
             self._status_refreshing.discard(instance_name)
             if repaint_table:
                 self.render_instances(sync_cursor=True)
                 if not self.command_running:
-                    self.query_one("#summary", Static).update(aggregate_state(self.statuses))
+                    try:
+                        counts = await asyncio.to_thread(aggregate_summary)
+                        self._cached_aggregate = counts
+                        self.query_one("#summary", Static).update(format_aggregate(counts))
+                    except Exception as exc:
+                        self.log_line(f"[warning]aggregate refresh failed:[/] {exc}")
             if self.current_instance == instance_name:
                 self.current_status = status
                 state = status.get("state", {})
@@ -2670,7 +2631,7 @@ def run_tui() -> int:
             instance = self.current_instance
             if command == "up":
                 state = self.current_status.get("state", {}) if self.current_status else {}
-                if effective_provider_state(cast(dict[str, Any], state)) == "stopped":
+                if str(state.get("effective_provider_state", "unknown")) == "stopped":
                     command = "start"
             args = (
                 provider_dispatch_args(command, instance)
@@ -2709,7 +2670,7 @@ def run_tui() -> int:
                 await self.refresh_status_for(instance, repaint_table=True)
                 status = self.statuses.get(instance, {})
                 state = status.get("state", {})
-                if isinstance(state, dict) and effective_provider_state(state) == expected_state:
+                if isinstance(state, dict) and str(state.get("effective_provider_state", "unknown")) == expected_state:
                     return True
                 await asyncio.sleep(2)
             return False
@@ -2719,7 +2680,7 @@ def run_tui() -> int:
                 instance = self.current_instance
                 await self.refresh_status_for(instance, repaint_table=True, resolve_ip=False)
                 state = self.current_status.get("state", {}) if self.current_status else {}
-                provider_state = effective_provider_state(cast(dict[str, Any], state))
+                provider_state = str(state.get("effective_provider_state", "unknown"))
                 if provider_state != "running":
                     command = "start" if provider_state == "stopped" else "up"
                     code = await self.stream_command(f"provider.{command}", make_args(command, instance), refresh_instance=instance)
@@ -3005,7 +2966,7 @@ def run_tui() -> int:
             has_instance = self.current_instance is not None
             state = self.current_status.get("state", {}) if self.current_status else {}
             provision_state = str(state.get("provision_state", "unknown"))
-            display_provider_state = effective_provider_state(cast(dict[str, Any], state))
+            display_provider_state = str(state.get("effective_provider_state", "unknown"))
             provider_available = provider_actions_available(cast(dict[str, Any], state))
             provider_busy = display_provider_state == "changing"
             self.current_remote_actions = self.installed_package_actions()
@@ -3122,7 +3083,7 @@ def run_tui() -> int:
                 )
             else:
                 root.remove_class("busy")
-                summary.update(aggregate_state(self.statuses))
+                summary.update(format_aggregate(self._cached_aggregate))
                 output_help.update(
                     "Output  |  press l to focus, arrows/PageUp/PageDown to scroll, y to copy selected/all log text"
                 )

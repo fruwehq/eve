@@ -12,6 +12,7 @@ PROVIDER_COMMANDS = %w[resolve init plan up down start stop status ip ssh].freez
 PACKAGE_COMMANDS = %w[install status down].freeze
 PROVIDER_ENGINES = %w[terraform vagrant metal].freeze
 PROVIDER_KINDS = %w[vm metal].freeze
+PROVIDER_CAPABILITIES = %w[host-ssh login needs-provider-ip password].freeze
 PACKAGE_OS_FAMILIES = %w[ubuntu windows].freeze
 PACKAGE_ARCHES = %w[amd64 arm64].freeze
 
@@ -88,6 +89,7 @@ def validate_plugin!(plugin)
   raise "#{plugin["_path"]}: supports must be a map" unless plugin["supports"].is_a?(Hash)
   validate_provider_supports!(plugin) if kind == "provider"
   validate_package_supports!(plugin) if kind == "package"
+  validate_capabilities!(plugin) if plugin.key?("capabilities")
   require_string_list!(plugin["env"], plugin["_path"], "env")
   require_string_list!(plugin["conflicts_with"], plugin["_path"], "conflicts_with") if kind == "package" && plugin.key?("conflicts_with")
   if kind == "package" && plugin.key?("compatibility_enforced") &&
@@ -137,6 +139,13 @@ def validate_provider_supports!(plugin)
     require_string_list!(kinds, path, "supports.kinds")
     require_allowed_entries!(kinds, PROVIDER_KINDS, path, "supports.kinds")
   end
+end
+
+def validate_capabilities!(plugin)
+  capabilities = plugin["capabilities"]
+  path = plugin["_path"]
+  require_string_list!(capabilities, path, "capabilities")
+  require_allowed_entries!(capabilities, PROVIDER_CAPABILITIES, path, "capabilities")
 end
 
 def validate_package_supports!(plugin)

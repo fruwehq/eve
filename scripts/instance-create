@@ -9,13 +9,8 @@ require "yaml"
 ROOT = File.expand_path("..", __dir__)
 DEFAULT_REGISTRY_PATH = File.join(ROOT, ".egame/instances.yaml")
 
-def state_root
-  ENV["EGAME_STATE_DIR"] || File.join(ROOT, ".egame/state")
-end
-
-def state_path(instance)
-  File.join(state_root, "instances", "#{instance}.json")
-end
+$LOAD_PATH.unshift(File.join(ROOT, "core"))
+require "sdk"
 
 def with_registry_lock(registry_path)
   FileUtils.mkdir_p(File.dirname(registry_path))
@@ -173,7 +168,7 @@ with_registry_lock(registry_path) do
   write_registry!(registry_path, registry)
 end
 
-FileUtils.rm_f(state_path(name))
+Egame::SDK::State.delete!(name)
 
 puts "Created instance: #{name}"
 puts "Registry: #{registry_path}"

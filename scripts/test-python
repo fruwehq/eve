@@ -10,4 +10,6 @@ trap 'rm -rf "$cache_dir"' EXIT
 RUFF_CACHE_DIR="$cache_dir/ruff" poetry run ruff check scripts/egame-tui
 MYPY_CACHE_DIR="$cache_dir/mypy" poetry run mypy scripts/egame-tui
 
-printf '  [OK] python lint and type checks pass\n'
+poetry run pytest tests/python
+
+printf '  [OK] python lint, type checks, and tests pass\n'

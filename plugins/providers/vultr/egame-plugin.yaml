@@ -13,6 +13,7 @@ commands:
   status: {exec: commands/provider-command, args: [status]}
   ip: {exec: commands/provider-command, args: [ip]}
   ssh: {exec: commands/provider-command, args: [ssh]}
+capabilities: [password]
 supports:
   engines: [terraform]
   kinds: [vm]

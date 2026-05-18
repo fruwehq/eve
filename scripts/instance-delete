@@ -11,6 +11,9 @@ require "yaml"
 ROOT = File.expand_path("..", __dir__)
 DEFAULT_REGISTRY_PATH = File.join(ROOT, ".egame/instances.yaml")
 
+$LOAD_PATH.unshift(File.join(ROOT, "core"))
+require "sdk"
+
 def with_registry_lock(registry_path)
   FileUtils.mkdir_p(File.dirname(registry_path))
   File.open("#{registry_path}.lock", File::RDWR | File::CREAT, 0o600) do |lock|
@@ -117,15 +120,12 @@ puts "Registry: #{registry_path}"
 
 if purge
   workdir = paths.fetch("INSTANCE_WORKDIR")
-  state = paths.fetch("INSTANCE_STATE_PATH")
 
   if File.exist?(workdir)
     FileUtils.rm_rf(workdir)
     puts "Removed workdir: #{workdir}"
   end
 
-  if File.exist?(state)
-    FileUtils.rm_f(state)
-    puts "Removed state: #{state}"
-  end
+  Egame::SDK::State.delete!(instance_name)
+  puts "Removed state: #{paths.fetch("INSTANCE_STATE_PATH")}"
 end
