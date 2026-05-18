@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Run terraform apply for a profile's stacks.
+# Usage: scripts/tf-apply <profile>
+
+if [ -n "${EGAME_INSTANCE_NAME:-}" ]; then
+  PROFILE="$EGAME_INSTANCE_NAME"
+else
+  PROFILE="${1:?Usage: commands/up <instance>}"
+fi
+cd "$(git rev-parse --show-toplevel)"
+
+RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
+ENGINE=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^ENGINE=/{print $2}')
+
+if [ "$ENGINE" != "terraform" ]; then
+  echo "[tf-apply] not supported for engine=$ENGINE"
+  exit 1
+fi
+
+TAGS=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^STACK_TAGS=/{print $2}')
+echo "[tf-apply] profile=$PROFILE tags=$TAGS"
+PROVIDER=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^PROVIDER=/{print $2}')
+if [ "$PROVIDER" = "gcp" ]; then
+  PROJECT="${GOOGLE_CLOUD_PROJECT:-${GOOGLE_PROJECT:-}}"
+  if [ -z "$PROJECT" ] && command -v gcloud >/dev/null 2>&1; then
+    PROJECT="$(gcloud config get-value project 2>/dev/null || true)"
+  fi
+  REGION=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^LOCATION_REGION=/{print $2}')
+  ZONE=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^LOCATION_ZONE=/{print $2}')
+  echo "[tf-apply] gcp project=$PROJECT region=$REGION zone=$ZONE"
+fi
+
+terramate generate
+
+eval "$(./scripts/tf-env "$PROFILE")"
+
+if [ -n "${EGAME_INSTANCE_NAME:-}" ]; then
+  echo "[tf-apply] instance=$EGAME_INSTANCE_NAME initializing backend before apply"
+  "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/init" "$PROFILE"
+fi
+
+TM_RUN_FLAGS=(
+  --disable-safeguards=git-untracked
+  --disable-safeguards=git-uncommitted
+  --disable-safeguards=git-out-of-sync
+  --disable-safeguards=outdated-code
+)
+
+terramate run "${TM_RUN_FLAGS[@]}" --tags="$TAGS" -- terraform apply -auto-approve

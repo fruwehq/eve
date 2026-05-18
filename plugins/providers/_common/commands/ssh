@@ -1,0 +1,140 @@
+#!/usr/bin/env bash
+# SSH into a profile's instance (or run a remote command).
+# Usage:
+#   scripts/instance-ssh <profile>                         # interactive shell
+#   scripts/instance-ssh <profile> -- <cmd> [args...]      # remote command
+#   scripts/instance-ssh <profile> --scp <local> <remote>  # scp helper
+
+set -euo pipefail
+
+if [ -n "${EGAME_INSTANCE_NAME:-}" ]; then
+  PROFILE="$EGAME_INSTANCE_NAME"
+else
+  PROFILE="${1:?Usage: commands/ssh <instance> [-- <cmd>] [--scp <local> <remote>]}"
+  shift || true
+fi
+cd "$(git rev-parse --show-toplevel)"
+# shellcheck source=scripts/lib/load-runtime-env.sh
+. ./scripts/lib/load-runtime-env.sh
+# shellcheck source=scripts/lib/instance-workdir.sh
+. ./scripts/lib/instance-workdir.sh
+
+RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
+ENGINE=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^ENGINE=/{print $2}')
+
+if [ "$ENGINE" = "vagrant" ]; then
+  WORKDIR="$(egame_instance_workdir "$PROFILE")"
+  if [ ! -f "$WORKDIR/Vagrantfile" ]; then
+    echo "instance-ssh: no Vagrantfile for $PROFILE at $WORKDIR" >&2
+    echo "instance-ssh: run: make up INSTANCE=$PROFILE" >&2
+    exit 1
+  fi
+  cd "$WORKDIR"
+  if [ "${1:-}" = "--scp" ]; then
+    shift
+    LOCAL_PATH="${1:?--scp requires <local> <remote>}"
+    REMOTE_PATH="${2:?--scp requires <local> <remote>}"
+    if [ -d "$LOCAL_PATH" ]; then
+      DIR_NAME=$(basename "$LOCAL_PATH")
+      tar --no-xattrs -C "$(dirname "$LOCAL_PATH")" -cf - --exclude='._*' "$DIR_NAME" | vagrant ssh -c "mkdir -p '$REMOTE_PATH' && cd '$REMOTE_PATH' && tar -xf -"
+    else
+      BASENAME=$(basename "$LOCAL_PATH")
+      vagrant ssh -c "cat > '$REMOTE_PATH/$BASENAME'" < "$LOCAL_PATH"
+    fi
+    exit $?
+  fi
+  if [ "${1:-}" = "--" ]; then
+    shift
+    exec vagrant ssh -c "$*"
+  fi
+  exec vagrant ssh
+fi
+
+PROVIDER=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^PROVIDER=/{print $2}')
+RESOLVED_RASPBERRY_PI_HOST=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^RASPBERRY_PI_HOST=/{print substr($0, index($0, "=") + 1)}')
+RESOLVED_RASPBERRY_PI_IP=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^RASPBERRY_PI_IP=/{print substr($0, index($0, "=") + 1)}')
+
+normalize_path() {
+  case "$1" in
+    \~|\~/*)
+      printf '%s\n' "$HOME${1#\~}"
+      ;;
+    \$HOME|\$HOME/*)
+      printf '%s\n' "$HOME${1#\$HOME}"
+      ;;
+    \$\(HOME\)|\$\(HOME\)/*)
+      printf '%s\n' "$HOME${1#\$\(HOME\)}"
+      ;;
+    *)
+      printf '%s\n' "$1"
+      ;;
+  esac
+}
+
+if [ "$ENGINE" = "metal" ]; then
+  case "$PROVIDER" in
+    raspberry-pi)
+      ./scripts/env-require VM_USER_NAME
+      if [ -n "$RESOLVED_RASPBERRY_PI_IP" ]; then
+        IP="$RESOLVED_RASPBERRY_PI_IP"
+      else
+        IP=$(./scripts/instance-ip "$PROFILE")
+      fi
+      SSH_USER=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^SSH_USER=/{print $2}')
+      ;;
+    *)
+      echo "instance-ssh: metal engine: unsupported provider '$PROVIDER'" >&2
+      exit 2
+      ;;
+  esac
+else
+  SSH_USER=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^SSH_USER=/{print $2}')
+  OS_FAMILY=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^OS_FAMILY=/{print $2}')
+  if [ "$OS_FAMILY" != "windows" ] && [ -z "$SSH_USER" ]; then
+    ./scripts/env-require VM_USER_NAME
+    SSH_USER="$VM_USER_NAME"
+  fi
+  IP=$(./scripts/instance-ip "$PROFILE")
+  [ -n "$IP" ] || { echo "instance-ssh: could not resolve IP for $PROFILE" >&2; exit 1; }
+fi
+
+WORKDIR="$(egame_instance_workdir "$PROFILE")"
+mkdir -p "$WORKDIR/ssh"
+KNOWN_HOSTS_FILE="$WORKDIR/ssh/known_hosts"
+
+KEY_FILE="${SSH_PUBLIC_KEY_FILE:-}"
+if [ -n "$KEY_FILE" ] && [ "${KEY_FILE%.pub}" != "$KEY_FILE" ]; then
+  PRIV_KEY="${KEY_FILE%.pub}"
+else
+  PRIV_KEY="${SSH_PRIVATE_KEY_FILE:-}"
+fi
+[ -z "$PRIV_KEY" ] || PRIV_KEY="$(normalize_path "$PRIV_KEY")"
+
+SSH_OPTS=(
+  -o StrictHostKeyChecking=no
+  -o UserKnownHostsFile="$KNOWN_HOSTS_FILE"
+  -o ConnectTimeout=10
+  -o ConnectionAttempts=1
+  -o ServerAliveInterval=10
+  -o ServerAliveCountMax=3
+  -o WarnWeakCrypto=no-pq-kex
+)
+[ "${EPHEMERAL_SSH_BATCH:-0}" = "1" ] && SSH_OPTS+=(-o BatchMode=yes -o NumberOfPasswordPrompts=0)
+[ -n "$PRIV_KEY" ] && SSH_OPTS+=(-i "$PRIV_KEY" -o IdentitiesOnly=yes)
+if [ "$ENGINE:$PROVIDER" = "metal:raspberry-pi" ] && [ -n "$RESOLVED_RASPBERRY_PI_HOST" ] && [ "$IP" != "$RESOLVED_RASPBERRY_PI_HOST" ]; then
+  SSH_OPTS+=(-o "HostKeyAlias=$RESOLVED_RASPBERRY_PI_HOST")
+fi
+
+if [ "${1:-}" = "--scp" ]; then
+  shift
+  LOCAL_PATH="${1:?--scp requires <local> <remote>}"
+  REMOTE_PATH="${2:?--scp requires <local> <remote>}"
+  exec scp "${SSH_OPTS[@]}" -r "$LOCAL_PATH" "$SSH_USER@$IP:$REMOTE_PATH"
+fi
+
+if [ "${1:-}" = "--" ]; then
+  shift
+  exec ssh "${SSH_OPTS[@]}" "$SSH_USER@$IP" "$@"
+fi
+
+exec ssh "${SSH_OPTS[@]}" "$SSH_USER@$IP"

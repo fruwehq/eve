@@ -319,12 +319,44 @@ while IFS= read -r provider_manifest; do
     printf '  [FAIL] provider manifest still points at central provider-plugin: %s\n' "$provider_manifest" >&2
     provider_command_boundary_failed=1
   fi
+  if grep -nE '^  (init|plan|up|down|start|stop|status|ip|ssh): \{exec: commands/provider-command' "$provider_manifest" >/dev/null; then
+    printf '  [FAIL] provider manifest keeps lifecycle command on provider-command: %s\n' "$provider_manifest" >&2
+    provider_command_boundary_failed=1
+  fi
 done <<EOF
 $(find plugins/providers -name egame-plugin.yaml -print | sort)
 EOF
 if [ "$provider_command_boundary_failed" -eq 0 ]; then
-  printf '  [OK] provider manifests route through plugin-local command wrappers\n'
+  printf '  [OK] provider manifests route lifecycle commands through plugin-owned implementations\n'
 else
+  FAIL=$((FAIL + 1))
+fi
+
+if provider_command_exec_err="$(
+  ruby <<'RUBY' 2>&1
+require "yaml"
+
+commands = %w[init plan up down start stop status ip ssh]
+Dir.glob("plugins/providers/*/egame-plugin.yaml").sort.each do |manifest|
+  provider_dir = File.dirname(manifest)
+  manifest_commands = YAML.load_file(manifest).fetch("commands")
+  commands.each do |command|
+    spec = manifest_commands[command]
+    raise "#{manifest}: missing command #{command}" unless spec
+
+    exec_path = spec.fetch("exec")
+    path = exec_path.start_with?("/") ? exec_path : File.expand_path(exec_path, provider_dir)
+    next if File.file?(path) && File.executable?(path)
+
+    raise "#{manifest}: #{command} exec is not executable: #{exec_path}"
+  end
+end
+RUBY
+)"; then
+  printf '  [OK] provider lifecycle command exec paths are executable\n'
+else
+  printf '  [FAIL] provider lifecycle command exec paths are executable\n' >&2
+  printf '%s\n' "$provider_command_exec_err" >&2
   FAIL=$((FAIL + 1))
 fi
 

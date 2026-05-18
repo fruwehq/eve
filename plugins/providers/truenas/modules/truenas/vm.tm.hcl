@@ -103,7 +103,7 @@ generate_hcl "z_truenas_vm.tf" {
       }
 
       provisioner "local-exec" {
-        command = "\"$(git rev-parse --show-toplevel)/scripts/truenas-dataset-verify\" '${local.base_dir}'"
+        command = "\"$(git rev-parse --show-toplevel)/plugins/providers/truenas/commands/dataset-verify\" '${local.base_dir}'"
       }
     }
 
@@ -128,7 +128,7 @@ generate_hcl "z_truenas_vm.tf" {
 
       provisioner "local-exec" {
         command = join(" ", [
-          "\"$(git rev-parse --show-toplevel)/scripts/truenas-vm-disk-prepare\"",
+          "\"$(git rev-parse --show-toplevel)/plugins/providers/truenas/commands/vm-disk-prepare\"",
           "'${var.truenas_host}'",
           "'${local.images_dir}'",
           "'${local.zvol_device}'",
@@ -151,12 +151,12 @@ generate_hcl "z_truenas_vm.tf" {
       }
 
       provisioner "local-exec" {
-        command = "\"$(git rev-parse --show-toplevel)/scripts/truenas-cloudinit-upload\" '${local.vm_name}' '${var.ssh_public_key_file}' '${var.truenas_host}' '${local.iso_path}' '${var.provision_user_name}' '${var.vm_user_name}'"
+        command = "\"$(git rev-parse --show-toplevel)/plugins/providers/truenas/commands/cloudinit-upload\" '${local.vm_name}' '${var.ssh_public_key_file}' '${var.truenas_host}' '${local.iso_path}' '${var.provision_user_name}' '${var.vm_user_name}'"
       }
 
       provisioner "local-exec" {
         when    = destroy
-        command = "\"$(git rev-parse --show-toplevel)/scripts/truenas-cloudinit-delete\" '${self.triggers.truenas_host}' '${self.triggers.iso_path}'"
+        command = "\"$(git rev-parse --show-toplevel)/plugins/providers/truenas/commands/cloudinit-delete\" '${self.triggers.truenas_host}' '${self.triggers.iso_path}'"
       }
     }
 

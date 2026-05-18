@@ -62,8 +62,6 @@ scripts/
   instance-password            # Display the instance's default password (Windows)
   tf-init / tf-plan / tf-apply / tf-destroy  # Terraform dispatchers used by provider plugins
   vagrant-up / vagrant-destroy  # Vagrant dispatchers for local-qemu
-  truenas-cloudinit-upload    # Generates NoCloud seed ISO and uploads to TrueNAS REST API
-  truenas-cloudinit-delete    # Removes cloud-init ISO from TrueNAS on destroy
   test / test-catalog / test-core-boundary / test-instances / test-lint  # Test suite
 oses/<catalog-os-id>/provision/       # Bash state-machine runner (systemd unit)
   scripts/bootstrap.sh / runner.sh / lib/common.sh / steps/NN_*.sh

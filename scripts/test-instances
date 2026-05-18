@@ -594,6 +594,59 @@ else
   FAIL=$((FAIL + 1))
 fi
 
+aws_state_base="$tmp_overlay_dir/provider-fallback/aws-gpu-a/tf/state"
+mkdir -p "$aws_state_base/plugins/providers/aws/stacks/20-services/workspaces/aws-gpu-a"
+cat >"$aws_state_base/plugins/providers/aws/stacks/20-services/workspaces/aws-gpu-a/terraform.tfstate" <<'JSON'
+{"resources":[{"type":"aws_instance","name":"main","instances":[{"attributes":{"instance_state":"running"}}]}]}
+JSON
+if EGAME_INSTANCE_REGISTRY="$FIXTURE" EGAME_INSTANCE_WORKDIR="$tmp_overlay_dir/provider-fallback" EGAME_STATE_DIR="$tmp_overlay_dir/provider-fallback-state" \
+  ./scripts/provider-dispatch --registry "$FIXTURE" --instance aws-gpu-a --command start >/dev/null 2>&1; then
+  printf '  [OK] provider start reads relocated Terraform state fallback\n'
+else
+  printf '  [FAIL] provider start should read relocated Terraform state fallback\n' >&2
+  EGAME_INSTANCE_REGISTRY="$FIXTURE" EGAME_INSTANCE_WORKDIR="$tmp_overlay_dir/provider-fallback" EGAME_STATE_DIR="$tmp_overlay_dir/provider-fallback-state" \
+    ./scripts/provider-dispatch --registry "$FIXTURE" --instance aws-gpu-a --command start >&2 || true
+  FAIL=$((FAIL + 1))
+fi
+
+cat >"$aws_state_base/plugins/providers/aws/stacks/20-services/workspaces/aws-gpu-a/terraform.tfstate" <<'JSON'
+{"resources":[{"type":"aws_instance","name":"main","instances":[{"attributes":{"instance_state":"stopped"}}]}]}
+JSON
+if EGAME_INSTANCE_REGISTRY="$FIXTURE" EGAME_INSTANCE_WORKDIR="$tmp_overlay_dir/provider-fallback" EGAME_STATE_DIR="$tmp_overlay_dir/provider-fallback-state" \
+  ./scripts/provider-dispatch --registry "$FIXTURE" --instance aws-gpu-a --command stop >/dev/null 2>&1; then
+  printf '  [OK] provider stop reads relocated Terraform state fallback\n'
+else
+  printf '  [FAIL] provider stop should read relocated Terraform state fallback\n' >&2
+  EGAME_INSTANCE_REGISTRY="$FIXTURE" EGAME_INSTANCE_WORKDIR="$tmp_overlay_dir/provider-fallback" EGAME_STATE_DIR="$tmp_overlay_dir/provider-fallback-state" \
+    ./scripts/provider-dispatch --registry "$FIXTURE" --instance aws-gpu-a --command stop >&2 || true
+  FAIL=$((FAIL + 1))
+fi
+
+truenas_state_base="$tmp_overlay_dir/provider-fallback/truenas-all-a/tf/state"
+mkdir -p "$truenas_state_base/plugins/providers/truenas/stacks/truenas/20-services/workspaces/truenas-all-a"
+cat >"$truenas_state_base/plugins/providers/truenas/stacks/truenas/20-services/workspaces/truenas-all-a/terraform.tfstate" <<'JSON'
+{"resources":[{"type":"truenas_vm","name":"this","instances":[{"attributes":{"id":"42","name":"fixture-vm","state":"RUNNING"}}]}]}
+JSON
+fake_bin="$tmp_overlay_dir/bin"
+mkdir -p "$fake_bin"
+cat >"$fake_bin/nc" <<'SH'
+#!/usr/bin/env sh
+exit 1
+SH
+chmod +x "$fake_bin/nc"
+truenas_status_out="$(
+  PATH="$fake_bin:$PATH" TRUENAS_HOST=127.0.0.1 TRUENAS_SSH_USER=terraform \
+    EGAME_INSTANCE_REGISTRY="$FIXTURE" EGAME_INSTANCE_WORKDIR="$tmp_overlay_dir/provider-fallback" EGAME_STATE_DIR="$tmp_overlay_dir/provider-fallback-state" \
+    ./scripts/provider-dispatch --registry "$FIXTURE" --instance truenas-all-a --command status 2>/dev/null || true
+)"
+if printf '%s\n' "$truenas_status_out" | grep -q 'Status:[[:space:]]*unreachable'; then
+  printf '  [OK] provider status reads nested TrueNAS Terraform state fallback\n'
+else
+  printf '  [FAIL] provider status should read nested TrueNAS Terraform state fallback\n' >&2
+  printf '%s\n' "$truenas_status_out" >&2
+  FAIL=$((FAIL + 1))
+fi
+
 provider_bridge_failed=0
 for provider_target in up down stop ip ssh; do
   provider_bridge_out="$(

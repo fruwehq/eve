@@ -4,15 +4,15 @@ id: raspberry-pi
 display_name: Raspberry Pi Metal
 commands:
   resolve: {exec: commands/provider-command, args: [resolve]}
-  init: {exec: commands/provider-command, args: [init]}
-  plan: {exec: commands/provider-command, args: [plan]}
-  up: {exec: commands/provider-command, args: [up]}
-  down: {exec: commands/provider-command, args: [down]}
-  start: {exec: commands/provider-command, args: [start]}
-  stop: {exec: commands/provider-command, args: [stop]}
-  status: {exec: commands/provider-command, args: [status]}
-  ip: {exec: commands/provider-command, args: [ip]}
-  ssh: {exec: commands/provider-command, args: [ssh]}
+  init: {exec: commands/init}
+  plan: {exec: commands/plan}
+  up: {exec: commands/up}
+  down: {exec: commands/down}
+  start: {exec: ../_common/commands/start}
+  stop: {exec: ../_common/commands/stop}
+  status: {exec: ../_common/commands/status}
+  ip: {exec: ../_common/commands/ip}
+  ssh: {exec: ../_common/commands/ssh}
 capabilities: [needs-provider-ip]
 supports:
   engines: [metal]

@@ -1,0 +1,12 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+root = File.expand_path("../../../..", __dir__)
+instance = ENV["EGAME_INSTANCE_NAME"] || ARGV.first
+unless instance && !instance.empty?
+  warn "Usage: commands/plan <instance>"
+  exit 2
+end
+
+warn "[plan] instance=#{instance} uses metal hardware; provisioning will run over SSH."
+exec(File.join(root, "scripts/profile-resolve"), "--profile", instance, "--emit", "env")

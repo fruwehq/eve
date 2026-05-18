@@ -1,0 +1,209 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [ -n "${EGAME_INSTANCE_NAME:-}" ]; then
+  PROFILE="$EGAME_INSTANCE_NAME"
+else
+  PROFILE="${1:?Usage: commands/start <instance>}"
+fi
+cd "$(git rev-parse --show-toplevel)"
+
+RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
+ENGINE=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^ENGINE=/{print $2}')
+PROVIDER=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^PROVIDER=/{print $2}')
+
+TM_READ_FLAGS=(
+  --disable-safeguards=git-untracked
+  --disable-safeguards=git-uncommitted
+  --disable-safeguards=git-out-of-sync
+  --disable-safeguards=outdated-code
+)
+
+tf_attr() {
+  local json="$1" address="$2" attr="$3"
+  printf '%s' "$json" | jq -r --arg addr "$address" --arg attr "$attr" \
+    '[((.values // {} | .root_module // {} | .resources // [])
+       | map(select(.address == $addr))
+       | map(.values[$attr])[]?),
+      ((.resources // [])
+       | map(select((.type + "." + .name) == $addr))
+       | map(.instances[]?.attributes[$attr])[]?)]
+     | map(select(. != null and . != ""))
+     | first // ""' 2>/dev/null
+}
+
+terraform_state_json() {
+  local tags="$1" candidate
+  local state_json="" state_path="" workspace="${TF_WORKSPACE:-default}"
+
+  state_json=$(terramate run "${TM_READ_FLAGS[@]}" --quiet --tags="$tags-services" -- terraform show -json 2>/dev/null) || true
+  if [ -n "$state_json" ]; then
+    printf '%s\n' "$state_json"
+    return 0
+  fi
+
+  if [ -n "${EGAME_TF_STATE_BASE:-}" ]; then
+    while IFS= read -r candidate; do
+      state_path="${EGAME_TF_STATE_BASE}/${candidate}/workspaces/${workspace}/terraform.tfstate"
+      if [ -f "$state_path" ]; then
+        cat "$state_path"
+        return 0
+      fi
+
+      state_path="${EGAME_TF_STATE_BASE}/${candidate}/default.tfstate"
+      if [ -f "$state_path" ]; then
+        cat "$state_path"
+        return 0
+      fi
+    done <<EOF
+$(terraform_state_stack_candidates)
+EOF
+  fi
+}
+
+terraform_state_stack_candidates() {
+  case "$PROVIDER" in
+    truenas)
+      printf '%s\n' "plugins/providers/truenas/stacks/truenas/20-services" "stacks/truenas/20-services"
+      ;;
+    *)
+      printf '%s\n' "plugins/providers/${PROVIDER}/stacks/20-services" "stacks/${PROVIDER}/20-services"
+      ;;
+  esac
+}
+
+normalize_path() {
+  local value="$1"
+  # shellcheck disable=SC2088,SC2016
+  case "$value" in
+    '$(HOME)'|'$(HOME)/'*) printf '%s' "$HOME${value#\$\(HOME\)}" ;;
+    '$HOME'|'$HOME/'*) printf '%s' "$HOME${value#\$HOME}" ;;
+    '~'|'~/'*) printf '%s' "$HOME${value#\~}" ;;
+    *) printf '%s' "$value" ;;
+  esac
+}
+
+truenas_ssh_opts() {
+  SSH_USER="${TRUENAS_SSH_USER:-terraform}"
+  SSH_OPTS=(-o StrictHostKeyChecking=no -o IdentitiesOnly=yes)
+  if [ -n "${TRUENAS_SSH_PRIVATE_KEY_FILE:-}" ]; then
+    SSH_KEY="$(normalize_path "${TRUENAS_SSH_PRIVATE_KEY_FILE}")"
+    SSH_OPTS+=(-i "$SSH_KEY")
+  fi
+  if [ -n "${TRUENAS_SSH_PORT:-}" ] && [ "${TRUENAS_SSH_PORT}" != "22" ]; then
+    SSH_OPTS+=(-p "$TRUENAS_SSH_PORT")
+  fi
+}
+
+truenas_vm_state() {
+  local vm_id="$1" output
+  truenas_ssh_opts
+  # shellcheck disable=SC2029
+  output=$(ssh "${SSH_OPTS[@]}" "${SSH_USER}@${TRUENAS_HOST}" "sudo midclt call vm.query '[[\"id\",\"=\",$vm_id]]'" 2>/dev/null) || return 1
+  printf '%s\n' "$output" | jq -r '.[0].status.state // .[0].state // empty' 2>/dev/null
+}
+
+case "$ENGINE" in
+  metal)
+    case "$PROVIDER" in
+      raspberry-pi)
+        if ./scripts/instance-ssh "$PROFILE" -- exit 0 >/dev/null 2>&1; then
+          echo "[start] Raspberry Pi is already reachable"
+          exit 0
+        fi
+        echo "[start] Raspberry Pi is not reachable. Power it on physically, then retry." >&2
+        exit 1
+        ;;
+      *)
+        echo "[start] Unsupported metal provider: $PROVIDER" >&2
+        exit 1
+        ;;
+    esac
+    ;;
+  vagrant)
+    exec ./scripts/vagrant-up "$PROFILE"
+    ;;
+  terraform)
+    eval "$(./scripts/tf-env "$PROFILE")"
+    TAGS=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^STACK_TAGS=/{print $2}')
+
+    STATE_JSON=$(terraform_state_json "$TAGS")
+    if [ -z "$STATE_JSON" ]; then
+      echo "[start] No instance in state. Run 'make up PROFILE=$PROFILE' first." >&2
+      exit 1
+    fi
+
+    case "$PROVIDER" in
+      aws)
+        RAW=$(tf_attr "$STATE_JSON" "aws_instance.main" "instance_state")
+        if [ "$RAW" = "running" ]; then
+          echo "[start] Already running"
+          exit 0
+        fi
+        INSTANCE_ID=$(terramate run --quiet --tags="$TAGS-services" -- terraform output -raw instance_id)
+        REGION=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^LOCATION_REGION=/{print $2}')
+        echo "[start] Starting AWS instance $INSTANCE_ID in $REGION"
+        aws ec2 start-instances --instance-ids "$INSTANCE_ID" --region "$REGION" --output table
+        ;;
+      gcp)
+        RAW=$(tf_attr "$STATE_JSON" "google_compute_instance.main" "current_status")
+        if [ "$RAW" = "RUNNING" ]; then
+          echo "[start] Already running"
+          exit 0
+        fi
+        INSTANCE_NAME=$(terramate run --quiet --tags="$TAGS-services" -- terraform output -raw instance_name)
+        ZONE=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^LOCATION_ZONE=/{print $2}')
+        PROJECT_ID="${GOOGLE_CLOUD_PROJECT:-${GOOGLE_PROJECT:-}}"
+        echo "[start] Starting GCP instance $INSTANCE_NAME in $ZONE"
+        gcloud compute instances start "$INSTANCE_NAME" --zone "$ZONE" ${PROJECT_ID:+--project "$PROJECT_ID"} --quiet
+        ;;
+      vultr)
+        RAW=$(tf_attr "$STATE_JSON" "vultr_instance.default" "power_status")
+        if [ "$RAW" = "running" ]; then
+          echo "[start] Already running"
+          exit 0
+        fi
+        INSTANCE_ID=$(terramate run --quiet --tags="$TAGS-services" -- terraform output -raw instance_id)
+        echo "[start] Starting Vultr instance $INSTANCE_ID"
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+          -H "Authorization: Bearer ${VULTR_API_KEY}" \
+          "https://api.vultr.com/v2/instances/$INSTANCE_ID/start")
+        if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+          echo "[start] Instance start initiated (HTTP $HTTP_CODE)"
+        else
+          echo "[start] Failed to start instance (HTTP $HTTP_CODE)" >&2
+          exit 1
+        fi
+        ;;
+      truenas)
+        ./scripts/env-require TRUENAS_SSH_USER
+        VM_ID=$(tf_attr "$STATE_JSON" "truenas_vm.this" "id")
+        VM_NAME=$(tf_attr "$STATE_JSON" "truenas_vm.this" "name")
+        if [ -z "$VM_ID" ]; then
+          echo "[start] TrueNAS VM id not found in state." >&2
+          exit 1
+        fi
+        LIVE_STATE=$(truenas_vm_state "$VM_ID" || true)
+        if [ "$(printf '%s' "$LIVE_STATE" | tr '[:lower:]' '[:upper:]')" = "RUNNING" ]; then
+          echo "[start] Already running"
+          exit 0
+        fi
+        echo "[start] Starting TrueNAS VM $VM_NAME (id=$VM_ID)"
+        truenas_ssh_opts
+        # shellcheck disable=SC2029
+        ssh "${SSH_OPTS[@]}" "${SSH_USER}@${TRUENAS_HOST}" "sudo midclt call vm.start $VM_ID"
+        echo "[start] VM start initiated"
+        ;;
+      *)
+        echo "[start] Unsupported provider: $PROVIDER" >&2
+        exit 1
+        ;;
+    esac
+
+    terramate run --quiet --tags="$TAGS-services" -- terraform refresh 2>/dev/null || true
+    ;;
+  *)
+    echo "[start] Unsupported engine: $ENGINE" >&2
+    exit 1
+    ;;
+esac

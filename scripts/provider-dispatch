@@ -30,6 +30,9 @@ def command_vector(plugin, spec)
     root_exec = File.join(ROOT, exec_path)
     exec_path = File.exist?(plugin_exec) ? plugin_exec : root_exec
   end
+  unless File.file?(exec_path) && File.executable?(exec_path)
+    raise "provider plugin #{plugin.fetch("id")} command is not executable: #{spec.fetch("exec")}"
+  end
   [exec_path, *(spec["args"] || [])]
 end
 
@@ -154,6 +157,22 @@ begin
 
   spec = plugin.fetch("commands")[command]
   raise "provider plugin #{provider} has no command: #{command}" unless spec
+  cmd = command_vector(plugin, spec)
+
+  if dry_run
+    payload = {
+      "kind" => "provider",
+      "provider" => provider,
+      "command" => command,
+      "instance" => instance_name,
+      "profile" => instance_name,
+      "engine" => resolved.fetch("engine"),
+      "dry_run" => true
+    }
+    Egame::SDK::Contract.validate_output!(payload, def_name: "provider_command_output")
+    puts JSON.generate(payload)
+    exit 0
+  end
 
   paths_cmd = [File.join(ROOT, "scripts/instance-paths"), "--instance", instance_name, "--emit", "json"]
   paths_cmd += ["--registry", registry_path] if registry_path
@@ -172,7 +191,7 @@ begin
   env["EGAME_INSTANCE_REGISTRY"] = registry_path if registry_path
   env["EGAME_PLUGIN_DRY_RUN"] = "1" if dry_run
 
-  cmd = command_vector(plugin, spec) + extra_args
+  cmd += extra_args
   desired_state = desired_state_for(command)
 
   if INTERACTIVE_COMMANDS.include?(command) && !dry_run
