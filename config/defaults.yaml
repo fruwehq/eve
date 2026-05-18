@@ -26,7 +26,7 @@ global:
 
 moonlight:
   bitrate_kbps:
-  display_mode: borderless
+  display_mode:
   video_codec:
   video_decoder:
 
@@ -42,6 +42,12 @@ rustdesk:
 sunshine:
   max_bitrate_kbps:
   version:
+
+thinlinc:
+  agent_hostname:
+  server_bundle_path:
+  server_bundle_url:
+  webaccess_port:
 
 truenas:
   api_user:

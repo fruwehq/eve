@@ -37,7 +37,7 @@ fi
 line_count=\$(wc -l < "\$log" | tr -d ' ')
 last_step=\$(awk "/Running step / {n=NR} END {print n+0}" "\$log")
 last_done=\$(awk "/Provisioning complete\\./ {n=NR} END {print n+0}" "\$log")
-last_error=\$(awk "/ERROR: step / {n=NR} END {print n+0}" "\$log")
+last_error=\$(awk "/ERROR: / {n=NR} END {print n+0}" "\$log")
 if [ "\$last_done" -gt "\$last_step" ] && [ "\$last_done" -gt 0 ]; then
   state=DONE
 elif systemctl is-failed --quiet ephemeral-provision.service 2>/dev/null; then
@@ -47,7 +47,7 @@ elif [ "\$last_error" -gt "\$last_step" ] && [ "\$last_error" -gt "\$last_done" 
 else
   state=RUNNING
 fi
-last_line=\$(grep -E "Running step |ERROR: step " "\$log" | tail -n 1 || true)
+last_line=\$(grep -E "Running step |ERROR: " "\$log" | tail -n 1 || true)
 printf 'STATE\t%s\n' "\$state"
 printf 'LINES\t%s\n' "\$line_count"
 printf 'LAST\t%s\n' "\$last_line"
@@ -78,7 +78,7 @@ $lastError = -1
 for ($i = 0; $i -lt $lines.Count; $i++) {
   if ($lines[$i] -match "Running step ") { $lastStep = $i }
   if ($lines[$i] -match "Provisioning complete\.") { $lastDone = $i }
-  if ($lines[$i] -match "ERROR: step ") { $lastError = $i }
+  if ($lines[$i] -match "ERROR: ") { $lastError = $i }
 }
 if ($lastDone -gt $lastStep -and $lastDone -ge 0) {
   $state = "DONE"
@@ -87,7 +87,7 @@ if ($lastDone -gt $lastStep -and $lastDone -ge 0) {
 } else {
   $state = "RUNNING"
 }
-$last = $lines | Select-String -Pattern "Running step|ERROR: step" | Select-Object -Last 1
+$last = $lines | Select-String -Pattern "Running step|ERROR: " | Select-Object -Last 1
 if ($last) { $lastLine = $last.Line } else { $lastLine = "" }
 "STATE${tab}$state"
 "LINES${tab}$lineCount"

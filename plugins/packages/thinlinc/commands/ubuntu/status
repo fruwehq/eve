@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+set -eu
+
+exec ./scripts/package-status-command thinlinc 'if command -v /opt/thinlinc/bin/tlctl >/dev/null 2>&1 || systemctl list-unit-files vsmserver.service >/dev/null 2>&1; then if systemctl is-active --quiet vsmserver.service && systemctl is-active --quiet vsmagent.service && systemctl is-active --quiet tlwebaccess.service; then echo installed; else echo unknown; fi; else echo missing; fi'

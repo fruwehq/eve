@@ -33,6 +33,11 @@ MAPPINGS = [
   [%w[rustdesk server], "RUSTDESK_SERVER"],
   [%w[sunshine max_bitrate_kbps], "SUNSHINE_MAX_BITRATE_KBPS"],
   [%w[sunshine version], "SUNSHINE_VERSION"],
+  [%w[thinlinc agent_hostname], "THINLINC_AGENT_HOSTNAME"],
+  [%w[thinlinc accept_eula], "THINLINC_ACCEPT_EULA"],
+  [%w[thinlinc server_bundle_path], "THINLINC_SERVER_BUNDLE_PATH"],
+  [%w[thinlinc server_bundle_url], "THINLINC_SERVER_BUNDLE_URL"],
+  [%w[thinlinc webaccess_port], "THINLINC_WEBACCESS_PORT"],
   [%w[truenas api_user], "TRUENAS_API_USER"],
   [%w[truenas host], "TRUENAS_HOST"],
   [%w[truenas ssh_host_key_fingerprint], "TRUENAS_SSH_HOST_KEY_FINGERPRINT"],
@@ -43,6 +48,14 @@ MAPPINGS = [
   [%w[truenas vm_pool], "TRUENAS_VM_POOL"],
   [%w[truenas vm_zvol_prefix], "TRUENAS_VM_ZVOL_PREFIX"],
   [%w[vagrant show_console], "VAGRANT_SHOW_CONSOLE"]
+].freeze
+
+PATH_ENV_NAMES = %w[
+  AWS_CONFIG_FILE
+  AWS_SHARED_CREDENTIALS_FILE
+  GOOGLE_APPLICATION_CREDENTIALS
+  SSH_PUBLIC_KEY_FILE
+  TRUENAS_SSH_PRIVATE_KEY_FILE
 ].freeze
 
 def usage
@@ -84,6 +97,21 @@ def scalar_value(value)
   value.to_s
 end
 
+def normalize_pathish(value)
+  case value
+  when "~"
+    ENV.fetch("HOME")
+  when %r{\A~/}
+    File.join(ENV.fetch("HOME"), value[2..])
+  when %r{\A\$HOME(/|\z)}
+    "#{ENV.fetch("HOME")}#{value[5..]}"
+  when %r{\A\$\(HOME\)(/|\z)}
+    "#{ENV.fetch("HOME")}#{value[7..]}"
+  else
+    value
+  end
+end
+
 format = "--make"
 case ARGV.length
 when 0
@@ -104,6 +132,7 @@ begin
   config = deep_merge(load_config(DEFAULT_CONFIG), load_config(LOCAL_CONFIG))
   env = MAPPINGS.each_with_object({}) do |(path, name), out|
     value = scalar_value(fetch_path(config, path))
+    value = normalize_pathish(value) if value && PATH_ENV_NAMES.include?(name)
     out[name] = value if value
   end
 

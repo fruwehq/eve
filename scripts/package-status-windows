@@ -25,7 +25,11 @@ for path in "$@"; do
   ps_paths="${ps_paths}$(quote_ps_string "$path")"
 done
 
-ps_script="\$paths = @($ps_paths); if (\$paths | Where-Object { Test-Path \$_ }) { 'installed' } else { 'missing' }"
+process_name="${EGAME_PACKAGE_STATUS_PROCESS:-}"
+service_pattern="${EGAME_PACKAGE_STATUS_SERVICE_PATTERN:-}"
+ps_process="$(quote_ps_string "$process_name")"
+ps_service_pattern="$(quote_ps_string "$service_pattern")"
+ps_script="\$paths = @($ps_paths); \$processName = $ps_process; \$servicePattern = $ps_service_pattern; \$installed = [bool](\$paths | Where-Object { Test-Path \$_ }); \$running = \$false; if (\$installed -and \$processName) { \$running = [bool](Get-Process -Name \$processName -ErrorAction SilentlyContinue | Select-Object -First 1) }; if (\$installed -and -not \$running -and \$servicePattern) { \$running = [bool](Get-Service -ErrorAction SilentlyContinue | Where-Object { (\$_.Name -match \$servicePattern -or \$_.DisplayName -match \$servicePattern) -and \$_.Status -eq 'Running' } | Select-Object -First 1) }; if (\$running) { 'running' } elseif (\$installed) { 'installed' } else { 'missing' }"
 encoded_command="$(printf '%s' "$ps_script" | iconv -f UTF-8 -t UTF-16LE | base64 | tr -d '\n')"
 remote_command="powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand $encoded_command"
 PROFILE="${EGAME_INSTANCE_NAME:?EGAME_INSTANCE_NAME is required}"
@@ -52,9 +56,10 @@ clean_details() {
 details="$(clean_details "$output")"
 
 if [ "$exit_status" -eq 0 ]; then
-  status="$(printf '%s\n' "$details" | awk '/^(installed|missing|unknown)$/ { print; exit }')"
+  status="$(printf '%s\n' "$details" | awk '/^(running|installed|missing|unknown)$/ { print; exit }')"
   status="${status:-unknown}"
   case "$status" in
+    running) status="installed" ;;
     installed|missing|unknown) ;;
     *) status="unknown" ;;
   esac

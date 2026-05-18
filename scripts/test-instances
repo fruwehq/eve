@@ -28,6 +28,35 @@ unset TRUENAS_HOST TRUENAS_SSH_PORT TRUENAS_SSH_USER \
 FAIL=0
 INSTANCES=$(./scripts/instance-list --registry "$FIXTURE" --json | jq -r '.instances[].name')
 
+if [ -d linux ] || [ -d windows ] || [ -d ubuntu26 ] || [ -d windows-server-2025 ]; then
+  printf '  [FAIL] root OS provisioning folders must live under oses/<catalog-os-id>/\n' >&2
+  FAIL=$((FAIL + 1))
+else
+  printf '  [OK] root OS provisioning folders live under oses/\n'
+fi
+
+missing_os_dirs=0
+for os_id in $(yq -r '.oses[].id' config/catalog.yaml 2>/dev/null || ruby -ryaml -e 'YAML.load_file("config/catalog.yaml").fetch("oses").each { |os| puts os.fetch("id") }'); do
+  if [ ! -d "oses/$os_id/provision" ]; then
+    printf '  [FAIL] missing OS provisioning folder: oses/%s/provision\n' "$os_id" >&2
+    missing_os_dirs=$((missing_os_dirs + 1))
+  elif [ -L "oses/$os_id/provision" ]; then
+    target=$(cd "oses/$os_id/provision" && pwd -P)
+    case "$target" in
+      "$PWD"/oses/*/provision) ;;
+      *)
+        printf '  [FAIL] OS provisioning symlink escapes oses/: oses/%s/provision -> %s\n' "$os_id" "$target" >&2
+        missing_os_dirs=$((missing_os_dirs + 1))
+        ;;
+    esac
+  fi
+done
+if [ "$missing_os_dirs" -eq 0 ]; then
+  printf '  [OK] OS provisioning folders match catalog OS IDs\n'
+else
+  FAIL=$((FAIL + missing_os_dirs))
+fi
+
 for instance in $INSTANCES; do
   if ! ./scripts/instance-resolve --registry "$FIXTURE" --instance "$instance" --validate >/dev/null 2>&1; then
     printf '  [FAIL] validate: %s\n' "$instance" >&2
@@ -216,7 +245,7 @@ if EGAME_INSTANCE_REGISTRY="$tmp_registry" make bundle.unselect INSTANCE=test-de
     jq -e '(.composition.bundles == ["desktop-streaming"]) and (.bundle_packages | index("docker") | not)' >/dev/null &&
   EGAME_INSTANCE_REGISTRY="$tmp_registry" make bundle.select INSTANCE=test-dev BUNDLE=desktop-gnome >/dev/null &&
   ./scripts/instance-resolve --registry "$tmp_registry" --instance test-dev --emit json |
-    jq -e '(.composition.bundles | index("desktop-gnome")) and (.bundle_packages | index("gnome-desktop")) and (.package_sources["gnome-desktop"] | index("bundle:desktop-streaming")) and (.package_sources["gnome-desktop"] | index("bundle:desktop-gnome"))' >/dev/null; then
+    jq -e '(.composition.bundles | index("desktop-gnome")) and (.bundle_packages | index("gnome-desktop")) and .package_sources["gnome-desktop"] == ["bundle:desktop-gnome"]' >/dev/null; then
   printf '  [OK] bundle selection updates instance bundles\n'
 else
   printf '  [FAIL] bundle selection updates instance bundles\n' >&2

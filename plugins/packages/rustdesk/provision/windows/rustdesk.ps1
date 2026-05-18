@@ -118,20 +118,25 @@ if (Test-Path $programFilesExe) {
   Write-Host "Using machine-wide RustDesk at $rustdeskExe"
 }
 
-$serviceName = "Rustdesk"
-$service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+function Get-RustDeskService {
+  return Get-Service -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -match 'rustdesk' -or $_.DisplayName -match 'rustdesk' } |
+    Select-Object -First 1
+}
+
+$service = Get-RustDeskService
 if (-not $service) {
   Write-Host "Installing RustDesk Windows service..."
   Start-Process -FilePath $rustdeskExe -ArgumentList "--install-service"
   Start-Sleep -Seconds 20
-  $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+  $service = Get-RustDeskService
 }
 
 if ($service) {
-  Set-Service -Name $serviceName -StartupType Automatic
+  Set-Service -Name $service.Name -StartupType Automatic
   if ($service.Status -ne "Running") {
     Write-Host "Starting RustDesk Windows service..."
-    Start-Service -Name $serviceName
+    Start-Service -Name $service.Name
     Start-Sleep -Seconds 5
   }
 } else {
@@ -191,7 +196,7 @@ function Get-PasswordMarkerValue {
 
   $hashBytes = [System.Security.Cryptography.SHA256]::Create().ComputeHash([System.Text.Encoding]::UTF8.GetBytes($Password))
   $hash = ([System.BitConverter]::ToString($hashBytes)).Replace('-', '').ToLowerInvariant()
-  return "v2:$hash"
+  return "v3:$hash"
 }
 
 function Set-RustDeskPasswordIfNeeded {
@@ -220,6 +225,30 @@ function Set-RustDeskPasswordIfNeeded {
     throw "RustDesk --password failed for ${Context}: $output"
   }
   Set-Content -Path $passwordMarker -Value $desired -Encoding ASCII -NoNewline
+}
+
+function Sync-RustDeskIdentityToServiceProfiles {
+  $adminIdentity = "C:\Users\Administrator\AppData\Roaming\RustDesk\config\RustDesk.toml"
+  if (-not (Test-Path $adminIdentity)) {
+    return
+  }
+
+  $sourceContent = Get-Content -LiteralPath $adminIdentity -Raw
+  foreach ($dir in @(
+    "C:\Windows\System32\config\systemprofile\AppData\Roaming\RustDesk\config",
+    "C:\Windows\ServiceProfiles\LocalService\AppData\Roaming\RustDesk\config",
+    "C:\ProgramData\RustDesk\config"
+  )) {
+    if (-not (Test-Path $dir)) {
+      New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    }
+    $targetIdentity = Join-Path $dir "RustDesk.toml"
+    $targetContent = if (Test-Path $targetIdentity) { Get-Content -LiteralPath $targetIdentity -Raw } else { "" }
+    if ($sourceContent -ne $targetContent) {
+      Write-Host "Copying RustDesk identity to $targetIdentity"
+      Set-Content -Path $targetIdentity -Value $sourceContent -Encoding UTF8 -NoNewline
+    }
+  }
 }
 
 Write-Host "Waiting for RustDesk process..."
@@ -260,6 +289,8 @@ if ($rustdeskServer -or $rustdeskKey -or $rustdeskPassword) {
   $configDirs = @(
     "C:\Users\Administrator\AppData\Roaming\RustDesk\config",
     "C:\Windows\System32\config\systemprofile\AppData\Roaming\RustDesk\config",
+    "C:\Windows\ServiceProfiles\LocalService\AppData\Roaming\RustDesk\config",
+    "C:\ProgramData\RustDesk\config",
     "$env:APPDATA\RustDesk\config"
   )
 
@@ -287,28 +318,40 @@ if ($rustdeskServer -or $rustdeskKey -or $rustdeskPassword) {
       Set-Content -Path $cfgPath -Value $toml -Encoding UTF8 -NoNewline
     }
 
-    Write-Host "Restarting RustDesk..."
-    Start-Process -FilePath $rustdeskExe -WindowStyle Hidden
-    Start-Sleep -Seconds 3
-
-    if ($rustdeskPassword) {
-      Set-RustDeskPasswordIfNeeded `
-        -Exe $rustdeskExe `
-        -Password $rustdeskPassword `
-        -MarkerDir "C:\Windows\System32\config\systemprofile\AppData\Roaming\RustDesk" `
-        -Context "SYSTEM"
+    Write-Host "Restarting RustDesk service..."
+    $service = Get-RustDeskService
+    if ($service) {
+      Start-Service -Name $service.Name
+    } else {
+      Start-Process -FilePath $rustdeskExe -ArgumentList "--server" -WindowStyle Hidden
     }
+    Start-Sleep -Seconds 3
   } else {
     Write-Host "RustDesk config already matches desired state -- leaving password/salt intact."
   }
 }
 
-$service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+if ($rustdeskPassword) {
+  Set-RustDeskPasswordIfNeeded `
+    -Exe $rustdeskExe `
+    -Password $rustdeskPassword `
+    -MarkerDir "C:\Windows\System32\config\systemprofile\AppData\Roaming\RustDesk" `
+    -Context "SYSTEM"
+}
+
+# RustDesk stores the generated identity and encrypted permanent password in
+# RustDesk.toml, while rendezvous/server preferences live in RustDesk2.toml.
+# The service and interactive tray can read different profile directories; keep
+# their identity file aligned so the ID reported by --get-id is the same ID the
+# unattended service registers with the rendezvous server.
+Sync-RustDeskIdentityToServiceProfiles
+
+$service = Get-RustDeskService
 if ($service) {
-  Set-Service -Name $serviceName -StartupType Automatic
+  Set-Service -Name $service.Name -StartupType Automatic
   if ($service.Status -ne "Running") {
     Write-Host "Starting RustDesk Windows service after config update..."
-    Start-Service -Name $serviceName
+    Start-Service -Name $service.Name
     Start-Sleep -Seconds 5
   }
 }
@@ -324,6 +367,7 @@ if (-not (Test-Path $stateDir)) {
 
 $startScript = Join-Path $stateDir "start-rustdesk.ps1"
 $configureScript = Join-Path $stateDir "configure-rustdesk-user.ps1"
+$startupScript = Join-Path $stateDir "ensure-rustdesk-startup.ps1"
 $escapedExe = Escape-ForSingleQuotedPowerShell $rustdeskExe
 $escapedEnvFile = Escape-ForSingleQuotedPowerShell $envFile
 $escapedConfigureScript = Escape-ForSingleQuotedPowerShell $configureScript
@@ -354,7 +398,7 @@ if (Test-Path `$envFile) {
       if (-not (Test-Path `$markerDir)) { New-Item -ItemType Directory -Path `$markerDir -Force | Out-Null }
       `$passwordMarker = Join-Path `$markerDir 'egame-password.sha256'
       `$hashBytes = [System.Security.Cryptography.SHA256]::Create().ComputeHash([System.Text.Encoding]::UTF8.GetBytes(`$password))
-      `$hash = 'v2:' + ([System.BitConverter]::ToString(`$hashBytes)).Replace('-', '').ToLowerInvariant()
+      `$hash = 'v3:' + ([System.BitConverter]::ToString(`$hashBytes)).Replace('-', '').ToLowerInvariant()
       `$existing = if (Test-Path `$passwordMarker) { (Get-Content `$passwordMarker -Raw).Trim() } else { '' }
       if (`$existing -ne `$hash) {
         `$output = & `$exe --password `$password 2>&1 | Out-String
@@ -369,10 +413,91 @@ if (Test-Path `$envFile) {
 "@
 Write-TextFileIfChanged -Path $configureScript -Value $configureScriptBody
 
+$startupScriptBody = @"
+`$ErrorActionPreference = 'SilentlyContinue'
+`$exe = '$escapedExe'
+`$envFile = '$escapedEnvFile'
+`$logFile = 'C:\Users\Administrator\provision\logs\rustdesk-startup.log'
+function Write-EGameLog {
+  param([string]`$Message)
+  try {
+    `$parent = Split-Path `$logFile
+    if (-not (Test-Path `$parent)) { New-Item -ItemType Directory -Path `$parent -Force | Out-Null }
+    Add-Content -Path `$logFile -Value ("{0} {1}" -f (Get-Date).ToString("s"), `$Message) -Encoding UTF8
+  } catch {
+  }
+}
+if (-not (Test-Path `$exe)) {
+  Write-EGameLog "rustdesk.exe missing: `$exe"
+  exit 0
+}
+`$service = Get-Service -ErrorAction SilentlyContinue |
+  Where-Object { `$_.Name -match 'rustdesk' -or `$_.DisplayName -match 'rustdesk' } |
+  Select-Object -First 1
+if (`$service) {
+  Set-Service -Name `$service.Name -StartupType Automatic
+  if (`$service.Status -ne 'Running') {
+    Start-Service -Name `$service.Name
+    Start-Sleep -Seconds 5
+    Write-EGameLog "started service `$(`$service.Name)"
+  }
+}
+`$currentSessionId = (Get-Process -Id `$PID).SessionId
+`$sessionRustDesk = Get-Process rustdesk -ErrorAction SilentlyContinue |
+  Where-Object { `$_.SessionId -eq `$currentSessionId } |
+  Select-Object -First 1
+if (-not `$sessionRustDesk) {
+  Start-Process -FilePath `$exe -WindowStyle Hidden
+  Start-Sleep -Seconds 5
+  Write-EGameLog "started process in session `$currentSessionId"
+}
+if (Test-Path `$envFile) {
+  try {
+    `$envData = Get-Content `$envFile | ConvertFrom-Json
+    `$password = `$envData.rustdesk_password
+    if (`$password) {
+      `$markerDir = 'C:\Windows\System32\config\systemprofile\AppData\Roaming\RustDesk'
+      if (-not (Test-Path `$markerDir)) { New-Item -ItemType Directory -Path `$markerDir -Force | Out-Null }
+      `$passwordMarker = Join-Path `$markerDir 'egame-password.sha256'
+      `$hashBytes = [System.Security.Cryptography.SHA256]::Create().ComputeHash([System.Text.Encoding]::UTF8.GetBytes(`$password))
+      `$hash = 'v3:' + ([System.BitConverter]::ToString(`$hashBytes)).Replace('-', '').ToLowerInvariant()
+      `$existing = if (Test-Path `$passwordMarker) { (Get-Content `$passwordMarker -Raw).Trim() } else { '' }
+      if (`$existing -ne `$hash) {
+        `$output = & `$exe --password `$password 2>&1 | Out-String
+        if (`$null -eq `$LASTEXITCODE -or `$LASTEXITCODE -eq 0) {
+          Set-Content -Path `$passwordMarker -Value `$hash -Encoding ASCII -NoNewline
+          Write-EGameLog "applied SYSTEM permanent password"
+        } else {
+          Write-EGameLog "password command failed: `$output"
+        }
+      }
+    }
+  } catch {
+    Write-EGameLog "password setup failed: `$(`$_.Exception.Message)"
+  }
+}
+try {
+  `$id = (& `$exe --get-id 2>`$null) -replace '\s', ''
+  if (`$id) { Write-EGameLog "rustdesk id `$id" }
+} catch {
+}
+"@
+Write-TextFileIfChanged -Path $startupScript -Value $startupScriptBody
+
 $runValue = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$configureScript`""
 New-Item -Path "HKLM:\Software\Microsoft\Windows\CurrentVersion\Run" -Force | Out-Null
 Set-ItemProperty -Path "HKLM:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "EGameRustDesk" -Value $runValue
 Write-Host "Registered RustDesk interactive autostart."
+
+$startupTask = "EGameRustDeskStartup"
+$startupTaskCommand = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$startupScript`""
+try {
+  & schtasks.exe /Create /TN $startupTask /SC ONSTART /RU SYSTEM /RL HIGHEST /TR $startupTaskCommand /F | Out-Null
+  & schtasks.exe /Run /TN $startupTask | Out-Null
+  Write-Host "Registered and started RustDesk SYSTEM startup task."
+} catch {
+  Write-Warning "Could not register or run RustDesk SYSTEM startup task."
+}
 
 if ($windowsPassword) {
   $autoTask = "EGameRustDeskAutostart"
@@ -403,18 +528,32 @@ if ($windowsPassword) {
 
 Write-Host "Ensuring RustDesk is started in the current context..."
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $configureScript | Out-Null
+Sync-RustDeskIdentityToServiceProfiles
+
+$service = Get-RustDeskService
+if ($service) {
+  Write-Host "Restarting RustDesk service after final identity sync..."
+  Restart-Service -Name $service.Name -Force
+  Start-Sleep -Seconds 5
+}
 
 Write-Host "Resolving RustDesk ID..."
+$resolvedId = $null
 for ($i = 1; $i -le 15; $i++) {
-  $id = (& $rustdeskExe --get-id 2>$null) -replace '\s', ''
+  $id = (& $rustdeskExe --get-id 2>$null | Out-String) -replace '\s', ''
   if ($id) {
     Write-Host "RustDesk ID: $id"
+    $resolvedId = $id
     break
   }
   Start-Sleep -Seconds 2
+}
+if (-not $resolvedId) {
+  Write-Warning "RustDesk ID was not available yet; service/startup tasks are installed and will retry on boot/logon."
 }
 
 Write-Host "---------------------------------------------------------"
 Write-Host "END rustdesk"
 Write-Host "---------------------------------------------------------"
 Write-Host ""
+exit 0

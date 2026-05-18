@@ -7,6 +7,12 @@ commands:
   status: {exec: scripts/package-plugin, args: [macos-desktop-theme, status]}
   down: {exec: scripts/package-plugin, args: [macos-desktop-theme, down]}
 supports: {os_families: [ubuntu]}
+compatibility:
+  - platform: ubuntu
+    desktop: GNOME
+    session: Wayland
+    status: wip
+    notes: Theme layer on top of GNOME; remote access depends on the selected remote desktop package.
 down: {destructive: true}
 env: []
 install:

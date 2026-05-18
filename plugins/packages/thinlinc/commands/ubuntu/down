@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+set -eu
+
+exec ./scripts/package-down-command thinlinc 'sudo systemctl disable --now vsmserver.service vsmagent.service tlwebaccess.service tlwebadm.service 2>/dev/null || true'

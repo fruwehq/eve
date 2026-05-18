@@ -5,6 +5,8 @@ set -euo pipefail
 
 ROOT="$(git rev-parse --show-toplevel)"
 cd "$ROOT"
+# shellcheck source=lib/load-runtime-env.sh
+. ./scripts/lib/load-runtime-env.sh
 
 TARGET="${1:?Usage: scripts/instance-run <make-target> [instance]}"
 INSTANCE_NAME="${2:-${INSTANCE:-}}"
@@ -100,7 +102,10 @@ case "$TARGET" in
     exec ./scripts/ssh-wait "$INSTANCE_NAME"
     ;;
   upload)
-    exec ./scripts/upload "$INSTANCE_NAME" "${EXTRA_ARGS[@]}"
+    if [ "${#EXTRA_ARGS[@]}" -gt 0 ]; then
+      exec ./scripts/upload "$INSTANCE_NAME" "${EXTRA_ARGS[@]}"
+    fi
+    exec ./scripts/upload "$INSTANCE_NAME"
     ;;
 esac
 

@@ -212,6 +212,28 @@ class DisplayConfig
                 dmAfter.dmDisplayFrequency,
                 dmAfter.dmPositionX, dmAfter.dmPositionY);
 
+            int activeNonVdd = 0;
+            adapter = new DISPLAY_DEVICE();
+            for (uint i = 0; ; i++)
+            {
+                adapter.cb = Marshal.SizeOf(typeof(DISPLAY_DEVICE));
+                if (!EnumDisplayDevices(null, i, ref adapter, 0)) break;
+
+                bool active = (adapter.StateFlags & ATTACHED) != 0;
+                bool isVdd  = adapter.DeviceString.IndexOf("Virtual Display", StringComparison.OrdinalIgnoreCase) >= 0;
+                Console.WriteLine("After: {0} | {1} | active={2} vdd={3} flags=0x{4:X}",
+                    adapter.DeviceName, adapter.DeviceString, active, isVdd, adapter.StateFlags);
+                if (active && !isVdd)
+                    activeNonVdd++;
+            }
+
+            if (activeNonVdd > 0)
+            {
+                File.WriteAllText(markerPath,
+                    "ERROR: active non-VDD display remains count=" + activeNonVdd + "\n");
+                return;
+            }
+
             File.WriteAllText(markerPath,
                 "OK " + dmAfter.dmPelsWidth + "x" + dmAfter.dmPelsHeight +
                 " disconnected=" + disconnected + "\n");

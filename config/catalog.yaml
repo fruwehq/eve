@@ -182,6 +182,7 @@ packages:
   - id: rustdesk
   - id: steam
   - id: sunshine
+  - id: thinlinc
   - id: vscode
   - id: vnc
   - id: waypipe
@@ -192,13 +193,13 @@ packages:
 # -----------------------------------------------------------------------------
 bundles:
   - id: desktop-gnome
-    includes: [gnome-desktop, rustdesk]
+    includes: [gnome-desktop]
 
   - id: desktop-gnome-mac
-    includes: [gnome-desktop, macos-desktop-theme, rustdesk]
+    includes: [gnome-desktop, macos-desktop-theme]
 
   - id: desktop-streaming
-    includes: [gnome-desktop, sunshine, rustdesk, vnc, rdp, waypipe]
+    includes: [sunshine, rustdesk, vnc, rdp, waypipe]
 
   - id: remote-xpra
     includes: [xpra]

@@ -13,7 +13,7 @@ fi
 FILES=()
 while IFS= read -r f; do FILES+=("$f"); done < <(
   find scripts -type f 2>/dev/null
-  find linux/provision/scripts -type f -name '*.sh' 2>/dev/null
+  find oses -path '*/provision/scripts/*' -type f -name '*.sh' 2>/dev/null
 )
 
 FAIL=0

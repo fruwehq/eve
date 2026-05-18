@@ -60,13 +60,28 @@ if (Test-Path $config) {
     }
 }
 
-# Install PowerShell 7 if it is not already present. Wait for winget to become available first.
-# All downstream provisioning scripts require PS7, so this is a hard requirement.
 $pwshCmd = Get-Command pwsh -ErrorAction SilentlyContinue
+$windowsPowerShell = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
+$defaultShell = if ($pwshCmd) { $pwshCmd.Source } else { $windowsPowerShell }
+Write-Host "Setting OpenSSH DefaultShell to $defaultShell"
+
+New-ItemProperty `
+  -Path "HKLM:\SOFTWARE\OpenSSH" `
+  -Name DefaultShell `
+  -Value $defaultShell `
+  -PropertyType String `
+  -Force | Out-Null
+
+Write-Host "Starting SSH service..."
+Set-Service -Name sshd -StartupType Automatic
+Start-Service sshd
+
+# Install PowerShell 7 if it is not already present. SSH must be available before
+# this best-effort step so provisioning can still diagnose slow or missing winget.
 if (-not $pwshCmd) {
     Write-Host "Waiting for winget to become available..."
     $wingetCmd = $null
-    $maxAttempts = 30
+    $maxAttempts = 12
 
     for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
         $wingetCmd = Get-Command winget -ErrorAction SilentlyContinue
@@ -80,26 +95,28 @@ if (-not $pwshCmd) {
     }
 
     if (-not $wingetCmd) {
-        Write-Error "FATAL: winget did not become available. Cannot install PowerShell 7."
-        Stop-Transcript
-        exit 1
+        Write-Warning "winget did not become available. Leaving SSH online with Windows PowerShell as the default shell."
+    } else {
+        Write-Host "Installing PowerShell 7..."
+        & $wingetCmd.Source install --id Microsoft.PowerShell --source winget --accept-package-agreements --accept-source-agreements
+        $pwshCmd = Get-Command pwsh -ErrorAction SilentlyContinue
+
+        if ($pwshCmd) {
+            $defaultShell = $pwshCmd.Source
+            Write-Host "PowerShell 7 installed at $defaultShell"
+            Write-Host "Updating OpenSSH DefaultShell to $defaultShell"
+            New-ItemProperty `
+              -Path "HKLM:\SOFTWARE\OpenSSH" `
+              -Name DefaultShell `
+              -Value $defaultShell `
+              -PropertyType String `
+              -Force | Out-Null
+            Restart-Service sshd
+        } else {
+            Write-Warning "PowerShell 7 was not found after winget install. Leaving SSH online with Windows PowerShell."
+        }
     }
-
-    Write-Host "Installing PowerShell 7..."
-    & $wingetCmd.Source install --id Microsoft.PowerShell --source winget --accept-package-agreements --accept-source-agreements
-    $pwshCmd = Get-Command pwsh -ErrorAction SilentlyContinue
-
-    if (-not $pwshCmd) {
-        Write-Error "FATAL: PowerShell 7 not found after install."
-        Stop-Transcript
-        exit 1
-    }
-
-    Write-Host "PowerShell 7 installed at $($pwshCmd.Source)"
 }
-
-$defaultShell = $pwshCmd.Source
-Write-Host "Setting OpenSSH DefaultShell to $defaultShell"
 
 # Enable CTRL-D in PowerShell profile (only if PS7 is available)
 if ($pwshCmd) {
@@ -119,18 +136,6 @@ if ($pwshCmd) {
         Add-Content -Path $profilePath -Value $ctrlDLine
     }
 }
-
-New-ItemProperty `
-  -Path "HKLM:\SOFTWARE\OpenSSH" `
-  -Name DefaultShell `
-  -Value $defaultShell `
-  -PropertyType String `
-  -Force
-
-# Enable and start the SSH service only after PowerShell 7 and the default shell are configured
-Write-Host "Starting SSH service..."
-Set-Service -Name sshd -StartupType Automatic
-Start-Service sshd
 
 Write-Host "SSH setup complete."
 Write-Host "You can now connect using:"

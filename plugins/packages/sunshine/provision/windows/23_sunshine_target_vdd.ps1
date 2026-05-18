@@ -4,10 +4,12 @@ Write-Host "#########################################################"
 Write-Host "### Start 23"
 Write-Host "#########################################################"
 
-# After step 22, VDD is the only active display on the desktop.  NVIDIA's
-# adapter stays present for NVENC encoding.  DXGI Desktop Duplication captures
-# the entire virtual desktop - which is now VDD's resolution alone.  We just
-# ensure Sunshine has no stale output_name override and restart it.
+# After step 22, VDD must be the only active display on the desktop. NVIDIA's
+# adapter stays present for NVENC encoding. DXGI Desktop Duplication captures
+# the entire virtual desktop - which is now VDD's resolution alone. If the VDD
+# driver failed to start, Sunshine can still expose its API and pair with
+# Moonlight, but the stream is black/no-video. Treat that as a provisioning
+# failure instead of silently targeting the physical/NVIDIA display.
 
 . "$PSScriptRoot\..\lib\sunshine.ps1"
 
@@ -21,12 +23,21 @@ if (-not (Test-Path $markerPath)) {
         Start-Sleep -Seconds 3
     }
     if (-not (Test-Path $markerPath)) {
-        Write-Host "WARNING: display-config marker not found. Continuing anyway."
+        throw "Display configuration marker was not created; VDD display setup did not complete."
     } else {
         Write-Host "Display config: $((Get-Content $markerPath -Raw).Trim())"
     }
 } else {
     Write-Host "Display config already done: $((Get-Content $markerPath -Raw).Trim())"
+}
+
+$markerContent = (Get-Content -LiteralPath $markerPath -Raw).Trim()
+if ($markerContent -notmatch '^OK\b') {
+    $displayLog = 'C:\Users\Administrator\provision\state\display-config.log'
+    if (Test-Path -LiteralPath $displayLog) {
+        Get-Content -LiteralPath $displayLog | ForEach-Object { Write-Host "  $_" }
+    }
+    throw "VDD display setup failed: $markerContent"
 }
 
 # Ensure config file exists
@@ -36,21 +47,42 @@ if (-not (Test-Path $confPath)) {
     New-Item -ItemType File -Path $confPath -Force | Out-Null
 }
 
-# Remove any stale output_name line.  With VDD as the sole desktop display,
-# Sunshine captures the full virtual desktop at VDD's resolution via NVIDIA's
-# DXGI adapter + NVENC encoder automatically.
-$cfgLines = @(Get-Content -LiteralPath $confPath)
-$filtered = @($cfgLines | Where-Object { $_ -notmatch '^\s*output_name\s*=' })
-$desired  = ($filtered | Where-Object { $_.Trim() -ne '' }) -join "`r`n"
-$existing = Get-Content -LiteralPath $confPath -Raw -ErrorAction SilentlyContinue
+function Set-ConfigValue {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Key,
+        [Parameter(Mandatory = $false)][AllowNull()][string]$Value
+    )
 
-if ($existing -ne $desired) {
-    Write-Host "Updating Sunshine config (removing output_name)."
-    Set-Content -LiteralPath $confPath -Value $desired -NoNewline -Encoding ASCII
+    $lines = @()
+    if (Test-Path -LiteralPath $Path) {
+        $lines = @(Get-Content -LiteralPath $Path)
+    }
+    $filtered = @($lines | Where-Object { $_ -notmatch "^\s*$([regex]::Escape($Key))\s*=" })
+    if ($null -ne $Value -and $Value.Trim() -ne '') {
+        $filtered += "$Key = $Value"
+    }
+    $desired = ($filtered | Where-Object { $_.Trim() -ne '' }) -join "`r`n"
+    $existing = Get-Content -LiteralPath $Path -Raw -ErrorAction SilentlyContinue
+    if ($existing -ne $desired) {
+        Set-Content -LiteralPath $Path -Value $desired -NoNewline -Encoding ASCII
+        return $true
+    }
+    return $false
+}
+
+$changed = $false
+# With VDD as the sole active desktop display, Sunshine should capture the full
+# virtual desktop automatically. A stale or forced output_name can bind capture
+# to a display path that is no longer stable after reboot, so remove it.
+Write-Host "Removing Sunshine output_name override."
+$changed = Set-ConfigValue -Path $confPath -Key 'output_name' -Value $null
+
+if ($changed) {
     Write-Host "Restarting Sunshine ..."
     Restart-Sunshine
 } else {
-    Write-Host "Sunshine config already correct (no output_name)."
+    Write-Host "Sunshine output_name already matches active display state."
 }
 
 Start-Sleep -Seconds 5

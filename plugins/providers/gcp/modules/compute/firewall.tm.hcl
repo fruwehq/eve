@@ -10,12 +10,19 @@ generate_hcl "z_gcp_firewall.tf" {
       description = "CIDR allowed to reach SSH"
     }
 
+    variable "bundle_packages" {
+      type        = string
+      default     = "ssh"
+      description = "Comma-separated package list"
+    }
+
     data "google_compute_network" "default" {
       name = "default"
     }
 
     locals {
-      gcp_name = substr(replace(lower(var.profile_name), "_", "-"), 0, 52)
+      gcp_name    = substr(replace(lower(var.profile_name), "_", "-"), 0, 52)
+      package_set = toset(split(",", var.bundle_packages))
     }
 
     resource "google_compute_firewall" "ssh" {
@@ -27,6 +34,19 @@ generate_hcl "z_gcp_firewall.tf" {
       allow {
         protocol = "tcp"
         ports    = ["22"]
+      }
+    }
+
+    resource "google_compute_firewall" "thinlinc" {
+      count         = contains(local.package_set, "thinlinc") ? 1 : 0
+      name          = "${local.gcp_name}-thinlinc"
+      network       = data.google_compute_network.default.name
+      source_ranges = [var.ssh_allowed_cidr]
+      target_tags   = [local.gcp_name]
+
+      allow {
+        protocol = "tcp"
+        ports    = ["300"]
       }
     }
 

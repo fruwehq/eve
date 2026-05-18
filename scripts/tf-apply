@@ -37,4 +37,11 @@ if [ -n "${EGAME_INSTANCE_NAME:-}" ]; then
   ./scripts/tf-init "$PROFILE"
 fi
 
-terramate run --tags="$TAGS" -- terraform apply -auto-approve
+TM_RUN_FLAGS=(
+  --disable-safeguards=git-untracked
+  --disable-safeguards=git-uncommitted
+  --disable-safeguards=git-out-of-sync
+  --disable-safeguards=outdated-code
+)
+
+terramate run "${TM_RUN_FLAGS[@]}" --tags="$TAGS" -- terraform apply -auto-approve

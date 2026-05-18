@@ -21,9 +21,10 @@ profile_catalog_dir="$(mktemp -d "${TMPDIR:-/tmp}/egame-plugin-profiles.XXXXXX")
 profile_catalog="$profile_catalog_dir/catalog.local.yaml"
 state_dir=""
 waypipe_bin_dir=""
+gnome_registry=""
 FAIL=0
 
-trap 'rm -rf "$profile_catalog_dir"; if [ -n "$state_dir" ]; then rm -rf "$state_dir"; fi; if [ -n "$waypipe_bin_dir" ]; then rm -rf "$waypipe_bin_dir"; fi' EXIT
+trap 'rm -rf "$profile_catalog_dir"; if [ -n "$state_dir" ]; then rm -rf "$state_dir"; fi; if [ -n "$waypipe_bin_dir" ]; then rm -rf "$waypipe_bin_dir"; fi; if [ -n "$gnome_registry" ]; then rm -f "$gnome_registry"; fi' EXIT
 
 cat >"$profile_catalog" <<'YAML'
 profiles:
@@ -131,11 +132,34 @@ else
   FAIL=$((FAIL + 1))
 fi
 
+if ./scripts/plugin-list --kind package --json | \
+  jq -e '.plugins[] | select(.id == "thinlinc") | (.env | index("THINLINC_SERVER_BUNDLE_URL")) and (.actions[] | select(.id == "web" and .target == "thinlinc.web"))' >/dev/null; then
+  printf '  [OK] ThinLinc package metadata validates\n'
+else
+  printf '  [FAIL] ThinLinc package metadata mismatch\n' >&2
+  FAIL=$((FAIL + 1))
+fi
+
 if ./scripts/package-list --registry "$FIXTURE" --instance dev-a --json | \
   jq -e '.packages[] | select(.id == "rustdesk") | (.actions[] | select(.id == "rustdesk" and .target == "rustdesk.connect"))' >/dev/null; then
   printf '  [OK] package-list exposes package actions to callers\n'
 else
   printf '  [FAIL] package-list exposes package actions to callers\n' >&2
+  FAIL=$((FAIL + 1))
+fi
+
+gnome_registry="$(mktemp)"
+cp "$FIXTURE" "$gnome_registry"
+if EGAME_INSTANCE_REGISTRY="$gnome_registry" make bundle.select INSTANCE=dev-a BUNDLE=desktop-gnome >/dev/null &&
+  ./scripts/package-list --registry "$gnome_registry" --instance dev-a --json |
+    jq -e '
+      ([.packages[] | select(.id as $id | ["rustdesk", "sunshine", "thinlinc", "vnc", "waypipe"] | index($id)) | .supported == false and .installable == false and .actions == []] | all) and
+      (.packages[] | select(.id == "rdp") | .supported == true and .installable == true)
+    ' >/dev/null; then
+  printf '  [OK] package-list keeps only GNOME Remote Desktop RDP for GNOME desktop selections\n'
+else
+  printf '  [FAIL] package-list GNOME remote desktop compatibility mismatch\n' >&2
+  ./scripts/package-list --registry "$gnome_registry" --instance dev-a --json >&2 || true
   FAIL=$((FAIL + 1))
 fi
 
@@ -161,6 +185,37 @@ if EGAME_INSTANCE_REGISTRY="$FIXTURE" ./scripts/package-action --instance dev-a 
   printf '  [OK] package action dry-run resolves manifest target\n'
 else
   printf '  [FAIL] package action dry-run resolves manifest target\n' >&2
+  FAIL=$((FAIL + 1))
+fi
+
+if EGAME_INSTANCE_REGISTRY="$FIXTURE" ./scripts/package-action --instance dev-a --package thinlinc --action web --dry-run | \
+  jq -e '.kind == "package-action" and .package == "thinlinc" and .action == "web" and .target == "thinlinc.web" and .dry_run == true' >/dev/null; then
+  printf '  [OK] ThinLinc package action dry-run resolves manifest target\n'
+else
+  printf '  [FAIL] ThinLinc package action dry-run resolves manifest target\n' >&2
+  FAIL=$((FAIL + 1))
+fi
+
+if EGAME_INSTANCE_REGISTRY="$FIXTURE" ./scripts/package-provision --instance dev-a --package rustdesk --dry-run | \
+  jq -e '.kind == "package-provision" and .instance == "dev-a" and .package == "rustdesk" and .dry_run == true' >/dev/null; then
+  printf '  [OK] package-provision dry-run honors EGAME_INSTANCE_REGISTRY\n'
+else
+  printf '  [FAIL] package-provision dry-run honors EGAME_INSTANCE_REGISTRY\n' >&2
+  FAIL=$((FAIL + 1))
+fi
+
+if EGAME_INSTANCE_REGISTRY="$FIXTURE" ./scripts/package-provision --instance dev-a --package thinlinc --dry-run | \
+  jq -e '.kind == "package-provision" and .instance == "dev-a" and .package == "thinlinc" and (.steps | index("provision/ubuntu/thinlinc.sh")) and (.package_markers | index("thinlinc")) and .dry_run == true' >/dev/null; then
+  printf '  [OK] ThinLinc package-provision dry-run resolves install steps\n'
+else
+  printf '  [FAIL] ThinLinc package-provision dry-run resolves install steps\n' >&2
+  FAIL=$((FAIL + 1))
+fi
+
+if ! grep -Eq 'Sunshine not responding|starting via SSH|Start-Process.*Sunshine|systemctl --user start sunshine' scripts/remote-sunshine-wait; then
+  printf '  [OK] remote-sunshine-wait only waits and does not start Sunshine\n'
+else
+  printf '  [FAIL] remote-sunshine-wait must not start Sunshine as a fallback\n' >&2
   FAIL=$((FAIL + 1))
 fi
 
@@ -614,6 +669,13 @@ printf '#< CLIXML\n'
 printf 'installed\n'
 SH
 chmod +x "$fake_capture_ssh"
+fake_running_ssh="$state_dir/fake-running-ssh"
+cat >"$fake_running_ssh" <<'SH'
+#!/usr/bin/env sh
+set -eu
+printf 'running\n'
+SH
+chmod +x "$fake_running_ssh"
 
 status_contract="$(
   EGAME_PACKAGE_STATUS_SSH="$fake_ssh" EGAME_INSTANCE_NAME=dev-a \
@@ -636,6 +698,18 @@ if printf '%s\n' "$windows_status_contract" | jq -e '.kind == "package-status" a
 else
   printf '  [FAIL] windows package status helper contract mismatch\n' >&2
   printf '%s\n' "$windows_status_contract" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+windows_running_contract="$(
+  EGAME_PACKAGE_STATUS_SSH="$fake_running_ssh" EGAME_INSTANCE_NAME=win-a EGAME_PACKAGE_STATUS_PROCESS=rustdesk EGAME_PACKAGE_STATUS_SERVICE_PATTERN=rustdesk \
+    ./scripts/package-status-windows rustdesk 'C:\Program Files\RustDesk\rustdesk.exe'
+)"
+if printf '%s\n' "$windows_running_contract" | jq -e '.kind == "package-status" and .package == "rustdesk" and .instance == "win-a" and .os_family == "windows" and .status == "installed" and .details == "running"' >/dev/null; then
+  printf '  [OK] windows package status helper keeps running packages installed\n'
+else
+  printf '  [FAIL] windows package status helper running contract mismatch\n' >&2
+  printf '%s\n' "$windows_running_contract" >&2
   FAIL=$((FAIL + 1))
 fi
 

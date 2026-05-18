@@ -20,8 +20,9 @@ if (Test-Path -LiteralPath $envFile) {
 }
 
 # Baseline list - 10 modes that Sunshine/Moonlight clients commonly request.
-# Global refresh rates (30/60/120) below apply to all of them; the configured
-# default is added if it falls outside the baseline.
+# Keep the established ultrawide/smaller mode set intact: the current VDD
+# driver has been observed to fail post-start when this list is narrowed to
+# only conventional monitor resolutions on Vultr Windows Server 2025.
 $BaselineResolutions = @(
   '5120x1440',
   '4096x1152',

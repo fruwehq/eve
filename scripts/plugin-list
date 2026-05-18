@@ -89,9 +89,14 @@ def validate_plugin!(plugin)
   validate_provider_supports!(plugin) if kind == "provider"
   validate_package_supports!(plugin) if kind == "package"
   require_string_list!(plugin["env"], plugin["_path"], "env")
+  if kind == "package" && plugin.key?("compatibility_enforced") &&
+     plugin["compatibility_enforced"] != true && plugin["compatibility_enforced"] != false
+    raise "#{plugin["_path"]}: compatibility_enforced must be boolean"
+  end
 
   validate_package_install!(plugin) if kind == "package" && plugin.key?("install")
   validate_package_actions!(plugin) if kind == "package" && plugin.key?("actions")
+  validate_package_compatibility!(plugin) if kind == "package" && plugin.key?("compatibility")
 end
 
 # install metadata is consumed by scripts/package-provision and
@@ -216,6 +221,26 @@ def validate_package_actions!(plugin)
       raise "#{path}: #{field}.id must match [a-z][a-z0-9-]*"
     end
     validate_package_action_prompt!(action["prompt"], path, "#{field}.prompt") if action.key?("prompt")
+  end
+end
+
+def validate_package_compatibility!(plugin)
+  compatibility = plugin["compatibility"]
+  path = plugin["_path"]
+  raise "#{path}: compatibility must be a list" unless compatibility.is_a?(Array)
+
+  compatibility.each_with_index do |entry, index|
+    field = "compatibility[#{index}]"
+    raise "#{path}: #{field} must be a map" unless entry.is_a?(Hash)
+
+    %w[platform desktop session status notes].each do |key|
+      value = entry[key]
+      raise "#{path}: #{field}.#{key} must be a string" unless value.is_a?(String) && !value.empty?
+    end
+
+    unless %w[supported wip unsupported legacy].include?(entry["status"])
+      raise "#{path}: #{field}.status must be one of supported, wip, unsupported, legacy"
+    end
   end
 end
 

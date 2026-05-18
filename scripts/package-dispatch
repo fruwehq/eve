@@ -58,14 +58,25 @@ def run_plugin(plugin, command, resolved, dry_run)
   env["EGAME_PLUGIN_DRY_RUN"] = "1" if dry_run
 
   cmd = command_vector(plugin, spec)
-  out = nil
+  out = +""
   Open3.popen3(env, *cmd, chdir: ROOT) do |stdin, stdout, stderr, wait_thr|
     stdin.write(JSON.generate(resolved))
     stdin.close
-    out = stdout.read
-    err = stderr.read
-    warn err unless err.empty?
-    print out
+
+    stdout_reader = Thread.new do
+      stdout.each_line do |line|
+        out << line
+        print line
+      end
+    end
+    stderr_reader = Thread.new do
+      stderr.each_line do |line|
+        warn line
+      end
+    end
+
+    stdout_reader.join
+    stderr_reader.join
     raise "package command failed: #{command}" unless wait_thr.value.success?
   end
   out
@@ -117,6 +128,9 @@ def validate_package_support!(package_id, plugin, resolved)
   validate_support_value!(package_id, supports, os.fetch("id"), "os_ids", "OS")
   validate_support_value!(package_id, supports, os.fetch("version", ""), "os_versions", "OS version")
   validate_support_value!(package_id, supports, os.fetch("version", ""), "#{os_family}_versions", "#{os_family} version")
+  if os_family == "ubuntu" && package_id == "rustdesk" && resolved.fetch("bundle_packages", []).include?("gnome-desktop")
+    raise "package plugin rustdesk is disabled for gnome-desktop because RustDesk cannot unattended-capture GNOME/Wayland sessions"
+  end
 end
 
 instance_name = nil

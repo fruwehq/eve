@@ -10,6 +10,8 @@ set -euo pipefail
 PROFILE="${1:?Usage: scripts/instance-ssh <profile> [-- <cmd>] [--scp <local> <remote>]}"
 shift || true
 cd "$(git rev-parse --show-toplevel)"
+# shellcheck source=lib/load-runtime-env.sh
+. ./scripts/lib/load-runtime-env.sh
 # shellcheck source=lib/instance-workdir.sh
 . ./scripts/lib/instance-workdir.sh
 
@@ -48,6 +50,23 @@ PROVIDER=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^PROVIDER=/{print $2}')
 RESOLVED_RASPBERRY_PI_HOST=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^RASPBERRY_PI_HOST=/{print substr($0, index($0, "=") + 1)}')
 RESOLVED_RASPBERRY_PI_IP=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^RASPBERRY_PI_IP=/{print substr($0, index($0, "=") + 1)}')
 
+normalize_path() {
+  case "$1" in
+    '~'|'~/'*)
+      printf '%s\n' "$HOME${1#\~}"
+      ;;
+    '$HOME'|'$HOME/'*)
+      printf '%s\n' "$HOME${1#\$HOME}"
+      ;;
+    '$(HOME)'|'$(HOME)/'*)
+      printf '%s\n' "$HOME${1#\$\(HOME\)}"
+      ;;
+    *)
+      printf '%s\n' "$1"
+      ;;
+  esac
+}
+
 if [ "$ENGINE" = "metal" ]; then
   case "$PROVIDER" in
     raspberry-pi)
@@ -85,6 +104,7 @@ if [ -n "$KEY_FILE" ] && [ "${KEY_FILE%.pub}" != "$KEY_FILE" ]; then
 else
   PRIV_KEY="${SSH_PRIVATE_KEY_FILE:-}"
 fi
+[ -z "$PRIV_KEY" ] || PRIV_KEY="$(normalize_path "$PRIV_KEY")"
 
 SSH_OPTS=(
   -o StrictHostKeyChecking=no

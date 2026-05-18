@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+INSTANCE="${1:-}"
+if [ -z "$INSTANCE" ]; then
+  echo "Usage: scripts/remote-thinlinc <instance>" >&2
+  exit 2
+fi
+
+ip=$(./scripts/instance-ip "$INSTANCE")
+if [ -z "$ip" ]; then
+  echo "remote-thinlinc: could not resolve IP for $INSTANCE" >&2
+  exit 1
+fi
+
+port="${THINLINC_WEBACCESS_PORT:-300}"
+url="https://$ip:$port"
+
+if command -v open >/dev/null 2>&1; then
+  exec open "$url"
+fi
+
+exec xdg-open "$url"

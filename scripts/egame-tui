@@ -377,7 +377,7 @@ def run_tui() -> int:
 
         #confirm-dialog {
             width: 72;
-            height: 10;
+            height: 12;
             border: round $error;
             background: $surface;
             padding: 1 2;
@@ -645,6 +645,7 @@ def run_tui() -> int:
             self.step = 0
             self.selected_platform_id = ""
             self.highlighted_bundle_id = ""
+            self.highlighted_package_id = ""
             self.rendered_bundle_signature: tuple[Any, ...] | None = None
             self.rendered_bundled_package_ids: set[str] = set()
             self.rendered_package_signature: tuple[Any, ...] | None = None
@@ -675,6 +676,7 @@ def run_tui() -> int:
                         with Vertical(classes="content-column"):
                             yield Static("Additional packages", classes="muted")
                             yield SelectionList(id="package-select", disabled=not self.package_ids)
+                            yield Static("", id="package-compatibility", classes="muted")
                     yield Static("", id="included-packages", classes="muted")
                     yield Static("", id="resource-defaults")
                     with Horizontal(id="override-row"):
@@ -792,21 +794,90 @@ def run_tui() -> int:
                 return reason
             if not self.package_installable_on_platform(package_id):
                 return "native action only on this OS"
+            compatibility_reason = self.package_compatibility_reason(
+                package_id,
+                self.content_package_ids(extra_package_id=package_id),
+            )
+            if compatibility_reason:
+                return compatibility_reason
             return None
 
         def bundle_support_reason(self, bundle_id: str) -> str | None:
+            prospective_packages = self.content_package_ids(extra_bundle_id=bundle_id)
             for package_id in self.bundle_includes(bundle_id):
                 reason = self.support_reason(package_id)
                 if reason:
                     return f"{package_id}: {reason}"
+                compatibility_reason = self.package_compatibility_reason(package_id, prospective_packages)
+                if compatibility_reason:
+                    return f"{package_id}: {compatibility_reason}"
             return None
 
         def supported_selected_bundles(self) -> list[str]:
             return [bundle_id for bundle_id in self.selected_bundles() if not self.bundle_support_reason(bundle_id)]
 
+        def raw_selected_bundles(self) -> list[str]:
+            selected = self.query_one("#bundle-select", SelectionList).selected
+            return [str(bundle) for bundle in selected]
+
+        def raw_selected_packages(self) -> list[str]:
+            selected = self.query_one("#package-select", SelectionList).selected
+            return [str(package) for package in selected]
+
+        def content_package_ids(self, extra_bundle_id: str = "", extra_package_id: str = "") -> set[str]:
+            packages = set(self.raw_selected_packages())
+            if extra_package_id:
+                packages.add(extra_package_id)
+            bundle_ids = set(self.raw_selected_bundles())
+            if extra_bundle_id:
+                bundle_ids.add(extra_bundle_id)
+            for bundle_id in bundle_ids:
+                packages.update(self.bundle_includes(bundle_id))
+            return packages
+
+        def compatibility_target(self, package_ids: set[str]) -> dict[str, str]:
+            platform_choice = self.selected_platform()
+            os_family = str(platform_choice.get("os_family") or "")
+            if os_family == "windows":
+                return {"platform": "windows", "desktop": "Windows", "session": "Native"}
+            if os_family == "ubuntu" and "gnome-desktop" in package_ids:
+                return {"platform": "ubuntu", "desktop": "GNOME", "session": "Wayland"}
+            if os_family == "ubuntu":
+                return {"platform": "ubuntu", "desktop": "XFCE", "session": "X11"}
+            return {"platform": os_family, "desktop": "", "session": ""}
+
+        def package_compatibility_reason(self, package_id: str, package_ids: set[str]) -> str | None:
+            package = self.package_map.get(package_id, {})
+            if package.get("compatibility_enforced") is not True:
+                return None
+            entries = package.get("compatibility", [])
+            if not isinstance(entries, list):
+                return "no supported compatibility matrix"
+
+            target = self.compatibility_target(package_ids)
+            for entry in entries:
+                if not isinstance(entry, dict) or str(entry.get("status") or "") != "supported":
+                    continue
+                if str(entry.get("platform") or "") != target["platform"]:
+                    continue
+                desktop = str(entry.get("desktop") or "")
+                session = str(entry.get("session") or "")
+                if desktop and desktop != target["desktop"]:
+                    continue
+                if session and session != target["session"]:
+                    continue
+                return None
+
+            target_label = " / ".join(value for value in (target["platform"], target["desktop"], target["session"]) if value)
+            return f"no supported {target_label} row"
+
         def selected_packages(self) -> list[str]:
             selected = self.query_one("#package-select", SelectionList).selected
-            return [str(package) for package in selected if self.package_installable_on_platform(str(package))]
+            return [
+                str(package)
+                for package in selected
+                if self.package_installable_on_platform(str(package)) and self.package_select_reason(str(package)) is None
+            ]
 
         def selected_bundles(self) -> list[str]:
             selected = self.query_one("#bundle-select", SelectionList).selected
@@ -899,12 +970,51 @@ def run_tui() -> int:
                 for package in self.package_ids
                 if package not in bundled
             ]
+            option_values = [str(option.value) for option in package_options]
             package_list.set_options(package_options)
             if isinstance(highlighted, int) and package_options:
                 package_list.highlighted = min(highlighted, len(package_options) - 1)
+            if self.highlighted_package_id not in option_values:
+                self.highlighted_package_id = option_values[0] if option_values else ""
             package_list.disabled = package_list.option_count == 0
             self.rendered_bundled_package_ids = bundled
             self.rendered_package_signature = signature
+
+        def package_compatibility_text(self, package_id: str) -> str:
+            if not package_id:
+                return "Highlight a package to see desktop/session compatibility."
+
+            package = self.package_map.get(package_id, {})
+            entries = package.get("compatibility", [])
+            display_name = str(package.get("display_name") or package_id)
+            if not isinstance(entries, list) or not entries:
+                return f"{display_name}: no compatibility matrix yet."
+
+            platform_choice = self.selected_platform()
+            current_family = str(platform_choice.get("os_family") or platform_choice.get("provider") or "")
+            typed_entries = [entry for entry in entries if isinstance(entry, dict)]
+            matching = [entry for entry in typed_entries if str(entry.get("platform") or "") == current_family]
+            other = [entry for entry in typed_entries if entry not in matching]
+            ordered = matching + other
+
+            status_labels = {
+                "supported": "SUPPORTED",
+                "wip": "WIP",
+                "unsupported": "NO",
+                "legacy": "LEGACY",
+            }
+            lines = [f"{display_name} compatibility:"]
+            for entry in ordered[:4]:
+                status = status_labels.get(str(entry.get("status") or ""), str(entry.get("status") or "-").upper())
+                platform = str(entry.get("platform") or "-")
+                desktop = str(entry.get("desktop") or "-")
+                session = str(entry.get("session") or "-")
+                notes = str(entry.get("notes") or "")
+                current = " (selected platform)" if platform == current_family else ""
+                lines.append(f"{status}: {platform} / {desktop} / {session}{current} - {notes}")
+            if len(ordered) > 4:
+                lines.append(f"... {len(ordered) - 4} more rows in docs.")
+            return "\n".join(lines)
 
         def platform_default_lines(self, platform_choice: dict[str, Any]) -> list[str]:
             defaults = platform_choice.get("defaults", {}) if isinstance(platform_choice.get("defaults"), dict) else {}
@@ -965,6 +1075,10 @@ def run_tui() -> int:
             else:
                 preview_text = "Highlight a bundle to preview included packages before selecting it."
             self.query_one("#bundle-preview", Static).update(preview_text)
+            highlighted_package_id = self.highlighted_package_id or (selected_packages[0] if selected_packages else "")
+            self.query_one("#package-compatibility", Static).update(
+                self.package_compatibility_text(highlighted_package_id)
+            )
             self.query_one("#included-packages", Static).update(
                 "Included by selected bundles (locked): " + bundled_text
             )
@@ -1021,6 +1135,9 @@ def run_tui() -> int:
         def on_selection_list_selection_highlighted(self, event: SelectionList.SelectionHighlighted[Any]) -> None:
             if event.selection_list.id == "bundle-select":
                 self.highlighted_bundle_id = str(event.selection.value)
+                self.update_wizard()
+            elif event.selection_list.id == "package-select":
+                self.highlighted_package_id = str(event.selection.value)
                 self.update_wizard()
 
         def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
@@ -2770,14 +2887,15 @@ def run_tui() -> int:
                 package_id = str(package.get("id") or "")
                 state = package.get("state", {}) or {}
                 status = state.get("status")
-                effectively_installed = status in {"installed", "reinstalled"} or (
+                effectively_installed = status in {"installed", "running", "reinstalled"} or (
                     status in {None, "unknown"} and bool(package.get("selected")) and provision_state == "provisioned"
                 )
                 for action in package.get("actions", []):
                     if not isinstance(action, dict):
                         continue
                     native_action = bool(action.get("native"))
-                    if not effectively_installed and not (native_action and provider_available and bool(package.get("supported"))):
+                    native_without_install = native_action and os_family == "windows"
+                    if not effectively_installed and not (native_without_install and provider_available and bool(package.get("supported"))):
                         continue
                     if not action_allowed_for_instance(action, package_id, os_family):
                         continue

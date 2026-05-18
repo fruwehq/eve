@@ -7,6 +7,7 @@ Write-Host "#########################################################"
 . "$PSScriptRoot\..\lib\downloads.ps1"
 
 $rebootFlag = 'C:\Users\Administrator\provision\state\reboot.flag'
+$driverVersion = '24.12.24'
 
 $alreadyInstalled = $false
 
@@ -14,11 +15,29 @@ $alreadyInstalled = $false
 Write-Host "Checking Virtual Display Driver (VDD)..."
 
 try {
-  $existing = Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue |
-    Where-Object { $_.InstanceId -like 'ROOT\\MTTVDD*' -or $_.FriendlyName -match 'Virtual Display|VDD|MttVDD' }
-  if ($existing) {
-    Write-Host "VDD already installed. Skipping installation step."
+  $existing = @(Get-PnpDevice -ErrorAction SilentlyContinue |
+    Where-Object {
+      $_.InstanceId -like 'ROOT\\DISPLAY\\0000*' -or
+      $_.InstanceId -like 'ROOT\\MTTVDD*' -or
+      $_.FriendlyName -match 'Virtual Display|VDD|MttVDD'
+    }
+  )
+  $healthy = @($existing | Where-Object {
+      $_.Status -eq 'OK' -and $_.ConfigManagerErrorCode -eq 'CM_PROB_NONE'
+    })
+  $unhealthy = @($existing | Where-Object {
+      $_.Status -ne 'OK' -or $_.ConfigManagerErrorCode -ne 'CM_PROB_NONE'
+    })
+  if ($healthy.Count -gt 0) {
+    Write-Host "VDD already installed and healthy. Skipping installation step."
     $alreadyInstalled = $true
+  } elseif ($unhealthy.Count -gt 0) {
+    Write-Host "VDD is present but unhealthy; removing stale device before reinstall."
+    foreach ($dev in $unhealthy) {
+      Write-Host "Removing unhealthy VDD device: $($dev.FriendlyName) [$($dev.InstanceId)] status=$($dev.Status) code=$($dev.ConfigManagerErrorCode)"
+      pnputil /remove-device "$($dev.InstanceId)" | ForEach-Object { Write-Host "  $_" }
+    }
+    Start-Sleep -Seconds 3
   }
 } catch {
   Write-Host "Could not verify existing VDD installation. Continuing..."
@@ -52,39 +71,68 @@ Expand-Archive -Path $controlZipPath -DestinationPath $controlExtractPath -Force
 
 # === Install VDD driver if missing ============================================
 if (-not $alreadyInstalled) {
-  $repoZipPath = "C:\Users\Administrator\provision\downloads\vdd\Virtual-Display-Driver-master.zip"
-  $repoExtractPath = "C:\Users\Administrator\provision\downloads\vdd\repo"
-  $repoUrl = "https://github.com/VirtualDrivers/Virtual-Display-Driver/archive/refs/heads/master.zip"
+  $driverZipPath = "C:\Users\Administrator\provision\downloads\vdd\Signed-Driver-v$driverVersion-x64.zip"
+  $driverExtractPath = "C:\Users\Administrator\provision\downloads\vdd\signed-$driverVersion-x64"
+  $driverUrl = "https://github.com/VirtualDrivers/Virtual-Display-Driver/releases/download/$driverVersion/Signed-Driver-v$driverVersion-x64.zip"
 
-  Write-Host "Downloading Virtual-Display-Driver repository archive..."
-  Download-File -Url $repoUrl -OutFile $repoZipPath -SkipIfExists
+  Write-Host "Downloading Virtual Display Driver $driverVersion signed x64 package..."
+  Download-File -Url $driverUrl -OutFile $driverZipPath -SkipIfExists
 
-  if (Test-Path $repoExtractPath) { Remove-Item -Recurse -Force $repoExtractPath }
-  New-Item -ItemType Directory -Path $repoExtractPath -Force | Out-Null
-  Expand-Archive -Path $repoZipPath -DestinationPath $repoExtractPath -Force
+  if (Test-Path $driverExtractPath) { Remove-Item -Recurse -Force $driverExtractPath }
+  New-Item -ItemType Directory -Path $driverExtractPath -Force | Out-Null
+  Expand-Archive -Path $driverZipPath -DestinationPath $driverExtractPath -Force
 
-  $scriptPath = Get-ChildItem -Path $repoExtractPath -Recurse -Filter 'silent-install.ps1' |
-    Where-Object { $_.FullName -match 'Community Scripts' } |
+  $driverInf = Get-ChildItem -Path $driverExtractPath -Recurse -Filter 'MttVDD.inf' |
     Select-Object -First 1 -ExpandProperty FullName
-  if (-not $scriptPath) {
-    throw "Could not find Community Scripts\\silent-install.ps1 in extracted repository archive."
+  if (-not $driverInf) {
+    throw "Could not find MttVDD.inf in $driverExtractPath."
   }
 
-  Write-Host "Executing silent install script from repository archive..."
-  & $scriptPath
+  $driverCat = Get-ChildItem -Path $driverExtractPath -Recurse -Filter 'mttvdd.cat' |
+    Select-Object -First 1 -ExpandProperty FullName
+  if ($driverCat) {
+    $signature = Get-AuthenticodeSignature -LiteralPath $driverCat
+    if ($signature.SignerCertificate) {
+      Write-Host "Trusting VDD publisher certificate: $($signature.SignerCertificate.Subject)"
+      $publisherCertPath = Join-Path $driverExtractPath 'vdd-publisher.cer'
+      [System.IO.File]::WriteAllBytes($publisherCertPath, $signature.SignerCertificate.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert))
+      Import-Certificate -FilePath $publisherCertPath -CertStoreLocation Cert:\LocalMachine\TrustedPublisher | Out-Null
+    }
+  }
+
+  $devcon = Join-Path $controlExtractPath 'Dependencies\devcon.exe'
+  if (-not (Test-Path -LiteralPath $devcon)) {
+    throw "Could not find devcon.exe in VDD Control dependencies at $devcon."
+  }
+
+  Write-Host "Installing Virtual Display Driver $driverVersion via devcon..."
+  & $devcon install $driverInf 'Root\MttVDD'
+  if ($LASTEXITCODE -ne 0) {
+    throw "devcon VDD install failed (exit $LASTEXITCODE)"
+  }
   Start-Sleep -Seconds 5
 
   try {
-    $installed = Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue |
-      Where-Object { $_.InstanceId -like 'ROOT\\MTTVDD*' -or $_.FriendlyName -match 'Virtual Display|VDD|MttVDD' }
-    if ($installed) {
+    $installed = @(Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue |
+      Where-Object {
+        $_.InstanceId -like 'ROOT\\DISPLAY\\0000*' -or
+        $_.InstanceId -like 'ROOT\\MTTVDD*' -or
+        $_.FriendlyName -match 'Virtual Display|VDD|MttVDD'
+      })
+    $healthy = @($installed | Where-Object {
+        $_.Status -eq 'OK' -and $_.ConfigManagerErrorCode -eq 'CM_PROB_NONE'
+      })
+    if ($healthy.Count -gt 0) {
       Write-Host "VDD installation successful."
       New-Item $rebootFlag -ItemType File -Force | Out-Null
     } else {
-      Write-Host "WARNING: VDD installation could not be verified."
+      foreach ($dev in $installed) {
+        Write-Host "VDD device not healthy: $($dev.FriendlyName) [$($dev.InstanceId)] status=$($dev.Status) code=$($dev.ConfigManagerErrorCode)"
+      }
+      throw "VDD installation could not be verified as healthy."
     }
   } catch {
-    Write-Host "WARNING: Could not verify VDD installation."
+    throw "Could not verify VDD installation: $_"
   }
 }
 

@@ -257,6 +257,20 @@ generate_hcl "z_ec2_security_group.tf" {
         }
       }
 
+      # ── ThinLinc ─────────────────────────────────────────────────────
+
+      dynamic "ingress" {
+        for_each = contains(local.package_set, "thinlinc") ? [1] : []
+
+        content {
+          from_port   = 300
+          to_port     = 300
+          protocol    = "tcp"
+          cidr_blocks = local.allowed_cidrs
+          description = "ThinLinc Web Access"
+        }
+      }
+
       # ── Windows-specific ──────────────────────────────────────────────
 
       dynamic "ingress" {

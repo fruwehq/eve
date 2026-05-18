@@ -10,6 +10,18 @@ supports:
   os_families: [ubuntu, windows]
   arches: [amd64]
   ubuntu_versions: ["22.04", "24.04"]
+compatibility_enforced: true
+compatibility:
+  - platform: ubuntu
+    desktop: XFCE
+    session: X11
+    status: legacy
+    notes: Limited to Ubuntu 22.04/24.04; not an Ubuntu 26 path.
+  - platform: windows
+    desktop: Windows
+    session: Native
+    status: wip
+    notes: Available as an experimental package only.
 down: {destructive: true}
 env: []
 actions:

@@ -7,6 +7,9 @@
 > Next boundary cleanup: [docs/v3.1-provider-plugin-boundaries-plan.md](docs/v3.1-provider-plugin-boundaries-plan.md)
 >
 > Planned runtime notes: [docs/raspberry-pi-provider.md](docs/raspberry-pi-provider.md)
+>
+> Remote desktop compatibility matrix:
+> [docs/remote-desktop-compatibility.md](docs/remote-desktop-compatibility.md)
 
 ## v3 instance workflow
 
@@ -318,7 +321,7 @@ make logs INSTANCE=aws-dev-a       # tail remote logs
   `systemd` unit, and runs numbered package steps. During the v3.1 migration,
   manifests may still reference legacy shared steps, but package-specific steps
   should live under `plugins/packages/<id>/provision/ubuntu/`.
-- Windows: uploads [windows/provision/](windows/provision/) to `C:\Users\Administrator\provision` and runs `bootstrap.ps1`, which registers a Scheduled Task that walks a similar sorted `steps/` directory. Requires `EPHEMERAL_WINDOWS_PASSWORD` (or a terraform output) and `EPHEMERAL_SUNSHINE_PASSWORD` — used to build `./tmp/env.json` and scp it into the provision state dir.
+- Windows: uploads [oses/windows-server-2025/provision/](oses/windows-server-2025/provision/) to `C:\Users\Administrator\provision` and runs `bootstrap.ps1`, which registers a Scheduled Task that walks a similar sorted `steps/` directory. Requires `EPHEMERAL_WINDOWS_PASSWORD` (or a terraform output) and `EPHEMERAL_SUNSHINE_PASSWORD` — used to build `./tmp/env.json` and scp it into the provision state dir.
 
 State is tracked in `$HOME/provision/state/state.json` on the VM — provisioning resumes from the last completed step after a reboot.
 

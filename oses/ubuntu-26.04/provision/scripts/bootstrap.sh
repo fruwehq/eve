@@ -39,8 +39,8 @@ User=$USER
 WorkingDirectory=$PROVISION_ROOT
 Environment=PROVISION_ROOT=$PROVISION_ROOT
 ExecStart=/usr/bin/env bash $SCRIPTS_DIR/runner.sh
-StandardOutput=append:$LOGS_DIR/provision.log
-StandardError=append:$LOGS_DIR/provision.log
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target

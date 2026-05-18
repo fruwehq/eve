@@ -162,6 +162,7 @@ packages = catalog["packages"].map do |package|
   plugin = package_plugin_by_id[package["id"]] || {}
   supports = plugin["supports"].is_a?(Hash) ? plugin["supports"] : {}
   actions = plugin["actions"].is_a?(Array) ? plugin["actions"] : []
+  compatibility = plugin["compatibility"].is_a?(Array) ? plugin["compatibility"] : []
   install = plugin["install"].is_a?(Hash) ? plugin["install"] : nil
   installable_os_families = install ? install.keys : []
 
@@ -171,7 +172,9 @@ packages = catalog["packages"].map do |package|
     "supports" => supports,
     "installable" => !install.nil?,
     "installable_os_families" => installable_os_families,
-    "actions" => actions
+    "actions" => actions,
+    "compatibility_enforced" => plugin["compatibility_enforced"] == true,
+    "compatibility" => compatibility
   }
 end
 

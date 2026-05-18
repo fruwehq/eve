@@ -112,7 +112,24 @@ Supported metadata:
 ```yaml
 supports:
   os_families: [ubuntu, windows]
+compatibility_enforced: true
+compatibility:
+  - platform: ubuntu
+    desktop: XFCE
+    session: X11
+    status: supported
+    notes: Uses an isolated XFCE session.
 ```
+
+`compatibility` is optional. It feeds Eve's new-instance package help and the
+remote desktop compatibility docs. Each row must include `platform`, `desktop`,
+`session`, `status`, and `notes`; status must be one of `supported`, `wip`,
+`unsupported`, or `legacy`.
+
+Set `compatibility_enforced: true` when package availability should be filtered
+by the matrix. Eve and `package-list` then require a `supported` row matching
+the selected OS family, desktop, and session. Leave it unset for ordinary
+packages whose compatibility rows are informational.
 
 Package `status` commands should emit one JSON object with:
 

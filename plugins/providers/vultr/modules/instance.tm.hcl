@@ -57,7 +57,7 @@ generate_hcl "z_vultr_instance.tf" {
         "${terramate.root.path.fs.absolute}/plugins/providers/vultr/modules/templates/windows-startup.cmd.tftpl",
         {
           encoded_command = textencodebase64(templatefile(
-            "${terramate.root.path.fs.absolute}/windows/ssh.ps1.tftpl",
+            "${terramate.root.path.fs.absolute}/oses/windows-server-2025/ssh.ps1.tftpl",
             {
               public_key = trimspace(file(pathexpand(var.ssh_public_key_file)))
             }

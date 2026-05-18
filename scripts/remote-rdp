@@ -16,7 +16,8 @@ case "$OS_FAMILY" in
     ADMIN_SESSION=1
     ;;
   ubuntu)
-    USERNAME=$(printf '%s\n' "$RESOLVED_ENV" | awk -F= '/^VM_USER_NAME=/{print $2}')
+    VM_USERNAME=$(printf '%s\n' "$RESOLVED_ENV" | awk -F= '/^VM_USER_NAME=/{print $2}')
+    USERNAME="${RDP_GATE_USER:-$VM_USERNAME}"
     if [ -z "$USERNAME" ]; then
       USERNAME="${VM_USER_NAME:-}"
     fi
@@ -24,12 +25,12 @@ case "$OS_FAMILY" in
       echo "remote-rdp: VM_USER_NAME is required for Ubuntu RDP" >&2
       exit 2
     fi
-    if [ -z "${VM_USER_PASSWORD:-}" ]; then
-      echo "remote-rdp: VM_USER_PASSWORD is required for Ubuntu RDP/xrdp login" >&2
-      echo "remote-rdp: RustDesk uses RUSTDESK_PASSWORD; Linux login/RDP uses VM_USER_PASSWORD." >&2
+    PW="${RDP_GATE_PASSWORD:-${VM_USER_PASSWORD:-}}"
+    if [ -z "$PW" ]; then
+      echo "remote-rdp: VM_USER_PASSWORD or RDP_GATE_PASSWORD is required for Ubuntu RDP login" >&2
+      echo "remote-rdp: RustDesk uses RUSTDESK_PASSWORD; Linux login/RDP uses VM_USER_PASSWORD by default." >&2
       exit 2
     fi
-    PW="$VM_USER_PASSWORD"
     ADMIN_SESSION=0
     ;;
   *)

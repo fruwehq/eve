@@ -330,6 +330,10 @@ emit_vagrant() {
       (if ($r.bundle_packages | index("rdp")) != null then
         "  # RDP\n" +
         "  config.vm.network \"forwarded_port\", guest: 3389, host: 3389, auto_correct: true\n"
+      else "" end) +
+      (if ($r.bundle_packages | index("thinlinc")) != null then
+        "  # ThinLinc Web Access\n" +
+        "  config.vm.network \"forwarded_port\", guest: 300, host: 300, auto_correct: true\n"
       else "" end)
     ) as $port_forwards |
 

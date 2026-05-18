@@ -94,6 +94,32 @@ Set-RegistryValueIfNeeded `
   -Type DWord `
   -Value 1
 
+# Disable Windows Server's Shutdown Event Tracker prompt. These instances are
+# disposable desktops, and the modal blocks RDP after provider reboots/crashes.
+Set-RegistryValueIfNeeded `
+  -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Reliability" `
+  -Name ShutdownReasonOn `
+  -Type DWord `
+  -Value 0
+
+Set-RegistryValueIfNeeded `
+  -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Reliability" `
+  -Name ShutdownReasonUI `
+  -Type DWord `
+  -Value 0
+
+Set-RegistryValueIfNeeded `
+  -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Reliability" `
+  -Name ShutdownReasonOn `
+  -Type DWord `
+  -Value 0
+
+Set-RegistryValueIfNeeded `
+  -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Reliability" `
+  -Name ShutdownReasonUI `
+  -Type DWord `
+  -Value 0
+
 # Configure Windows auto-logon for the local Administrator account
 Set-RegistryValueIfNeeded -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" -Name AutoAdminLogon -Value "1"
 Set-RegistryValueIfNeeded -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" -Name DefaultUserName -Value $User

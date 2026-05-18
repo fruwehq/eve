@@ -59,11 +59,18 @@ env_value() {
 }
 
 OS_FAMILY=$(env_value OS_FAMILY)
+OS_ID=$(env_value OS_ID)
+OS_PROVISION_DIR="oses/$OS_ID/provision"
 
 if [ "$OS_FAMILY" != "windows" ]; then
   echo "package-provision-windows: granular package install is only implemented for windows, got $OS_FAMILY" >&2
   exit 2
 fi
+if [ ! -d "$OS_PROVISION_DIR" ]; then
+  echo "package-provision-windows: OS provisioning directory not found: $OS_PROVISION_DIR" >&2
+  exit 2
+fi
+OS_PROVISION_DIR=$(cd "$OS_PROVISION_DIR" && pwd -P)
 
 # Read install metadata from the package plugin manifest.  Packages whose
 # manifest declares install.windows.fallback: true (or omits install.windows
@@ -139,9 +146,9 @@ fi
 STAGE=$(mktemp -d)
 trap 'rm -rf "$STAGE"' EXIT
 mkdir -p "$STAGE/scripts/steps"
-cp -R windows/provision/scripts/lib "$STAGE/scripts/lib"
-if [ -d windows/provision/scripts/templates ]; then
-  cp -R windows/provision/scripts/templates "$STAGE/scripts/templates"
+cp -R "$OS_PROVISION_DIR/scripts/lib" "$STAGE/scripts/lib"
+if [ -d "$OS_PROVISION_DIR/scripts/templates" ]; then
+  cp -R "$OS_PROVISION_DIR/scripts/templates" "$STAGE/scripts/templates"
 fi
 if [ -n "$PLUGIN_ROOT" ] && [ -d "$PLUGIN_ROOT/provision/windows/lib" ]; then
   cp -R "$PLUGIN_ROOT/provision/windows/lib/." "$STAGE/scripts/lib/"
@@ -157,8 +164,8 @@ resolve_step_path() {
     printf '%s\n' "$PLUGIN_ROOT/$step"
     return 0
   fi
-  if [ -f "windows/provision/scripts/steps/$step" ]; then
-    printf '%s\n' "windows/provision/scripts/steps/$step"
+  if [ -f "$OS_PROVISION_DIR/scripts/steps/$step" ]; then
+    printf '%s\n' "$OS_PROVISION_DIR/scripts/steps/$step"
     return 0
   fi
   echo "package-provision-windows: step not found for package=$PACKAGE: $step" >&2

@@ -4,8 +4,8 @@
 #
 # Usage: scripts/provision <profile>
 #
-# Linux:   uploads ./linux/provision/   -> $HOME/provision    runs bootstrap.sh
-# Windows: uploads ./windows/provision/ -> C:\Users\<user>\provision  runs bootstrap.ps1
+# Ubuntu: uploads ./oses/<catalog-os-id>/provision/ -> $HOME/provision
+# Windows: uploads ./oses/<catalog-os-id>/provision/ -> C:\Users\<user>\provision
 
 set -euo pipefail
 
@@ -14,11 +14,19 @@ cd "$(git rev-parse --show-toplevel)"
 
 RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
 OS_FAMILY=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^OS_FAMILY=/{print $2}')
+OS_ID=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^OS_ID=/{print $2}')
 BUNDLE_PACKAGES=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^BUNDLE_PACKAGES=/{print $2}')
 PROFILE_NAME=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^PROFILE_NAME=/{print $2}')
 PROVIDER=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^PROVIDER=/{print $2}')
+OS_PROVISION_DIR="oses/$OS_ID/provision"
 
-echo "[provision] profile=$PROFILE os_family=$OS_FAMILY"
+echo "[provision] profile=$PROFILE os=$OS_ID os_family=$OS_FAMILY"
+
+if [ ! -d "$OS_PROVISION_DIR" ]; then
+  echo "[provision] OS provisioning directory not found: $OS_PROVISION_DIR" >&2
+  exit 2
+fi
+OS_PROVISION_DIR=$(cd "$OS_PROVISION_DIR" && pwd -P)
 
 ./scripts/ssh-wait "$PROFILE"
 
@@ -41,7 +49,7 @@ case "$OS_FAMILY" in
 
     STAGE=$(mktemp -d)
     trap 'rm -rf "$STAGE"' EXIT
-    cp -R linux/provision/scripts "$STAGE/scripts"
+    cp -R "$OS_PROVISION_DIR/scripts" "$STAGE/scripts"
     mkdir -p "$STAGE/state"
     rm -f "$STAGE/scripts/steps/"*.sh
 
@@ -55,8 +63,8 @@ case "$OS_FAMILY" in
       local target
       target="$STAGE/scripts/steps/$(basename "$step")"
 
-      if [ -f "linux/provision/scripts/steps/$step" ]; then
-        source="linux/provision/scripts/steps/$step"
+      if [ -f "$OS_PROVISION_DIR/scripts/steps/$step" ]; then
+        source="$OS_PROVISION_DIR/scripts/steps/$step"
       elif [ -f "$plugin_root/$step" ]; then
         source="$plugin_root/$step"
       else
@@ -113,12 +121,37 @@ case "$OS_FAMILY" in
 
     # bundle_packages: one package per line for cheap grep lookup in step scripts
     printf '%s\n' "$BUNDLE_PACKAGES" | tr ',' '\n' > "$STAGE/state/bundle_packages"
+
+    THINLINC_REMOTE_SERVER_BUNDLE_PATH="${THINLINC_SERVER_BUNDLE_PATH:-}"
+    UPLOAD_THINLINC_BUNDLE=0
+    case ",$BUNDLE_PACKAGES," in
+      *,thinlinc,*)
+        if [ -n "${THINLINC_SERVER_BUNDLE_PATH:-}" ]; then
+          if [ ! -e "$THINLINC_SERVER_BUNDLE_PATH" ]; then
+            echo "[provision] THINLINC_SERVER_BUNDLE_PATH does not exist: $THINLINC_SERVER_BUNDLE_PATH" >&2
+            exit 2
+          fi
+          thinlinc_bundle_basename="$(basename "$THINLINC_SERVER_BUNDLE_PATH")"
+          THINLINC_REMOTE_SERVER_BUNDLE_PATH="\$HOME/provision/downloads/thinlinc/$thinlinc_bundle_basename"
+          UPLOAD_THINLINC_BUNDLE=1
+        fi
+        ;;
+    esac
+
     # Auto-detect host timezone if not explicitly set
     _HOST_TZ="${TIMEZONE:-}"
     if [ -z "$_HOST_TZ" ]; then
       _LINK=$(readlink /etc/localtime 2>/dev/null || true)
       _HOST_TZ=$(echo "$_LINK" | sed -n 's|.*/zoneinfo/||p')
     fi
+    THINLINC_AGENT_HOSTNAME_DEFAULT="${THINLINC_AGENT_HOSTNAME:-}"
+    case ",$BUNDLE_PACKAGES," in
+      *,thinlinc,*)
+        if [ -z "$THINLINC_AGENT_HOSTNAME_DEFAULT" ]; then
+          THINLINC_AGENT_HOSTNAME_DEFAULT="$(./scripts/instance-ip "$PROFILE" 2>/dev/null || true)"
+        fi
+        ;;
+    esac
     # env file: sourced by runner.sh so steps see PROFILE_NAME and local config.
     cat > "$STAGE/state/env" <<EOF
 export OS_FAMILY="$OS_FAMILY"
@@ -128,6 +161,8 @@ export VM_USER_PASSWORD="${VM_USER_PASSWORD:-}"
 export EPHEMERAL_DISPLAY_RESOLUTION="${EPHEMERAL_DISPLAY_RESOLUTION:-}"
 export PROVIDER="$PROVIDER"
 export EPHEMERAL_SUNSHINE_PASSWORD="${EPHEMERAL_SUNSHINE_PASSWORD:-}"
+export RDP_GATE_PASSWORD="${RDP_GATE_PASSWORD:-}"
+export RDP_GATE_USER="${RDP_GATE_USER:-}"
 export RASPBERRY_PI_HDMI_CONNECTOR="${RASPBERRY_PI_HDMI_CONNECTOR:-}"
 export RASPBERRY_PI_HDMI_MODE="${RASPBERRY_PI_HDMI_MODE:-}"
 export RUSTDESK_KEY="${RUSTDESK_KEY:-}"
@@ -135,12 +170,21 @@ export RUSTDESK_PASSWORD="${RUSTDESK_PASSWORD:-}"
 export RUSTDESK_SERVER="${RUSTDESK_SERVER:-}"
 export SUNSHINE_MAX_BITRATE_KBPS="${SUNSHINE_MAX_BITRATE_KBPS:-}"
 export SUNSHINE_VERSION="${SUNSHINE_VERSION:-}"
+export THINLINC_ACCEPT_EULA="${THINLINC_ACCEPT_EULA:-}"
+export THINLINC_AGENT_HOSTNAME="${THINLINC_AGENT_HOSTNAME_DEFAULT:-}"
+export THINLINC_SERVER_BUNDLE_PATH="${THINLINC_REMOTE_SERVER_BUNDLE_PATH:-}"
+export THINLINC_SERVER_BUNDLE_URL="${THINLINC_SERVER_BUNDLE_URL:-}"
+export THINLINC_WEBACCESS_PORT="${THINLINC_WEBACCESS_PORT:-}"
 export TIMEZONE="$_HOST_TZ"
 EOF
 
-    echo "[provision] uploading linux/provision/ to remote"
+    echo "[provision] uploading $OS_PROVISION_DIR/ to remote"
     # Remote paths are relative to $HOME (SFTP/SCP default) to avoid shell-expansion pitfalls.
     ./scripts/ssh-retry "prepare linux provision directory" ./scripts/instance-ssh "$PROFILE" -- 'rm -rf ~/provision/state ~/provision/scripts ~/provision/logs && mkdir -p ~/provision/state'
+    if [ "$UPLOAD_THINLINC_BUNDLE" = "1" ]; then
+      ./scripts/ssh-retry "prepare ThinLinc bundle directory" ./scripts/instance-ssh "$PROFILE" -- 'rm -rf ~/provision/downloads/thinlinc && mkdir -p ~/provision/downloads/thinlinc'
+      ./scripts/ssh-retry "upload ThinLinc server bundle" ./scripts/instance-ssh "$PROFILE" --scp "$THINLINC_SERVER_BUNDLE_PATH" 'provision/downloads/thinlinc'
+    fi
     ./scripts/ssh-retry "upload linux scripts" ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/scripts" 'provision/'
     ./scripts/ssh-retry "upload linux bundle package list" ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/state/bundle_packages" 'provision/state/'
     ./scripts/ssh-retry "upload linux environment" ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/state/env" 'provision/state/'
@@ -159,7 +203,10 @@ EOF
       case "$PROVIDER" in
         vultr)
           eval "$(./scripts/tf-env "$PROFILE")"
-          WINDOWS_PASSWORD=$(terramate run --quiet --tags="$TAGS-services" -- terraform output -raw vultr_instance_default_password)
+          WINDOWS_PASSWORD=$(
+            terramate run --quiet --disable-safeguards=git-untracked,git-uncommitted,git-out-of-sync,outdated-code --tags="$TAGS-services" -- \
+              terraform output -raw vultr_instance_default_password
+          )
           ;;
         *)
           echo "[provision] set EPHEMERAL_WINDOWS_PASSWORD (no terraform output available for provider=$PROVIDER)" >&2
@@ -183,7 +230,7 @@ EOF
 
     STAGE=$(mktemp -d)
     trap 'rm -rf "$STAGE"' EXIT
-    cp -R windows/provision "$STAGE/provision"
+    cp -R "$OS_PROVISION_DIR" "$STAGE/provision"
 
     copy_windows_step() {
       local step="$1"
@@ -192,8 +239,8 @@ EOF
       local target
       target="$STAGE/provision/scripts/steps/$(basename "$step")"
 
-      if [ -f "windows/provision/scripts/steps/$step" ]; then
-        source="windows/provision/scripts/steps/$step"
+      if [ -f "$OS_PROVISION_DIR/scripts/steps/$step" ]; then
+        source="$OS_PROVISION_DIR/scripts/steps/$step"
       elif [ -f "$plugin_root/$step" ]; then
         source="$plugin_root/$step"
       else
@@ -228,7 +275,7 @@ EOF
         '
     )
 
-    echo "[provision] uploading windows/provision/ to remote"
+    echo "[provision] uploading $OS_PROVISION_DIR/ to remote"
     # Clear scripts AND state — without state reset, currentStep can outrun the
     # available step files when new steps are added, silently skipping them.
     ./scripts/ssh-retry "prepare windows provision directory" ./scripts/instance-ssh "$PROFILE" -- 'New-Item -ItemType Directory -Force C:\Users\Administrator\provision | Out-Null; if (Test-Path "C:\Users\Administrator\provision\scripts") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\scripts" }; if (Test-Path "C:\Users\Administrator\provision\state") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\state" }; if (Test-Path "C:\Users\Administrator\provision\logs") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\logs" }; New-Item -ItemType Directory -Force C:\Users\Administrator\provision\state | Out-Null'

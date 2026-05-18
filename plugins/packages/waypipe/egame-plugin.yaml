@@ -7,6 +7,13 @@ commands:
   status: {exec: scripts/package-plugin, args: [waypipe, status]}
   down: {exec: scripts/package-plugin, args: [waypipe, down]}
 supports: {os_families: [ubuntu], arches: [amd64, arm64]}
+compatibility_enforced: true
+compatibility:
+  - platform: ubuntu
+    desktop: GNOME
+    session: Wayland
+    status: wip
+    notes: Wayland app forwarding, not a polished full desktop yet.
 down: {destructive: true}
 env: []
 actions:

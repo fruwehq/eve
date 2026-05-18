@@ -66,6 +66,11 @@ export RUSTDESK_SERVER
 export SSH_PUBLIC_KEY_FILE
 export SUNSHINE_MAX_BITRATE_KBPS
 export SUNSHINE_VERSION
+export THINLINC_ACCEPT_EULA
+export THINLINC_AGENT_HOSTNAME
+export THINLINC_SERVER_BUNDLE_PATH
+export THINLINC_SERVER_BUNDLE_URL
+export THINLINC_WEBACCESS_PORT
 export TIMEZONE
 export TRUENAS_API_KEY
 export TRUENAS_API_USER
@@ -274,6 +279,11 @@ package.down: ## Remove package from an instance (PACKAGE=<id>, YES=1 for destru
 
 package.install: ## Install selected package set for an instance (PACKAGE=<id>)
 	@if [ -z "$(INSTANCE)" ] || [ -z "$(PACKAGE)" ]; then echo "Usage: make package.install INSTANCE=<name> PACKAGE=<id>"; exit 2; fi; \
+	THINLINC_ACCEPT_EULA="$(THINLINC_ACCEPT_EULA)" \
+	THINLINC_AGENT_HOSTNAME="$(THINLINC_AGENT_HOSTNAME)" \
+	THINLINC_SERVER_BUNDLE_PATH="$(THINLINC_SERVER_BUNDLE_PATH)" \
+	THINLINC_SERVER_BUNDLE_URL="$(THINLINC_SERVER_BUNDLE_URL)" \
+	THINLINC_WEBACCESS_PORT="$(THINLINC_WEBACCESS_PORT)" \
 	./scripts/package-dispatch --instance $(INSTANCE) --package $(PACKAGE) --command install
 
 package.list: ## List package plugins for an instance with selection/support
@@ -398,7 +408,7 @@ test.plugins-sync: ## Validate external plugin synchronization
 test.python: ## Run Python lint and type checks
 	@./scripts/test-python
 
-test.shellcheck: ## Run shellcheck over scripts/ and linux/provision/
+test.shellcheck: ## Run shellcheck over scripts/ and OS provisioning trees
 	@./scripts/test-shellcheck
 
 test.terraform: ## terramate generate + terraform validate across provider stacks

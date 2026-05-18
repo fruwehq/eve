@@ -7,6 +7,8 @@ skip_unless_pkg sunshine
 
 log "### sunshine: installing LizardByte Sunshine"
 
+repair_human_desktop_dirs
+
 install_sunshine_compat_libs() {
   # The noble deb is built against Ubuntu 24.04 libs. On 26.04 (resolute) the
   # ICU soname has bumped and symbol-versioned ICU 74 symbols are required.
@@ -131,6 +133,13 @@ EOF
   set_sunshine_config sw_preset ultrafast
   set_sunshine_config sw_tune zerolatency
   set_sunshine_config max_bitrate "${SUNSHINE_MAX_BITRATE_KBPS:-3000}"
+else
+  # Cloud/VM Linux desktops are X11 sessions here. Sunshine's automatic Linux
+  # capture can prefer KMS and grab a blank virtual DRM device instead of the
+  # actual desktop, producing a black Moonlight stream while the API still
+  # looks healthy.
+  set_sunshine_config capture x11
+  sudo setcap -r "$(readlink -f "$(command -v sunshine)")" 2>/dev/null || true
 fi
 
 # Set Sunshine web UI credentials (matches Windows step 10's behavior).
@@ -230,7 +239,7 @@ human_run systemctl --user stop sunshine 2>/dev/null || true
 pkill -u "$HUMAN_USER_NAME" -x sunshine 2>/dev/null || true
 
 sunshine_display_ready() {
-  DISPLAY="$SUN_DISPLAY" XAUTHORITY="$SUN_XAUTHORITY" xrandr --query >/dev/null 2>&1
+  human_run env DISPLAY="$SUN_DISPLAY" XAUTHORITY="$SUN_XAUTHORITY" xrandr --query >/dev/null 2>&1
 }
 
 sunshine_kms_ready() {

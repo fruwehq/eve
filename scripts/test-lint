@@ -35,8 +35,12 @@ if ! ruby -ryaml -e '
 fi
 
 printf '  -- terraform fmt --\n'
-if ! terraform fmt -check -recursive -no-color modules stacks >/dev/null; then
-  terraform fmt -check -recursive -no-color modules stacks >&2 || true
+TF_FMT_DIRS=()
+for dir in modules stacks plugins/providers; do
+  [ -d "$dir" ] && TF_FMT_DIRS+=("$dir")
+done
+if [ "${#TF_FMT_DIRS[@]}" -gt 0 ] && ! terraform fmt -check -recursive -no-color "${TF_FMT_DIRS[@]}" >/dev/null; then
+  terraform fmt -check -recursive -no-color "${TF_FMT_DIRS[@]}" >&2 || true
   FAIL=$((FAIL + 1))
 fi
 

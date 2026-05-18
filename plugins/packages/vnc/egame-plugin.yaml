@@ -7,6 +7,18 @@ commands:
   status: {exec: scripts/package-plugin, args: [vnc, status]}
   down: {exec: scripts/package-plugin, args: [vnc, down]}
 supports: {os_families: [ubuntu]}
+compatibility_enforced: true
+compatibility:
+  - platform: ubuntu
+    desktop: XFCE
+    session: X11
+    status: supported
+    notes: Uses TigerVNC on display :1 with XFCE.
+  - platform: ubuntu
+    desktop: GNOME
+    session: Wayland
+    status: unsupported
+    notes: TigerVNC does not serve the local GNOME Wayland session.
 down: {destructive: true}
 env: []
 actions:

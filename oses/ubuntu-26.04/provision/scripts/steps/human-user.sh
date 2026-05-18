@@ -15,11 +15,6 @@ case "$VM_USER_NAME" in
     ;;
 esac
 
-if [ "$VM_USER_NAME" = "$PROVISION_USER_NAME" ]; then
-  log "### human-user: VM user is provisioning user ($VM_USER_NAME)"
-  exit 0
-fi
-
 if id "$VM_USER_NAME" >/dev/null 2>&1; then
   log "### human-user: user exists: $VM_USER_NAME"
 else
@@ -35,7 +30,7 @@ else
   sudo passwd -l "$VM_USER_NAME" >/dev/null
 fi
 
-if [ -r "$HOME/.ssh/authorized_keys" ]; then
+if [ "$VM_USER_NAME" != "$PROVISION_USER_NAME" ] && [ -r "$HOME/.ssh/authorized_keys" ]; then
   target_home=$(getent passwd "$VM_USER_NAME" | awk -F: '{print $6}')
   target_group=$(id -gn "$VM_USER_NAME")
   sudo install -d -o "$VM_USER_NAME" -g "$target_group" -m 0700 "$target_home/.ssh"

@@ -7,6 +7,13 @@ skip_unless_pkg rustdesk
 
 log "### rustdesk: installing RustDesk"
 
+repair_human_desktop_dirs
+
+if has_pkg gnome-desktop; then
+  log "### rustdesk: GNOME/Wayland selected; skipping RustDesk because unattended screen capture requires peer-side selection"
+  exit 0
+fi
+
 if ! command -v rustdesk >/dev/null 2>&1; then
   arch=$(dpkg --print-architecture)
   case "$arch" in
@@ -27,24 +34,40 @@ if ! command -v lightdm >/dev/null 2>&1; then
   printf 'lightdm shared/default-x-display-manager select lightdm\n' | sudo debconf-set-selections
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y lightdm
 fi
+printf '/usr/sbin/lightdm\n' | sudo tee /etc/X11/default-display-manager >/dev/null
 
 desktop_session="xfce"
+gnome_installed=0
+# Some desktop dependencies can leave GNOME binaries on an otherwise XFCE
+# profile. Only hand display-manager ownership to the GNOME package when that
+# package is actually selected for this instance.
 if has_pkg gnome-desktop; then
-  desktop_session="gnome"
+  gnome_installed=1
 fi
-if [ "$desktop_session" = "xfce" ] && ! command -v startxfce4 >/dev/null 2>&1; then
+if [ "$gnome_installed" -eq 0 ] && ! command -v startxfce4 >/dev/null 2>&1; then
   log "### rustdesk: installing XFCE desktop for autologin session"
-  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y xfce4
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y xfce4 xfce4-terminal
+elif [ "$gnome_installed" -eq 0 ] && ! command -v xfce4-terminal >/dev/null 2>&1; then
+  log "### rustdesk: installing XFCE terminal emulator"
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y xfce4-terminal
 fi
+ensure_xfce_terminal
 
-log "### rustdesk: configuring LightDM autologin session=$desktop_session"
-sudo mkdir -p /etc/lightdm/lightdm.conf.d
-sudo tee /etc/lightdm/lightdm.conf.d/50-ephemeral-autologin.conf >/dev/null <<EOF
+if [ "$gnome_installed" -eq 1 ]; then
+  log "### rustdesk: GNOME detected; leaving display manager to gnome-desktop"
+else
+  log "### rustdesk: configuring LightDM autologin session=$desktop_session"
+  sudo systemctl disable gdm.service gdm3.service 2>/dev/null || true
+  sudo systemctl enable lightdm.service >/dev/null 2>&1 || true
+  sudo ln -sfn /usr/lib/systemd/system/lightdm.service /etc/systemd/system/display-manager.service
+  sudo mkdir -p /etc/lightdm/lightdm.conf.d
+  sudo tee /etc/lightdm/lightdm.conf.d/50-ephemeral-autologin.conf >/dev/null <<EOF
 [Seat:*]
 autologin-user=$HUMAN_USER_NAME
 autologin-user-timeout=0
 user-session=$desktop_session
 EOF
+fi
 
 write_display_mode_helper() {
   local output_name="$1"
@@ -62,6 +85,10 @@ if ! xrandr --query >/dev/null 2>&1; then
 fi
 output_name="\$(xrandr --query | awk '/ connected/{print \$1; exit}')"
 output_name="\${output_name:-\$preferred_output}"
+xrandr --query | awk '/ connected/{print \$1}' | while read -r connected_output; do
+  [ "\$connected_output" = "\$output_name" ] && continue
+  xrandr --output "\$connected_output" --off 2>/dev/null || true
+done
 EOF
   if [ -n "$modeline" ]; then
     cat <<EOF | sudo tee -a "$HUMAN_HOME/.local/bin/egame-set-display-mode" >/dev/null
@@ -70,7 +97,7 @@ xrandr --addmode "\$output_name" "$mode_name" 2>/dev/null || true
 EOF
   fi
   cat <<EOF | sudo tee -a "$HUMAN_HOME/.local/bin/egame-set-display-mode" >/dev/null
-xrandr --output "\$output_name" --mode "$mode_name" 2>/dev/null || true
+xrandr --output "\$output_name" --mode "$mode_name" --primary 2>/dev/null || true
 EOF
   sudo chown "$HUMAN_USER_NAME:$HUMAN_GROUP" "$HUMAN_HOME/.local/bin/egame-set-display-mode"
   sudo chmod 0755 "$HUMAN_HOME/.local/bin/egame-set-display-mode"
@@ -170,18 +197,48 @@ elif [ -n "${EPHEMERAL_DISPLAY_RESOLUTION:-}" ]; then
   fi
 
   log "### rustdesk: configuring Xorg virtual display ${xrandr_mode} for RustDesk"
+  if [ "${PROVIDER:-}" = "truenas" ] || ! compgen -G "/dev/dri/card*" >/dev/null; then
+    if [ "${PROVIDER:-}" = "truenas" ]; then
+      log "### rustdesk: TrueNAS virtual display has limited mode support; using Xorg dummy display driver"
+    else
+      log "### rustdesk: no DRM card detected; using Xorg dummy display driver"
+    fi
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y xserver-xorg-video-dummy
+    sudo mkdir -p /etc/lightdm/lightdm.conf.d
+    sudo tee /etc/lightdm/lightdm.conf.d/40-ephemeral-headless.conf >/dev/null <<EOF
+[LightDM]
+logind-check-graphical=false
+EOF
+    dummy_device_config='Section "Device"
+    Identifier "Ephemeral Dummy Display"
+    Driver "dummy"
+    VideoRam 256000
+EndSection
+
+'
+    screen_device_config='    Device "Ephemeral Dummy Display"'
+    display_output_name="DUMMY0"
+  else
+    dummy_device_config=""
+    screen_device_config=""
+    display_output_name="Virtual-1"
+  fi
+
   sudo mkdir -p /etc/X11/xorg.conf.d
   sudo rm -f /etc/X11/xorg.conf.d/20-ephemeral-virtual-display.conf
   sudo tee /etc/X11/xorg.conf.d/20-ephemeral-virtual-display.conf >/dev/null <<EOF
-Section "Monitor"
-    Identifier "Virtual-1"
+${dummy_device_config}Section "Monitor"
+    Identifier "Ephemeral Monitor"
+    HorizSync 5.0-1000.0
+    VertRefresh 5.0-200.0
 ${modeline_config}
     Option "PreferredMode" "$mode_name"
 EndSection
 
 Section "Screen"
     Identifier "Default Screen Section"
-    Monitor "Virtual-1"
+${screen_device_config}
+    Monitor "Ephemeral Monitor"
     SubSection "Display"
         Depth 16
         Virtual ${xrandr_width} ${xrandr_height}
@@ -195,7 +252,7 @@ Section "Screen"
 EndSection
 EOF
 
-  write_display_mode_helper "Virtual-1" "$mode_name" "$modeline"
+  write_display_mode_helper "$display_output_name" "$mode_name" "$modeline"
 fi
 
 # LightDM's pam_succeed_if rule for the autologin path keys off the `autologin`
@@ -232,6 +289,35 @@ cat <<'XEOF' | human_write_file "$HUMAN_HOME/.config/xfce4/xfconf/xfce-perchanne
 XEOF
 
 human_install_dir "$HUMAN_HOME/.config/autostart"
+cat <<'EOF' | human_write_file "$HUMAN_HOME/.local/bin/egame-disable-session-lock" 0755
+#!/usr/bin/env sh
+set -eu
+if command -v gsettings >/dev/null 2>&1; then
+  gsettings set org.gnome.desktop.session idle-delay 0 2>/dev/null || true
+  gsettings set org.gnome.desktop.screensaver lock-enabled false 2>/dev/null || true
+  gsettings set org.gnome.desktop.screensaver idle-activation-enabled false 2>/dev/null || true
+fi
+if command -v xfconf-query >/dev/null 2>&1; then
+  xfconf-query -c xfce4-screensaver -p /saver/enabled -n -t bool -s false 2>/dev/null || true
+  xfconf-query -c xfce4-screensaver -p /lock/enabled -n -t bool -s false 2>/dev/null || true
+fi
+EOF
+
+cat <<EOF | human_write_file "$HUMAN_HOME/.config/autostart/egame-disable-session-lock.desktop" 0644
+[Desktop Entry]
+Type=Application
+Name=Disable session lock
+Exec=$HUMAN_HOME/.local/bin/egame-disable-session-lock
+Hidden=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+EOF
+
+if [ "$desktop_session" = "gnome" ]; then
+  human_run dbus-run-session "$HUMAN_HOME/.local/bin/egame-disable-session-lock" 2>/dev/null || true
+fi
+
+human_install_dir "$HUMAN_HOME/.config/autostart"
 cat <<EOF | human_write_file "$HUMAN_HOME/.config/autostart/rustdesk-server.desktop" 0644
 [Desktop Entry]
 Type=Application
@@ -262,7 +348,11 @@ sleep 1
 # rewrites; [options] is user preferences and is preserved across daemon writes.
 write_rustdesk_config() {
   local cfg="$1"
-  sudo mkdir -p "$(dirname "$cfg")"
+  if [ "$cfg" = "$HUMAN_HOME/.config/rustdesk/RustDesk2.toml" ]; then
+    human_install_dir "$(dirname "$cfg")"
+  else
+    sudo mkdir -p "$(dirname "$cfg")"
+  fi
   {
     [ -n "${RUSTDESK_SERVER:-}" ] && echo "rendezvous_server = '${RUSTDESK_SERVER}:21116'"
     echo
@@ -290,10 +380,16 @@ sudo chown -R "$HUMAN_USER_NAME:$HUMAN_GROUP" "$HUMAN_HOME/.config/rustdesk"
 
 # Start daemon — reads our config on launch
 sudo systemctl set-default graphical.target >/dev/null 2>&1 || true
-sudo systemctl disable --now gdm3.service >/dev/null 2>&1 || true
-sudo systemctl enable --now display-manager.service >/dev/null 2>&1 || true
-sudo systemctl enable --now lightdm.service >/dev/null 2>&1 || true
-sudo systemctl restart lightdm.service >/dev/null 2>&1 || true
+if [ "$gnome_installed" -eq 1 ]; then
+  sudo systemctl disable --now lightdm.service >/dev/null 2>&1 || true
+  sudo systemctl enable --now gdm3.service >/dev/null 2>&1 || true
+  sudo systemctl restart gdm3.service >/dev/null 2>&1 || true
+else
+  sudo systemctl disable --now gdm3.service >/dev/null 2>&1 || true
+  sudo systemctl enable --now display-manager.service >/dev/null 2>&1 || true
+  sudo systemctl enable --now lightdm.service >/dev/null 2>&1 || true
+  sudo systemctl restart lightdm.service >/dev/null 2>&1 || true
+fi
 sudo systemctl enable --now rustdesk 2>/dev/null || true
 
 # Wait for the root service to come up.
@@ -331,12 +427,23 @@ if [ -n "${RUSTDESK_PASSWORD:-}" ]; then
     printf '%s\n' "$output" | grep -q "Done!"
   }
 
-  if set_rustdesk_password sudo rustdesk --password "$RUSTDESK_PASSWORD"; then
-    log "### rustdesk: permanent password set via admin service"
-  elif set_rustdesk_password human_run rustdesk --password "$RUSTDESK_PASSWORD"; then
-    log "### rustdesk: permanent password set via user server"
-  else
-    log "### rustdesk: warn: --password failed (server-user=$rd_user); client will be prompted to set one"
+  password_set=0
+  for i in $(seq 1 30); do
+    if set_rustdesk_password sudo rustdesk --password "$RUSTDESK_PASSWORD"; then
+      log "### rustdesk: permanent password set via admin service"
+      password_set=1
+      break
+    fi
+    log "### rustdesk: waiting for password IPC ($i/30)..."
+    sleep 2
+  done
+
+  if [ "$password_set" -ne 1 ]; then
+    if set_rustdesk_password human_run rustdesk --password "$RUSTDESK_PASSWORD"; then
+      log "### rustdesk: permanent password set via user server"
+    else
+      log "### rustdesk: warn: --password failed (server-user=$rd_user); client will be prompted to set one"
+    fi
   fi
 fi
 

@@ -7,6 +7,23 @@ commands:
   status: {exec: scripts/package-plugin, args: [rustdesk, status]}
   down: {exec: scripts/package-plugin, args: [rustdesk, down]}
 supports: {os_families: [ubuntu, windows]}
+compatibility_enforced: true
+compatibility:
+  - platform: windows
+    desktop: Windows
+    session: Native
+    status: supported
+    notes: Runs as a service against the active Windows desktop.
+  - platform: ubuntu
+    desktop: XFCE
+    session: X11
+    status: supported
+    notes: Uses LightDM autologin plus an X11 desktop session.
+  - platform: ubuntu
+    desktop: GNOME
+    session: Wayland
+    status: unsupported
+    notes: RustDesk cannot unattended-share GNOME Wayland without peer-side screen selection.
 down: {destructive: true}
 env: [RUSTDESK_SERVER, RUSTDESK_KEY, RUSTDESK_PASSWORD]
 actions:

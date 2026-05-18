@@ -93,6 +93,62 @@ human_install_dir() {
   sudo install -d -o "$HUMAN_USER_NAME" -g "$HUMAN_GROUP" "$@"
 }
 
+repair_human_desktop_dirs() {
+  human_install_dir \
+    "$HUMAN_HOME/.config" \
+    "$HUMAN_HOME/.cache" \
+    "$HUMAN_HOME/.local" \
+    "$HUMAN_HOME/.local/share" \
+    "$HUMAN_HOME/Desktop" \
+    "$HUMAN_HOME/Documents" \
+    "$HUMAN_HOME/Downloads" \
+    "$HUMAN_HOME/Music" \
+    "$HUMAN_HOME/Pictures" \
+    "$HUMAN_HOME/Public" \
+    "$HUMAN_HOME/Templates" \
+    "$HUMAN_HOME/Videos"
+  sudo install -D -o "$HUMAN_USER_NAME" -g "$HUMAN_GROUP" -m 0644 /dev/stdin "$HUMAN_HOME/.config/user-dirs.dirs" <<'EOF'
+XDG_DESKTOP_DIR="$HOME/Desktop"
+XDG_DOWNLOAD_DIR="$HOME/Downloads"
+XDG_TEMPLATES_DIR="$HOME/Templates"
+XDG_PUBLICSHARE_DIR="$HOME/Public"
+XDG_DOCUMENTS_DIR="$HOME/Documents"
+XDG_MUSIC_DIR="$HOME/Music"
+XDG_PICTURES_DIR="$HOME/Pictures"
+XDG_VIDEOS_DIR="$HOME/Videos"
+EOF
+  sudo chown -R "$HUMAN_USER_NAME:$HUMAN_GROUP" \
+    "$HUMAN_HOME/.config" \
+    "$HUMAN_HOME/.cache" \
+    "$HUMAN_HOME/.local" \
+    "$HUMAN_HOME/Desktop" \
+    "$HUMAN_HOME/Documents" \
+    "$HUMAN_HOME/Downloads" \
+    "$HUMAN_HOME/Music" \
+    "$HUMAN_HOME/Pictures" \
+    "$HUMAN_HOME/Public" \
+    "$HUMAN_HOME/Templates" \
+    "$HUMAN_HOME/Videos"
+}
+
+ensure_xfce_terminal() {
+  local helper_dir="$HUMAN_HOME/.config/xfce4"
+  local helper_file="$helper_dir/helpers.rc"
+  apt_install xfce4-terminal xterm
+  human_install_dir "$helper_dir"
+
+  if sudo test -f "$helper_file"; then
+    if sudo grep -q '^TerminalEmulator=' "$helper_file"; then
+      sudo sed -i 's/^TerminalEmulator=.*/TerminalEmulator=xfce4-terminal/' "$helper_file"
+    else
+      printf '\nTerminalEmulator=xfce4-terminal\n' | sudo tee -a "$helper_file" >/dev/null
+    fi
+  else
+    printf 'TerminalEmulator=xfce4-terminal\n' | human_write_file "$helper_file" 0644
+  fi
+  sudo chown "$HUMAN_USER_NAME:$HUMAN_GROUP" "$helper_file"
+}
+
 human_write_file() {
   local path="$1"
   local mode="${2:-0644}"

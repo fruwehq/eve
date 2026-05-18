@@ -89,6 +89,12 @@ remote_check() {
   "${SSH_CMD[@]}" "$command" >/dev/null 2>&1
 }
 
+package_selected() {
+  local package="$1"
+  printf '%s' "$PACKAGE_LIST" |
+    jq -e --arg package "$package" '.packages[] | select(.id == $package and .selected and .supported)' >/dev/null
+}
+
 shell_quote() {
   printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
 }
@@ -121,7 +127,7 @@ verify_installed() {
   status=$(status_for_package "$package")
   case "$status" in
     installed)
-      pass "$package" "installed"
+      pass "$package" "$status"
       ;;
     *)
       fail "$package" "status is $status"
@@ -140,10 +146,10 @@ verify_rdp() {
       pass rdp "Windows RDP helper can use Administrator password"
       ;;
     ubuntu)
-      if [ -z "${VM_USER_PASSWORD:-}" ]; then
-        fail rdp "VM_USER_PASSWORD is not set; Ubuntu xrdp login will prompt and fail"
+      if [ -z "${RDP_GATE_PASSWORD:-${VM_USER_PASSWORD:-}}" ]; then
+        fail rdp "VM_USER_PASSWORD or RDP_GATE_PASSWORD is not set; Ubuntu RDP login will prompt and fail"
       else
-        pass rdp "VM_USER_PASSWORD is set for Ubuntu xrdp login"
+        pass rdp "Ubuntu RDP password is set"
       fi
       if [ -z "$HUMAN_USER" ]; then
         fail rdp "VM_USER_NAME is not known, cannot verify Linux password state"
@@ -156,7 +162,13 @@ verify_rdp() {
           fail rdp "Linux password is locked or missing for $HUMAN_USER; rerun provisioning after setting VM_USER_PASSWORD"
         fi
       fi
-      if remote_check 'systemctl is-active --quiet xrdp && ss -tln | grep -q ":3389 "'; then
+      if package_selected gnome-desktop; then
+        if remote_check 'systemctl is-active --quiet gnome-remote-desktop && ss -tln | grep -q ":3389 "'; then
+          pass rdp "GNOME Remote Desktop active on tcp/3389"
+        else
+          fail rdp "GNOME Remote Desktop is not active/listening on tcp/3389"
+        fi
+      elif remote_check 'systemctl is-active --quiet xrdp && ss -tln | grep -q ":3389 "'; then
         pass rdp "xrdp active on tcp/3389"
       else
         fail rdp "xrdp is not active/listening on tcp/3389"
@@ -176,6 +188,36 @@ verify_rustdesk() {
   else
     printf '%s\n' "$output" >&2
     fail rustdesk "RustDesk ID is not available"
+  fi
+  if [ "$OS_FAMILY" = "ubuntu" ]; then
+    local human_user_q
+    human_user_q=$(shell_quote "${HUMAN_USER:-chris}")
+    if remote_check "human_user=$human_user_q; pgrep -u \"\$human_user\" -f 'gdm-wayland-session|gnome-shell --mode=.*' >/dev/null 2>&1 && pgrep -u \"\$human_user\" -f '[X]wayland' >/dev/null 2>&1"; then
+      fail rustdesk "active GNOME session is Wayland/Xwayland; RustDesk requires peer-side screen sharing and is not unattended-capturable"
+    elif remote_check "human_user=$human_user_q; ps -u \"\$human_user\" -o comm= | grep -Eq '^(gnome-shell|xfce4-session|xfwm4|xfdesktop)$'"; then
+      pass rustdesk "capturable X11 desktop/session is present"
+    else
+      fail rustdesk "no capturable X11 desktop/session found"
+    fi
+  elif [ "$OS_FAMILY" = "windows" ]; then
+    # shellcheck disable=SC2016
+    if remote_check 'powershell.exe -NoProfile -Command '"'"'$svc = Get-Service -ErrorAction SilentlyContinue | Where-Object { $_.Name -match "rustdesk" -or $_.DisplayName -match "rustdesk" } | Select-Object -First 1; if (-not $svc -or $svc.Status -ne "Running") { exit 1 }'"'"''; then
+      pass rustdesk "Windows service is running"
+    else
+      fail rustdesk "Windows service is not running"
+    fi
+    # shellcheck disable=SC2016
+    if remote_check 'powershell.exe -NoProfile -Command '"'"'$p = Get-Process rustdesk -ErrorAction SilentlyContinue | Where-Object { $_.SessionId -gt 0 } | Select-Object -First 1; if (-not $p) { exit 1 }'"'"''; then
+      pass rustdesk "interactive Windows RustDesk process is running"
+    else
+      fail rustdesk "no interactive Windows RustDesk process is running"
+    fi
+    # shellcheck disable=SC2016
+    if remote_check 'powershell.exe -NoProfile -Command '"'"'$logs = @("C:\Windows\ServiceProfiles\LocalService\AppData\Roaming\RustDesk\log\server\RustDesk_rCURRENT.log", "C:\Windows\ServiceProfiles\LocalService\AppData\Roaming\RustDesk\log\service\RustDesk_rCURRENT.log", "C:\Users\Administrator\AppData\Roaming\RustDesk\log\server\rustdesk_rCURRENT.log", "C:\Users\Administrator\AppData\Roaming\RustDesk\log\rustdesk_rCURRENT.log") | Where-Object { Test-Path -LiteralPath $_ }; if (-not $logs) { exit 1 }; $fresh = $false; foreach ($log in $logs) { $item = Get-Item -LiteralPath $log; if ($item.LastWriteTime -lt (Get-Date).AddMinutes(-15)) { continue }; $recent = Get-Content -LiteralPath $log -Tail 160 | Select-String -Pattern "start rendezvous mediator|Latency of .*:21116|Got nat response"; if ($recent) { $fresh = $true } }; if (-not $fresh) { exit 1 }'"'"''; then
+      pass rustdesk "recent rendezvous activity is present"
+    else
+      fail rustdesk "no recent RustDesk rendezvous activity; host may appear offline"
+    fi
   fi
 }
 
@@ -197,6 +239,28 @@ verify_sunshine() {
       pass sunshine "X display is available for capture"
     else
       fail sunshine "no usable X display for capture"
+    fi
+    if remote_check "sudo test -r /home/$(printf '%s' "$HUMAN_USER" | sed "s/'/'\\\\''/g")/.config/sunshine/sunshine.log && ! sudo tail -250 /home/$(printf '%s' "$HUMAN_USER" | sed "s/'/'\\\\''/g")/.config/sunshine/sunshine.log | grep -Eq 'CLIENT CONNECTED|New streaming session started'"; then
+      pass sunshine "no recent streaming session to classify"
+    else
+      if remote_check "sudo tail -250 /home/$(printf '%s' "$HUMAN_USER" | sed "s/'/'\\\\''/g")/.config/sunshine/sunshine.log | grep -Eq 'frame I:[0-9]+[[:space:]]+Avg QP:.*size:[[:space:]]+[0-9]{1,3}($|[^0-9])|coded y,uvDC,uvAC intra:[[:space:]]+0\\.0%[[:space:]]+0\\.0%[[:space:]]+0\\.0%|skip:100\\.0%'"; then
+        fail sunshine "recent stream encoded blank/static frames; visual Moonlight check will be black"
+      else
+        pass sunshine "recent stream log does not show the known blank-frame signature"
+      fi
+    fi
+  elif [ "$OS_FAMILY" = "windows" ]; then
+    # shellcheck disable=SC2016
+    if remote_check 'powershell.exe -NoProfile -Command '"'"'$marker = "C:\Users\Administrator\provision\state\display-config-done.flag"; if (-not (Test-Path -LiteralPath $marker)) { exit 1 }; $content = (Get-Content -LiteralPath $marker -Raw).Trim(); if ($content -notmatch "^OK\b") { exit 1 }'"'"''; then
+      pass sunshine "Windows VDD display setup completed"
+    else
+      fail sunshine "Windows VDD display setup failed; Moonlight may pair but stream black"
+    fi
+    # shellcheck disable=SC2016
+    if remote_check 'powershell.exe -NoProfile -Command '"'"'$log = "C:\Users\Administrator\provision\state\display-config.log"; if (-not (Test-Path -LiteralPath $log)) { exit 1 }; $activeVdd = Get-Content -LiteralPath $log | Select-String -Pattern "active=True.*vdd=True"; if (-not $activeVdd) { exit 1 }'"'"''; then
+      pass sunshine "active VDD display is present"
+    else
+      fail sunshine "no active VDD display is present"
     fi
   fi
 }
@@ -221,6 +285,20 @@ verify_vnc() {
   fi
 }
 
+verify_thinlinc() {
+  verify_installed thinlinc || return
+  if remote_check 'systemctl is-active --quiet vsmserver.service && systemctl is-active --quiet vsmagent.service && systemctl is-active --quiet tlwebaccess.service'; then
+    pass thinlinc "ThinLinc services are active"
+  else
+    fail thinlinc "one or more ThinLinc services are not active"
+  fi
+  if remote_check 'ss -tln | grep -Eq ":(300|'"${THINLINC_WEBACCESS_PORT:-300}"') "'; then
+    pass thinlinc "Web Access is listening"
+  else
+    fail thinlinc "ThinLinc Web Access is not listening"
+  fi
+}
+
 verify_generic() {
   verify_installed "$1" || true
 }
@@ -232,6 +310,7 @@ while IFS= read -r package; do
     rdp) verify_rdp ;;
     rustdesk) verify_rustdesk ;;
     sunshine) verify_sunshine ;;
+    thinlinc) verify_thinlinc ;;
     vnc) verify_vnc ;;
     *) verify_generic "$package" ;;
   esac

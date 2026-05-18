@@ -65,9 +65,9 @@ scripts/
   truenas-cloudinit-upload    # Generates NoCloud seed ISO and uploads to TrueNAS REST API
   truenas-cloudinit-delete    # Removes cloud-init ISO from TrueNAS on destroy
   test / test-catalog / test-instances / test-lint  # Test suite
-linux/provision/               # Bash state-machine runner (systemd unit)
+oses/<catalog-os-id>/provision/       # Bash state-machine runner (systemd unit)
   scripts/bootstrap.sh / runner.sh / lib/common.sh / steps/NN_*.sh
-windows/provision/             # PowerShell state-machine runner (Scheduled Task)
+oses/windows-server-2025/provision/             # PowerShell state-machine runner (Scheduled Task)
   scripts/bootstrap.ps1 / runner.ps1 / lib/*.ps1 / steps/NN_*.ps1
 tests/golden/                  # Frozen instance env snapshots
 .github/workflows/test.yml     # CI: runs make test
@@ -128,8 +128,8 @@ See [docs/raspberry-pi-provider.md](docs/raspberry-pi-provider.md) for the metal
 
 Per-instance post-boot provisioning is OS-family driven:
 
-- `linux/provision/` — bash state-machine runner for Ubuntu/Linux hosts.
-- `windows/provision/` — PowerShell state-machine runner for Windows hosts.
+- `oses/ubuntu-26.04/provision/` — shared bash state-machine runner for catalog Ubuntu OSes; `oses/ubuntu-26.04-amd64/provision` and `oses/ubuntu-26.04-arm64/provision` point here.
+- `oses/windows-server-2025/provision/` — PowerShell state-machine runner for Windows hosts.
 
 Both use the same shape: `bootstrap` registers a runner (systemd unit or Scheduled Task), the runner walks a sorted `steps/` directory, and a `state.json` file tracks `currentStep` so provisioning is resumable across reboots. Steps are package-aware: a Linux step exits 0 early if its package id is not selected for the instance.
 
@@ -140,7 +140,7 @@ Entry points:
 - `make logs INSTANCE=…` — stream remote provisioning logs.
 
 Adding a new Linux step:
-1. Drop `linux/provision/scripts/steps/NN_<name>.sh` (NN controls order).
+1. Drop `oses/<catalog-os-id>/provision/scripts/steps/NN_<name>.sh` (NN controls order).
 2. Source `$PROVISION_ROOT/scripts/lib/common.sh` for helpers (`log`, `apt_install`, `has_pkg`, `skip_unless_pkg`, `request_reboot`). Add `# shellcheck source=../lib/common.sh` above the source line.
 3. Call `skip_unless_pkg <package-id>` at the top if the step is bundle-gated.
 4. Keep steps idempotent — they will re-run if provisioning is restarted.
@@ -152,7 +152,7 @@ Adding a new Linux step:
 - **catalog** (`test-catalog`) — validates provider/platform/content choice emission and provider-specific OS image metadata gating.
 - **instances** (`test-instances`) — validates local instance registry fixtures, generated overlays, provider dispatch routing, and state contracts.
 - **terraform** (`test-terraform`) — `terramate generate` + `terraform init -backend=false` + `terraform validate` across `aws-services`, `gcp-services`, `vultr-services`, and `truenas-services`. Uses a fake `MY_IP` and a tempfile SSH key. No cloud credentials required.
-- **shellcheck** (`test-shellcheck`) — runs `shellcheck -x --source-path=SCRIPTDIR` over every shell script with a bash/sh shebang in `scripts/` and `linux/provision/`.
+- **shellcheck** (`test-shellcheck`) — runs `shellcheck -x --source-path=SCRIPTDIR` over every shell script with a bash/sh shebang in `scripts/` and `oses/<catalog-os-id>/provision/`.
 - **python** (`test-python`) — runs ruff and strict mypy for Python TUI code.
 - **lint** (`test-lint`) — checks Ruby syntax, YAML syntax, Terraform formatting, and Terramate formatting.
 

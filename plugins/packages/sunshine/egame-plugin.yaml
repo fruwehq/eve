@@ -7,6 +7,23 @@ commands:
   status: {exec: scripts/package-plugin, args: [sunshine, status]}
   down: {exec: scripts/package-plugin, args: [sunshine, down]}
 supports: {os_families: [ubuntu, windows]}
+compatibility_enforced: true
+compatibility:
+  - platform: windows
+    desktop: VDD
+    session: Native
+    status: supported
+    notes: Uses Virtual Display Driver as the intended single Sunshine display.
+  - platform: ubuntu
+    desktop: XFCE
+    session: X11
+    status: wip
+    notes: Current Linux path uses X11 capture; ultrawide 5120x1440 still needs live validation.
+  - platform: ubuntu
+    desktop: GNOME
+    session: Wayland
+    status: wip
+    notes: Wayland capture is not the stable default path yet.
 down: {destructive: true}
 env: [EPHEMERAL_DISPLAY_FPS, EPHEMERAL_DISPLAY_RESOLUTION, EPHEMERAL_SUNSHINE_PASSWORD, SUNSHINE_VERSION, SUNSHINE_MAX_BITRATE_KBPS]
 actions:
