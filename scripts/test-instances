@@ -595,7 +595,7 @@ else
 fi
 
 provider_bridge_failed=0
-for provider_target in up down stop status ip ssh; do
+for provider_target in up down stop ip ssh; do
   provider_bridge_out="$(
     EGAME_PROVIDER_DRY_RUN=1 EGAME_INSTANCE_REGISTRY="$FIXTURE" EGAME_INSTANCE_WORKDIR="$tmp_overlay_dir/provider-bridge" \
       make --no-print-directory "$provider_target" INSTANCE=dev-a 2>/dev/null
@@ -620,6 +620,19 @@ fi
 if [ "$provider_bridge_failed" -eq 0 ]; then
   printf '  [OK] make lifecycle targets route INSTANCE through provider plugins\n'
 else
+  FAIL=$((FAIL + 1))
+fi
+
+provider_status_out="$(
+  EGAME_PROVIDER_DRY_RUN=1 EGAME_INSTANCE_REGISTRY="$FIXTURE" EGAME_INSTANCE_WORKDIR="$tmp_overlay_dir/provider-bridge" \
+    make --no-print-directory provider.status INSTANCE=dev-a 2>/dev/null
+)"
+if printf '%s\n' "$provider_status_out" |
+  jq -e '.provider == "local-qemu" and .command == "status" and .dry_run == true' >/dev/null; then
+  printf '  [OK] provider.status routes through provider plugin dry-run\n'
+else
+  printf '  [FAIL] provider.status did not route through provider dry-run\n' >&2
+  printf '%s\n' "$provider_status_out" >&2
   FAIL=$((FAIL + 1))
 fi
 
@@ -1038,7 +1051,7 @@ else
 fi
 
 state_target="$(EGAME_STATE_DIR="$tmp_overlay_dir/state" make --no-print-directory instance.state INSTANCE=aws-gpu-a 2>/dev/null)"
-if printf '%s\n' "$state_target" | jq -e '.last_operation.name == "provider.status" and (.observed_state | type == "object")' >/dev/null; then
+if printf '%s\n' "$state_target" | jq -e '.instance == "aws-gpu-a" and .last_operation == null and .provider_state == "unknown" and (.observed_state | type == "object")' >/dev/null; then
   printf '  [OK] make target exposes local instance state\n'
 else
   printf '  [FAIL] instance.state make target output mismatch\n' >&2
@@ -1123,7 +1136,7 @@ status_target="$(
     make --no-print-directory instance.status INSTANCE=aws-gpu-a EMIT=json 2>/dev/null
 )"
 if printf '%s\n' "$status_target" |
-  jq -e '.instance.name == "aws-gpu-a" and .instance.provider == "aws" and .instance.engine == "terraform" and .state.last_operation.name == "provider.status" and (.observed_state | type == "object") and .packages.summary.unknown >= 1 and (.packages.selected[] | select(.id == "docker" and .state.status == "unknown")) and (.paths.INSTANCE_TF_STATE_BASE | test("aws-gpu-a/tf/state$"))' >/dev/null; then
+  jq -e '.instance.name == "aws-gpu-a" and .instance.provider == "aws" and .instance.engine == "terraform" and .state.last_operation == null and .state.effective_provider_state == "unknown" and (.observed_state | type == "object") and .packages.summary.unknown >= 1 and (.packages.selected[] | select(.id == "docker" and .state.status == "unknown")) and (.paths.INSTANCE_TF_STATE_BASE | test("aws-gpu-a/tf/state$"))' >/dev/null; then
   printf '  [OK] instance.status combines metadata, state, packages, and paths\n'
 else
   printf '  [FAIL] instance.status combined output mismatch\n' >&2
