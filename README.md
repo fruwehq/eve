@@ -186,9 +186,6 @@ Manual and AI-assisted live test flow is documented in
 package sweep, use
 `YES=1 make integration.packages INSTANCES=<linux>,<windows>` to install and
 status-check every installable package supported by each instance OS/arch.
-Optional host-side AI agent sandboxing is documented in
-[docs/ai-sandboxes.md](docs/ai-sandboxes.md).
-
 The optional `make eve` target opens **Eve** (Ephemeral VM Environment), a
 Textual instance manager for browsing instances, combined state, package state,
 and safe provider/package actions. `make tui` remains available as a

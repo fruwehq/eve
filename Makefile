@@ -1,6 +1,6 @@
 # Makefile
 .DEFAULT_GOAL := default
-.PHONY: ai.sandbox bundle.select bundle.unselect catalog.list clean config.migrate default docker.build \
+.PHONY: bundle.select bundle.unselect catalog.list clean config.migrate default docker.build \
 				docker.shell docker.test doctor down env eve generate help info init.all install-cli instance.create \
 				instance.delete instance.env instance.info instance.list instance.observe instance.paths instance.provision \
 				instance.recover instance.state instance.status instance.validate instance.view integration.packages \
@@ -13,7 +13,6 @@
 				test.update-golden tui up update upload validate
 
 TM_PARALLEL ?= 8
-AGENT ?= codex
 EVE_TOOLCHAIN_IMAGE ?= eve-toolchain:local
 
 # v3 concrete instance selection. Instances live in .egame/instances.yaml.
@@ -88,14 +87,6 @@ export VAGRANT_SHOW_CONSOLE
 export VM_USER_NAME
 export VM_USER_PASSWORD
 export VULTR_API_KEY
-
-ai.sandbox: ## Run a coding agent in Docker Sandboxes (AGENT=codex|opencode|claude|shell)
-	@if ! command -v sbx >/dev/null 2>&1; then \
-		echo "Docker Sandboxes CLI (sbx) is not installed."; \
-		echo "See docs/ai-sandboxes.md for setup notes."; \
-		exit 2; \
-	fi; \
-	exec sbx run $(AGENT) .
 
 bundle.select: ## Add a bundle to an instance's desired bundle list
 	@if [ -z "$(INSTANCE)" ] || [ -z "$(BUNDLE)" ]; then echo "Usage: make bundle.select INSTANCE=<name> BUNDLE=<id>"; exit 2; fi; \
