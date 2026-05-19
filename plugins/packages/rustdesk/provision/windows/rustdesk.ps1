@@ -418,7 +418,7 @@ $startupScriptBody = @"
 `$exe = '$escapedExe'
 `$envFile = '$escapedEnvFile'
 `$logFile = 'C:\Users\Administrator\provision\logs\rustdesk-startup.log'
-function Write-EGameLog {
+function Write-EveLog {
   param([string]`$Message)
   try {
     `$parent = Split-Path `$logFile
@@ -428,7 +428,7 @@ function Write-EGameLog {
   }
 }
 if (-not (Test-Path `$exe)) {
-  Write-EGameLog "rustdesk.exe missing: `$exe"
+  Write-EveLog "rustdesk.exe missing: `$exe"
   exit 0
 }
 `$service = Get-Service -ErrorAction SilentlyContinue |
@@ -439,7 +439,7 @@ if (`$service) {
   if (`$service.Status -ne 'Running') {
     Start-Service -Name `$service.Name
     Start-Sleep -Seconds 5
-    Write-EGameLog "started service `$(`$service.Name)"
+    Write-EveLog "started service `$(`$service.Name)"
   }
 }
 `$currentSessionId = (Get-Process -Id `$PID).SessionId
@@ -449,7 +449,7 @@ if (`$service) {
 if (-not `$sessionRustDesk) {
   Start-Process -FilePath `$exe -WindowStyle Hidden
   Start-Sleep -Seconds 5
-  Write-EGameLog "started process in session `$currentSessionId"
+  Write-EveLog "started process in session `$currentSessionId"
 }
 if (Test-Path `$envFile) {
   try {
@@ -466,19 +466,19 @@ if (Test-Path `$envFile) {
         `$output = & `$exe --password `$password 2>&1 | Out-String
         if (`$null -eq `$LASTEXITCODE -or `$LASTEXITCODE -eq 0) {
           Set-Content -Path `$passwordMarker -Value `$hash -Encoding ASCII -NoNewline
-          Write-EGameLog "applied SYSTEM permanent password"
+          Write-EveLog "applied SYSTEM permanent password"
         } else {
-          Write-EGameLog "password command failed: `$output"
+          Write-EveLog "password command failed: `$output"
         }
       }
     }
   } catch {
-    Write-EGameLog "password setup failed: `$(`$_.Exception.Message)"
+    Write-EveLog "password setup failed: `$(`$_.Exception.Message)"
   }
 }
 try {
   `$id = (& `$exe --get-id 2>`$null) -replace '\s', ''
-  if (`$id) { Write-EGameLog "rustdesk id `$id" }
+  if (`$id) { Write-EveLog "rustdesk id `$id" }
 } catch {
 }
 "@
@@ -486,10 +486,10 @@ Write-TextFileIfChanged -Path $startupScript -Value $startupScriptBody
 
 $runValue = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$configureScript`""
 New-Item -Path "HKLM:\Software\Microsoft\Windows\CurrentVersion\Run" -Force | Out-Null
-Set-ItemProperty -Path "HKLM:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "EGameRustDesk" -Value $runValue
+Set-ItemProperty -Path "HKLM:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "EveRustDesk" -Value $runValue
 Write-Host "Registered RustDesk interactive autostart."
 
-$startupTask = "EGameRustDeskStartup"
+$startupTask = "EveRustDeskStartup"
 $startupTaskCommand = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$startupScript`""
 try {
   & schtasks.exe /Create /TN $startupTask /SC ONSTART /RU SYSTEM /RL HIGHEST /TR $startupTaskCommand /F | Out-Null
@@ -500,8 +500,8 @@ try {
 }
 
 if ($windowsPassword) {
-  $autoTask = "EGameRustDeskAutostart"
-  $configureTask = "EGameRustDeskConfigure"
+  $autoTask = "EveRustDeskAutostart"
+  $configureTask = "EveRustDeskConfigure"
   $startTaskCommand = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$configureScript`""
   $configureTaskCommand = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$configureScript`""
 

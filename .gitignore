@@ -64,7 +64,6 @@ __pycache__/
 
 # v3 local instance registry and state
 .eve
-.egame
 
 # local catalog overrides (developer-specific, not committed)
 config/catalog.local.yaml

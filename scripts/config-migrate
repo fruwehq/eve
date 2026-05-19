@@ -6,9 +6,6 @@ require "time"
 require "yaml"
 
 ROOT = File.expand_path("..", __dir__)
-$LOAD_PATH.unshift(File.join(ROOT, "core"))
-require "sdk"
-Eve::SDK::Workdir.migrate_legacy_root!
 ENV_PATH = ENV.fetch("EVE_ENV_LOCAL", File.join(ROOT, ".env.local"))
 CONFIG_PATH = ENV.fetch("EVE_CONFIG_PATH", File.join(ROOT, ".eve/config.yaml"))
 

@@ -12,9 +12,6 @@ require "json"
 require "yaml"
 
 ROOT = File.expand_path("..", __dir__)
-$LOAD_PATH.unshift(File.join(ROOT, "core"))
-require "sdk"
-Eve::SDK::Workdir.migrate_legacy_root!
 DEFAULT_REGISTRY_PATH = File.join(ROOT, ".eve/instances.yaml")
 DEFAULT_WORKDIR_BASE = File.join(ROOT, ".generated/instances")
 DEFAULT_STATE_BASE = File.join(ROOT, ".eve/state")

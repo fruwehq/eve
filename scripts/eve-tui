@@ -974,7 +974,7 @@ def run_tui() -> int:
                 }
             )
 
-    class EGameTui(App[None]):
+    class EveTui(App[None]):
         """Instance-first manager built on the existing v3 command surface."""
 
         CSS = """
@@ -2993,7 +2993,7 @@ def run_tui() -> int:
                 "Select << New Instance >> to create an instance."
             )
 
-    EGameTui().run()
+    EveTui().run()
     return 0
 
 

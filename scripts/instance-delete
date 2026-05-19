@@ -9,9 +9,6 @@ require "tempfile"
 require "yaml"
 
 ROOT = File.expand_path("..", __dir__)
-$LOAD_PATH.unshift(File.join(ROOT, "core"))
-require "sdk"
-Eve::SDK::Workdir.migrate_legacy_root!
 DEFAULT_REGISTRY_PATH = File.join(ROOT, ".eve/instances.yaml")
 
 $LOAD_PATH.unshift(File.join(ROOT, "core"))
