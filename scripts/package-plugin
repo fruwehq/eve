@@ -46,13 +46,13 @@ rescue Errno::EACCES
   exit 126
 end
 
-hook = command_hook(ENV["EGAME_PACKAGE_PLUGIN_ROOT"], os_family, command)
+hook = command_hook(ENV["EVE_PACKAGE_PLUGIN_ROOT"], os_family, command)
 
-if ENV["EGAME_PLUGIN_DRY_RUN"] == "1" && hook && command == "down"
+if ENV["EVE_PLUGIN_DRY_RUN"] == "1" && hook && command == "down"
   run_hook(hook, resolved)
 end
 
-if ENV["EGAME_PLUGIN_DRY_RUN"] == "1"
+if ENV["EVE_PLUGIN_DRY_RUN"] == "1"
   puts JSON.generate({
     "kind" => "package",
     "package" => package_id,

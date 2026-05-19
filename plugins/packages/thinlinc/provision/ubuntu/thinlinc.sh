@@ -165,7 +165,7 @@ else
   ensure_xfce_terminal
 fi
 
-workdir=/tmp/egame-thinlinc
+workdir=/tmp/eve-thinlinc
 bundle="$workdir/thinlinc-server.zip"
 sudo rm -rf "$workdir"
 sudo mkdir -p "$workdir"

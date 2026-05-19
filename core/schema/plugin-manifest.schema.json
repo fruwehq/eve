@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://ephemeral.dev/schemas/plugin-manifest.schema.json",
   "title": "Plugin Manifest",
-  "description": "Schema for egame-plugin.yaml manifests covering both provider and package plugin kinds.",
+  "description": "Schema for eve-plugin.yaml manifests covering both provider and package plugin kinds.",
 
   "type": "object",
   "required": ["api_version", "kind", "id", "display_name", "commands", "supports"],
@@ -10,9 +10,9 @@
 
   "properties": {
     "api_version": {
-      "description": "API version. Only egame.plugin/v1 is accepted; unknown versions must be refused.",
+      "description": "API version. Only eve.plugin/v1 is accepted; unknown versions must be refused.",
       "type": "string",
-      "const": "egame.plugin/v1"
+      "const": "eve.plugin/v1"
     },
 
     "kind": {

@@ -1,4 +1,4 @@
 #!/usr/bin/env sh
 set -eu
 
-exec ./scripts/package-down-command claude 'npm uninstall -g @anthropic-ai/claude-code || true; sudo rm -f "$EGAME_HUMAN_HOME/.local/bin/claude"'
+exec ./scripts/package-down-command claude 'npm uninstall -g @anthropic-ai/claude-code || true; sudo rm -f "$EVE_HUMAN_HOME/.local/bin/claude"'

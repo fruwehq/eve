@@ -27,13 +27,13 @@ target-version = "py313"
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 
 [tool.ruff.lint.per-file-ignores]
-"scripts/egame-tui" = ["E402", "E501"]
+"scripts/eve-tui" = ["E402", "E501"]
 
 [tool.mypy]
 python_version = "3.13"
 strict = true
 warn_unreachable = true
-files = ["scripts/egame-tui"]
+files = ["scripts/eve-tui"]
 
 [tool.poetry]
 package-mode = false

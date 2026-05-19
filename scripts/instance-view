@@ -10,8 +10,11 @@ require "yaml"
 ROOT = File.expand_path("..", __dir__)
 $LOAD_PATH.unshift(File.join(ROOT, "core"))
 require "sdk"
+Eve::SDK::Workdir.migrate_legacy_root!
+$LOAD_PATH.unshift(File.join(ROOT, "core"))
+require "sdk"
 
-DEFAULT_REGISTRY_PATH = File.join(ROOT, ".egame/instances.yaml")
+DEFAULT_REGISTRY_PATH = File.join(ROOT, ".eve/instances.yaml")
 
 def usage
   warn <<~USAGE
@@ -43,8 +46,8 @@ def provider_actions(provider_id)
 end
 
 instance_name = nil
-registry_path = ENV["EGAME_INSTANCE_REGISTRY"] && !ENV["EGAME_INSTANCE_REGISTRY"].empty? \
-                ? File.expand_path(ENV["EGAME_INSTANCE_REGISTRY"], Dir.pwd) \
+registry_path = ENV["EVE_INSTANCE_REGISTRY"] && !ENV["EVE_INSTANCE_REGISTRY"].empty? \
+                ? File.expand_path(ENV["EVE_INSTANCE_REGISTRY"], Dir.pwd) \
                 : DEFAULT_REGISTRY_PATH
 emit = "json"
 aggregate = false
@@ -80,15 +83,15 @@ if aggregate
     instances.each do |inst|
       name = inst.fetch("name", nil)
       next unless name
-      state = Egame::SDK::State.read(name)
+      state = Eve::SDK::State.read(name)
       observed = state.fetch("observed_state", {})
-      reconciled = Egame::SDK::StateMachine.status_with_observed_state(
+      reconciled = Eve::SDK::StateMachine.status_with_observed_state(
         { "state" => state, "observed_state" => observed },
         { "observed_state" => observed }
       )
       statuses[name] = reconciled
     end
-    counts = Egame::SDK::StateMachine.aggregate_summary(statuses)
+    counts = Eve::SDK::StateMachine.aggregate_summary(statuses)
     puts JSON.pretty_generate({ "aggregate" => counts })
   rescue StandardError => e
     warn "instance-view: #{e.message}"
@@ -112,7 +115,7 @@ begin
   if observe
     observe_cmd = [File.join(ROOT, "scripts/instance-observe"), "--instance", instance_name]
     observe_env = {}
-    observe_env["EGAME_INSTANCE_REGISTRY"] = registry_path if registry_path != DEFAULT_REGISTRY_PATH
+    observe_env["EVE_INSTANCE_REGISTRY"] = registry_path if registry_path != DEFAULT_REGISTRY_PATH
     observe_out, observe_err, observe_status = Open3.capture3(observe_env, *observe_cmd, chdir: ROOT)
     unless observe_status.success?
       raise "observe failed for #{instance_name}: #{observe_err.empty? ? observe_out : observe_err}".strip
@@ -133,7 +136,7 @@ begin
   packages = run_json(*package_cmd).fetch("packages")
   actions = provider_actions(resolved.fetch("provider_plugin"))
 
-  view = Egame::SDK::State.build_view(
+  view = Eve::SDK::State.build_view(
     instance_name: instance_name,
     resolved: resolved,
     packages: packages,

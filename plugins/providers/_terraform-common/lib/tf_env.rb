@@ -2,11 +2,11 @@
 
 require "json"
 
-module EgameProviderTfEnv
+module EveProviderTfEnv
   module_function
 
   def env
-    JSON.parse(ENV.fetch("EGAME_TF_ENV_JSON"))
+    JSON.parse(ENV.fetch("EVE_TF_ENV_JSON"))
   end
 
   def quote(value)

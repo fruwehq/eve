@@ -19,7 +19,7 @@ TAGS=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^STACK_TAGS=/{print $2}')
 echo "[tf-init] profile=$PROFILE tags=$TAGS"
 
 run_step() {
-  if [ "${EGAME_TF_PRINT:-0}" = "1" ]; then
+  if [ "${EVE_TF_PRINT:-0}" = "1" ]; then
     printf '[tf-init] would run:'
     printf ' %q' "$@"
     printf '\n'
@@ -28,7 +28,7 @@ run_step() {
   "$@"
 }
 
-if [ "${EGAME_TF_PRINT:-0}" != "1" ]; then
+if [ "${EVE_TF_PRINT:-0}" != "1" ]; then
   terramate generate
 fi
 
@@ -45,24 +45,24 @@ tm_args=(
 
 # When in v3 INSTANCE= mode, ensure a dedicated workspace exists per stack so
 # subsequent plan/apply/destroy/output operations (which honor TF_WORKSPACE and
-# EGAME_TF_DATA_BASE from tf-env) target isolated backend and data paths.
+# EVE_TF_DATA_BASE from tf-env) target isolated backend and data paths.
 # PROFILE= callers skip this and keep using the default compatibility paths.
-if [ -n "${EGAME_INSTANCE_NAME:-}" ]; then
-  : "${EGAME_TF_STATE_BASE:?tf-env did not set EGAME_TF_STATE_BASE}"
-  : "${EGAME_TF_DATA_BASE:?tf-env did not set EGAME_TF_DATA_BASE}"
-  if [ "${EGAME_TF_PRINT:-0}" != "1" ]; then
-    mkdir -p "$EGAME_TF_STATE_BASE" "$EGAME_TF_DATA_BASE"
+if [ -n "${EVE_INSTANCE_NAME:-}" ]; then
+  : "${EVE_TF_STATE_BASE:?tf-env did not set EVE_TF_STATE_BASE}"
+  : "${EVE_TF_DATA_BASE:?tf-env did not set EVE_TF_DATA_BASE}"
+  if [ "${EVE_TF_PRINT:-0}" != "1" ]; then
+    mkdir -p "$EVE_TF_STATE_BASE" "$EVE_TF_DATA_BASE"
   fi
   tm_args+=(--eval)
   init_args+=(
-    "-backend-config=path=${EGAME_TF_STATE_BASE}/\${terramate.stack.path.relative}/default.tfstate"
-    "-backend-config=workspace_dir=${EGAME_TF_STATE_BASE}/\${terramate.stack.path.relative}/workspaces"
+    "-backend-config=path=${EVE_TF_STATE_BASE}/\${terramate.stack.path.relative}/default.tfstate"
+    "-backend-config=workspace_dir=${EVE_TF_STATE_BASE}/\${terramate.stack.path.relative}/workspaces"
   )
 fi
 
 run_step terramate run "${tm_args[@]}" -- "${init_args[@]}"
 
-if [ -n "${EGAME_INSTANCE_NAME:-}" ]; then
+if [ -n "${EVE_INSTANCE_NAME:-}" ]; then
   TF_WORKSPACE="" run_step terramate run "${tm_args[@]}" -- \
-    terraform workspace select -or-create "$EGAME_INSTANCE_NAME"
+    terraform workspace select -or-create "$EVE_INSTANCE_NAME"
 fi

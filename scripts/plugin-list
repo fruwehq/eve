@@ -6,8 +6,8 @@ require "yaml"
 
 ROOT = File.expand_path("..", __dir__)
 BUILTIN_ROOT = File.join(ROOT, "plugins")
-EXTERNAL_ROOT = File.join(ROOT, ".egame/plugins")
-API_VERSION = "egame.plugin/v1"
+EXTERNAL_ROOT = File.join(ROOT, ".eve/plugins")
+API_VERSION = "eve.plugin/v1"
 PROVIDER_COMMANDS = %w[resolve init plan up down start stop status ip ssh validate].freeze
 PACKAGE_COMMANDS = %w[install status down].freeze
 PROVIDER_ENGINES = %w[terraform vagrant metal].freeze
@@ -25,7 +25,7 @@ end
 
 def plugin_roots
   roots = [BUILTIN_ROOT, EXTERNAL_ROOT]
-  extra = ENV.fetch("EGAME_PLUGIN_ROOTS", "")
+  extra = ENV.fetch("EVE_PLUGIN_ROOTS", "")
   roots.concat(extra.split(":").reject(&:empty?).map { |path| File.expand_path(path, Dir.pwd) })
   roots.uniq
 end
@@ -34,7 +34,7 @@ def plugin_paths
   plugin_roots.flat_map do |root|
     next [] unless Dir.exist?(root)
 
-    Dir.glob(File.join(root, "**/egame-plugin.yaml"))
+    Dir.glob(File.join(root, "**/eve-plugin.yaml"))
   end.sort
 end
 
@@ -374,7 +374,7 @@ begin
   plugins_by_key = {}
   plugins.each do |plugin|
     key = "#{plugin["kind"]}:#{plugin["id"]}"
-    if plugins_by_key[key] && ENV["EGAME_PLUGIN_ALLOW_OVERRIDE"] != "1"
+    if plugins_by_key[key] && ENV["EVE_PLUGIN_ALLOW_OVERRIDE"] != "1"
       raise "duplicate plugin #{key}: #{plugins_by_key[key]["_path"]} and #{plugin["_path"]}"
     end
     plugins_by_key.delete(key) if plugins_by_key[key]

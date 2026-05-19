@@ -45,8 +45,8 @@ PATHS_JSON=$(./scripts/instance-paths --instance "$INSTANCE" --emit json)
 OVERLAY=$(printf '%s' "$PATHS_JSON" | jq -r '.INSTANCE_OVERLAY_PATH')
 mkdir -p "$(dirname "$OVERLAY")"
 ./scripts/instance-profile-overlay --instance "$INSTANCE" --output "$OVERLAY" >/dev/null
-export EGAME_CATALOG_LOCAL="$OVERLAY"
-export EGAME_INSTANCE_NAME="$INSTANCE"
+export EVE_CATALOG_LOCAL="$OVERLAY"
+export EVE_INSTANCE_NAME="$INSTANCE"
 
 RESOLVED_JSON=$(./scripts/instance-resolve --instance "$INSTANCE" --emit json)
 OS_FAMILY=$(printf '%s' "$RESOLVED_JSON" | jq -r '.os.family')

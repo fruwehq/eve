@@ -40,7 +40,7 @@ case "$OS_FAMILY" in
         echo "[provision] configuring passwordless sudo for Raspberry Pi provisioning"
         # shellcheck disable=SC2016
         printf '%s\n' "$RASPBERRY_PI_USER_PASSWORD" | ./scripts/instance-ssh "$PROFILE" -- \
-          'tmp=$(mktemp); printf "%s ALL=(ALL) NOPASSWD:ALL\n" "$USER" > "$tmp"; chmod 0440 "$tmp"; sudo -S -p "" install -o root -g root -m 0440 "$tmp" /etc/sudoers.d/90-egame-provision; rm -f "$tmp"; sudo -n visudo -cf /etc/sudoers.d/90-egame-provision'
+          'tmp=$(mktemp); printf "%s ALL=(ALL) NOPASSWD:ALL\n" "$USER" > "$tmp"; chmod 0440 "$tmp"; sudo -S -p "" install -o root -g root -m 0440 "$tmp" /etc/sudoers.d/90-eve-provision; rm -f "$tmp"; sudo -n visudo -cf /etc/sudoers.d/90-eve-provision'
       fi
     fi
 
@@ -224,7 +224,7 @@ EOF
     ./scripts/ssh-retry "upload linux provision manifest" ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/state/provision-manifest.json" 'provision/state/'
     echo "[provision] running bootstrap.sh"
     ./scripts/ssh-retry "start linux provisioning runner" ./scripts/instance-ssh "$PROFILE" -- 'chmod +x ~/provision/scripts/bootstrap.sh ~/provision/scripts/runner.sh ~/provision/scripts/steps/*.sh ~/provision/scripts/lib/*.sh && ~/provision/scripts/bootstrap.sh'
-    echo "[provision] waiting for linux provisioning to finish (polling remote log every ${EGAME_PROVISION_WAIT_POLL_INTERVAL:-5}s)"
+    echo "[provision] waiting for linux provisioning to finish (polling remote log every ${EVE_PROVISION_WAIT_POLL_INTERVAL:-5}s)"
     ./scripts/wait-for-provision "$PROFILE"
     ;;
   windows)
@@ -345,7 +345,7 @@ EOF
     if [ "$exit_code" -ne 0 ] && [ "$exit_code" -ne 255 ]; then
       exit "$exit_code"
     fi
-    echo "[provision] waiting for windows provisioning to finish (polling remote log every ${EGAME_PROVISION_WAIT_POLL_INTERVAL:-5}s)"
+    echo "[provision] waiting for windows provisioning to finish (polling remote log every ${EVE_PROVISION_WAIT_POLL_INTERVAL:-5}s)"
     ./scripts/wait-for-provision "$PROFILE"
     ;;
   *)

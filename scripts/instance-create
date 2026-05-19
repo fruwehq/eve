@@ -7,7 +7,7 @@ require "time"
 require "yaml"
 
 ROOT = File.expand_path("..", __dir__)
-DEFAULT_REGISTRY_PATH = File.join(ROOT, ".egame/instances.yaml")
+DEFAULT_REGISTRY_PATH = File.join(ROOT, ".eve/instances.yaml")
 
 $LOAD_PATH.unshift(File.join(ROOT, "core"))
 require "sdk"
@@ -21,7 +21,7 @@ def with_registry_lock(registry_path)
 end
 
 def write_registry!(registry_path, registry)
-  Tempfile.create(["egame-registry-", ".yaml"], File.dirname(registry_path)) do |tmp|
+  Tempfile.create(["eve-registry-", ".yaml"], File.dirname(registry_path)) do |tmp|
     tmp.write(registry.to_yaml)
     tmp.close
     FileUtils.mv(tmp.path, registry_path)
@@ -54,8 +54,8 @@ def usage
 end
 
 name = nil
-registry_path = ENV["EGAME_INSTANCE_REGISTRY"] && !ENV["EGAME_INSTANCE_REGISTRY"].empty? \
-                ? File.expand_path(ENV["EGAME_INSTANCE_REGISTRY"], Dir.pwd) \
+registry_path = ENV["EVE_INSTANCE_REGISTRY"] && !ENV["EVE_INSTANCE_REGISTRY"].empty? \
+                ? File.expand_path(ENV["EVE_INSTANCE_REGISTRY"], Dir.pwd) \
                 : DEFAULT_REGISTRY_PATH
 fields = {}
 overrides = {}
@@ -148,7 +148,7 @@ with_registry_lock(registry_path) do
 
   registry["instances"] << entry
 
-  Tempfile.create(["egame-instance-", ".yaml"]) do |tmp|
+  Tempfile.create(["eve-instance-", ".yaml"]) do |tmp|
     tmp.write(registry.to_yaml)
     tmp.close
 
@@ -168,7 +168,7 @@ with_registry_lock(registry_path) do
   write_registry!(registry_path, registry)
 end
 
-Egame::SDK::State.delete!(name)
+Eve::SDK::State.delete!(name)
 
 puts "Created instance: #{name}"
 puts "Registry: #{registry_path}"

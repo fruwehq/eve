@@ -5,8 +5,8 @@ set -eu
 
 package="${1:?Usage: package-down-command <package> <remote-command>}"
 remote_command="${2:?Usage: package-down-command <package> <remote-command>}"
-profile="${EGAME_INSTANCE_NAME:?EGAME_INSTANCE_NAME is required}"
-ssh_cmd="${EGAME_PACKAGE_DOWN_SSH:-./scripts/instance-ssh}"
+profile="${EVE_INSTANCE_NAME:?EVE_INSTANCE_NAME is required}"
+ssh_cmd="${EVE_PACKAGE_DOWN_SSH:-./scripts/instance-ssh}"
 
 if resolved_env=$(./scripts/profile-resolve --profile "$profile" --emit env 2>/dev/null); then
   ssh_user=$(printf "%s\n" "$resolved_env" | awk -F= '/^SSH_USER=/{print $2}')
@@ -26,25 +26,25 @@ esac
 
 remote_command_with_context=$(cat <<EOF
 set -eu
-EGAME_HUMAN_USER="$human_user"
-EGAME_HUMAN_HOME=\$(getent passwd "\$EGAME_HUMAN_USER" | cut -d: -f6)
-EGAME_HUMAN_UID=\$(id -u "\$EGAME_HUMAN_USER")
-export EGAME_HUMAN_USER EGAME_HUMAN_HOME EGAME_HUMAN_UID
-export HOME="\$EGAME_HUMAN_HOME"
-export PATH="\$EGAME_HUMAN_HOME/.local/bin:\$PATH"
-egame_human_run() {
-  sudo -H -u "\$EGAME_HUMAN_USER" env \
-    HOME="\$EGAME_HUMAN_HOME" \
-    USER="\$EGAME_HUMAN_USER" \
-    LOGNAME="\$EGAME_HUMAN_USER" \
-    XDG_RUNTIME_DIR="/run/user/\$EGAME_HUMAN_UID" \
+EVE_HUMAN_USER="$human_user"
+EVE_HUMAN_HOME=\$(getent passwd "\$EVE_HUMAN_USER" | cut -d: -f6)
+EVE_HUMAN_UID=\$(id -u "\$EVE_HUMAN_USER")
+export EVE_HUMAN_USER EVE_HUMAN_HOME EVE_HUMAN_UID
+export HOME="\$EVE_HUMAN_HOME"
+export PATH="\$EVE_HUMAN_HOME/.local/bin:\$PATH"
+eve_human_run() {
+  sudo -H -u "\$EVE_HUMAN_USER" env \
+    HOME="\$EVE_HUMAN_HOME" \
+    USER="\$EVE_HUMAN_USER" \
+    LOGNAME="\$EVE_HUMAN_USER" \
+    XDG_RUNTIME_DIR="/run/user/\$EVE_HUMAN_UID" \
     "\$@"
 }
 $remote_command
 EOF
 )
 
-if [ "${EGAME_PLUGIN_DRY_RUN:-0}" = "1" ]; then
+if [ "${EVE_PLUGIN_DRY_RUN:-0}" = "1" ]; then
   jq -n \
     --arg package "$package" \
     --arg instance "$profile" \

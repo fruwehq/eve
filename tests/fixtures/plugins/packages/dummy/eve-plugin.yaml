@@ -1,0 +1,11 @@
+api_version: eve.plugin/v1
+kind: package
+id: dummy
+display_name: Dummy Test Package
+commands:
+  install: {exec: scripts/package-plugin, args: [dummy, install]}
+  status: {exec: scripts/package-plugin, args: [dummy, status]}
+  down: {exec: scripts/package-plugin, args: [dummy, down]}
+supports: {os_families: [ubuntu]}
+down: {destructive: false}
+env: []

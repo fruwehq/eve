@@ -4,7 +4,7 @@ require "json"
 require "time"
 require "fileutils"
 
-module Egame
+module Eve
   module SDK
     class StateError < StandardError; end
 

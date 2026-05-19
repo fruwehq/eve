@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://ephemeral.dev/schemas/resolved-instance.schema.json",
   "title": "Resolved Instance",
-  "description": "The shape of EGAME_RESOLVED_JSON produced by scripts/instance-resolve --emit json. This is the central data contract consumed by every plugin command, the TUI, and the dispatchers.",
+  "description": "The shape of EVE_RESOLVED_JSON produced by scripts/instance-resolve --emit json. This is the central data contract consumed by every plugin command, the TUI, and the dispatchers.",
 
   "type": "object",
   "required": [
@@ -37,7 +37,7 @@
     },
 
     "instance": {
-      "description": "The raw instance registry entry from .egame/instances.yaml or the fixture registry.",
+      "description": "The raw instance registry entry from .eve/instances.yaml or the fixture registry.",
       "type": "object",
       "required": ["name", "machine", "os", "init", "location"],
       "additionalProperties": true,

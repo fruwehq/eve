@@ -1,4 +1,4 @@
 #!/usr/bin/env sh
 set -eu
 
-exec ./scripts/package-down-command goose 'sudo rm -f "$EGAME_HUMAN_HOME/.local/bin/goose"'
+exec ./scripts/package-down-command goose 'sudo rm -f "$EVE_HUMAN_HOME/.local/bin/goose"'

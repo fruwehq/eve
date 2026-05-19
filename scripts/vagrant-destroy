@@ -19,7 +19,7 @@ fi
 
 echo "[vagrant-destroy] profile=$PROFILE"
 
-WORKDIR="$(egame_instance_workdir "$PROFILE")"
+WORKDIR="$(eve_instance_workdir "$PROFILE")"
 if [ -f "$WORKDIR/Vagrantfile" ]; then
   cd "$WORKDIR"
   vagrant destroy -f

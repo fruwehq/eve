@@ -1,0 +1,62 @@
+api_version: eve.plugin/v1
+kind: package
+id: vnc
+display_name: TigerVNC
+commands:
+  install: {exec: scripts/package-plugin, args: [vnc, install]}
+  status: {exec: scripts/package-plugin, args: [vnc, status]}
+  down: {exec: scripts/package-plugin, args: [vnc, down]}
+supports: {os_families: [ubuntu]}
+compatibility_enforced: true
+compatibility:
+  - platform: ubuntu
+    desktop: XFCE
+    session: X11
+    status: supported
+    notes: Uses TigerVNC on display :1 with XFCE.
+  - platform: ubuntu
+    desktop: XFCE Headless
+    session: X11
+    status: supported
+    notes: Uses TigerVNC on display :1 with XFCE.
+  - platform: ubuntu
+    desktop: GNOME
+    session: Wayland
+    status: unsupported
+    notes: TigerVNC does not serve the local GNOME Wayland session.
+  - platform: ubuntu
+    desktop: GNOME Headless
+    session: Wayland
+    status: unsupported
+    notes: TigerVNC does not serve the GNOME Wayland compositor.
+  - platform: ubuntu
+    desktop: KDE Plasma
+    session: Wayland
+    status: unsupported
+    notes: TigerVNC does not serve the KDE Wayland compositor.
+  - platform: ubuntu
+    desktop: KDE Plasma Headless
+    session: Wayland
+    status: unsupported
+    notes: TigerVNC does not serve the KDE Wayland compositor.
+down: {destructive: true}
+env: []
+actions:
+  - id: vnc
+    label: VNC
+    target: vnc.open
+    prompt:
+      title: Open VNC
+      message: Choose the viewer for this VNC session.
+      env: VNC_VIEWER
+      choices:
+        - value: auto
+          label: Auto
+          variant: primary
+        - value: system
+          label: macOS
+        - value: tigervnc
+          label: TigerVNC
+install:
+  ubuntu:
+    steps: [base.sh, timezone.sh, provision/ubuntu/vnc.sh]

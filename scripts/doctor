@@ -59,8 +59,8 @@ section "providers"
 ./scripts/providers-status
 
 section "state"
-mkdir -p .egame/state/instances
-printf '  [OK] state directory: .egame/state/instances\n'
+mkdir -p .eve/state/instances
+printf '  [OK] state directory: .eve/state/instances\n'
 printf '  [INFO] recover interrupted state with: make instance.recover INSTANCE=<name>\n'
 
 exit "$fail"

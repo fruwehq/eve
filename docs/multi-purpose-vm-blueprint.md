@@ -85,7 +85,7 @@ Instead of path-only presets like `aws/linux/dev-sandbox`, define reusable catal
 - `inits[]`
 - `packages[]` and/or `bundles[]`
 - `locations[]`
-- concrete instances in `.egame/instances.yaml` (composition entries)
+- concrete instances in `.eve/instances.yaml` (composition entries)
 
 ## Example manifest (aligned with your idea)
 

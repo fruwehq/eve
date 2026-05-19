@@ -2,7 +2,7 @@
 
 require "json"
 
-module Egame
+module Eve
   module SDK
     module StateMachine
       VALID_LIVE_STATES = %w[running stopped absent error].freeze

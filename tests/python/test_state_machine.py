@@ -1,7 +1,7 @@
 """Regression tests for state-machine rules moved to core/sdk/state-machine.rb.
 
 These tests pin the behavior of the 6 state-machine functions that were
-extracted from scripts/egame-tui into core/sdk/state-machine.rb. They
+extracted from scripts/eve-tui into core/sdk/state-machine.rb. They
 verify the Ruby implementation matches the original Python behavior.
 """
 
@@ -31,7 +31,7 @@ def ruby_eval(code: str) -> str:
 
 
 def ruby_state_machine(method: str, *args_json: str) -> str:
-    parts = [f'include Egame::SDK']
+    parts = [f'include Eve::SDK']
     parts.append(f'result = StateMachine.{method}({", ".join(args_json)})')
     parts.append('puts result.inspect')
     return ruby_eval("; ".join(parts))
@@ -171,7 +171,7 @@ class TestShouldApplyLiveProviderState:
 class TestStatusWithProviderState:
     def _swps(self, status_json: str, provider_state: str) -> dict[str, Any]:
         code = (
-            f'include Egame::SDK; '
+            f'include Eve::SDK; '
             f'result = StateMachine.status_with_provider_state({status_json}, "{provider_state}"); '
             f'puts JSON.generate(result)'
         )
@@ -199,7 +199,7 @@ class TestStatusWithProviderState:
 
     def test_does_not_mutate_original(self) -> None:
         code = (
-            'include Egame::SDK; '
+            'include Eve::SDK; '
             'original = {"state"=>{"provider_state"=>"unknown"}}; '
             'result = StateMachine.status_with_provider_state(original, "running"); '
             'puts JSON.generate({"original"=>original, "result"=>result})'
@@ -225,7 +225,7 @@ class TestStatusWithProviderState:
 class TestStatusWithObservedState:
     def _swos(self, status_json: str, state_doc_json: str) -> dict[str, Any]:
         code = (
-            f'include Egame::SDK; '
+            f'include Eve::SDK; '
             f'result = StateMachine.status_with_observed_state({status_json}, {state_doc_json}); '
             f'puts JSON.generate(result)'
         )
@@ -270,7 +270,7 @@ class TestStatusWithObservedState:
 
     def test_does_not_mutate_original(self) -> None:
         code = (
-            'include Egame::SDK; '
+            'include Eve::SDK; '
             'original = {"state"=>{"provider_state"=>"unknown"}}; '
             'result = StateMachine.status_with_observed_state(original, {"observed_state"=>{"provider_status"=>"running"}}); '
             'puts JSON.generate({"original"=>original, "result"=>result})'
@@ -293,7 +293,7 @@ class TestStatusWithObservedState:
 class TestAggregateSummary:
     def _agg(self, statuses_json: str) -> dict[str, int]:
         code = (
-            f'include Egame::SDK; '
+            f'include Eve::SDK; '
             f'result = StateMachine.aggregate_summary({statuses_json}); '
             f'puts JSON.generate(result)'
         )
@@ -349,7 +349,7 @@ class TestAggregateSummary:
 class TestStatusWithProviderStateNonDictState:
     def _swps(self, status_json: str, provider_state: str) -> dict[str, Any]:
         code = (
-            f'include Egame::SDK; '
+            f'include Eve::SDK; '
             f'result = StateMachine.status_with_provider_state({status_json}, "{provider_state}"); '
             f'puts JSON.generate(result)'
         )
@@ -367,7 +367,7 @@ class TestStatusWithProviderStateNonDictState:
 class TestStatusWithObservedStateNonDict:
     def _swos(self, status_json: str, state_doc_json: str) -> dict[str, Any]:
         code = (
-            f'include Egame::SDK; '
+            f'include Eve::SDK; '
             f'result = StateMachine.status_with_observed_state({status_json}, {state_doc_json}); '
             f'puts JSON.generate(result)'
         )
@@ -441,7 +441,7 @@ class TestStatusWithObservedStateNonDict:
 class TestStatusWithProviderStateNilState:
     def _swps(self, status_json: str, provider_state: str) -> dict[str, Any]:
         code = (
-            f'include Egame::SDK; '
+            f'include Eve::SDK; '
             f'result = StateMachine.status_with_provider_state({status_json}, "{provider_state}"); '
             f'puts JSON.generate(result)'
         )
@@ -464,8 +464,8 @@ class TestOpen3Capture3EnvForm:
     def test_env_overlay_passed_to_subprocess(self) -> None:
         code = (
             'require "open3"; '
-            'out, _, _ = Open3.capture3({"_EGAME_TEST_VAR" => "from_overlay"}, '
-            '"ruby", "-e", "puts ENV[\\\"_EGAME_TEST_VAR\\\"]"); '
+            'out, _, _ = Open3.capture3({"_EVE_TEST_VAR" => "from_overlay"}, '
+            '"ruby", "-e", "puts ENV[\\\"_EVE_TEST_VAR\\\"]"); '
             'puts out.strip'
         )
         assert ruby_eval(code) == "from_overlay"

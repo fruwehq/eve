@@ -82,7 +82,7 @@ def provider_status_table() -> str:
 
 
 def upload_folders() -> list[str]:
-    upload_dir = Path(os.environ.get("EGAME_UPLOAD_DIR", ROOT / "upload"))
+    upload_dir = Path(os.environ.get("EVE_UPLOAD_DIR", ROOT / "upload"))
     if not upload_dir.exists():
         return []
     return sorted(path.name for path in upload_dir.iterdir() if path.is_dir())
@@ -91,7 +91,7 @@ def upload_folders() -> list[str]:
 def instance_ip(instance: str) -> str:
     code, out, err = run_command(
         ["make", "--no-print-directory", "ip", f"INSTANCE={instance}"],
-        env={"EGAME_DISABLE_STATE": "1"},
+        env={"EVE_DISABLE_STATE": "1"},
     )
     if code != 0:
         raise RuntimeError(err.strip() or out.strip() or f"make ip exited {code}")

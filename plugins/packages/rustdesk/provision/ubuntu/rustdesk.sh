@@ -74,7 +74,7 @@ write_display_mode_helper() {
   local mode_name="$2"
   local modeline="$3"
   human_install_dir "$HUMAN_HOME/.local/bin" "$HUMAN_HOME/.config/autostart"
-  cat <<EOF | human_write_file "$HUMAN_HOME/.local/bin/egame-set-display-mode" 0755
+  cat <<EOF | human_write_file "$HUMAN_HOME/.local/bin/eve-set-display-mode" 0755
 #!/usr/bin/env sh
 set -eu
 preferred_output="$output_name"
@@ -91,22 +91,22 @@ xrandr --query | awk '/ connected/{print \$1}' | while read -r connected_output;
 done
 EOF
   if [ -n "$modeline" ]; then
-    cat <<EOF | sudo tee -a "$HUMAN_HOME/.local/bin/egame-set-display-mode" >/dev/null
+    cat <<EOF | sudo tee -a "$HUMAN_HOME/.local/bin/eve-set-display-mode" >/dev/null
 xrandr --newmode $modeline 2>/dev/null || true
 xrandr --addmode "\$output_name" "$mode_name" 2>/dev/null || true
 EOF
   fi
-  cat <<EOF | sudo tee -a "$HUMAN_HOME/.local/bin/egame-set-display-mode" >/dev/null
+  cat <<EOF | sudo tee -a "$HUMAN_HOME/.local/bin/eve-set-display-mode" >/dev/null
 xrandr --output "\$output_name" --mode "$mode_name" --primary 2>/dev/null || true
 EOF
-  sudo chown "$HUMAN_USER_NAME:$HUMAN_GROUP" "$HUMAN_HOME/.local/bin/egame-set-display-mode"
-  sudo chmod 0755 "$HUMAN_HOME/.local/bin/egame-set-display-mode"
+  sudo chown "$HUMAN_USER_NAME:$HUMAN_GROUP" "$HUMAN_HOME/.local/bin/eve-set-display-mode"
+  sudo chmod 0755 "$HUMAN_HOME/.local/bin/eve-set-display-mode"
 
-  cat <<EOF | human_write_file "$HUMAN_HOME/.config/autostart/egame-display-mode.desktop" 0644
+  cat <<EOF | human_write_file "$HUMAN_HOME/.config/autostart/eve-display-mode.desktop" 0644
 [Desktop Entry]
 Type=Application
 Name=Set display mode
-Exec=$HUMAN_HOME/.local/bin/egame-set-display-mode
+Exec=$HUMAN_HOME/.local/bin/eve-set-display-mode
 Hidden=false
 NoDisplay=true
 X-GNOME-Autostart-enabled=true
@@ -127,7 +127,7 @@ if [ "${PROVIDER:-}" = "raspberry-pi" ]; then
   if [ -w /boot/firmware/cmdline.txt ] || sudo test -w /boot/firmware/cmdline.txt; then
     if grep -qF "video=${hdmi_connector}:" /boot/firmware/cmdline.txt; then
       log "### rustdesk: removing obsolete Raspberry Pi HDMI-forcing cmdline token"
-      sudo cp /boot/firmware/cmdline.txt /boot/firmware/cmdline.txt.egame.bak
+      sudo cp /boot/firmware/cmdline.txt /boot/firmware/cmdline.txt.eve.bak
       sudo sed -i -E "s#(^| )video=${hdmi_connector}:[^ ]+##g; s#  +# #g; s#^ ##; s# \$##" /boot/firmware/cmdline.txt
     fi
   else
@@ -289,7 +289,7 @@ cat <<'XEOF' | human_write_file "$HUMAN_HOME/.config/xfce4/xfconf/xfce-perchanne
 XEOF
 
 human_install_dir "$HUMAN_HOME/.config/autostart"
-cat <<'EOF' | human_write_file "$HUMAN_HOME/.local/bin/egame-disable-session-lock" 0755
+cat <<'EOF' | human_write_file "$HUMAN_HOME/.local/bin/eve-disable-session-lock" 0755
 #!/usr/bin/env sh
 set -eu
 if command -v gsettings >/dev/null 2>&1; then
@@ -303,18 +303,18 @@ if command -v xfconf-query >/dev/null 2>&1; then
 fi
 EOF
 
-cat <<EOF | human_write_file "$HUMAN_HOME/.config/autostart/egame-disable-session-lock.desktop" 0644
+cat <<EOF | human_write_file "$HUMAN_HOME/.config/autostart/eve-disable-session-lock.desktop" 0644
 [Desktop Entry]
 Type=Application
 Name=Disable session lock
-Exec=$HUMAN_HOME/.local/bin/egame-disable-session-lock
+Exec=$HUMAN_HOME/.local/bin/eve-disable-session-lock
 Hidden=false
 NoDisplay=true
 X-GNOME-Autostart-enabled=true
 EOF
 
 if [ "$desktop_session" = "gnome" ]; then
-  human_run dbus-run-session "$HUMAN_HOME/.local/bin/egame-disable-session-lock" 2>/dev/null || true
+  human_run dbus-run-session "$HUMAN_HOME/.local/bin/eve-disable-session-lock" 2>/dev/null || true
 fi
 
 human_install_dir "$HUMAN_HOME/.config/autostart"
@@ -322,7 +322,7 @@ cat <<EOF | human_write_file "$HUMAN_HOME/.config/autostart/rustdesk-server.desk
 [Desktop Entry]
 Type=Application
 Name=RustDesk Server
-Exec=sh -lc 'export DISPLAY="\${DISPLAY:-:0}"; export XAUTHORITY="\${XAUTHORITY:-$HUMAN_HOME/.Xauthority}"; [ -x "$HUMAN_HOME/.local/bin/egame-set-display-mode" ] && "$HUMAN_HOME/.local/bin/egame-set-display-mode" || true; exec rustdesk --server'
+Exec=sh -lc 'export DISPLAY="\${DISPLAY:-:0}"; export XAUTHORITY="\${XAUTHORITY:-$HUMAN_HOME/.Xauthority}"; [ -x "$HUMAN_HOME/.local/bin/eve-set-display-mode" ] && "$HUMAN_HOME/.local/bin/eve-set-display-mode" || true; exec rustdesk --server'
 Hidden=false
 NoDisplay=true
 X-GNOME-Autostart-enabled=true

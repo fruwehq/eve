@@ -1,2 +1,2 @@
 #!/usr/bin/env ruby
-require_relative "../../../../core/sdk"; Egame::Provider.dispatch(ARGV)
+require_relative "../../../../core/sdk"; Eve::Provider.dispatch(ARGV)

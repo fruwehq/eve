@@ -4,15 +4,15 @@
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
-cache_dir="$(mktemp -d "${TMPDIR:-/tmp}/egame-tui-pycache.XXXXXX")"
+cache_dir="$(mktemp -d "${TMPDIR:-/tmp}/eve-tui-pycache.XXXXXX")"
 trap 'rm -rf "$cache_dir"' EXIT
 
-PYTHONPYCACHEPREFIX="$cache_dir" poetry run python -m py_compile scripts/egame-tui
-poetry run python ./scripts/egame-tui --check
+PYTHONPYCACHEPREFIX="$cache_dir" poetry run python -m py_compile scripts/eve-tui
+poetry run python ./scripts/eve-tui --check
 poetry run python - <<'PY'
 import runpy
 
-module = runpy.run_path("scripts/egame-tui")
+module = runpy.run_path("scripts/eve-tui")
 options = module["catalog_options"]()
 assert "vultr" in options["providers"]
 assert any(platform["provider"] == "vultr" and platform["os"] == "windows-server-2025" for platform in options["platforms"])
@@ -21,4 +21,4 @@ format_aggregate = module["format_aggregate"]
 assert "running" in format_aggregate({"running": 0, "stopped": 0, "failed": 0, "other": 0})
 PY
 
-printf '  [OK] egame-tui compiles without importing optional Textual dependency\n'
+printf '  [OK] eve-tui compiles without importing optional Textual dependency\n'

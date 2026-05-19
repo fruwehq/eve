@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [ -n "${EGAME_INSTANCE_NAME:-}" ]; then
-  PROFILE="$EGAME_INSTANCE_NAME"
+if [ -n "${EVE_INSTANCE_NAME:-}" ]; then
+  PROFILE="$EVE_INSTANCE_NAME"
 else
   PROFILE="${1:?Usage: commands/start <instance>}"
 fi
@@ -42,15 +42,15 @@ terraform_state_json() {
     return 0
   fi
 
-  if [ -n "${EGAME_TF_STATE_BASE:-}" ]; then
+  if [ -n "${EVE_TF_STATE_BASE:-}" ]; then
     while IFS= read -r candidate; do
-      state_path="${EGAME_TF_STATE_BASE}/${candidate}/workspaces/${workspace}/terraform.tfstate"
+      state_path="${EVE_TF_STATE_BASE}/${candidate}/workspaces/${workspace}/terraform.tfstate"
       if [ -f "$state_path" ]; then
         cat "$state_path"
         return 0
       fi
 
-      state_path="${EGAME_TF_STATE_BASE}/${candidate}/default.tfstate"
+      state_path="${EVE_TF_STATE_BASE}/${candidate}/default.tfstate"
       if [ -f "$state_path" ]; then
         cat "$state_path"
         return 0

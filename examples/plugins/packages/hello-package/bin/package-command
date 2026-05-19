@@ -24,7 +24,7 @@ esac
 
 jq -n \
   --arg kind "package-status" \
-  --arg package "${EGAME_PACKAGE_PLUGIN:-hello-package}" \
+  --arg package "${EVE_PACKAGE_PLUGIN:-hello-package}" \
   --arg command "$command" \
   --arg instance "$instance" \
   --arg os_family "$os_family" \

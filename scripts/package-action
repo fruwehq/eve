@@ -24,8 +24,8 @@ end
 
 def prepare_instance_overlay(instance_name)
   path_args = [File.join(ROOT, "scripts/instance-paths"), "--instance", instance_name, "--emit", "json"]
-  if ENV["EGAME_INSTANCE_REGISTRY"] && !ENV["EGAME_INSTANCE_REGISTRY"].empty?
-    path_args += ["--registry", ENV["EGAME_INSTANCE_REGISTRY"]]
+  if ENV["EVE_INSTANCE_REGISTRY"] && !ENV["EVE_INSTANCE_REGISTRY"].empty?
+    path_args += ["--registry", ENV["EVE_INSTANCE_REGISTRY"]]
   end
   paths = run_json(*path_args)
   overlay = paths.fetch("INSTANCE_OVERLAY_PATH")
@@ -35,14 +35,14 @@ def prepare_instance_overlay(instance_name)
     "--instance", instance_name,
     "--output", overlay
   ]
-  if ENV["EGAME_INSTANCE_REGISTRY"] && !ENV["EGAME_INSTANCE_REGISTRY"].empty?
-    overlay_args += ["--registry", ENV["EGAME_INSTANCE_REGISTRY"]]
+  if ENV["EVE_INSTANCE_REGISTRY"] && !ENV["EVE_INSTANCE_REGISTRY"].empty?
+    overlay_args += ["--registry", ENV["EVE_INSTANCE_REGISTRY"]]
   end
   out, status = Open3.capture2e(*overlay_args)
   raise out unless status.success?
 
-  ENV["EGAME_CATALOG_LOCAL"] = overlay
-  ENV["EGAME_INSTANCE_NAME"] = instance_name
+  ENV["EVE_CATALOG_LOCAL"] = overlay
+  ENV["EVE_INSTANCE_NAME"] = instance_name
 end
 
 def run_action_target(target, instance_name)

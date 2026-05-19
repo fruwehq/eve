@@ -15,7 +15,7 @@
 
 v3 introduces concrete local instances selected from provider/platform catalog
 choices. Instances live in the git-ignored local registry at
-`.egame/instances.yaml`.
+`.eve/instances.yaml`.
 
 ```bash
 # List supported provider / platform / content choices
@@ -58,7 +58,7 @@ make package.unselect INSTANCE=dev-a PACKAGE=xpra
 ```
 
 The v3 command surface is instance-first. The catalog defines machines, OSes,
-init methods, locations, bundles, packages, and plugins; `.egame/instances.yaml`
+init methods, locations, bundles, packages, and plugins; `.eve/instances.yaml`
 defines concrete local instances composed from those catalog entries. Provider
 and package plugins receive resolved instance JSON, and legacy profile-shaped
 overlays are generated only as an internal compatibility detail for lower-level
@@ -168,9 +168,9 @@ best-effort dock-at-bottom, left-side window controls, dark color scheme, and
 Papirus icon setup on the next GNOME login.
 
 Providers and packages are now described by plugin manifests. Built-ins live in
-`plugins/providers/<id>/egame-plugin.yaml` and
-`plugins/packages/<id>/egame-plugin.yaml`; optional external plugins can be
-pinned in `.egame/plugin-sources.yaml` and synchronized with
+`plugins/providers/<id>/eve-plugin.yaml` and
+`plugins/packages/<id>/eve-plugin.yaml`; optional external plugins can be
+pinned in `.eve/plugin-sources.yaml` and synchronized with
 `make plugins.sync`. Package `down` and `reinstall` operations are explicit and
 destructive removals require `YES=1`.
 
@@ -219,12 +219,12 @@ that launches a local GUI client.
 Package plugins may provide host-side command hooks at
 `commands/<os_family>/<install|status|down>` or
 `commands/common/<install|status|down>`. The built-in compatibility wrapper
-passes the resolved instance JSON on stdin and sets `EGAME_INSTANCE_NAME`,
-`EGAME_PACKAGE_PLUGIN`, and `EGAME_PACKAGE_PLUGIN_ROOT`.
+passes the resolved instance JSON on stdin and sets `EVE_INSTANCE_NAME`,
+`EVE_PACKAGE_PLUGIN`, and `EVE_PACKAGE_PLUGIN_ROOT`.
 
 Manifest command `exec` paths may point at core repo scripts, such as
 `scripts/package-plugin`, or at plugin-local executables. External plugins that
-reuse a built-in id are rejected by default; set `EGAME_PLUGIN_ALLOW_OVERRIDE=1`
+reuse a built-in id are rejected by default; set `EVE_PLUGIN_ALLOW_OVERRIDE=1`
 only when you intentionally want the later external plugin to replace the
 built-in one.
 
@@ -240,11 +240,11 @@ Terraform provider versions are pinned exactly in the Terramate provider templat
 - Local instance choices (for example QEMU/Vagrant) should work without cloud API keys.
 - Cloud providers (AWS/Vultr/TrueNAS) only require their own env vars when used.
 - Keep secrets and credentials in `.env.local`.
-- Non-secret preferences can go in `.egame/config.yaml`, using the same shape
+- Non-secret preferences can go in `.eve/config.yaml`, using the same shape
   as [config/defaults.yaml](config/defaults.yaml). This is intended for
   UI-editable settings such as display resolution and Moonlight preferences.
   Run `make config.migrate` to preview moving existing non-secret `.env.local`
-  values into `.egame/config.yaml`; apply with `YES=1 make config.migrate`.
+  values into `.eve/config.yaml`; apply with `YES=1 make config.migrate`.
 
 ```bash
 # List catalog choices and create a concrete instance
@@ -408,20 +408,20 @@ later SSH/provision/package commands use that identity.
     - `TRUENAS_SSH_PRIVATE_KEY_FILE` — path to private key
     - `TRUENAS_SSH_HOST_KEY_FINGERPRINT` — e.g. `SHA256:...`
     - `TRUENAS_API_KEY` — REST API key for cloud-init ISO upload
-    - `TRUENAS_VM_BASE_DIR` — base directory for VM files (e.g. `/mnt/pool1/egame`)
+    - `TRUENAS_VM_BASE_DIR` — base directory for VM files (e.g. `/mnt/pool1/eve`)
     - `TRUENAS_VM_POOL` — ZFS pool for zvols (e.g. `pool1`)
-    - `TRUENAS_VM_ZVOL_PREFIX` — dataset path prefix for zvols (e.g. `egame`)
+    - `TRUENAS_VM_ZVOL_PREFIX` — dataset path prefix for zvols (e.g. `eve`)
  5. **Optional env vars** (defaults in `.env`, override in `.env.local`):
     - `TRUENAS_SSH_PORT` (default: `22`)
  6. **One-time ZFS setup** — create the parent dataset:
     ```bash
     # On TrueNAS web UI: Storage > pool1 > Add Dataset (preset: Generic)
-    #   Name: egame    →  creates pool1/egame
+    #   Name: eve    →  creates pool1/eve
     ```
-    The dataset (`pool1/egame`) must exist before `make up`. Subdirectories (`iso/`, `images/`) are created automatically.
+    The dataset (`pool1/eve`) must exist before `make up`. Subdirectories (`iso/`, `images/`) are created automatically.
  7. **One-time sudoers setup** — the Terraform user needs `sudo dd` access to write cloud images to zvols. Add to sudoers (`visudo` on TrueNAS):
     ```
-    terraform ALL=(ALL) NOPASSWD: /usr/bin/dd if=/mnt/pool1/egame/images/* of=/dev/zvol/pool1/egame/*
+    terraform ALL=(ALL) NOPASSWD: /usr/bin/dd if=/mnt/pool1/eve/images/* of=/dev/zvol/pool1/eve/*
     ```
     Adjust path to `/bin/dd` if using TrueNAS CORE (FreeBSD).
  8. **Disk image setup** — `make up` downloads the cloud image directly to the NAS, writes it to a zvol, and resizes the partition. No manual `dd` needed.
@@ -463,7 +463,7 @@ make instance.create INSTANCE=rpi5-b MACHINE=raspberry-pi-5 OS=ubuntu-26.04-arm6
 ```
 
 The TUI asks for this IP address when the selected platform is Raspberry Pi.
-`raspberry_pi.host` / `raspberry_pi.ip` in `.egame/config.yaml` remain useful as
+`raspberry_pi.host` / `raspberry_pi.ip` in `.eve/config.yaml` remain useful as
 single-board defaults, but a per-instance `provider_config.ip` wins whenever it
 is present.
 

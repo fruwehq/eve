@@ -79,9 +79,9 @@ configure_gnome_rdp() {
     elif command -v mutter >/dev/null 2>&1; then
       log "### rdp: enabling fallback headless Mutter virtual monitor ${width}x${height}"
       sudo install -d -o "$HUMAN_USER_NAME" -g "$HUMAN_GROUP" -m 0700 "$HUMAN_HOME/.config/systemd/user/default.target.wants"
-      sudo tee "$HUMAN_HOME/.config/systemd/user/egame-headless-mutter.service" >/dev/null <<EOF
+      sudo tee "$HUMAN_HOME/.config/systemd/user/eve-headless-mutter.service" >/dev/null <<EOF
 [Unit]
-Description=Egame headless Mutter virtual monitor
+Description=Eve headless Mutter virtual monitor
 After=graphical-session.target
 PartOf=graphical-session.target
 
@@ -94,12 +94,12 @@ RestartSec=2
 [Install]
 WantedBy=default.target
 EOF
-      sudo chown "$HUMAN_USER_NAME:$HUMAN_GROUP" "$HUMAN_HOME/.config/systemd/user/egame-headless-mutter.service"
-      sudo ln -sfn "$HUMAN_HOME/.config/systemd/user/egame-headless-mutter.service" \
-        "$HUMAN_HOME/.config/systemd/user/default.target.wants/egame-headless-mutter.service"
-      sudo chown -h "$HUMAN_USER_NAME:$HUMAN_GROUP" "$HUMAN_HOME/.config/systemd/user/default.target.wants/egame-headless-mutter.service"
+      sudo chown "$HUMAN_USER_NAME:$HUMAN_GROUP" "$HUMAN_HOME/.config/systemd/user/eve-headless-mutter.service"
+      sudo ln -sfn "$HUMAN_HOME/.config/systemd/user/eve-headless-mutter.service" \
+        "$HUMAN_HOME/.config/systemd/user/default.target.wants/eve-headless-mutter.service"
+      sudo chown -h "$HUMAN_USER_NAME:$HUMAN_GROUP" "$HUMAN_HOME/.config/systemd/user/default.target.wants/eve-headless-mutter.service"
       human_run systemctl --user daemon-reload || true
-      human_run systemctl --user enable --now egame-headless-mutter.service || true
+      human_run systemctl --user enable --now eve-headless-mutter.service || true
     fi
   fi
 

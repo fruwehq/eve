@@ -20,9 +20,9 @@ fi
 if ! human_run sh -lc 'command -v rustc >/dev/null 2>&1'; then
   log "installing Rust (rustup)"
   download https://sh.rustup.rs "$DOWNLOADS_DIR/rustup-init.sh"
-  human_install_dir -m 0755 "$HUMAN_HOME/.cache/egame"
-  sudo install -o "$HUMAN_USER_NAME" -g "$HUMAN_GROUP" -m 0755 "$DOWNLOADS_DIR/rustup-init.sh" "$HUMAN_HOME/.cache/egame/rustup-init.sh"
-  human_run sh "$HUMAN_HOME/.cache/egame/rustup-init.sh" -y --default-toolchain stable --profile minimal
+  human_install_dir -m 0755 "$HUMAN_HOME/.cache/eve"
+  sudo install -o "$HUMAN_USER_NAME" -g "$HUMAN_GROUP" -m 0755 "$DOWNLOADS_DIR/rustup-init.sh" "$HUMAN_HOME/.cache/eve/rustup-init.sh"
+  human_run sh "$HUMAN_HOME/.cache/eve/rustup-init.sh" -y --default-toolchain stable --profile minimal
 fi
 
 log "### dev-toolchain: done"

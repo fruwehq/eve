@@ -21,7 +21,7 @@ def run_json(*cmd)
 end
 
 instance_name = nil
-registry_path = ENV["EGAME_INSTANCE_REGISTRY"] ? File.expand_path(ENV["EGAME_INSTANCE_REGISTRY"], Dir.pwd) : nil
+registry_path = ENV["EVE_INSTANCE_REGISTRY"] ? File.expand_path(ENV["EVE_INSTANCE_REGISTRY"], Dir.pwd) : nil
 json = false
 
 args = ARGV.dup

@@ -1,4 +1,4 @@
 #!/usr/bin/env sh
 set -eu
 
-exec ./scripts/package-status-command goose 'if egame_human_run sh -lc "command -v goose >/dev/null 2>&1 || [ -x \"\$HOME/.local/bin/goose\" ]"; then echo installed; else echo missing; fi'
+exec ./scripts/package-status-command goose 'if eve_human_run sh -lc "command -v goose >/dev/null 2>&1 || [ -x \"\$HOME/.local/bin/goose\" ]"; then echo installed; else echo missing; fi'

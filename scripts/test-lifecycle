@@ -38,7 +38,7 @@ require "open3"
 
 puts "\n== lifecycle: fake provider =="
 
-Dir.mktmpdir("egame-lifecycle-test-") do |tmpdir|
+Dir.mktmpdir("eve-lifecycle-test-") do |tmpdir|
   workdir = File.join(tmpdir, "work")
   state_dir = File.join(tmpdir, "state")
   registry_dir = File.join(tmpdir, "registry")
@@ -101,11 +101,11 @@ Dir.mktmpdir("egame-lifecycle-test-") do |tmpdir|
   File.write(registry_path, YAML.dump(registry))
 
   base_env = {
-    "EGAME_INSTANCE_REGISTRY" => registry_path,
-    "EGAME_CATALOG_LOCAL" => catalog_path,
-    "EGAME_INSTANCE_WORKDIR" => workdir,
-    "EGAME_STATE_DIR" => state_dir,
-    "EGAME_PLUGIN_ROOTS" => FAKE_PLUGIN_PATH
+    "EVE_INSTANCE_REGISTRY" => registry_path,
+    "EVE_CATALOG_LOCAL" => catalog_path,
+    "EVE_INSTANCE_WORKDIR" => workdir,
+    "EVE_STATE_DIR" => state_dir,
+    "EVE_PLUGIN_ROOTS" => FAKE_PLUGIN_PATH
   }
 
   provision_stub = File.join(tmpdir, "fake-provision")
@@ -232,7 +232,7 @@ Dir.mktmpdir("egame-lifecycle-test-") do |tmpdir|
   r_provision = run_capture(
     File.join(ROOT, "scripts/instance-provision"),
     "--instance", "fake-lifecycle-a",
-    env: base_env.merge("EGAME_PROVISION_SCRIPT" => provision_stub)
+    env: base_env.merge("EVE_PROVISION_SCRIPT" => provision_stub)
   )
   if r_provision[:status]&.success?
     state = JSON.parse(File.read(File.join(state_dir, "instances", "fake-lifecycle-a.json")))

@@ -2,4 +2,4 @@
 set -eu
 
 # shellcheck disable=SC2016 # Remote command must expand on the VM.
-exec ./scripts/package-status-command docker 'service="$EGAME_HUMAN_HOME/.config/systemd/user/docker.service"; if command -v docker >/dev/null 2>&1 && sudo test -f "$service"; then echo installed; else echo missing; fi'
+exec ./scripts/package-status-command docker 'service="$EVE_HUMAN_HOME/.config/systemd/user/docker.service"; if command -v docker >/dev/null 2>&1 && sudo test -f "$service"; then echo installed; else echo missing; fi'

@@ -1,7 +1,15 @@
 #!/usr/bin/env bash
-# Boundary lint: two checks on central scripts/
+# Boundary lint: checks on central scripts/ AND the provider-agnostic
+# shared dispatchers under plugins/providers/_common and _terraform-common.
+#
 #   1. provider/OS ID references outside the allowlist
-#   2. bash/sh shebangs outside the allowlist (language policy)
+#   2. bash/sh shebangs in central scripts/ outside the allowlist
+#      (language policy: no new bash in scripts/)
+#
+# The _common and _terraform-common directories must be provider-agnostic
+# by construction. Any provider/OS ID in them is a violation by definition
+# and either belongs in a per-provider plugin or in the allowlist (with
+# a Part 2 follow-up marker).
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
@@ -49,10 +57,27 @@ PROVIDER_IDS="aws gcp local-qemu raspberry-pi truenas vultr"
 OS_IDS="$(awk '/^oses:/{a=1;next} /^[^ ]/{a=0} a&&/^  - id:/{print $3}' config/catalog.yaml)"
 ALL_IDS="$PROVIDER_IDS $OS_IDS"
 
+# Files scanned for provider/OS references:
+#   - scripts/* (central scripts; old surface)
+#   - plugins/providers/_common/commands/* (must be provider-agnostic)
+#   - plugins/providers/_common/lib/* if present
+#   - plugins/providers/_terraform-common/commands/* (must be provider-agnostic)
+#   - plugins/providers/_terraform-common/lib/* if present
+SCAN_FILES=()
 for f in scripts/*; do
   [[ -d "$f" ]] && continue
   base="$(basename "$f")"
   [[ "$base" == test-* || "$base" == test ]] && continue
+  SCAN_FILES+=("$f")
+done
+for dir in plugins/providers/_common plugins/providers/_terraform-common; do
+  [[ -d "$dir" ]] || continue
+  while IFS= read -r f; do
+    SCAN_FILES+=("$f")
+  done < <(find "$dir" -type f -not -path '*/\.*')
+done
+
+for f in "${SCAN_FILES[@]}"; do
   for id in $ALL_IDS; do
     if grep -qF "$id" "$f"; then
       if ! grep -q "^${f}:provider/OS reference -" "$ALLOWLIST" 2>/dev/null; then

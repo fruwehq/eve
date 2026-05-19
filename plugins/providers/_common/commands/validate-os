@@ -12,7 +12,7 @@ unless %w[all any].include?(mode) && label && !keys.empty?
   exit 2
 end
 
-json = ENV["EGAME_RESOLVED_JSON"]
+json = ENV["EVE_RESOLVED_JSON"]
 json = $stdin.read if json.nil? || json.empty?
 resolved = JSON.parse(json)
 os = resolved.fetch("os")

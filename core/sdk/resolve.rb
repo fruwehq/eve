@@ -2,7 +2,7 @@
 
 require "json"
 
-module Egame
+module Eve
   module SDK
     class SchemaValidationError < StandardError; end
 
@@ -120,12 +120,12 @@ module Egame
 
     module Resolve
       def self.from_env
-        json_source = ENV["EGAME_RESOLVED_JSON"]
+        json_source = ENV["EVE_RESOLVED_JSON"]
         raw = if json_source
                 begin
                   JSON.parse(json_source)
                 rescue JSON::ParserError => e
-                  raise SchemaValidationError, "Invalid JSON in EGAME_RESOLVED_JSON: #{e.message}"
+                  raise SchemaValidationError, "Invalid JSON in EVE_RESOLVED_JSON: #{e.message}"
                 end
               else
                 begin

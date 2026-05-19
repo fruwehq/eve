@@ -25,7 +25,7 @@ def run_json(*cmd)
 end
 
 instance_name = nil
-registry_path = ENV["EGAME_INSTANCE_REGISTRY"] ? File.expand_path(ENV["EGAME_INSTANCE_REGISTRY"], Dir.pwd) : nil
+registry_path = ENV["EVE_INSTANCE_REGISTRY"] ? File.expand_path(ENV["EVE_INSTANCE_REGISTRY"], Dir.pwd) : nil
 json = false
 
 args = ARGV.dup
@@ -65,7 +65,7 @@ begin
   paths = run_json(*paths_cmd)
   packages = run_json(*package_cmd).fetch("packages")
 
-  status = Egame::SDK::State.build_view(
+  status = Eve::SDK::State.build_view(
     instance_name: instance_name,
     resolved: resolved,
     packages: packages,

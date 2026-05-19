@@ -1,0 +1,48 @@
+api_version: eve.plugin/v1
+kind: provider
+id: truenas
+display_name: TrueNAS SCALE
+commands:
+  resolve: {exec: commands/provider-command, args: [resolve]}
+  init: {exec: ../_terraform-common/commands/init}
+  plan: {exec: ../_terraform-common/commands/plan}
+  up: {exec: ../_terraform-common/commands/up}
+  down: {exec: ../_terraform-common/commands/down}
+  start: {exec: ../_common/commands/start}
+  stop: {exec: ../_common/commands/stop}
+  status: {exec: ../_common/commands/status}
+  ip: {exec: ../_common/commands/ip}
+  ssh: {exec: ../_common/commands/ssh}
+  host-ssh: {exec: commands/host-ssh}
+  tf-env: {exec: commands/tf-env}
+  validate: {exec: ../_common/commands/validate-os, args: [all, cloud image URL, cloud_image_url]}
+actions:
+  - id: status-details
+    label: Status
+    target: provider.status
+  - id: plan
+    label: Plan
+    target: provider.plan
+  - id: init
+    label: Init
+    target: provider.init
+  - id: host-ssh
+    label: TrueNAS SSH
+    target: provider.host-ssh
+    interactive: true
+access:
+  ubuntu:
+    bootstrap_user: {env: EVE_PROVISION_USER, location: provision_user}
+    provision_user: {env: EVE_PROVISION_USER, location: provision_user}
+    human_user: {env: VM_USER_NAME, fallback: provision_user}
+capabilities: [host-ssh]
+supports:
+  engines: [terraform]
+  kinds: [vm]
+env:
+  - EVE_PROVISION_USER
+  - TRUENAS_HOST
+  - TRUENAS_SSH_HOST_KEY_FINGERPRINT
+  - TRUENAS_SSH_PORT
+  - TRUENAS_SSH_PRIVATE_KEY_FILE
+  - TRUENAS_SSH_USER

@@ -34,9 +34,9 @@ def command_vector(plugin, spec)
 end
 
 def record_state(instance_name, operation, status, package_id, package_state = nil, error = nil)
-  return if ENV["EGAME_DISABLE_STATE"] == "1"
+  return if ENV["EVE_DISABLE_STATE"] == "1"
 
-  Egame::SDK::State.record_operation(
+  Eve::SDK::State.record_operation(
     instance_name, operation, status,
     package: package_id,
     package_state: package_state,
@@ -51,11 +51,12 @@ def run_plugin(plugin, command, resolved, dry_run)
   raise "package plugin #{plugin["id"]} has no command: #{command}" unless spec
 
   env = ENV.to_h.merge(
-    "EGAME_INSTANCE_NAME" => resolved.fetch("instance").fetch("name"),
-    "EGAME_PACKAGE_PLUGIN" => plugin.fetch("id"),
-    "EGAME_PACKAGE_PLUGIN_ROOT" => File.dirname(plugin.fetch("path"))
+    "EVE_INSTANCE_NAME" => resolved.fetch("instance").fetch("name"),
+    "EVE_PACKAGE_PLUGIN" => plugin.fetch("id"),
+    "EVE_PACKAGE_PLUGIN_ROOT" => File.dirname(plugin.fetch("path")),
+    "EVE_RESOLVED_JSON" => JSON.generate(resolved)
   )
-  env["EGAME_PLUGIN_DRY_RUN"] = "1" if dry_run
+  env["EVE_PLUGIN_DRY_RUN"] = "1" if dry_run
 
   cmd = command_vector(plugin, spec)
   out = +""
@@ -87,7 +88,7 @@ def package_status_from_output(output)
 
   validate_pkg_output = lambda do |parsed|
     return nil unless parsed.key?("status")
-    Egame::SDK::Contract.validate_output!(parsed, def_name: "package_command_output")
+    Eve::SDK::Contract.validate_output!(parsed, def_name: "package_command_output")
   end
 
   (output.length - 1).downto(0) do |index|
@@ -143,7 +144,7 @@ end
 instance_name = nil
 package_id = nil
 command = nil
-registry_path = ENV["EGAME_INSTANCE_REGISTRY"] ? File.expand_path(ENV["EGAME_INSTANCE_REGISTRY"], Dir.pwd) : nil
+registry_path = ENV["EVE_INSTANCE_REGISTRY"] ? File.expand_path(ENV["EVE_INSTANCE_REGISTRY"], Dir.pwd) : nil
 dry_run = false
 yes = false
 
@@ -187,8 +188,8 @@ begin
   resolved = run_json(*resolve_cmd)
 
   begin
-    Egame::SDK::Contract.validate_input!(resolved)
-  rescue Egame::SDK::ContractError => e
+    Eve::SDK::Contract.validate_input!(resolved)
+  rescue Eve::SDK::ContractError => e
     warn "package-dispatch: #{e.message}"
     exit 1
   end
@@ -200,8 +201,8 @@ begin
   validate_package_support!(package_id, plugin, resolved)
 
   destructive = plugin.dig("down", "destructive") == true
-  if %w[down reinstall].include?(command) && destructive && !yes && ENV["EGAME_CONFIRM_DESTRUCTIVE"] != "1"
-    raise "package #{package_id} down is destructive; pass --yes or EGAME_CONFIRM_DESTRUCTIVE=1"
+  if %w[down reinstall].include?(command) && destructive && !yes && ENV["EVE_CONFIRM_DESTRUCTIVE"] != "1"
+    raise "package #{package_id} down is destructive; pass --yes or EVE_CONFIRM_DESTRUCTIVE=1"
   end
 
   paths_cmd = [File.join(ROOT, "scripts/instance-paths"), "--instance", instance_name, "--emit", "json"]
@@ -212,8 +213,8 @@ begin
   overlay_cmd += ["--registry", registry_path] if registry_path
   overlay_out, overlay_status = Open3.capture2e(*overlay_cmd)
   raise overlay_out unless overlay_status.success?
-  ENV["EGAME_CATALOG_LOCAL"] = overlay
-  ENV["EGAME_INSTANCE_REGISTRY"] = registry_path if registry_path
+  ENV["EVE_CATALOG_LOCAL"] = overlay
+  ENV["EVE_INSTANCE_REGISTRY"] = registry_path if registry_path
 
   record_state(instance_name, "package.#{command}", "running", package_id) unless dry_run
 

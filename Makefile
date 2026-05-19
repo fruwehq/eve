@@ -15,7 +15,7 @@
 TM_PARALLEL ?= 8
 EVE_TOOLCHAIN_IMAGE ?= eve-toolchain:local
 
-# v3 concrete instance selection. Instances live in .egame/instances.yaml.
+# v3 concrete instance selection. Instances live in .eve/instances.yaml.
 INSTANCE ?=
 export INSTANCE
 
@@ -28,8 +28,8 @@ EMIT ?= env
 # Non-secret structured preferences. Values here override .env defaults, while
 # .env.local and command-line make variables remain the highest-precedence user
 # overrides.
-EGAME_CONFIG_EXPORTS := $(shell ./scripts/config-env --make 2>/dev/null)
-$(foreach assignment,$(EGAME_CONFIG_EXPORTS),$(eval export $(assignment)))
+EVE_CONFIG_EXPORTS := $(shell ./scripts/config-env --make 2>/dev/null)
+$(foreach assignment,$(EVE_CONFIG_EXPORTS),$(eval export $(assignment)))
 
 -include .env.local
 
@@ -43,7 +43,7 @@ export AWS_CONFIG_FILE
 export AWS_PROFILE
 export AWS_REGION
 export AWS_SHARED_CREDENTIALS_FILE
-export EGAME_PROVISION_USER
+export EVE_PROVISION_USER
 export EPHEMERAL_DISPLAY_RESOLUTION
 export EPHEMERAL_DISPLAY_FPS
 export EPHEMERAL_MOONLIGHT_BITRATE_KBPS
@@ -107,7 +107,7 @@ clean: ## Remove terramate-generated terraform files and cache
 	rm -rf .terraform-cache-dir/plugins/*
 	rm -rf .terraform-cache-dir/state/*
 
-config.migrate: ## Move non-secret .env.local values to .egame/config.yaml (YES=1 to apply)
+config.migrate: ## Move non-secret .env.local values to .eve/config.yaml (YES=1 to apply)
 	@if [ "$(YES)" = "1" ]; then ./scripts/config-migrate --apply; else ./scripts/config-migrate --dry-run; fi
 
 default: help  ## Show help
@@ -222,7 +222,7 @@ instance.status: ## Print combined resolved metadata, local state, packages, and
 	if [ "$(EMIT)" = "json" ]; then args="$$args --json"; fi; \
 	./scripts/instance-status $$args
 
-instance.validate: ## Validate a concrete instance from .egame/instances.yaml
+instance.validate: ## Validate a concrete instance from .eve/instances.yaml
 	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make instance.validate INSTANCE=<name>"; exit 2; fi; \
 	./scripts/instance-resolve --instance $(INSTANCE) --validate
 
@@ -315,7 +315,7 @@ package.verify: ## Live smoke-check selected packages for an instance (PACKAGE=<
 plugins.list: ## List provider and package plugins
 	@./scripts/plugin-list
 
-plugins.sync: ## Download pinned external plugins from .egame/plugin-sources.yaml
+plugins.sync: ## Download pinned external plugins from .eve/plugin-sources.yaml
 	@./scripts/plugins-sync
 
 plugins.validate: ## Validate provider and package plugin manifests
@@ -426,7 +426,7 @@ test.update-golden: ## Regenerate tests/golden/instances/*.env from current inst
 	@UPDATE_GOLDEN=1 ./scripts/test-instances
 
 tui: ## Open the v3 Textual instance manager
-	@poetry run python ./scripts/egame-tui
+	@poetry run python ./scripts/eve-tui
 
 up: ## Create and start provider resources for an instance
 	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make up INSTANCE=<name>"; exit 2; fi; \
@@ -442,6 +442,6 @@ upload: ## Upload ./upload folders to the instance (UPLOADS=a,b optional)
 	if [ -n "$(UPLOADS)" ]; then for upload_name in $$(printf '%s' "$(UPLOADS)" | tr ',' ' '); do args="$$args $$upload_name"; done; fi; \
 	./scripts/instance-run upload $(INSTANCE) $$args
 
-validate: ## Validate an instance from .egame/instances.yaml
+validate: ## Validate an instance from .eve/instances.yaml
 	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make validate INSTANCE=<name>"; exit 2; fi; \
 	./scripts/instance-run validate $(INSTANCE)

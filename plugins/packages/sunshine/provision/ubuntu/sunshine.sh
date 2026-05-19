@@ -115,9 +115,9 @@ if [ "${PROVIDER:-}" = "raspberry-pi" ]; then
   sudo groupadd --system uinput 2>/dev/null || true
   sudo usermod -aG input "$HUMAN_USER_NAME"
   sudo usermod -aG uinput "$HUMAN_USER_NAME"
-  echo uinput | sudo tee /etc/modules-load.d/egame-uinput.conf >/dev/null
+  echo uinput | sudo tee /etc/modules-load.d/eve-uinput.conf >/dev/null
   sudo modprobe uinput 2>/dev/null || true
-  sudo tee /etc/udev/rules.d/70-egame-uinput.rules >/dev/null <<'EOF'
+  sudo tee /etc/udev/rules.d/70-eve-uinput.rules >/dev/null <<'EOF'
 KERNEL=="uinput", SUBSYSTEM=="misc", OPTIONS+="static_node=uinput", MODE="0660", GROUP="uinput", TAG+="uaccess"
 EOF
   sudo udevadm control --reload-rules 2>/dev/null || true
@@ -157,8 +157,8 @@ fi
 sudo rm -f "$HUMAN_HOME/.config/autostart/sunshine.desktop"
 
 human_install_dir "$HUMAN_HOME/.local/bin"
-if [ ! -x "$HUMAN_HOME/.local/bin/egame-set-display-mode" ]; then
-  cat <<'EOF' | human_write_file "$HUMAN_HOME/.local/bin/egame-set-display-mode" 0755
+if [ ! -x "$HUMAN_HOME/.local/bin/eve-set-display-mode" ]; then
+  cat <<'EOF' | human_write_file "$HUMAN_HOME/.local/bin/eve-set-display-mode" 0755
 #!/usr/bin/env sh
 exit 0
 EOF
@@ -179,7 +179,7 @@ write_sunshine_apps() {
       "image-path": "desktop.png",
       "prep-cmd": [
         {
-          "do": "$(HOME)/.local/bin/egame-set-display-mode",
+          "do": "$(HOME)/.local/bin/eve-set-display-mode",
           "undo": ""
         }
       ]
@@ -188,12 +188,12 @@ write_sunshine_apps() {
       "name": "Steam",
       "cmd": "steam -bigpicture",
       "detached": [
-        "setsid steam -bigpicture >/tmp/egame-steam.log 2>&1"
+        "setsid steam -bigpicture >/tmp/eve-steam.log 2>&1"
       ],
       "image-path": "steam.png",
       "prep-cmd": [
         {
-          "do": "$(HOME)/.local/bin/egame-set-display-mode",
+          "do": "$(HOME)/.local/bin/eve-set-display-mode",
           "undo": ""
         }
       ]
@@ -213,7 +213,7 @@ EOF
       "image-path": "desktop.png",
       "prep-cmd": [
         {
-          "do": "$(HOME)/.local/bin/egame-set-display-mode",
+          "do": "$(HOME)/.local/bin/eve-set-display-mode",
           "undo": ""
         }
       ]
@@ -255,8 +255,8 @@ sunshine_kms_ready() {
 start_sunshine_with_display() {
   export DISPLAY="$SUN_DISPLAY"
   export XAUTHORITY="$SUN_XAUTHORITY"
-  if [ -x "$HUMAN_HOME/.local/bin/egame-set-display-mode" ]; then
-    human_run "$HUMAN_HOME/.local/bin/egame-set-display-mode" || true
+  if [ -x "$HUMAN_HOME/.local/bin/eve-set-display-mode" ]; then
+    human_run "$HUMAN_HOME/.local/bin/eve-set-display-mode" || true
   fi
   human_run env DISPLAY="$SUN_DISPLAY" XAUTHORITY="$SUN_XAUTHORITY" systemctl --user import-environment DISPLAY XAUTHORITY XDG_RUNTIME_DIR 2>/dev/null || true
   human_run systemctl --user reset-failed sunshine 2>/dev/null || true
@@ -269,8 +269,8 @@ if human_run systemctl --user is-active sunshine >/dev/null 2>&1; then
   log "### sunshine: restarting sunshine to reload config"
   export DISPLAY="$SUN_DISPLAY"
   export XAUTHORITY="$SUN_XAUTHORITY"
-  if [ -x "$HUMAN_HOME/.local/bin/egame-set-display-mode" ]; then
-    human_run "$HUMAN_HOME/.local/bin/egame-set-display-mode" || true
+  if [ -x "$HUMAN_HOME/.local/bin/eve-set-display-mode" ]; then
+    human_run "$HUMAN_HOME/.local/bin/eve-set-display-mode" || true
   fi
   human_run systemctl --user reset-failed sunshine 2>/dev/null || true
   human_run env DISPLAY="$SUN_DISPLAY" XAUTHORITY="$SUN_XAUTHORITY" systemctl --user restart sunshine 2>/dev/null || true

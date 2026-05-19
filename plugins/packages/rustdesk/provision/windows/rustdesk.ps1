@@ -211,7 +211,7 @@ function Set-RustDeskPasswordIfNeeded {
     New-Item -ItemType Directory -Path $MarkerDir -Force | Out-Null
   }
 
-  $passwordMarker = Join-Path $MarkerDir 'egame-password.sha256'
+  $passwordMarker = Join-Path $MarkerDir 'eve-password.sha256'
   $desired = Get-PasswordMarkerValue -Password $Password
   $existing = if (Test-Path $passwordMarker) { (Get-Content $passwordMarker -Raw).Trim() } else { '' }
   if ($existing -eq $desired) {
@@ -396,7 +396,7 @@ if (Test-Path `$envFile) {
     if (`$password) {
       `$markerDir = Join-Path `$env:APPDATA 'RustDesk'
       if (-not (Test-Path `$markerDir)) { New-Item -ItemType Directory -Path `$markerDir -Force | Out-Null }
-      `$passwordMarker = Join-Path `$markerDir 'egame-password.sha256'
+      `$passwordMarker = Join-Path `$markerDir 'eve-password.sha256'
       `$hashBytes = [System.Security.Cryptography.SHA256]::Create().ComputeHash([System.Text.Encoding]::UTF8.GetBytes(`$password))
       `$hash = 'v3:' + ([System.BitConverter]::ToString(`$hashBytes)).Replace('-', '').ToLowerInvariant()
       `$existing = if (Test-Path `$passwordMarker) { (Get-Content `$passwordMarker -Raw).Trim() } else { '' }
@@ -458,7 +458,7 @@ if (Test-Path `$envFile) {
     if (`$password) {
       `$markerDir = 'C:\Windows\System32\config\systemprofile\AppData\Roaming\RustDesk'
       if (-not (Test-Path `$markerDir)) { New-Item -ItemType Directory -Path `$markerDir -Force | Out-Null }
-      `$passwordMarker = Join-Path `$markerDir 'egame-password.sha256'
+      `$passwordMarker = Join-Path `$markerDir 'eve-password.sha256'
       `$hashBytes = [System.Security.Cryptography.SHA256]::Create().ComputeHash([System.Text.Encoding]::UTF8.GetBytes(`$password))
       `$hash = 'v3:' + ([System.BitConverter]::ToString(`$hashBytes)).Replace('-', '').ToLowerInvariant()
       `$existing = if (Test-Path `$passwordMarker) { (Get-Content `$passwordMarker -Raw).Trim() } else { '' }

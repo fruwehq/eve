@@ -12,8 +12,8 @@
 
 set -euo pipefail
 
-if [ -n "${EGAME_INSTANCE_NAME:-}" ]; then
-  PROFILE="$EGAME_INSTANCE_NAME"
+if [ -n "${EVE_INSTANCE_NAME:-}" ]; then
+  PROFILE="$EVE_INSTANCE_NAME"
 else
   PROFILE="${1:?Usage: commands/ip <instance>}"
 fi
@@ -226,7 +226,7 @@ case "$ENGINE:$PROVIDER" in
     printf '%s\n' "$FOUND"
     ;;
   vagrant:*)
-    cd "$(egame_instance_workdir "$PROFILE")"
+    cd "$(eve_instance_workdir "$PROFILE")"
     vagrant ssh-config | awk '/HostName/ {print $2; exit}'
     ;;
   *)

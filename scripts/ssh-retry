@@ -8,8 +8,8 @@ LABEL="${1:?Usage: scripts/ssh-retry <label> <command> [args...]}"
 shift
 [ "$#" -gt 0 ] || { echo "ssh-retry: missing command for $LABEL" >&2; exit 2; }
 
-ATTEMPTS="${EGAME_SSH_RETRY_ATTEMPTS:-6}"
-DELAY="${EGAME_SSH_RETRY_DELAY:-5}"
+ATTEMPTS="${EVE_SSH_RETRY_ATTEMPTS:-6}"
+DELAY="${EVE_SSH_RETRY_DELAY:-5}"
 
 attempt=1
 while [ "$attempt" -le "$ATTEMPTS" ]; do

@@ -2,7 +2,7 @@
 
 require "fileutils"
 
-module Egame
+module Eve
   module SDK
     module Workdir
       def self.root
@@ -14,13 +14,32 @@ module Egame
       end
 
       def self.workdir_base
-        base = ENV["EGAME_INSTANCE_WORKDIR"]
+        base = ENV["EVE_INSTANCE_WORKDIR"]
         base && !base.empty? ? File.expand_path(base) : File.join(root, ".generated/instances")
       end
 
+      # One-shot migration from the legacy .egame/ directory to .eve/.
+      # The project was renamed from Egame to Eve; existing checkouts have
+      # state under .egame/. Migrate the entire directory once, the first
+      # time any SDK consumer asks for a state path. Idempotent: if .eve/
+      # already exists or .egame/ is gone, this is a no-op.
+      def self.migrate_legacy_root!
+        return if @legacy_root_migrated
+
+        legacy = File.join(root, ".egame")
+        eve = File.join(root, ".eve")
+        if File.directory?(legacy) && !File.exist?(eve)
+          FileUtils.mv(legacy, eve)
+        end
+        @legacy_root_migrated = true
+      end
+
       def self.state_base
-        base = ENV["EGAME_STATE_DIR"]
-        base && !base.empty? ? File.expand_path(base) : File.join(root, ".egame/state")
+        base = ENV["EVE_STATE_DIR"]
+        return File.expand_path(base) if base && !base.empty?
+
+        migrate_legacy_root!
+        File.join(root, ".eve/state")
       end
 
       def self.instance_workdir(instance_name)

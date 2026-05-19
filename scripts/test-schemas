@@ -81,7 +81,7 @@ instances.each do |inst|
   label = "resolved-instance: #{name}"
 
   json_str = IO.popen(
-    { "EGAME_INSTANCE_REGISTRY" => FIXTURE_REGISTRY },
+    { "EVE_INSTANCE_REGISTRY" => FIXTURE_REGISTRY },
     [File.join(ROOT, "scripts", "instance-resolve"), "--instance", name, "--emit", "json"],
     err: File::NULL
   ) { |io| io.read }
@@ -112,7 +112,7 @@ manifest_schema_path = File.join(SCHEMA_DIR, "plugin-manifest.schema.json")
 manifest_schemer = schemer_from_file(manifest_schema_path)
 shipped = 0
 
-Dir.glob(File.join(ROOT, "plugins", "*", "*", "egame-plugin.yaml")).sort.each do |path|
+Dir.glob(File.join(ROOT, "plugins", "*", "*", "eve-plugin.yaml")).sort.each do |path|
   rel = path.sub(%r{^#{ROOT}/plugins/}, "")
   shipped += 1
   data = load_yaml(path)
@@ -127,7 +127,7 @@ puts "  (#{shipped} shipped manifests checked)"
 # ---------- plugin-manifest: test fixtures (positive) ----------
 puts "\n== schemas: plugin-manifest (fixture positive) =="
 
-Dir.glob(File.join(ROOT, "tests", "fixtures", "plugins", "*", "*", "egame-plugin.yaml")).sort.each do |path|
+Dir.glob(File.join(ROOT, "tests", "fixtures", "plugins", "*", "*", "eve-plugin.yaml")).sort.each do |path|
   dir_name = File.basename(File.dirname(path))
   next if dir_name.start_with?("bad")
 
@@ -144,8 +144,8 @@ end
 puts "\n== schemas: plugin-manifest (negative) =="
 
 negative_patterns = [
-  File.join(ROOT, "tests", "fixtures", "plugins", "*", "bad*", "egame-plugin.yaml"),
-  File.join(ROOT, "tests", "fixtures", "plugins", "*", "*", "bad*", "egame-plugin.yaml")
+  File.join(ROOT, "tests", "fixtures", "plugins", "*", "bad*", "eve-plugin.yaml"),
+  File.join(ROOT, "tests", "fixtures", "plugins", "*", "*", "bad*", "eve-plugin.yaml")
 ]
 negative_manifests = negative_patterns.flat_map { |p| Dir.glob(p) }.uniq.sort
 
@@ -194,7 +194,7 @@ end
 # ---------- observed-state: live state files ----------
 puts "\n== schemas: observed-state (live) =="
 
-state_dir = File.join(ROOT, ".egame", "state", "instances")
+state_dir = File.join(ROOT, ".eve", "state", "instances")
 if Dir.exist?(state_dir)
   found = 0
   Dir.glob(File.join(state_dir, "*.json")).sort.each do |path|

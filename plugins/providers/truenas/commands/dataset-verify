@@ -5,8 +5,8 @@
 #
 # Usage: scripts/truenas-dataset-verify <mount_path>
 #
-# Example: truenas-dataset-verify /mnt/pool1/egame
-#   Verifies: pool1/egame exists as a ZFS dataset.
+# Example: truenas-dataset-verify /mnt/pool1/eve
+#   Verifies: pool1/eve exists as a ZFS dataset.
 
 set -euo pipefail
 

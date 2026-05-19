@@ -1,6 +1,6 @@
 # v3 Instance State
 
-Concrete instance state lives in `.egame/state/instances/<instance>.json` and
+Concrete instance state lives in `.eve/state/instances/<instance>.json` and
 is updated through `scripts/instance-state`. Core dispatchers should not write
 these JSON files directly.
 
@@ -44,7 +44,7 @@ Refresh it with:
 make instance.observe INSTANCE=<name>
 ```
 
-Observation refreshes set `EGAME_DISABLE_STATE=1` while calling provider
+Observation refreshes set `EVE_DISABLE_STATE=1` while calling provider
 commands, so they do not append lifecycle operations to `operation_history`.
 
 ## Operation Entries

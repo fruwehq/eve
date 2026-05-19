@@ -1,13 +1,16 @@
 #!/usr/bin/env ruby
-# Move approved non-secret .env.local values into .egame/config.yaml.
+# Move approved non-secret .env.local values into .eve/config.yaml.
 
 require "fileutils"
 require "time"
 require "yaml"
 
 ROOT = File.expand_path("..", __dir__)
-ENV_PATH = ENV.fetch("EGAME_ENV_LOCAL", File.join(ROOT, ".env.local"))
-CONFIG_PATH = ENV.fetch("EGAME_CONFIG_PATH", File.join(ROOT, ".egame/config.yaml"))
+$LOAD_PATH.unshift(File.join(ROOT, "core"))
+require "sdk"
+Eve::SDK::Workdir.migrate_legacy_root!
+ENV_PATH = ENV.fetch("EVE_ENV_LOCAL", File.join(ROOT, ".env.local"))
+CONFIG_PATH = ENV.fetch("EVE_CONFIG_PATH", File.join(ROOT, ".eve/config.yaml"))
 
 MIGRATIONS = {
   "AWS_CONFIG_FILE" => %w[aws config_file],
@@ -56,7 +59,7 @@ def usage
     Usage:
       scripts/config-migrate [--dry-run|--apply]
 
-    Migrates non-secret values from .env.local to .egame/config.yaml.
+    Migrates non-secret values from .env.local to .eve/config.yaml.
   USAGE
 end
 
@@ -139,7 +142,7 @@ FileUtils.cp(ENV_PATH, backup_path)
 migrated.each do |index, _key|
   next if lines[index].lstrip.start_with?("#")
 
-  lines[index] = "# migrated to .egame/config.yaml: #{lines[index]}"
+  lines[index] = "# migrated to .eve/config.yaml: #{lines[index]}"
 end
 
 File.write(ENV_PATH, lines.join("\n") + "\n")

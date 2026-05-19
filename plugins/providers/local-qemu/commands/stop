@@ -4,8 +4,8 @@ set -euo pipefail
 # Stop a running vagrant profile (suspend).
 # Usage: scripts/vagrant-stop <profile>
 
-if [ -n "${EGAME_INSTANCE_NAME:-}" ]; then
-  PROFILE="$EGAME_INSTANCE_NAME"
+if [ -n "${EVE_INSTANCE_NAME:-}" ]; then
+  PROFILE="$EVE_INSTANCE_NAME"
 else
   PROFILE="${1:?Usage: commands/stop <instance>}"
 fi
@@ -23,7 +23,7 @@ fi
 
 echo "[vagrant-stop] profile=$PROFILE"
 
-WORKDIR="$(egame_instance_workdir "$PROFILE")"
+WORKDIR="$(eve_instance_workdir "$PROFILE")"
 if [ -f "$WORKDIR/Vagrantfile" ]; then
   cd "$WORKDIR"
   vagrant halt

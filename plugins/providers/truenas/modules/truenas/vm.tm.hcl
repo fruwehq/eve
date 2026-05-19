@@ -80,7 +80,7 @@ generate_hcl "z_truenas_vm.tf" {
 
     variable "provision_user_name" {
       type    = string
-      default = "egame-provision"
+      default = "eve-provision"
     }
 
     variable "cloud_image_url" {

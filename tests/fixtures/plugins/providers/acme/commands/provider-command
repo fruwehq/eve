@@ -9,7 +9,7 @@ unless command
   exit 2
 end
 
-json = ENV["EGAME_RESOLVED_JSON"]
+json = ENV["EVE_RESOLVED_JSON"]
 json = $stdin.read if json.nil? || json.empty?
 resolved = JSON.parse(json)
 
@@ -20,6 +20,6 @@ payload = {
   "instance" => resolved.dig("instance", "name") || "unknown",
   "profile" => resolved.dig("instance", "name") || "unknown",
   "engine" => resolved["engine"] || "terraform",
-  "dry_run" => ENV["EGAME_PLUGIN_DRY_RUN"] == "1"
+  "dry_run" => ENV["EVE_PLUGIN_DRY_RUN"] == "1"
 }
 puts JSON.generate(payload)

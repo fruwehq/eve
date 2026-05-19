@@ -22,8 +22,8 @@ terramate generate
 
 eval "$(./scripts/tf-env "$PROFILE")"
 
-if [ -n "${EGAME_INSTANCE_NAME:-}" ]; then
-  echo "[tf-apply] instance=$EGAME_INSTANCE_NAME initializing backend before apply"
+if [ -n "${EVE_INSTANCE_NAME:-}" ]; then
+  echo "[tf-apply] instance=$EVE_INSTANCE_NAME initializing backend before apply"
   ./scripts/tf-init "$PROFILE"
 fi
 

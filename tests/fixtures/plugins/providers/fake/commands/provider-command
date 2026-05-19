@@ -12,7 +12,7 @@ unless command
 end
 
 def load_resolved
-  json_source = ENV["EGAME_RESOLVED_JSON"]
+  json_source = ENV["EVE_RESOLVED_JSON"]
   raw = if json_source
           JSON.parse(json_source)
         else
@@ -30,8 +30,8 @@ rescue StandardError => e
 end
 
 def state_dir
-  workdir = ENV["EGAME_INSTANCE_WORKDIR"]
-  dir = workdir && !workdir.empty? ? File.join(workdir, ".fake-provider") : File.join(Dir.tmpdir, "egame-fake-provider")
+  workdir = ENV["EVE_INSTANCE_WORKDIR"]
+  dir = workdir && !workdir.empty? ? File.join(workdir, ".fake-provider") : File.join(Dir.tmpdir, "eve-fake-provider")
   FileUtils.mkdir_p(dir)
   dir
 end
@@ -51,7 +51,7 @@ def write_state(state)
   File.write(state_file, JSON.pretty_generate(state) + "\n")
 end
 
-if ENV["EGAME_PLUGIN_DRY_RUN"] == "1" || command == "resolve"
+if ENV["EVE_PLUGIN_DRY_RUN"] == "1" || command == "resolve"
   resolved = load_resolved
   payload = {
     "kind" => "provider",
@@ -60,7 +60,7 @@ if ENV["EGAME_PLUGIN_DRY_RUN"] == "1" || command == "resolve"
     "instance" => resolved["instance"],
     "profile" => resolved["instance"],
     "engine" => resolved["engine"],
-    "dry_run" => ENV["EGAME_PLUGIN_DRY_RUN"] == "1"
+    "dry_run" => ENV["EVE_PLUGIN_DRY_RUN"] == "1"
   }
   puts JSON.generate(payload)
   exit 0

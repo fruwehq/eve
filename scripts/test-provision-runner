@@ -94,7 +94,7 @@ bv = bash_version
 if bv.nil? || bv < 4
   skipped += skip_test "Ubuntu runner tests require bash >= 4 (host has #{bv || 'unknown'})"
 else
-  Dir.mktmpdir("egame-runner-exit-") do |dir|
+  Dir.mktmpdir("eve-runner-exit-") do |dir|
     make_ubuntu_tree(dir,
       steps: { "00_fail.sh" => "exit 42" })
 
@@ -114,7 +114,7 @@ else
     end
   end
 
-  Dir.mktmpdir("egame-runner-success-") do |dir|
+  Dir.mktmpdir("eve-runner-success-") do |dir|
     make_ubuntu_tree(dir,
       steps: { "00_ok.sh" => "exit 0" })
 
@@ -134,7 +134,7 @@ else
     end
   end
 
-  Dir.mktmpdir("egame-runner-resume-") do |dir|
+  Dir.mktmpdir("eve-runner-resume-") do |dir|
     prior_status = {
       "api_version" => 1,
       "os_family" => "ubuntu",
@@ -181,7 +181,7 @@ else
     end
   end
 
-  Dir.mktmpdir("egame-runner-manifest-hash-") do |dir|
+  Dir.mktmpdir("eve-runner-manifest-hash-") do |dir|
     manifest = {
       "api_version" => 1,
       "os_family" => "ubuntu",
@@ -214,7 +214,7 @@ else
     end
   end
 
-  Dir.mktmpdir("egame-runner-manifest-order-") do |dir|
+  Dir.mktmpdir("eve-runner-manifest-order-") do |dir|
     manifest = {
       "api_version" => 1,
       "os_family" => "ubuntu",
@@ -243,7 +243,7 @@ else
     end
   end
 
-  Dir.mktmpdir("egame-runner-manifest-name-") do |dir|
+  Dir.mktmpdir("eve-runner-manifest-name-") do |dir|
     manifest = {
       "api_version" => 1,
       "os_family" => "ubuntu",
@@ -272,7 +272,7 @@ else
     end
   end
 
-  Dir.mktmpdir("egame-runner-schema-invalid-status-") do |dir|
+  Dir.mktmpdir("eve-runner-schema-invalid-status-") do |dir|
     bad_status = '{"api_version":1,"os_family":"ubuntu","started_at":"2026-01-15T10:00:00Z","finished_at":null,"status":"bogus","steps":[{"step":"00_base.sh","phase":"pending","started_at":null,"ended_at":null,"exit_code":null}]}'
 
     make_ubuntu_tree(dir,
@@ -292,7 +292,7 @@ end
 puts "\n== provision-runner: windows (powershell) =="
 
 if has_pwsh?
-  Dir.mktmpdir("egame-runner-pwsh-") do |dir|
+  Dir.mktmpdir("eve-runner-pwsh-") do |dir|
     prov_dir = File.join(dir, "provision")
     scripts_dir = File.join(prov_dir, "scripts")
     steps_dir = File.join(scripts_dir, "steps")
@@ -323,7 +323,7 @@ if has_pwsh?
     end
   end
 
-  Dir.mktmpdir("egame-runner-pwsh-fail-") do |dir|
+  Dir.mktmpdir("eve-runner-pwsh-fail-") do |dir|
     prov_dir = File.join(dir, "provision")
     scripts_dir = File.join(prov_dir, "scripts")
     steps_dir = File.join(scripts_dir, "steps")

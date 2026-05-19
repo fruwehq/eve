@@ -2,7 +2,7 @@
 set -eu
 
 CATALOG_PATH="config/catalog.yaml"
-LOCAL_CATALOG_PATH="${EGAME_CATALOG_LOCAL:-config/catalog.local.yaml}"
+LOCAL_CATALOG_PATH="${EVE_CATALOG_LOCAL:-config/catalog.local.yaml}"
 PROFILE=""
 VALIDATE=0
 EMIT=""
@@ -16,7 +16,7 @@ Usage:
 Notes:
   - Base catalog: config/catalog.yaml
   - Optional local overlay: config/catalog.local.yaml (if present)
-  - EGAME_CATALOG_LOCAL can point at a generated overlay for INSTANCE workflows.
+  - EVE_CATALOG_LOCAL can point at a generated overlay for INSTANCE workflows.
 
 Examples:
   scripts/profile-resolve --profile aws-ubuntu-dev-headless --validate
@@ -65,7 +65,21 @@ if [ -z "$PROFILE" ]; then
   exit 2
 fi
 
-if [ ! -f "$CATALOG_PATH" ]; then
+# SDK fast-path: if a caller (provider-dispatch, package-dispatch) has already
+# resolved+validated the instance and exported EVE_RESOLVED_JSON, reuse it
+# instead of re-loading the catalog. The instance-resolve output is a strict
+# superset of this script's RESOLVED_JSON shape (same .profile/.machine/.os/
+# .init/.location/.bundle_packages/.engine/.stack_tags keys), so the
+# downstream jq emitters work unchanged. This keeps the SDK-validated
+# contract flowing through into bash dispatchers under
+# plugins/providers/_common.
+if [ -n "${EVE_RESOLVED_JSON:-}" ]; then
+  RESOLVED_JSON_INPUT="$EVE_RESOLVED_JSON"
+else
+  RESOLVED_JSON_INPUT=""
+fi
+
+if [ -z "$RESOLVED_JSON_INPUT" ] && [ ! -f "$CATALOG_PATH" ]; then
   echo "Catalog not found: $CATALOG_PATH" >&2
   exit 1
 fi
@@ -75,7 +89,10 @@ if ! command -v ruby >/dev/null 2>&1; then
   exit 1
 fi
 
-CATALOG_JSON="$(ruby -rjson -ryaml -e '
+if [ -n "$RESOLVED_JSON_INPUT" ]; then
+  CATALOG_JSON=""
+else
+  CATALOG_JSON="$(ruby -rjson -ryaml -e '
   def load_any(path)
     return nil unless File.exist?(path)
     ext = File.extname(path).downcase
@@ -136,6 +153,7 @@ CATALOG_JSON="$(ruby -rjson -ryaml -e '
 
   puts JSON.generate(merged)
 ' "$CATALOG_PATH" "$LOCAL_CATALOG_PATH")"
+fi
 
 # shellcheck disable=SC2016
 # $-prefixed names below are jq variables, not shell expansions.
@@ -209,7 +227,22 @@ else
   }
 end'
 
-RESOLVED_JSON="$(printf '%s' "$CATALOG_JSON" | jq -ce --arg profile "$PROFILE" "$jq_get")"
+if [ -n "$RESOLVED_JSON_INPUT" ]; then
+  # SDK fast-path: caller supplied a validated resolved-instance JSON
+  # (output of scripts/instance-resolve, schema:
+  # core/schema/resolved-instance.schema.json). That shape carries the
+  # catalog-resolved data under .machine/.os/.init/.location plus an
+  # .instance block with the instance name. profile-resolve's downstream
+  # jq emitters expect a .profile.name field (legacy profile shape), so
+  # map .instance.name -> .profile.name without touching other keys.
+  RESOLVED_JSON="$(printf '%s' "$RESOLVED_JSON_INPUT" | jq -c '
+    if (.profile // null) == null then
+      .profile = ((.instance // {}) + { name: ((.instance // {}).name // "") })
+    else . end
+  ')"
+else
+  RESOLVED_JSON="$(printf '%s' "$CATALOG_JSON" | jq -ce --arg profile "$PROFILE" "$jq_get")"
+fi
 
 if [ "$VALIDATE" -eq 1 ]; then
   echo "Profile validated: $PROFILE"
@@ -224,7 +257,7 @@ emit_env() {
     def env_or($name; $fallback): ((env[$name] | select(. != "")) // $fallback);
     def provision_user($locp):
       if (.os.family == "windows") then "Administrator"
-      elif (.machine.provider == "truenas") then env_or("EGAME_PROVISION_USER"; $locp.provision_user // "")
+      elif (.machine.provider == "truenas") then env_or("EVE_PROVISION_USER"; $locp.provision_user // "")
       else env_or("VM_USER_NAME"; "")
       end;
     def human_user($locp):

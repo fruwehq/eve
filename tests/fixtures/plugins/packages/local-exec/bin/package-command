@@ -6,7 +6,7 @@ payload="$(cat)"
 case "$payload" in
   *'"name":"dev-a"'*)
     printf '{"kind":"package-local-exec","command":"%s","instance":"%s","package":"%s"}\n' \
-      "$command" "${EGAME_INSTANCE_NAME:-}" "${EGAME_PACKAGE_PLUGIN:-}"
+      "$command" "${EVE_INSTANCE_NAME:-}" "${EVE_PACKAGE_PLUGIN:-}"
     ;;
   *)
     printf 'local exec fixture did not receive resolved instance JSON\n' >&2

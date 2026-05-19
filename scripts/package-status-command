@@ -6,9 +6,9 @@ cd "$(git rev-parse --show-toplevel)"
 
 PACKAGE="${1:?Usage: scripts/package-status-command <package> <remote-command>}"
 REMOTE_COMMAND="${2:?Usage: scripts/package-status-command <package> <remote-command>}"
-PROFILE="${EGAME_INSTANCE_NAME:?EGAME_INSTANCE_NAME is required}"
-OS_FAMILY="${EGAME_PACKAGE_OS_FAMILY:-ubuntu}"
-SSH_HELPER="${EGAME_PACKAGE_STATUS_SSH:-./scripts/instance-ssh}"
+PROFILE="${EVE_INSTANCE_NAME:?EVE_INSTANCE_NAME is required}"
+OS_FAMILY="${EVE_PACKAGE_OS_FAMILY:-ubuntu}"
+SSH_HELPER="${EVE_PACKAGE_STATUS_SSH:-./scripts/instance-ssh}"
 
 if RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env 2>/dev/null); then
   SSH_USER=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^SSH_USER=/{print $2}')
@@ -28,19 +28,19 @@ esac
 
 REMOTE_COMMAND_WITH_CONTEXT=$(cat <<EOF
 set -eu
-EGAME_HUMAN_USER="$HUMAN_USER"
-EGAME_HUMAN_HOME=\$(getent passwd "\$EGAME_HUMAN_USER" | cut -d: -f6)
-EGAME_HUMAN_UID=\$(id -u "\$EGAME_HUMAN_USER")
-export EGAME_HUMAN_USER EGAME_HUMAN_HOME EGAME_HUMAN_UID
-export HOME="\$EGAME_HUMAN_HOME"
-export PATH="\$EGAME_HUMAN_HOME/.local/bin:\$EGAME_HUMAN_HOME/.cargo/bin:\$PATH"
-egame_human_run() {
-  sudo -H -u "\$EGAME_HUMAN_USER" env \
-    HOME="\$EGAME_HUMAN_HOME" \
-    USER="\$EGAME_HUMAN_USER" \
-    LOGNAME="\$EGAME_HUMAN_USER" \
-    PATH="\$EGAME_HUMAN_HOME/.local/bin:\$EGAME_HUMAN_HOME/.cargo/bin:\$PATH" \
-    XDG_RUNTIME_DIR="/run/user/\$EGAME_HUMAN_UID" \
+EVE_HUMAN_USER="$HUMAN_USER"
+EVE_HUMAN_HOME=\$(getent passwd "\$EVE_HUMAN_USER" | cut -d: -f6)
+EVE_HUMAN_UID=\$(id -u "\$EVE_HUMAN_USER")
+export EVE_HUMAN_USER EVE_HUMAN_HOME EVE_HUMAN_UID
+export HOME="\$EVE_HUMAN_HOME"
+export PATH="\$EVE_HUMAN_HOME/.local/bin:\$EVE_HUMAN_HOME/.cargo/bin:\$PATH"
+eve_human_run() {
+  sudo -H -u "\$EVE_HUMAN_USER" env \
+    HOME="\$EVE_HUMAN_HOME" \
+    USER="\$EVE_HUMAN_USER" \
+    LOGNAME="\$EVE_HUMAN_USER" \
+    PATH="\$EVE_HUMAN_HOME/.local/bin:\$EVE_HUMAN_HOME/.cargo/bin:\$PATH" \
+    XDG_RUNTIME_DIR="/run/user/\$EVE_HUMAN_UID" \
     "\$@"
 }
 $REMOTE_COMMAND

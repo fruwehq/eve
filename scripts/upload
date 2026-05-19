@@ -7,7 +7,7 @@ INSTANCE_NAME="${1:?Usage: scripts/upload <instance> [upload-name ...]}"
 shift || true
 cd "$(git rev-parse --show-toplevel)"
 
-UPLOAD_DIR="${EGAME_UPLOAD_DIR:-./upload}"
+UPLOAD_DIR="${EVE_UPLOAD_DIR:-./upload}"
 
 if [ ! -d "$UPLOAD_DIR" ]; then
   printf '%s\n' "No upload directory found. Skipping upload."

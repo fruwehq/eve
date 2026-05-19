@@ -7,8 +7,8 @@
 
 set -euo pipefail
 
-if [ -n "${EGAME_INSTANCE_NAME:-}" ]; then
-  PROFILE="$EGAME_INSTANCE_NAME"
+if [ -n "${EVE_INSTANCE_NAME:-}" ]; then
+  PROFILE="$EVE_INSTANCE_NAME"
 else
   PROFILE="${1:?Usage: commands/ssh <instance> [-- <cmd>] [--scp <local> <remote>]}"
   shift || true
@@ -23,7 +23,7 @@ RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
 ENGINE=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^ENGINE=/{print $2}')
 
 if [ "$ENGINE" = "vagrant" ]; then
-  WORKDIR="$(egame_instance_workdir "$PROFILE")"
+  WORKDIR="$(eve_instance_workdir "$PROFILE")"
   if [ ! -f "$WORKDIR/Vagrantfile" ]; then
     echo "instance-ssh: no Vagrantfile for $PROFILE at $WORKDIR" >&2
     echo "instance-ssh: run: make up INSTANCE=$PROFILE" >&2
@@ -98,7 +98,7 @@ else
   [ -n "$IP" ] || { echo "instance-ssh: could not resolve IP for $PROFILE" >&2; exit 1; }
 fi
 
-WORKDIR="$(egame_instance_workdir "$PROFILE")"
+WORKDIR="$(eve_instance_workdir "$PROFILE")"
 mkdir -p "$WORKDIR/ssh"
 KNOWN_HOSTS_FILE="$WORKDIR/ssh/known_hosts"
 

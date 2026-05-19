@@ -1,4 +1,4 @@
 #!/usr/bin/env sh
 set -eu
 
-exec ./scripts/package-status-command codex-cli 'if egame_human_run sh -lc "command -v codex >/dev/null 2>&1 || [ -x \"\$HOME/.local/bin/codex\" ]"; then echo installed; else echo missing; fi'
+exec ./scripts/package-status-command codex-cli 'if eve_human_run sh -lc "command -v codex >/dev/null 2>&1 || [ -x \"\$HOME/.local/bin/codex\" ]"; then echo installed; else echo missing; fi'

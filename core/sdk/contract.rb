@@ -2,7 +2,7 @@
 
 require "json"
 
-module Egame
+module Eve
   module SDK
     class ContractError < StandardError; end
 

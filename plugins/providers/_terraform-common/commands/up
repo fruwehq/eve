@@ -4,8 +4,8 @@ set -euo pipefail
 # Run terraform apply for a profile's stacks.
 # Usage: scripts/tf-apply <profile>
 
-if [ -n "${EGAME_INSTANCE_NAME:-}" ]; then
-  PROFILE="$EGAME_INSTANCE_NAME"
+if [ -n "${EVE_INSTANCE_NAME:-}" ]; then
+  PROFILE="$EVE_INSTANCE_NAME"
 else
   PROFILE="${1:?Usage: commands/up <instance>}"
 fi
@@ -26,8 +26,8 @@ terramate generate
 
 eval "$(./scripts/tf-env "$PROFILE")"
 
-if [ -n "${EGAME_INSTANCE_NAME:-}" ]; then
-  echo "[tf-apply] instance=$EGAME_INSTANCE_NAME initializing backend before apply"
+if [ -n "${EVE_INSTANCE_NAME:-}" ]; then
+  echo "[tf-apply] instance=$EVE_INSTANCE_NAME initializing backend before apply"
   "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/init" "$PROFILE"
 fi
 

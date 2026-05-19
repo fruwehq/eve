@@ -9,7 +9,10 @@ require "tempfile"
 require "yaml"
 
 ROOT = File.expand_path("..", __dir__)
-DEFAULT_REGISTRY_PATH = File.join(ROOT, ".egame/instances.yaml")
+$LOAD_PATH.unshift(File.join(ROOT, "core"))
+require "sdk"
+Eve::SDK::Workdir.migrate_legacy_root!
+DEFAULT_REGISTRY_PATH = File.join(ROOT, ".eve/instances.yaml")
 
 $LOAD_PATH.unshift(File.join(ROOT, "core"))
 require "sdk"
@@ -23,7 +26,7 @@ def with_registry_lock(registry_path)
 end
 
 def write_registry!(registry_path, registry)
-  Tempfile.create(["egame-registry-", ".yaml"], File.dirname(registry_path)) do |tmp|
+  Tempfile.create(["eve-registry-", ".yaml"], File.dirname(registry_path)) do |tmp|
     tmp.write(registry.to_yaml)
     tmp.close
     FileUtils.mv(tmp.path, registry_path)
@@ -42,8 +45,8 @@ def usage
 end
 
 instance_name = nil
-registry_path = ENV["EGAME_INSTANCE_REGISTRY"] && !ENV["EGAME_INSTANCE_REGISTRY"].empty? \
-                ? File.expand_path(ENV["EGAME_INSTANCE_REGISTRY"], Dir.pwd) \
+registry_path = ENV["EVE_INSTANCE_REGISTRY"] && !ENV["EVE_INSTANCE_REGISTRY"].empty? \
+                ? File.expand_path(ENV["EVE_INSTANCE_REGISTRY"], Dir.pwd) \
                 : DEFAULT_REGISTRY_PATH
 purge = false
 
@@ -126,6 +129,6 @@ if purge
     puts "Removed workdir: #{workdir}"
   end
 
-  Egame::SDK::State.delete!(instance_name)
+  Eve::SDK::State.delete!(instance_name)
   puts "Removed state: #{paths.fetch("INSTANCE_STATE_PATH")}"
 end

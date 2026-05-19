@@ -4,17 +4,20 @@
 # This is the single source of truth for where per-instance artifacts live.
 # It does not create any directories — that is the consumer's responsibility.
 # It honors the same env overrides the rest of the v3 scripts already use:
-#   EGAME_INSTANCE_WORKDIR — base dir for generated per-instance workdirs
-#   EGAME_STATE_DIR        — base dir for instance state JSON files
-#   EGAME_INSTANCE_REGISTRY — alternative registry path
+#   EVE_INSTANCE_WORKDIR — base dir for generated per-instance workdirs
+#   EVE_STATE_DIR        — base dir for instance state JSON files
+#   EVE_INSTANCE_REGISTRY — alternative registry path
 
 require "json"
 require "yaml"
 
 ROOT = File.expand_path("..", __dir__)
-DEFAULT_REGISTRY_PATH = File.join(ROOT, ".egame/instances.yaml")
+$LOAD_PATH.unshift(File.join(ROOT, "core"))
+require "sdk"
+Eve::SDK::Workdir.migrate_legacy_root!
+DEFAULT_REGISTRY_PATH = File.join(ROOT, ".eve/instances.yaml")
 DEFAULT_WORKDIR_BASE = File.join(ROOT, ".generated/instances")
-DEFAULT_STATE_BASE = File.join(ROOT, ".egame/state")
+DEFAULT_STATE_BASE = File.join(ROOT, ".eve/state")
 
 def usage
   warn <<~USAGE
@@ -34,12 +37,12 @@ def absolute(path)
 end
 
 def workdir_base
-  base = ENV["EGAME_INSTANCE_WORKDIR"]
+  base = ENV["EVE_INSTANCE_WORKDIR"]
   base && !base.empty? ? absolute(base) : DEFAULT_WORKDIR_BASE
 end
 
 def state_base
-  base = ENV["EGAME_STATE_DIR"]
+  base = ENV["EVE_STATE_DIR"]
   base && !base.empty? ? absolute(base) : DEFAULT_STATE_BASE
 end
 
@@ -49,8 +52,8 @@ end
 
 instance_name = nil
 emit = "env"
-registry_path = ENV["EGAME_INSTANCE_REGISTRY"] && !ENV["EGAME_INSTANCE_REGISTRY"].empty? \
-                ? absolute(ENV["EGAME_INSTANCE_REGISTRY"]) \
+registry_path = ENV["EVE_INSTANCE_REGISTRY"] && !ENV["EVE_INSTANCE_REGISTRY"].empty? \
+                ? absolute(ENV["EVE_INSTANCE_REGISTRY"]) \
                 : DEFAULT_REGISTRY_PATH
 
 args = ARGV.dup

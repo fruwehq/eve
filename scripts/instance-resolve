@@ -6,11 +6,14 @@ require "open3"
 require "yaml"
 
 ROOT = File.expand_path("..", __dir__)
+$LOAD_PATH.unshift(File.join(ROOT, "core"))
+require "sdk"
+Eve::SDK::Workdir.migrate_legacy_root!
 CATALOG_PATH = File.join(ROOT, "config/catalog.yaml")
-LOCAL_CATALOG_PATH = ENV["EGAME_CATALOG_LOCAL"] && !ENV["EGAME_CATALOG_LOCAL"].empty? \
-                     ? File.expand_path(ENV["EGAME_CATALOG_LOCAL"], Dir.pwd) \
+LOCAL_CATALOG_PATH = ENV["EVE_CATALOG_LOCAL"] && !ENV["EVE_CATALOG_LOCAL"].empty? \
+                     ? File.expand_path(ENV["EVE_CATALOG_LOCAL"], Dir.pwd) \
                      : File.join(ROOT, "config/catalog.local.yaml")
-DEFAULT_REGISTRY_PATH = File.join(ROOT, ".egame/instances.yaml")
+DEFAULT_REGISTRY_PATH = File.join(ROOT, ".eve/instances.yaml")
 
 def usage
   warn <<~USAGE
@@ -120,7 +123,7 @@ end
 def validate_provider_metadata!(provider_plugin, resolved)
   spec = provider_plugin.fetch("commands").fetch("validate")
   argv = plugin_command_argv(provider_plugin, spec)
-  out, err, status = Open3.capture3({ "EGAME_RESOLVED_JSON" => JSON.generate(resolved) }, *argv)
+  out, err, status = Open3.capture3({ "EVE_RESOLVED_JSON" => JSON.generate(resolved) }, *argv)
   return if status.success?
 
   message = [err, out].reject { |part| part.to_s.strip.empty? }.join("\n").strip
@@ -395,8 +398,8 @@ end
 instance_name = nil
 emit = nil
 validate = false
-registry_path = ENV["EGAME_INSTANCE_REGISTRY"] && !ENV["EGAME_INSTANCE_REGISTRY"].empty? \
-                ? File.expand_path(ENV["EGAME_INSTANCE_REGISTRY"], Dir.pwd) \
+registry_path = ENV["EVE_INSTANCE_REGISTRY"] && !ENV["EVE_INSTANCE_REGISTRY"].empty? \
+                ? File.expand_path(ENV["EVE_INSTANCE_REGISTRY"], Dir.pwd) \
                 : DEFAULT_REGISTRY_PATH
 
 args = ARGV.dup

@@ -65,9 +65,9 @@ def provider_state_for(command, status)
 end
 
 def record_state(instance_name, operation, status, error = nil, desired_state = nil, provider_state = nil)
-  return if ENV["EGAME_DISABLE_STATE"] == "1"
+  return if ENV["EVE_DISABLE_STATE"] == "1"
 
-  Egame::SDK::State.record_operation(
+  Eve::SDK::State.record_operation(
     instance_name, operation, status,
     error: error,
     desired_state: desired_state,
@@ -77,8 +77,8 @@ end
 
 instance_name = nil
 command = nil
-registry_path = ENV["EGAME_INSTANCE_REGISTRY"] ? File.expand_path(ENV["EGAME_INSTANCE_REGISTRY"], Dir.pwd) : nil
-dry_run = ENV["EGAME_PROVIDER_DRY_RUN"] == "1"
+registry_path = ENV["EVE_INSTANCE_REGISTRY"] ? File.expand_path(ENV["EVE_INSTANCE_REGISTRY"], Dir.pwd) : nil
+dry_run = ENV["EVE_PROVIDER_DRY_RUN"] == "1"
 extra_args = []
 
 args = ARGV.dup
@@ -135,7 +135,7 @@ def validate_provider_output(output)
     end
     next unless parsed.key?("status") || parsed.key?("ip")
 
-    Egame::SDK::Contract.validate_output!(parsed, def_name: "provider_command_output")
+    Eve::SDK::Contract.validate_output!(parsed, def_name: "provider_command_output")
     return
   end
 
@@ -150,7 +150,7 @@ def validate_provider_output(output)
     end
     next unless parsed.key?("status") || parsed.key?("ip")
 
-    Egame::SDK::Contract.validate_output!(parsed, def_name: "provider_command_output")
+    Eve::SDK::Contract.validate_output!(parsed, def_name: "provider_command_output")
     return
   end
 end
@@ -179,7 +179,7 @@ begin
       "engine" => resolved.fetch("engine"),
       "dry_run" => true
     }
-    Egame::SDK::Contract.validate_output!(payload, def_name: "provider_command_output")
+    Eve::SDK::Contract.validate_output!(payload, def_name: "provider_command_output")
     puts JSON.generate(payload)
     exit 0
   end
@@ -194,18 +194,18 @@ begin
   raise overlay_out unless overlay_status.success?
 
   env = ENV.to_h.merge(
-    "EGAME_CATALOG_LOCAL" => overlay,
-    "EGAME_INSTANCE_NAME" => instance_name,
-    "EGAME_PROVIDER_PLUGIN" => provider
+    "EVE_CATALOG_LOCAL" => overlay,
+    "EVE_INSTANCE_NAME" => instance_name,
+    "EVE_PROVIDER_PLUGIN" => provider,
+    "EVE_RESOLVED_JSON" => JSON.generate(resolved)
   )
-  env["EGAME_INSTANCE_REGISTRY"] = registry_path if registry_path
-  env["EGAME_PLUGIN_DRY_RUN"] = "1" if dry_run
+  env["EVE_INSTANCE_REGISTRY"] = registry_path if registry_path
+  env["EVE_PLUGIN_DRY_RUN"] = "1" if dry_run
 
   cmd += extra_args
   desired_state = desired_state_for(command)
 
   if interactive_command?(plugin, command) && !dry_run
-    env["EGAME_RESOLVED_JSON"] = JSON.generate(resolved)
     exec(env, *cmd, chdir: ROOT)
   end
 
@@ -238,7 +238,7 @@ begin
   if exit_status.zero?
     begin
       validate_provider_output(captured_out)
-    rescue Egame::SDK::ContractError => e
+    rescue Eve::SDK::ContractError => e
       record_state(
         instance_name,
         "provider.#{command}",

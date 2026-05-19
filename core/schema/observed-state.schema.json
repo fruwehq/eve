@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://ephemeral.dev/schemas/observed-state.schema.json",
   "title": "Observed State",
-  "description": "The shape of .egame/state/instances/<name>.json. Written by scripts/instance-state and scripts/instance-observe. Read by the TUI and CLI status commands.",
+  "description": "The shape of .eve/state/instances/<name>.json. Written by scripts/instance-state and scripts/instance-observe. Read by the TUI and CLI status commands.",
 
   "type": "object",
   "required": [

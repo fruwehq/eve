@@ -7,10 +7,10 @@ case "$payload" in
     printf '{\n'
     printf '  "kind": "package-hook",\n'
     printf '  "package": "%s",\n' \
-      "${EGAME_PACKAGE_PLUGIN:-}"
+      "${EVE_PACKAGE_PLUGIN:-}"
     printf '  "command": "status",\n'
     printf '  "instance": "%s",\n' \
-      "${EGAME_INSTANCE_NAME:-}"
+      "${EVE_INSTANCE_NAME:-}"
     printf '  "os_family": "ubuntu",\n'
     printf '  "status": "installed"\n'
     printf '}\n'

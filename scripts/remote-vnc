@@ -63,7 +63,7 @@ fi
 
 if [ "$ENGINE" = "vagrant" ]; then
     IP=$(./scripts/instance-ip "$PROFILE")
-    WORKDIR="$(egame_instance_workdir "$PROFILE")"
+    WORKDIR="$(eve_instance_workdir "$PROFILE")"
     SSH_PORT=$(cd "$WORKDIR" && vagrant ssh-config | awk '/Port/ {print $2; exit}')
     PRIV_KEY=$(cd "$WORKDIR" && vagrant ssh-config | awk '/IdentityFile/ {print $2; exit}')
 
@@ -97,7 +97,7 @@ echo "[remote-vnc] Opening VNC viewer..."
 VNC_AUTH_ARGS=()
 VNC_PASSWD_FILE=""
 if [ "$VNC_VIEWER" != "system" ] && command -v mktemp >/dev/null 2>&1; then
-    VNC_PASSWD_FILE=$(mktemp "${TMPDIR:-/tmp}/egame-vnc-passwd.XXXXXX")
+    VNC_PASSWD_FILE=$(mktemp "${TMPDIR:-/tmp}/eve-vnc-passwd.XXXXXX")
     chmod 600 "$VNC_PASSWD_FILE"
     if ./scripts/instance-ssh "$PROFILE" -- "home=\$(getent passwd '$VNC_USER' | cut -d: -f6); if [ -f \"\$home/.config/tigervnc/passwd\" ]; then sudo cat \"\$home/.config/tigervnc/passwd\"; elif [ -f \"\$home/.vnc/passwd\" ]; then sudo cat \"\$home/.vnc/passwd\"; else exit 1; fi" > "$VNC_PASSWD_FILE"; then
         VNC_AUTH_ARGS=(-passwd "$VNC_PASSWD_FILE")

@@ -2,7 +2,7 @@
 
 require "json"
 
-module Egame
+module Eve
   module Provider
     def self.provider_id_from_path
       prog = File.expand_path($PROGRAM_NAME)
@@ -20,23 +20,23 @@ module Egame
       end
 
       resolved = begin
-        Egame::SDK::Resolve.from_env
-      rescue Egame::SDK::SchemaValidationError => e
+        Eve::SDK::Resolve.from_env
+      rescue Eve::SDK::SchemaValidationError => e
         warn "provider-command: #{e.message}"
         exit 1
-      rescue Egame::SDK::ContractError => e
+      rescue Eve::SDK::ContractError => e
         warn "provider-command: #{e.message}"
         exit 1
       end
 
       begin
-        Egame::SDK::Contract.validate_input!(resolved.raw)
-      rescue Egame::SDK::ContractError => e
+        Eve::SDK::Contract.validate_input!(resolved.raw)
+      rescue Eve::SDK::ContractError => e
         warn "provider-command: #{e.message}"
         exit 1
       end
 
-      provider_id = ENV["EGAME_PROVIDER_PLUGIN"] || provider_id_from_path
+      provider_id = ENV["EVE_PROVIDER_PLUGIN"] || provider_id_from_path
       instance_name = resolved.instance_name
       engine = resolved.engine
 
@@ -45,7 +45,7 @@ module Egame
         exit 1
       end
 
-      if ENV["EGAME_PLUGIN_DRY_RUN"] == "1" || command == "resolve"
+      if ENV["EVE_PLUGIN_DRY_RUN"] == "1" || command == "resolve"
         payload = {
           "kind" => "provider",
           "provider" => provider_id,
@@ -53,11 +53,11 @@ module Egame
           "instance" => instance_name,
           "profile" => instance_name,
           "engine" => engine,
-          "dry_run" => ENV["EGAME_PLUGIN_DRY_RUN"] == "1"
+          "dry_run" => ENV["EVE_PLUGIN_DRY_RUN"] == "1"
         }
         begin
-          Egame::SDK::Contract.validate_output!(payload, def_name: "provider_command_output")
-        rescue Egame::SDK::ContractError => e
+          Eve::SDK::Contract.validate_output!(payload, def_name: "provider_command_output")
+        rescue Eve::SDK::ContractError => e
           warn "provider-command: #{e.message}"
           exit 1
         end
@@ -65,7 +65,7 @@ module Egame
         exit 0
       end
 
-      root = Egame::SDK::Workdir.root
+      root = Eve::SDK::Workdir.root
 
       case command
       when "init"

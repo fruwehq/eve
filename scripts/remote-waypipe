@@ -46,9 +46,9 @@ fi
 
 if [ "$ENGINE" = "vagrant" ]; then
   ./scripts/vagrant-up --plan "$PROFILE" >/dev/null
-  tmp_config="$(mktemp "${TMPDIR:-/tmp}/egame-waypipe-ssh.XXXXXX")"
+  tmp_config="$(mktemp "${TMPDIR:-/tmp}/eve-waypipe-ssh.XXXXXX")"
   trap 'rm -f "$tmp_config"' EXIT
-  (cd "$(egame_instance_workdir "$PROFILE")" && vagrant ssh-config >"$tmp_config")
+  (cd "$(eve_instance_workdir "$PROFILE")" && vagrant ssh-config >"$tmp_config")
   exec waypipe ssh -o StreamLocalBindUnlink=yes -F "$tmp_config" default "${APP[@]}"
 fi
 

@@ -3,7 +3,7 @@
 require "json"
 require "time"
 
-module Egame
+module Eve
   module SDK
     module Log
       def self.info(message, prefix: nil, stream: $stdout)

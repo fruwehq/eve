@@ -34,7 +34,7 @@ case "$VPROV" in
 esac
 echo "[vagrant-up] profile=$PROFILE provider=$VAGRANT_PROVIDER"
 
-WORKDIR="$(egame_instance_workdir "$PROFILE")"
+WORKDIR="$(eve_instance_workdir "$PROFILE")"
 mkdir -p "$WORKDIR"
 ./scripts/profile-resolve --profile "$PROFILE" --emit vagrant \
   --output "$WORKDIR/Vagrantfile"

@@ -88,7 +88,7 @@ begin
     "observed_at" => now.iso8601,
     "expires_at" => (now + ttl).iso8601
   }
-  env = ENV.to_h.merge("EGAME_DISABLE_STATE" => "1")
+  env = ENV.to_h.merge("EVE_DISABLE_STATE" => "1")
 
   stdout, stderr, status = run_command(
     env,
@@ -125,9 +125,9 @@ begin
 
   observed["provider_status"] ||= "unknown"
 
-  state = Egame::SDK::State.update_observed(instance, observed)
+  state = Eve::SDK::State.update_observed(instance, observed)
   puts JSON.pretty_generate(state)
-rescue Egame::SDK::StateError, Egame::SDK::SchemaValidationError => e
+rescue Eve::SDK::StateError, Eve::SDK::SchemaValidationError => e
   warn "instance-observe: #{e.message}"
   exit 2
 end

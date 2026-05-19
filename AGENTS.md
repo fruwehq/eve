@@ -5,7 +5,7 @@
 **All configurable defaults live in `.env`, `config/defaults.yaml`, or the catalog.** Never use shell `${VAR:-default}` to encode a meaningful default inside a script. If a variable needs a default, declare it (commented or uncommented) in one of those files so it is discoverable in one place.
 
 - User-specific overrides go in `.env.local` (git-ignored).
-- Non-secret structured preferences go in `.egame/config.yaml` (git-ignored), using `config/defaults.yaml` as the documented shape.
+- Non-secret structured preferences go in `.eve/config.yaml` (git-ignored), using `config/defaults.yaml` as the documented shape.
 - Machine-level defaults (cpu, memory, disk_gb, network, state) belong in `config/catalog.yaml` under the machine's `defaults:` block.
 - Local catalog overrides (different machine sizes, personal zvol paths, etc.) go in `config/catalog.local.yaml` (git-ignored).
 - Scripts and terraform modules may declare variable defaults as a safety net (e.g. a terraform `default = "..."`) but the canonical, human-readable default always lives in `.env` or the catalog.
@@ -126,7 +126,7 @@ See [docs/raspberry-pi-provider.md](docs/raspberry-pi-provider.md) for the metal
 
 - **Core orchestration:** Ruby. All new orchestration scripts under `scripts/` must be Ruby (`#!/usr/bin/env ruby`).
 - **Guest-side provisioning:** bash under `oses/<catalog-os-id>/provision/` for Linux, PowerShell under `oses/windows-server-2025/provision/` for Windows. These are the only places new bash is acceptable.
-- **TUI:** Python. The TUI (`scripts/egame-tui`) stays Python because Textual is Python.
+- **TUI:** Python. The TUI (`scripts/eve-tui`) stays Python because Textual is Python.
 - **No new bash in `scripts/`.** The boundary lint (`make test.core-boundary`) enforces this; existing bash scripts are enumerated in `scripts/test-core-boundary.allowlist` and will be ported to Ruby over time.
 
 ## Post-boot provisioning

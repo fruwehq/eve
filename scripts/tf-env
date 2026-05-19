@@ -54,7 +54,7 @@ def provider_plugin_for(provider)
   plugin_doc.fetch("plugins").find { |entry| entry["id"] == provider }
 end
 
-if ENV["EGAME_RUNTIME_ENV_LOADED"] != "1"
+if ENV["EVE_RUNTIME_ENV_LOADED"] != "1"
   loader = File.join(ROOT, "scripts/lib/load-runtime-env.sh")
   out, err, status = Open3.capture3(
     "sh",
@@ -122,7 +122,7 @@ def print_provider_tf_env(provider, env)
     exit 1
   end
 
-  out, err, status = Open3.capture3({ "EGAME_TF_ENV_JSON" => JSON.generate(env) }, *command_vector(plugin, spec), chdir: ROOT)
+  out, err, status = Open3.capture3({ "EVE_TF_ENV_JSON" => JSON.generate(env) }, *command_vector(plugin, spec), chdir: ROOT)
   print out
   return if status.success?
 
@@ -147,10 +147,10 @@ def normalize_path(value)
   end
 end
 
-instance_name = ENV["EGAME_INSTANCE_NAME"]
+instance_name = ENV["EVE_INSTANCE_NAME"]
 unless instance_name.nil? || instance_name.empty?
   ip_args = ["./scripts/instance-paths", "--instance", instance_name, "--emit", "env"]
-  registry = ENV["EGAME_INSTANCE_REGISTRY"]
+  registry = ENV["EVE_INSTANCE_REGISTRY"]
   ip_args += ["--registry", registry] if registry && !registry.empty?
   instance_paths_raw = run_cmd(*ip_args)
 
@@ -165,8 +165,8 @@ unless instance_name.nil? || instance_name.empty?
   end
 
   print_kv("TF_WORKSPACE", instance_name)
-  print_kv("EGAME_TF_DATA_BASE", paths["INSTANCE_TF_DATA_BASE"].to_s)
-  print_kv("EGAME_TF_STATE_BASE", paths["INSTANCE_TF_STATE_BASE"].to_s)
+  print_kv("EVE_TF_DATA_BASE", paths["INSTANCE_TF_DATA_BASE"].to_s)
+  print_kv("EVE_TF_STATE_BASE", paths["INSTANCE_TF_STATE_BASE"].to_s)
 end
 
 print_kv("TF_VAR_bundle_packages", env["BUNDLE_PACKAGES"].to_s)

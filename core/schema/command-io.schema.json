@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://ephemeral.dev/schemas/command-io.schema.json",
   "title": "Plugin Command I/O",
-  "description": "Documents the JSON in/out contract for plugin commands. The input shape is resolved-instance.schema.json (passed via stdin or EGAME_RESOLVED_JSON). The $defs below describe the output shapes. This schema is documentation-only -- no data fixtures validate against it because provider commands emit mixed text/JSON on stdout.",
+  "description": "Documents the JSON in/out contract for plugin commands. The input shape is resolved-instance.schema.json (passed via stdin or EVE_RESOLVED_JSON). The $defs below describe the output shapes. This schema is documentation-only -- no data fixtures validate against it because provider commands emit mixed text/JSON on stdout.",
   "$comment": "Documentation-only: defines $defs for reference but has no root type constraint. Do not add a root type or oneOf without also adding corresponding command-output fixtures.",
 
   "$defs": {

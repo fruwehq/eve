@@ -30,18 +30,18 @@ end
 puts "\n== state-concurrency: #{WRITER_COUNT} parallel writers =="
 
 begin
-  tmpdir = Dir.mktmpdir("egame-state-test-")
+  tmpdir = Dir.mktmpdir("eve-state-test-")
   state_dir = File.join(tmpdir, "instances")
   FileUtils.mkdir_p(state_dir)
 
-  ENV["EGAME_STATE_DIR"] = tmpdir
+  ENV["EVE_STATE_DIR"] = tmpdir
 
-  Egame::SDK::State.write(INSTANCE_NAME, Egame::SDK::State.default_state(INSTANCE_NAME, Time.now.utc.iso8601))
+  Eve::SDK::State.write(INSTANCE_NAME, Eve::SDK::State.default_state(INSTANCE_NAME, Time.now.utc.iso8601))
 
   children = WRITER_COUNT.times.map do |i|
     fork do
       begin
-        Egame::SDK::State.record_operation(
+        Eve::SDK::State.record_operation(
           INSTANCE_NAME,
           "provider.status",
           i.even? ? "succeeded" : "failed",
@@ -64,12 +64,12 @@ begin
     pass "all #{WRITER_COUNT} writers completed"
   end
 
-  path = Egame::SDK::Workdir.state_path(INSTANCE_NAME)
+  path = Eve::SDK::Workdir.state_path(INSTANCE_NAME)
   raw = File.read(path)
   state = JSON.parse(raw)
   pass "final state is valid JSON"
 
-  Egame::SDK::State.validate_state!(state)
+  Eve::SDK::State.validate_state!(state)
   pass "final state passes schema validation"
 
   history = state.fetch("operation_history", [])
@@ -92,22 +92,22 @@ begin
   puts "  history entries: #{history.length}"
 ensure
   FileUtils.rm_rf(tmpdir) if tmpdir
-  ENV.delete("EGAME_STATE_DIR")
+  ENV.delete("EVE_STATE_DIR")
 end
 
 # ---------- Read validation ----------
 puts "\n== state-validation: read rejects invalid on-disk state =="
 
 begin
-  tmpdir2 = Dir.mktmpdir("egame-state-read-test-")
+  tmpdir2 = Dir.mktmpdir("eve-state-read-test-")
   state_dir2 = File.join(tmpdir2, "instances")
   FileUtils.mkdir_p(state_dir2)
-  ENV["EGAME_STATE_DIR"] = tmpdir2
+  ENV["EVE_STATE_DIR"] = tmpdir2
 
-  valid = Egame::SDK::State.default_state("read-test", Time.now.utc.iso8601)
+  valid = Eve::SDK::State.default_state("read-test", Time.now.utc.iso8601)
   valid["provider_state"] = "running"
-  Egame::SDK::State.write("read-test", valid)
-  read_back = Egame::SDK::State.read("read-test")
+  Eve::SDK::State.write("read-test", valid)
+  read_back = Eve::SDK::State.read("read-test")
   if read_back["provider_state"] == "running"
     pass "valid state reads back correctly"
   else
@@ -119,14 +119,14 @@ begin
   bad_state["provider_state"] = "not-a-real-state"
   File.write(invalid_path, JSON.pretty_generate(bad_state) + "\n")
   begin
-    Egame::SDK::State.read("corrupt")
+    Eve::SDK::State.read("corrupt")
     failures += fail_test "read accepted schema-invalid on-disk state"
-  rescue Egame::SDK::SchemaValidationError
+  rescue Eve::SDK::SchemaValidationError
     pass "read rejects schema-invalid on-disk state"
   end
 
   missing_path = File.join(state_dir2, "absent.json")
-  default_read = Egame::SDK::State.read("absent")
+  default_read = Eve::SDK::State.read("absent")
   if default_read["instance"] == "absent" && default_read["provider_state"] == "unknown"
     pass "read returns defaults for nonexistent state file"
   else
@@ -136,32 +136,32 @@ rescue StandardError => e
   failures += fail_test "read validation suite error: #{e.message}"
 ensure
   FileUtils.rm_rf(tmpdir2) if tmpdir2
-  ENV.delete("EGAME_STATE_DIR")
+  ENV.delete("EVE_STATE_DIR")
 end
 
 # ---------- Write validation inside lock ----------
 puts "\n== state-validation: write rejects invalid state before disk =="
 
 begin
-  tmpdir3 = Dir.mktmpdir("egame-state-write-test-")
-  ENV["EGAME_STATE_DIR"] = tmpdir3
+  tmpdir3 = Dir.mktmpdir("eve-state-write-test-")
+  ENV["EVE_STATE_DIR"] = tmpdir3
   FileUtils.mkdir_p(File.join(tmpdir3, "instances"))
 
-  valid = Egame::SDK::State.default_state("write-test", Time.now.utc.iso8601)
+  valid = Eve::SDK::State.default_state("write-test", Time.now.utc.iso8601)
   valid["provider_state"] = "running"
-  Egame::SDK::State.write("write-test", valid)
+  Eve::SDK::State.write("write-test", valid)
   pass "write accepts valid state"
 
   bad = valid.dup
   bad["provider_state"] = "not-a-real-state"
   begin
-    Egame::SDK::State.write("write-test", bad)
+    Eve::SDK::State.write("write-test", bad)
     failures += fail_test "write accepted schema-invalid state"
-  rescue Egame::SDK::SchemaValidationError
+  rescue Eve::SDK::SchemaValidationError
     pass "write rejects schema-invalid state"
   end
 
-  path3 = Egame::SDK::Workdir.state_path("write-test")
+  path3 = Eve::SDK::Workdir.state_path("write-test")
   disk = JSON.parse(File.read(path3))
   if disk["provider_state"] == "running"
     pass "invalid state was not written to disk"
@@ -172,7 +172,7 @@ rescue StandardError => e
   failures += fail_test "write validation suite error: #{e.message}"
 ensure
   FileUtils.rm_rf(tmpdir3) if tmpdir3
-  ENV.delete("EGAME_STATE_DIR")
+  ENV.delete("EVE_STATE_DIR")
 end
 
 if failures.positive?

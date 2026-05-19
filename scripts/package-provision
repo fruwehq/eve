@@ -54,10 +54,10 @@ fi
 
 cd "$(git rev-parse --show-toplevel)"
 
-if [ -n "${EGAME_INSTANCE_REGISTRY:-}" ]; then
-  TMP_OVERLAY=$(mktemp "${TMPDIR:-/tmp}/egame-package-provision-overlay.XXXXXX.yaml")
-  ./scripts/instance-profile-overlay --registry "$EGAME_INSTANCE_REGISTRY" --instance "$INSTANCE_NAME" --output "$TMP_OVERLAY" >/dev/null
-  export EGAME_CATALOG_LOCAL="$TMP_OVERLAY"
+if [ -n "${EVE_INSTANCE_REGISTRY:-}" ]; then
+  TMP_OVERLAY=$(mktemp "${TMPDIR:-/tmp}/eve-package-provision-overlay.XXXXXX.yaml")
+  ./scripts/instance-profile-overlay --registry "$EVE_INSTANCE_REGISTRY" --instance "$INSTANCE_NAME" --output "$TMP_OVERLAY" >/dev/null
+  export EVE_CATALOG_LOCAL="$TMP_OVERLAY"
 fi
 RESOLVED_ENV=$(./scripts/profile-resolve --profile "$INSTANCE_NAME" --emit env)
 env_value() {
@@ -82,7 +82,7 @@ fi
 OS_PROVISION_DIR=$(cd "$OS_PROVISION_DIR" && pwd -P)
 
 # Read install metadata from the package plugin manifest so adding a new
-# package only requires touching its plugins/packages/<id>/egame-plugin.yaml.
+# package only requires touching its plugins/packages/<id>/eve-plugin.yaml.
 PLUGIN_DOC=$(./scripts/plugin-list --kind package --json)
 PLUGIN_INSTALL=$(printf '%s' "$PLUGIN_DOC" | jq --arg id "$PACKAGE" '.plugins[] | select(.id == $id) | .install.ubuntu // null')
 PLUGIN_ROOT=$(printf '%s' "$PLUGIN_DOC" | jq -r --arg id "$PACKAGE" '.plugins[] | select(.id == $id) | .path' | xargs dirname)
@@ -125,7 +125,7 @@ if ! ./scripts/instance-ssh "$INSTANCE_NAME" -- 'sudo -n true' >/dev/null 2>&1; 
     echo "[package-provision] configuring passwordless sudo for Raspberry Pi provisioning"
     # shellcheck disable=SC2016
     printf '%s\n' "$RASPBERRY_PI_USER_PASSWORD" | ./scripts/instance-ssh "$INSTANCE_NAME" -- \
-      'tmp=$(mktemp); printf "%s ALL=(ALL) NOPASSWD:ALL\n" "$USER" > "$tmp"; chmod 0440 "$tmp"; sudo -S -p "" install -o root -g root -m 0440 "$tmp" /etc/sudoers.d/90-egame-provision; rm -f "$tmp"; sudo -n visudo -cf /etc/sudoers.d/90-egame-provision'
+      'tmp=$(mktemp); printf "%s ALL=(ALL) NOPASSWD:ALL\n" "$USER" > "$tmp"; chmod 0440 "$tmp"; sudo -S -p "" install -o root -g root -m 0440 "$tmp" /etc/sudoers.d/90-eve-provision; rm -f "$tmp"; sudo -n visudo -cf /etc/sudoers.d/90-eve-provision'
   fi
 fi
 

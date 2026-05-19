@@ -45,7 +45,7 @@ if [ "${#TF_FMT_DIRS[@]}" -gt 0 ] && ! terraform fmt -check -recursive -no-color
 fi
 
 printf '  -- terramate fmt --\n'
-tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/egame-terramate-fmt.XXXXXX")"
+tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/eve-terramate-fmt.XXXXXX")"
 trap 'rm -rf "$tmp_dir"' EXIT
 while IFS= read -r file; do
   tmp_file="$tmp_dir/${file//\//__}"

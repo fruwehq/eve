@@ -19,8 +19,8 @@ if [ -z "$INSTANCE_NAME" ]; then
 fi
 
 path_args=(--instance "$INSTANCE_NAME" --emit env)
-if [ -n "${EGAME_INSTANCE_REGISTRY:-}" ]; then
-  path_args+=(--registry "$EGAME_INSTANCE_REGISTRY")
+if [ -n "${EVE_INSTANCE_REGISTRY:-}" ]; then
+  path_args+=(--registry "$EVE_INSTANCE_REGISTRY")
 fi
 INSTANCE_PATHS="$(./scripts/instance-paths "${path_args[@]}")"
 extract_path() {
@@ -29,16 +29,16 @@ extract_path() {
 OVERLAY="$(extract_path INSTANCE_OVERLAY_PATH)"
 
 overlay_args=(--instance "$INSTANCE_NAME" --output "$OVERLAY")
-if [ -n "${EGAME_INSTANCE_REGISTRY:-}" ]; then
-  overlay_args+=(--registry "$EGAME_INSTANCE_REGISTRY")
+if [ -n "${EVE_INSTANCE_REGISTRY:-}" ]; then
+  overlay_args+=(--registry "$EVE_INSTANCE_REGISTRY")
 fi
 
 ./scripts/instance-profile-overlay "${overlay_args[@]}"
 
 echo "[instance-run] target=$TARGET instance=$INSTANCE_NAME overlay=$OVERLAY" >&2
 
-export EGAME_CATALOG_LOCAL="$OVERLAY"
-export EGAME_INSTANCE_NAME="$INSTANCE_NAME"
+export EVE_CATALOG_LOCAL="$OVERLAY"
+export EVE_INSTANCE_NAME="$INSTANCE_NAME"
 
 case "$TARGET" in
   init|plan|up|down|start|stop|status|ip|ssh)

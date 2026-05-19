@@ -1,7 +1,7 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-instance = ENV["EGAME_INSTANCE_NAME"] || ARGV.first
+instance = ENV["EVE_INSTANCE_NAME"] || ARGV.first
 unless instance && !instance.empty?
   warn "Usage: commands/up <instance>"
   exit 2

@@ -5,10 +5,10 @@ set -eu
 
 package="${1:?Usage: package-down-windows <package> <remote-command>}"
 remote_command="${2:?Usage: package-down-windows <package> <remote-command>}"
-profile="${EGAME_INSTANCE_NAME:?EGAME_INSTANCE_NAME is required}"
-ssh_cmd="${EGAME_PACKAGE_DOWN_SSH:-./scripts/instance-ssh}"
+profile="${EVE_INSTANCE_NAME:?EVE_INSTANCE_NAME is required}"
+ssh_cmd="${EVE_PACKAGE_DOWN_SSH:-./scripts/instance-ssh}"
 
-if [ "${EGAME_PLUGIN_DRY_RUN:-0}" = "1" ]; then
+if [ "${EVE_PLUGIN_DRY_RUN:-0}" = "1" ]; then
   jq -n \
     --arg package "$package" \
     --arg instance "$profile" \

@@ -1,6 +1,6 @@
 # Non-secret structured defaults. Empty values are ignored.
 #
-# Personal overrides can go in .egame/config.yaml, which is git-ignored and safe
+# Personal overrides can go in .eve/config.yaml, which is git-ignored and safe
 # for UI-editable preferences. Keep secrets such as API keys and passwords in
 # .env.local.
 

@@ -11,8 +11,8 @@ if [ "${1:-}" = "--plan" ]; then
   shift
 fi
 
-if [ -n "${EGAME_INSTANCE_NAME:-}" ]; then
-  PROFILE="$EGAME_INSTANCE_NAME"
+if [ -n "${EVE_INSTANCE_NAME:-}" ]; then
+  PROFILE="$EVE_INSTANCE_NAME"
 else
   PROFILE="${1:?Usage: commands/up [--plan] <instance>}"
 fi
@@ -38,7 +38,7 @@ case "$VPROV" in
 esac
 echo "[vagrant-up] profile=$PROFILE provider=$VAGRANT_PROVIDER"
 
-WORKDIR="$(egame_instance_workdir "$PROFILE")"
+WORKDIR="$(eve_instance_workdir "$PROFILE")"
 mkdir -p "$WORKDIR"
 ./scripts/profile-resolve --profile "$PROFILE" --emit vagrant \
   --output "$WORKDIR/Vagrantfile"
