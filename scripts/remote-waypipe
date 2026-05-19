@@ -2,11 +2,11 @@
 # Run a remote Wayland app through waypipe.
 #
 # Usage:
-#   scripts/remote-waypipe <profile-or-instance> [app [args...]]
+#   scripts/remote-waypipe <instance> [app [args...]]
 
 set -euo pipefail
 
-PROFILE="${1:?Usage: scripts/remote-waypipe <profile-or-instance> [app [args...]]}"
+PROFILE="${1:?Usage: scripts/remote-waypipe <instance> [app [args...]]}"
 shift || true
 APP=("$@")
 if [ "${#APP[@]}" -eq 0 ]; then

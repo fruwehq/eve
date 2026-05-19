@@ -2,7 +2,7 @@
 # Start a Moonlight stream to the instance.
 set -euo pipefail
 
-PROFILE="${1:?Usage: scripts/remote-moonlight <profile>}"
+PROFILE="${1:?Usage: scripts/remote-moonlight <instance>}"
 cd "$(git rev-parse --show-toplevel)"
 
 PKGS=$(./scripts/profile-resolve --profile "$PROFILE" --emit env | awk -F= '/^BUNDLE_PACKAGES/{print $2}')

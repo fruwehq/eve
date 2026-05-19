@@ -6,9 +6,9 @@
 # plugin instead of routing through this generic command.
 #
 # Usage:
-#   commands/ssh <profile>                         # interactive shell
-#   commands/ssh <profile> -- <cmd> [args...]      # remote command
-#   commands/ssh <profile> --scp <local> <remote>  # scp helper
+#   commands/ssh <instance>                         # interactive shell
+#   commands/ssh <instance> -- <cmd> [args...]      # remote command
+#   commands/ssh <instance> --scp <local> <remote>  # scp helper
 
 set -euo pipefail
 

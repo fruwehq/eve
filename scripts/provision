@@ -2,14 +2,14 @@
 # Upload the OS-appropriate provisioning tree to the profile's instance
 # and run the bootstrap entry point.
 #
-# Usage: scripts/provision <profile>
+# Usage: scripts/provision <instance>
 #
 # Ubuntu: uploads ./oses/<catalog-os-id>/provision/ -> $HOME/provision
 # Windows: uploads ./oses/<catalog-os-id>/provision/ -> C:\Users\<user>\provision
 
 set -euo pipefail
 
-PROFILE="${1:?Usage: scripts/provision <profile>}"
+PROFILE="${1:?Usage: scripts/provision <instance>}"
 cd "$(git rev-parse --show-toplevel)"
 
 RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)

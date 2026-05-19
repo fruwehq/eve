@@ -2,7 +2,7 @@
 # Open an RDP session to an instance.
 set -euo pipefail
 
-PROFILE="${1:?Usage: scripts/remote-rdp <profile>}"
+PROFILE="${1:?Usage: scripts/remote-rdp <instance>}"
 cd "$(git rev-parse --show-toplevel)"
 
 RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)

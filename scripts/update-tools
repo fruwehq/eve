@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-USAGE="Usage: scripts/update-tools <profile>
+USAGE="Usage: scripts/update-tools <instance>
 
 Updates all installed tools on a remote instance to their latest versions.
 "

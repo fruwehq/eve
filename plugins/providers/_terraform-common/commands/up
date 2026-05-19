@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Run terraform apply for a profile's stacks.
-# Usage: scripts/tf-apply <profile>
+# Usage: scripts/tf-apply <instance>
 
 if [ -n "${EVE_INSTANCE_NAME:-}" ]; then
   PROFILE="$EVE_INSTANCE_NAME"

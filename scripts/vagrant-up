@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Run vagrant up for a profile.
-# Usage: scripts/vagrant-up [--plan] <profile>
+# Usage: scripts/vagrant-up [--plan] <instance>
 #   --plan: generate Vagrantfile only, do not start the VM.
 
 PLAN=0
@@ -11,7 +11,7 @@ if [ "${1:-}" = "--plan" ]; then
   shift
 fi
 
-PROFILE="${1:?Usage: scripts/vagrant-up [--plan] <profile>}"
+PROFILE="${1:?Usage: scripts/vagrant-up [--plan] <instance>}"
 cd "$(git rev-parse --show-toplevel)"
 # shellcheck source=lib/instance-workdir.sh
 . ./scripts/lib/instance-workdir.sh

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Run terraform plan for a profile's stacks.
-# Usage: scripts/tf-plan <profile>
+# Usage: scripts/tf-plan <instance>
 
 if [ -n "${EVE_INSTANCE_NAME:-}" ]; then
   PROFILE="$EVE_INSTANCE_NAME"

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Stop a running vagrant profile (suspend).
-# Usage: scripts/vagrant-stop <profile>
+# Usage: scripts/vagrant-stop <instance>
 
 if [ -n "${EVE_INSTANCE_NAME:-}" ]; then
   PROFILE="$EVE_INSTANCE_NAME"

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Run terraform init for a profile's stacks.
-# Usage: scripts/tf-init <profile>
+# Usage: scripts/tf-init <instance>
 
 if [ -n "${EVE_INSTANCE_NAME:-}" ]; then
   PROFILE="$EVE_INSTANCE_NAME"

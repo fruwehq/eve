@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Stream the remote provisioning logs for a profile.
-# Usage: scripts/logs <profile>
+# Usage: scripts/logs <instance>
 
 set -euo pipefail
 
-PROFILE="${1:?Usage: scripts/logs <profile>}"
+PROFILE="${1:?Usage: scripts/logs <instance>}"
 cd "$(git rev-parse --show-toplevel)"
 
 RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)

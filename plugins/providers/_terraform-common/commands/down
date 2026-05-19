@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Run terraform destroy for a profile's stacks in reverse order.
-# Usage: scripts/tf-destroy <profile>
+# Usage: scripts/tf-destroy <instance>
 
 if [ -n "${EVE_INSTANCE_NAME:-}" ]; then
   PROFILE="$EVE_INSTANCE_NAME"

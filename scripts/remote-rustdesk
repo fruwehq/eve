@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-USAGE="Usage: scripts/remote-rustdesk <profile> [connect]
+USAGE="Usage: scripts/remote-rustdesk <instance> [connect]
 
 Prints the RustDesk connection details for a profile's instance.
 With 'connect', configures the local RustDesk client and opens a connection.

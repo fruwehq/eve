@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Open a VNC session to a profile's VM.
-# Usage: scripts/remote-vnc <profile>
+# Usage: scripts/remote-vnc <instance>
 #
 # For vagrant profiles: tunnels VNC (5901) through SSH via vagrant
 # For terraform profiles: tunnels VNC (5901) through SSH via instance-ssh
 
 set -euo pipefail
 
-PROFILE="${1:?Usage: scripts/remote-vnc <profile>}"
+PROFILE="${1:?Usage: scripts/remote-vnc <instance>}"
 cd "$(git rev-parse --show-toplevel)"
 # shellcheck source=lib/instance-workdir.sh
 . ./scripts/lib/instance-workdir.sh

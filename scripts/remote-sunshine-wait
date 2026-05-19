@@ -2,7 +2,7 @@
 # Wait until the Sunshine API accepts authenticated requests.
 set -euo pipefail
 
-PROFILE="${1:?Usage: scripts/remote-sunshine-wait <profile>}"
+PROFILE="${1:?Usage: scripts/remote-sunshine-wait <instance>}"
 cd "$(git rev-parse --show-toplevel)"
 
 RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)

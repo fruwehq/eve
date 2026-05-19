@@ -3,11 +3,11 @@
 # provisioning state machine triggers between steps (SSH probes simply fail
 # while the VM is rebooting and we retry on the next interval).
 #
-# Usage: scripts/wait-for-provision <profile> [max-wait-seconds]
+# Usage: scripts/wait-for-provision <instance> [max-wait-seconds]
 
 set -euo pipefail
 
-PROFILE="${1:?Usage: scripts/wait-for-provision <profile> [max-wait-seconds]}"
+PROFILE="${1:?Usage: scripts/wait-for-provision <instance> [max-wait-seconds]}"
 MAX_SECONDS=${2:-3600}
 POLL_INTERVAL=${EVE_PROVISION_WAIT_POLL_INTERVAL:-5}
 cd "$(git rev-parse --show-toplevel)"

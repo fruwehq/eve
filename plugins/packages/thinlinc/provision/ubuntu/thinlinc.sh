@@ -169,7 +169,7 @@ workdir=/tmp/eve-thinlinc
 bundle="$workdir/thinlinc-server.zip"
 sudo rm -rf "$workdir"
 sudo mkdir -p "$workdir"
-sudo chown "$USER:$USER" "$workdir"
+sudo chown "$PROVISION_USER_NAME:$PROVISION_USER_NAME" "$workdir"
 
 if [ -n "${THINLINC_SERVER_BUNDLE_PATH:-}" ]; then
   if [ ! -e "$THINLINC_SERVER_BUNDLE_PATH" ]; then

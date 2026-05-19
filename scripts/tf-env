@@ -1,6 +1,6 @@
 #!/usr/bin/env ruby
 # tf-env: emit TF_VAR_* exports for a profile, gated by provider.
-# Usage: scripts/tf-env <profile>
+# Usage: scripts/tf-env <instance>
 #
 # Emits shell-compatible "export KEY='value';" lines suitable for eval.
 # Preserves the same CLI, env output format, behavior, and exit codes as the
@@ -12,7 +12,7 @@ require "json"
 ROOT = File.expand_path("..", __dir__)
 
 def usage
-  warn "usage: scripts/tf-env <profile>"
+  warn "usage: scripts/tf-env <instance>"
   exit 2
 end
 

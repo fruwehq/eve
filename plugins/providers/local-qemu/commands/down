@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Run vagrant destroy for a profile.
-# Usage: scripts/vagrant-destroy <profile>
+# Usage: scripts/vagrant-destroy <instance>
 
 if [ -n "${EVE_INSTANCE_NAME:-}" ]; then
   PROFILE="$EVE_INSTANCE_NAME"

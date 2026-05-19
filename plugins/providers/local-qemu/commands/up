@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Run vagrant up for a profile.
-# Usage: scripts/vagrant-up [--plan] <profile>
+# Usage: scripts/vagrant-up [--plan] <instance>
 #   --plan: generate Vagrantfile only, do not start the VM.
 
 PLAN=0

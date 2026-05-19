@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Open the VM's graphical console for a local profile.
-# Usage: scripts/remote-console <profile>
+# Usage: scripts/remote-console <instance>
 #
 # QEMU: not implemented; use VNC/RustDesk/Waypipe/Xpra inside the guest.
 
 set -euo pipefail
 
-PROFILE="${1:?Usage: scripts/remote-console <profile>}"
+PROFILE="${1:?Usage: scripts/remote-console <instance>}"
 cd "$(git rev-parse --show-toplevel)"
 # shellcheck source=lib/instance-workdir.sh
 . ./scripts/lib/instance-workdir.sh
