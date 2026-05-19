@@ -26,14 +26,6 @@ scripts/remote-console:provider/OS reference - local-qemu not-implemented guard 
 scripts/remote-waypipe:provider/OS reference - raspberry-pi IP handling - Part 2 moves into raspberry-pi plugin
 scripts/vagrant-up:provider/OS reference - local-qemu Vagrant dispatch - Part 2 moves into local-qemu plugin
 
-# Shared provider dispatchers (must become provider-agnostic by Part 2)
-# Each entry documents coupling that should split into per-provider plugin commands.
-plugins/providers/_common/commands/ip:provider/OS reference - per-provider IP discovery (terraform attribute paths, raspberry-pi metal SSH) - Part 2 splits into plugin commands
-plugins/providers/_common/commands/ssh:provider/OS reference - raspberry-pi metal SSH bootstrap - Part 2 moves into raspberry-pi plugin
-plugins/providers/_common/commands/start:provider/OS reference - per-provider power-on (aws/gcp/vultr/truenas APIs, vagrant) - Part 2 splits into plugin commands
-plugins/providers/_common/commands/status:provider/OS reference - per-provider status decoding (aws/gcp/vultr/truenas/raspberry-pi/local-qemu) - Part 2 splits into plugin commands
-plugins/providers/_common/commands/stop:provider/OS reference - per-provider power-off (aws/gcp/vultr/truenas APIs, vagrant) - Part 2 splits into plugin commands
-
 # --- Bash shebangs (language policy: no new bash in scripts/) ---
 scripts/doctor:bash shebang - provider-specific CLI tool checks - port to Ruby
 scripts/env-require:bash shebang - env variable guard - port to Ruby

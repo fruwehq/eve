@@ -8,11 +8,11 @@ commands:
   plan: {exec: commands/up, args: [--plan]}
   up: {exec: commands/up}
   down: {exec: commands/down}
-  start: {exec: commands/up}
+  start: {exec: commands/start}
   stop: {exec: commands/stop}
-  status: {exec: ../_common/commands/status}
-  ip: {exec: ../_common/commands/ip}
-  ssh: {exec: ../_common/commands/ssh}
+  status: {exec: commands/status}
+  ip: {exec: commands/ip}
+  ssh: {exec: commands/ssh}
   validate: {exec: ../_common/commands/validate-os, args: [all, Vagrant box, vagrant_box]}
 actions:
   - id: status-details

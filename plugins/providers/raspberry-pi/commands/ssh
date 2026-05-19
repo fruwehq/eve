@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
-# Provider-agnostic SSH for cloud/Terraform providers.
-# Resolves the instance IP via the provider's own `ip` command,
-# constructs a workdir-scoped known_hosts file, and exec's ssh.
-# Engine-specific SSH (vagrant, metal) lives in the relevant provider
-# plugin instead of routing through this generic command.
+# Raspberry Pi metal SSH. Supplies HostKeyAlias when the resolved IP
+# differs from the configured hostname so host-key changes don't trip
+# StrictHostKeyChecking after the Pi's address moves.
 #
 # Usage:
 #   commands/ssh <profile>                         # interactive shell
@@ -29,13 +27,19 @@ cd "$(git rev-parse --show-toplevel)"
 . ./plugins/providers/_common/lib/ssh-helpers.sh
 
 eve_load_profile_env "$PROFILE"
+./scripts/env-require VM_USER_NAME
 
-if [ "$OS_FAMILY" != "windows" ] && [ -z "$SSH_USER" ]; then
-  ./scripts/env-require VM_USER_NAME
-  SSH_USER="$VM_USER_NAME"
+RESOLVED_PI_HOST=$(eve_resolved_value RASPBERRY_PI_HOST)
+RESOLVED_PI_IP=$(eve_resolved_value RASPBERRY_PI_IP)
+
+if [ -n "$RESOLVED_PI_IP" ]; then
+  IP="$RESOLVED_PI_IP"
+else
+  IP=$(./scripts/instance-ip "$PROFILE")
 fi
-IP=$(./scripts/instance-ip "$PROFILE")
 [ -n "$IP" ] || { echo "instance-ssh: could not resolve IP for $PROFILE" >&2; exit 1; }
+
+PI_SSH_USER="${SSH_USER:-$VM_USER_NAME}"
 
 WORKDIR="$(eve_instance_workdir "$PROFILE")"
 mkdir -p "$WORKDIR/ssh"
@@ -48,17 +52,20 @@ while IFS= read -r opt; do
   SSH_OPTS+=("$opt")
 done < <(eve_default_ssh_opts "$KNOWN_HOSTS_FILE")
 [ -n "$PRIV_KEY" ] && SSH_OPTS+=(-i "$PRIV_KEY" -o IdentitiesOnly=yes)
+if [ -n "$RESOLVED_PI_HOST" ] && [ "$IP" != "$RESOLVED_PI_HOST" ]; then
+  SSH_OPTS+=(-o "HostKeyAlias=$RESOLVED_PI_HOST")
+fi
 
 if [ "${1:-}" = "--scp" ]; then
   shift
   LOCAL_PATH="${1:?--scp requires <local> <remote>}"
   REMOTE_PATH="${2:?--scp requires <local> <remote>}"
-  exec scp "${SSH_OPTS[@]}" -r "$LOCAL_PATH" "$SSH_USER@$IP:$REMOTE_PATH"
+  exec scp "${SSH_OPTS[@]}" -r "$LOCAL_PATH" "$PI_SSH_USER@$IP:$REMOTE_PATH"
 fi
 
 if [ "${1:-}" = "--" ]; then
   shift
-  exec ssh "${SSH_OPTS[@]}" "$SSH_USER@$IP" "$@"
+  exec ssh "${SSH_OPTS[@]}" "$PI_SSH_USER@$IP" "$@"
 fi
 
-exec ssh "${SSH_OPTS[@]}" "$SSH_USER@$IP"
+exec ssh "${SSH_OPTS[@]}" "$PI_SSH_USER@$IP"
