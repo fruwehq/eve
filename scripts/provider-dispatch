@@ -12,7 +12,12 @@ require "sdk"
 def usage
   warn <<~USAGE
     Usage:
-      scripts/provider-dispatch --instance <name> --command <command> [--registry <path>] [--dry-run] [-- <args...>]
+      scripts/provider-dispatch --instance <name>   --command <command> [--registry <path>] [--dry-run] [-- <args...>]
+      scripts/provider-dispatch --provider <id>     --command <command> [--dry-run] [-- <args...>]
+
+    Provider-level mode (--provider) skips instance resolution and dispatches
+    the named command directly to the provider plugin. Use it for bootstrap
+    actions like `login` that must run before any instance can be created.
   USAGE
 end
 
@@ -76,6 +81,7 @@ def record_state(instance_name, operation, status, error = nil, desired_state = 
 end
 
 instance_name = nil
+provider_name = nil
 command = nil
 registry_path = ENV["EVE_INSTANCE_REGISTRY"] ? File.expand_path(ENV["EVE_INSTANCE_REGISTRY"], Dir.pwd) : nil
 dry_run = ENV["EVE_PROVIDER_DRY_RUN"] == "1"
@@ -87,6 +93,8 @@ until args.empty?
   case arg
   when "--instance"
     instance_name = args.shift
+  when "--provider"
+    provider_name = args.shift
   when "--command"
     command = args.shift
   when "--registry"
@@ -105,7 +113,12 @@ until args.empty?
   end
 end
 
-unless instance_name && command
+if instance_name && provider_name
+  warn "provider-dispatch: --instance and --provider are mutually exclusive"
+  exit 2
+end
+
+unless (instance_name || provider_name) && command
   usage
   exit 2
 end
@@ -156,6 +169,36 @@ def validate_provider_output(output)
 end
 
 begin
+  if provider_name
+    # Provider-level mode: no instance, no resolve. For bootstrap actions
+    # like `login` that must run before any instance can be created. Skip
+    # state recording and JSON output validation; these commands have no
+    # instance state to record and may produce free-form output.
+    plugin_doc = run_json(File.join(ROOT, "scripts/plugin-list"), "--kind", "provider", "--json")
+    plugin = plugin_doc.fetch("plugins").find { |entry| entry["id"] == provider_name }
+    raise "provider plugin not found: #{provider_name}" unless plugin
+
+    spec = plugin.fetch("commands")[command]
+    raise "provider plugin #{provider_name} has no command: #{command}" unless spec
+    cmd = command_vector(plugin, spec) + extra_args
+
+    env = ENV.to_h.merge("EVE_PROVIDER_PLUGIN" => provider_name)
+    env["EVE_PLUGIN_DRY_RUN"] = "1" if dry_run
+
+    if dry_run
+      payload = {
+        "kind" => "provider",
+        "provider" => provider_name,
+        "command" => command,
+        "dry_run" => true
+      }
+      puts JSON.generate(payload)
+      exit 0
+    end
+
+    exec(env, *cmd, chdir: ROOT)
+  end
+
   resolve_cmd = [File.join(ROOT, "scripts/instance-resolve"), "--instance", instance_name, "--emit", "json"]
   resolve_cmd += ["--registry", registry_path] if registry_path
   resolved = run_json(*resolve_cmd)

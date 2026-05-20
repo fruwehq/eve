@@ -6,7 +6,7 @@
 				instance.recover instance.state instance.status instance.validate instance.view integration.packages \
 				integration.plan integration.test ip lint logs package.action package.down package.install package.list \
 				package.reinstall package.select package.status package.uninstall package.unselect package.verify \
-				plugins.list plugins.sync plugins.validate provider.status providers.status provision \
+				plugins.list plugins.sync plugins.validate provider.action provider.status providers.status provision \
 				provision.clear-state provision.restart provision.wait reboot show-password ssh ssh.run \
 				ssh.wait start status stop test test.catalog test.core-boundary test.instances test.lifecycle test.lint test.plugins \
 				test.plugins-sync test.provision-runner test.python test.schemas test.shellcheck test.state-concurrency test.terraform test.tf-isolation test.tui \
@@ -320,6 +320,17 @@ plugins.sync: ## Download pinned external plugins from .eve/plugin-sources.yaml
 
 plugins.validate: ## Validate provider and package plugin manifests
 	@./scripts/plugin-list --validate
+
+provider.action: ## Run a provider-declared action (PROVIDER=<id> ACTION=<id>, or INSTANCE=<name> ACTION=<id>)
+	@if [ -z "$(ACTION)" ]; then echo "Usage: make provider.action PROVIDER=<id> ACTION=<id>"; echo "       make provider.action INSTANCE=<name> ACTION=<id>"; exit 2; fi; \
+	if [ -n "$(PROVIDER)" ] && [ -n "$(INSTANCE)" ]; then echo "Pass either PROVIDER or INSTANCE, not both"; exit 2; fi; \
+	if [ -n "$(PROVIDER)" ]; then \
+	  ./scripts/provider-dispatch --provider $(PROVIDER) --command $(ACTION); \
+	elif [ -n "$(INSTANCE)" ]; then \
+	  ./scripts/provider-dispatch --instance $(INSTANCE) --command $(ACTION); \
+	else \
+	  echo "Usage: make provider.action PROVIDER=<id> ACTION=<id>"; echo "       make provider.action INSTANCE=<name> ACTION=<id>"; exit 2; \
+	fi
 
 provider.status: ## Show provider plugin status for an instance
 	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make provider.status INSTANCE=<name>"; exit 2; fi; \
