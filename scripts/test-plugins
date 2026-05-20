@@ -457,7 +457,7 @@ fi
 codex_install="$(
   ./scripts/package-provision --profile local-qemu-ubuntu-dev-gui --package codex-cli --dry-run
 )"
-if printf '%s\n' "$codex_install" | jq -e '.package == "codex-cli" and .steps == ["base.sh", "timezone.sh", "../dev-toolchain/provision/ubuntu/dev-toolchain.sh", "provision/ubuntu/codex-cli.sh"] and .package_markers == ["dev-toolchain", "codex-cli"]' >/dev/null; then
+if printf '%s\n' "$codex_install" | jq -e '.package == "codex-cli" and .steps == ["base.sh", "timezone.sh", "provision/ubuntu/dev-toolchain.sh", "provision/ubuntu/codex-cli.sh"] and .package_markers == ["dev-toolchain", "codex-cli"]' >/dev/null; then
   printf '  [OK] package install includes dependency package markers\n'
 else
   printf '  [FAIL] package install includes dependency package markers\n' >&2

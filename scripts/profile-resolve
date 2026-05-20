@@ -198,13 +198,11 @@ else
     error("Init/provider mismatch: init \($i.id) expects provider \($i.provider), got machine provider \($m.provider)")
   else . end |
 
-  if (($bundle_packages | index("codex-cli")) != null and ($bundle_packages | index("dev-toolchain")) == null) then
-    error("Compatibility: codex-cli requires dev-toolchain in bundles")
-  else . end |
-
-  if (($bundle_packages | index("goose")) != null and ($bundle_packages | index("dev-toolchain")) == null) then
-    error("Compatibility: goose requires dev-toolchain in bundles")
-  else . end |
+  # Package dependency validation lives in scripts/instance-resolve via
+  # the depends_on manifest field. profile-resolve only enforces
+  # catalog/profile integrity here; dependency checks would duplicate
+  # logic and require keeping a hardcoded list of dep edges in this jq
+  # filter.
 
   if ($l[($m.provider // "")] == null) then
     error("Location \($l.name) has no mapping for provider \($m.provider)")

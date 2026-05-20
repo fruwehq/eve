@@ -3,6 +3,7 @@
 
 require "json"
 require "open3"
+require "set"
 require "yaml"
 
 ROOT = File.expand_path("..", __dir__)
@@ -227,15 +228,6 @@ def validate!(catalog, composition, machine, os, init, location, bundle_packages
   package_catalog = (catalog["packages"] || []).map { |pkg| pkg["id"] }
   unknown_package = bundle_packages.find { |pkg| !package_catalog.include?(pkg) }
   raise "Bundle references unknown package id: #{unknown_package}" if unknown_package
-
-  if bundle_packages.include?("codex-cli") && !bundle_packages.include?("dev-toolchain")
-    raise "Compatibility: codex-cli requires dev-toolchain in bundles"
-  end
-
-  if bundle_packages.include?("goose") && !bundle_packages.include?("dev-toolchain")
-    raise "Compatibility: goose requires dev-toolchain in bundles"
-  end
-
 end
 
 def engine_for(machine)
@@ -330,7 +322,45 @@ def validate_package_plugins!(bundle_packages, os)
     conflicts = plugin["conflicts_with"].is_a?(Array) ? plugin["conflicts_with"] : []
     conflict = conflicts.find { |candidate| bundle_packages.include?(candidate) }
     raise "Package conflict: #{package_id} conflicts with #{conflict}" if conflict
+
+    depends = plugin["depends_on"].is_a?(Array) ? plugin["depends_on"] : []
+    missing = depends.reject { |dep| bundle_packages.include?(dep) }
+    raise "Package #{package_id} depends_on #{missing.join(", ")} but none are selected" unless missing.empty?
   end
+end
+
+# Topologically sort package ids so that any package's depends_on entries
+# appear before it. Cycles raise. Within an equal-rank tier, packages stay
+# in their input (already-alphabetical) order so the result is deterministic.
+def order_packages_by_dependency(package_ids)
+  plugin_by_id = package_plugins.to_h { |entry| [entry.fetch("id"), entry] }
+  selected = package_ids.to_a
+  selected_set = selected.to_set
+  # Skip-edge: only consider depends that are themselves selected, so
+  # unselected optional dependencies do not break ordering.
+  deps = selected.to_h do |pkg|
+    plugin = plugin_by_id[pkg] || {}
+    edges = (plugin["depends_on"].is_a?(Array) ? plugin["depends_on"] : [])
+              .select { |dep| selected_set.include?(dep) }
+    [pkg, edges]
+  end
+
+  ordered = []
+  visiting = {}
+  visited = {}
+  visit = lambda do |pkg, stack|
+    return if visited[pkg]
+    raise "Package dependency cycle: #{(stack + [pkg]).join(" -> ")}" if visiting[pkg]
+
+    visiting[pkg] = true
+    deps.fetch(pkg, []).each { |dep| visit.call(dep, stack + [pkg]) }
+    visiting.delete(pkg)
+    visited[pkg] = true
+    ordered << pkg
+  end
+
+  selected.each { |pkg| visit.call(pkg, []) }
+  ordered
 end
 
 def emit_env(resolved)
@@ -457,6 +487,11 @@ begin
   engine = engine_for(machine)
   provider_plugin = validate_provider_plugin!(machine, engine)
   validate_package_plugins!(bundle_packages, os)
+  # Order packages so each package's depends_on entries come before it.
+  # validate_package_plugins! already verified deps are selected and
+  # plugins exist; topo sort runs after to produce the canonical
+  # install order downstream consumers (scripts/provision) rely on.
+  bundle_packages = order_packages_by_dependency(bundle_packages)
   resolved = {
     "instance" => instance,
     "access" => resolve_access!(provider_plugin, os.fetch("family"), location.fetch(provider, {})),

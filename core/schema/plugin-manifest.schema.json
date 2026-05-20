@@ -112,9 +112,10 @@
     },
 
     "depends_on": {
-      "description": "Package dependency specification (planned, not yet in any shipped manifest).",
-      "type": "object",
-      "additionalProperties": true
+      "description": "Package IDs this plugin requires. Used by the resolver to validate that dependencies are selected and to order install steps so dependencies run first.",
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true
     }
   },
 

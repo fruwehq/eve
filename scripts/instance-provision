@@ -135,6 +135,15 @@ if [ "$FORCE" = "1" ]; then
 fi
 
 provision_script="${EVE_PROVISION_SCRIPT:-./scripts/provision}"
+# Pass the SDK-validated, depends_on-ordered resolved JSON through so
+# profile-resolve's fast-path emits BUNDLE_PACKAGES in topological
+# order; without this the catalog path emits them alphabetically and
+# dependencies install after their dependents.
+resolve_cmd=(./scripts/instance-resolve --instance "$INSTANCE_NAME" --emit json)
+[ -n "$REGISTRY_PATH" ] && resolve_cmd+=(--registry "$REGISTRY_PATH")
+EVE_RESOLVED_JSON="$("${resolve_cmd[@]}")"
+export EVE_RESOLVED_JSON
+
 exit_code=0
 "$provision_script" "$INSTANCE_NAME" || exit_code=$?
 if [ "$exit_code" -ne 0 ]; then

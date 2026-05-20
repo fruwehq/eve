@@ -84,28 +84,75 @@ OS_PROVISION_DIR=$(cd "$OS_PROVISION_DIR" && pwd -P)
 # Read install metadata from the package plugin manifest so adding a new
 # package only requires touching its plugins/packages/<id>/eve-plugin.yaml.
 PLUGIN_DOC=$(./scripts/plugin-list --kind package --json)
-PLUGIN_INSTALL=$(printf '%s' "$PLUGIN_DOC" | jq --arg id "$PACKAGE" '.plugins[] | select(.id == $id) | .install.ubuntu // null')
-PLUGIN_ROOT=$(printf '%s' "$PLUGIN_DOC" | jq -r --arg id "$PACKAGE" '.plugins[] | select(.id == $id) | .path' | xargs dirname)
 
-if [ -z "$PLUGIN_INSTALL" ] || [ "$PLUGIN_INSTALL" = "null" ]; then
-  echo "package-provision: no ubuntu install step mapping for package: $PACKAGE" >&2
+# Topologically expand the install chain for $PACKAGE: any package the
+# manifest lists under depends_on contributes its install steps and
+# markers first, so a single `make package.install` for a dependent
+# package brings the dependency along automatically. Cycles raise.
+chain_json=$(
+  printf '%s' "$PLUGIN_DOC" | jq --arg root "$PACKAGE" '
+    .plugins as $plugins
+    | ($plugins | map({key: .id, value: .}) | from_entries) as $by_id
+    | def visit(id; stack):
+        if ($by_id[id] // null) == null then
+          error("package-provision: unknown package id: " + id)
+        elif (stack | index(id)) then
+          error("package-provision: dependency cycle: " + ((stack + [id]) | join(" -> ")))
+        else
+          ($by_id[id] as $plugin
+            | ($plugin.depends_on // []) as $deps
+            | reduce $deps[] as $dep ([]; . + visit($dep; stack + [id]))
+            | . + [$plugin]) end;
+    # Stable first-occurrence dedup; unique_by would reorder by id and
+    # destroy the topological ordering.
+    reduce visit($root; [])[] as $p ([];
+      if any(.[]; .id == $p.id) then . else . + [$p] end)
+  '
+)
+
+if [ -z "$chain_json" ]; then
+  echo "package-provision: no install chain for $PACKAGE" >&2
   exit 2
 fi
 
 steps=()
-while IFS= read -r step; do
-  steps+=("$step")
-done < <(printf '%s' "$PLUGIN_INSTALL" | jq -r '.steps // [] | .[]')
+step_roots=()
+package_markers=()
+while IFS= read -r plugin_id; do
+  plugin_install=$(printf '%s' "$chain_json" | jq --arg id "$plugin_id" '.[] | select(.id == $id) | .install.ubuntu // null')
+  if [ -z "$plugin_install" ] || [ "$plugin_install" = "null" ]; then
+    echo "package-provision: no ubuntu install step mapping for package: $plugin_id" >&2
+    exit 2
+  fi
+
+  plugin_root=$(printf '%s' "$chain_json" | jq -r --arg id "$plugin_id" '.[] | select(.id == $id) | .path' | xargs dirname)
+
+  while IFS= read -r step; do
+    [ -n "$step" ] || continue
+    skip=0
+    for existing in "${steps[@]:-}"; do
+      [ "$existing" = "$step" ] && skip=1 && break
+    done
+    if [ "$skip" -eq 0 ]; then
+      steps+=("$step")
+      step_roots+=("$plugin_root")
+    fi
+  done < <(printf '%s' "$plugin_install" | jq -r '.steps // [] | .[]')
+
+  while IFS= read -r marker; do
+    [ -n "$marker" ] || continue
+    skip=0
+    for existing in "${package_markers[@]:-}"; do
+      [ "$existing" = "$marker" ] && skip=1 && break
+    done
+    [ "$skip" -eq 0 ] && package_markers+=("$marker")
+  done < <(printf '%s' "$plugin_install" | jq -r --arg id "$plugin_id" '(.package_markers // [$id]) | .[]')
+done < <(printf '%s' "$chain_json" | jq -r '.[].id')
+
 if [ "${#steps[@]}" -eq 0 ]; then
   echo "package-provision: ubuntu install steps for $PACKAGE are empty in plugin manifest" >&2
   exit 2
 fi
-
-# package_markers default to [PACKAGE] when the manifest does not override it.
-package_markers=()
-while IFS= read -r marker; do
-  package_markers+=("$marker")
-done < <(printf '%s' "$PLUGIN_INSTALL" | jq -r --arg id "$PACKAGE" '(.package_markers // [$id]) | .[]')
 
 if [ "$DRY_RUN" -eq 1 ]; then
   jq -n \
@@ -157,8 +204,8 @@ copy_step() {
   cp "$source" "$target"
 }
 
-for step in "${steps[@]}"; do
-  copy_step "$step" "$PLUGIN_ROOT"
+for index in "${!steps[@]}"; do
+  copy_step "${steps[$index]}" "${step_roots[$index]}"
 done
 
 # The provision steps are package-gated. Include only the requested package and

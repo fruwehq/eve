@@ -105,13 +105,16 @@ case "$OS_FAMILY" in
       esac
       add_step "$step" "$(dirname "$plugin_path")"
     done < <(
+      # Iterate $selected in selection order so depends_on toposort from
+      # instance-resolve drives the step ordering. Iterating .plugins[]
+      # would re-sort alphabetically and put dependents before deps.
       printf '%s' "$PLUGIN_DOC" |
         jq -r --arg packages_csv "$BUNDLE_PACKAGES" '
           ($packages_csv | split(",") | map(select(length > 0))) as $selected |
-          .plugins[] |
-          . as $plugin |
-          select($selected | index($plugin.id)) |
-          (.install.ubuntu.steps // [])[] |
+          (.plugins | map({key: .id, value: .}) | from_entries) as $by_id |
+          $selected[] |
+          ($by_id[.] // empty) as $plugin |
+          ($plugin.install.ubuntu.steps // [])[] |
           [$plugin.path, .] | @tsv
         '
     )
@@ -297,13 +300,14 @@ EOF
       [ -n "$step" ] || continue
       copy_windows_step "$step" "$(dirname "$plugin_path")"
     done < <(
+      # Iterate $selected in selection order; see ubuntu branch for rationale.
       printf '%s' "$PLUGIN_DOC" |
         jq -r --arg packages_csv "$BUNDLE_PACKAGES" '
           ($packages_csv | split(",") | map(select(length > 0))) as $selected |
-          .plugins[] |
-          . as $plugin |
-          select($selected | index($plugin.id)) |
-          (.install.windows.steps // [])[] |
+          (.plugins | map({key: .id, value: .}) | from_entries) as $by_id |
+          $selected[] |
+          ($by_id[.] // empty) as $plugin |
+          ($plugin.install.windows.steps // [])[] |
           [$plugin.path, .] | @tsv
         '
     )
