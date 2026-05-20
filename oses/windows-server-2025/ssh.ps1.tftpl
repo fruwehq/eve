@@ -60,28 +60,17 @@ if (Test-Path $config) {
     }
 }
 
+# Install PowerShell 7 BEFORE starting sshd. All downstream provisioning runs
+# under PS7 (the windows-powershell7 init) and bootstrap.ps1's
+# Register-ScheduledTask call must not be interrupted by a mid-flight sshd
+# restart. Starting sshd later means the host's ssh.wait only returns once
+# the system is fully ready, so the bootstrap SSH session cannot be killed
+# by a concurrent DefaultShell swap. Hard-fails if winget never appears.
 $pwshCmd = Get-Command pwsh -ErrorAction SilentlyContinue
-$windowsPowerShell = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
-$defaultShell = if ($pwshCmd) { $pwshCmd.Source } else { $windowsPowerShell }
-Write-Host "Setting OpenSSH DefaultShell to $defaultShell"
-
-New-ItemProperty `
-  -Path "HKLM:\SOFTWARE\OpenSSH" `
-  -Name DefaultShell `
-  -Value $defaultShell `
-  -PropertyType String `
-  -Force | Out-Null
-
-Write-Host "Starting SSH service..."
-Set-Service -Name sshd -StartupType Automatic
-Start-Service sshd
-
-# Install PowerShell 7 if it is not already present. SSH must be available before
-# this best-effort step so provisioning can still diagnose slow or missing winget.
 if (-not $pwshCmd) {
     Write-Host "Waiting for winget to become available..."
     $wingetCmd = $null
-    $maxAttempts = 12
+    $maxAttempts = 30
 
     for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
         $wingetCmd = Get-Command winget -ErrorAction SilentlyContinue
@@ -95,30 +84,28 @@ if (-not $pwshCmd) {
     }
 
     if (-not $wingetCmd) {
-        Write-Warning "winget did not become available. Leaving SSH online with Windows PowerShell as the default shell."
-    } else {
-        Write-Host "Installing PowerShell 7..."
-        & $wingetCmd.Source install --id Microsoft.PowerShell --source winget --accept-package-agreements --accept-source-agreements
-        $pwshCmd = Get-Command pwsh -ErrorAction SilentlyContinue
-
-        if ($pwshCmd) {
-            $defaultShell = $pwshCmd.Source
-            Write-Host "PowerShell 7 installed at $defaultShell"
-            Write-Host "Updating OpenSSH DefaultShell to $defaultShell"
-            New-ItemProperty `
-              -Path "HKLM:\SOFTWARE\OpenSSH" `
-              -Name DefaultShell `
-              -Value $defaultShell `
-              -PropertyType String `
-              -Force | Out-Null
-            Restart-Service sshd
-        } else {
-            Write-Warning "PowerShell 7 was not found after winget install. Leaving SSH online with Windows PowerShell."
-        }
+        Write-Error "FATAL: winget did not become available. Cannot install PowerShell 7."
+        Stop-Transcript
+        exit 1
     }
+
+    Write-Host "Installing PowerShell 7..."
+    & $wingetCmd.Source install --id Microsoft.PowerShell --source winget --accept-package-agreements --accept-source-agreements
+    $pwshCmd = Get-Command pwsh -ErrorAction SilentlyContinue
+
+    if (-not $pwshCmd) {
+        Write-Error "FATAL: PowerShell 7 not found after install."
+        Stop-Transcript
+        exit 1
+    }
+
+    Write-Host "PowerShell 7 installed at $($pwshCmd.Source)"
 }
 
-# Enable CTRL-D in PowerShell profile (only if PS7 is available)
+$defaultShell = $pwshCmd.Source
+Write-Host "Setting OpenSSH DefaultShell to $defaultShell"
+
+# Enable CTRL-D in PowerShell profile (PS7 is always available here)
 if ($pwshCmd) {
     $profileDir = "C:\Users\Administrator\Documents\PowerShell"
     $profilePath = Join-Path $profileDir "Microsoft.PowerShell_profile.ps1"
@@ -136,6 +123,21 @@ if ($pwshCmd) {
         Add-Content -Path $profilePath -Value $ctrlDLine
     }
 }
+
+# Now that PS7 is installed and the profile is in place, set DefaultShell
+# and start sshd. The host's ssh.wait only returns after this point, so
+# the bootstrap.ps1 SSH session will already be running under PS7 with no
+# concurrent sshd restart looming.
+New-ItemProperty `
+  -Path "HKLM:\SOFTWARE\OpenSSH" `
+  -Name DefaultShell `
+  -Value $defaultShell `
+  -PropertyType String `
+  -Force | Out-Null
+
+Write-Host "Starting SSH service..."
+Set-Service -Name sshd -StartupType Automatic
+Start-Service sshd
 
 Write-Host "SSH setup complete."
 Write-Host "You can now connect using:"
