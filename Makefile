@@ -177,10 +177,11 @@ instance.create: ## Create a local instance registry entry (INSTANCE=<name> MACH
 	if [ -n "$(PLAN)" ]; then args="$$args --plan $(PLAN)"; fi; \
 	./scripts/instance-create $$args
 
-instance.delete: ## Delete a local instance registry entry (INSTANCE=<name>, PURGE=1 to remove generated files)
-	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make instance.delete INSTANCE=<name> [PURGE=1]"; exit 2; fi; \
+instance.delete: ## Delete a local instance registry entry (INSTANCE=<name>, PURGE=1 to remove generated files, FORCE=1 to bypass provider-state check)
+	@if [ -z "$(INSTANCE)" ]; then echo "Usage: make instance.delete INSTANCE=<name> [PURGE=1] [FORCE=1]"; exit 2; fi; \
 	args="--instance $(INSTANCE)"; \
 	if [ "$(PURGE)" = "1" ]; then args="$$args --purge"; fi; \
+	if [ "$(FORCE)" = "1" ]; then args="$$args --force"; fi; \
 	./scripts/instance-delete $$args
 
 instance.env: ## Print resolved concrete instance data as env lines

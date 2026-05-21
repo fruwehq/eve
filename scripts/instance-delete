@@ -38,6 +38,9 @@ def usage
     Options:
       --registry <path>
       --purge   Remove generated workdir and state files
+      --force   Delete the registry entry even when observed state suggests
+                provider resources may still exist. Use only after confirming
+                the cloud-side VM was already destroyed.
   USAGE
 end
 
@@ -46,6 +49,7 @@ registry_path = ENV["EVE_INSTANCE_REGISTRY"] && !ENV["EVE_INSTANCE_REGISTRY"].em
                 ? File.expand_path(ENV["EVE_INSTANCE_REGISTRY"], Dir.pwd) \
                 : DEFAULT_REGISTRY_PATH
 purge = false
+force = false
 
 args = ARGV.dup
 until args.empty?
@@ -56,6 +60,8 @@ until args.empty?
     registry_path = File.expand_path(args.shift, Dir.pwd)
   when "--purge"
     purge = true
+  when "--force"
+    force = true
   when "-h", "--help"
     usage
     exit 0
@@ -90,6 +96,42 @@ with_registry_lock(registry_path) do
   unless index
     warn "instance-delete: instance not found: #{instance_name}"
     exit 1
+  end
+
+  # Refuse to drop a registry entry whose provider resources may still
+  # exist. A user who runs `make instance.delete` without first running
+  # `make down` can otherwise leak billable cloud VMs whose only handle
+  # was the registry entry. Bypass with --force after manually
+  # confirming the cloud side is gone.
+  #
+  # `absent` = provider resources confirmed destroyed.
+  # `unknown` = no provider lifecycle has ever recorded state (fresh
+  #             instance, or only package ops have run); safe to drop
+  #             the entry.
+  # Anything else (running/stopped/error/changing/...) means a
+  # provider lifecycle has touched the cloud side and we cannot
+  # confirm it's gone.
+  unless force
+    state_path = Eve::SDK::Workdir.state_path(instance_name)
+    if File.exist?(state_path)
+      state = Eve::SDK::State.read(instance_name)
+      provider_state = state["provider_state"]
+      safe_states = %w[absent unknown]
+      if provider_state && !safe_states.include?(provider_state)
+        warn <<~MSG
+          instance-delete: refusing to delete #{instance_name}; provider_state=#{provider_state}.
+          Provider resources may still exist (cloud VM, terraform state, etc.).
+
+          Recommended:
+            make down INSTANCE=#{instance_name}     # destroys provider resources
+            make instance.delete INSTANCE=#{instance_name}#{purge ? " PURGE=1" : ""}
+
+          Or bypass this check if you have already destroyed the cloud side:
+            make instance.delete INSTANCE=#{instance_name}#{purge ? " PURGE=1" : ""} FORCE=1
+        MSG
+        exit 1
+      end
+    end
   end
 
   if purge

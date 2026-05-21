@@ -542,6 +542,44 @@ else
   FAIL=$((FAIL + 1))
 fi
 
+# instance-delete must refuse when the recorded provider_state indicates
+# the cloud side is still alive (e.g. running/stopped/error), so a user
+# who skipped `make down` cannot orphan a billable VM. --force bypasses.
+safety_workdir="$tmp_overlay_dir/safety-work"
+safety_state="$tmp_overlay_dir/safety-state"
+if ./scripts/instance-create \
+  --registry "$tmp_registry" \
+  --instance safety-dev \
+  --machine local-qemu-medium \
+  --os ubuntu-26.04-arm64 \
+  --location tokyo >/dev/null; then
+  EVE_STATE_DIR="$safety_state" ./scripts/instance-state \
+    --instance safety-dev \
+    --operation provider.up \
+    --status succeeded \
+    --provider-state running \
+    --desired-state running >/dev/null
+
+  if EVE_INSTANCE_REGISTRY="$tmp_registry" EVE_INSTANCE_WORKDIR="$safety_workdir" EVE_STATE_DIR="$safety_state" \
+       ./scripts/instance-delete --registry "$tmp_registry" --instance safety-dev >/dev/null 2>&1; then
+    printf '  [FAIL] instance-delete should refuse when provider_state=running\n' >&2
+    FAIL=$((FAIL + 1))
+  else
+    printf '  [OK] instance-delete refuses when provider_state=running\n'
+  fi
+
+  if EVE_INSTANCE_REGISTRY="$tmp_registry" EVE_INSTANCE_WORKDIR="$safety_workdir" EVE_STATE_DIR="$safety_state" \
+       ./scripts/instance-delete --registry "$tmp_registry" --instance safety-dev --force >/dev/null; then
+    printf '  [OK] instance-delete --force bypasses safety check\n'
+  else
+    printf '  [FAIL] instance-delete --force should bypass safety check\n' >&2
+    FAIL=$((FAIL + 1))
+  fi
+else
+  printf '  [FAIL] create safety test instance\n' >&2
+  FAIL=$((FAIL + 1))
+fi
+
 overlay="$tmp_overlay_dir/dev-a.catalog.local.yaml"
 if ./scripts/instance-profile-overlay --registry "$FIXTURE" --instance dev-a --output "$overlay"; then
   if EVE_CATALOG_LOCAL="$overlay" ./scripts/profile-resolve --profile dev-a --validate >/dev/null; then

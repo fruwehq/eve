@@ -526,17 +526,29 @@ class EveTui(App[None]):
         self.call_after_refresh(self.focus_instance_list_if_empty)
 
     async def load_provider_pane_data(self) -> None:
+        # Wrapped end-to-end so a failure here cannot strand
+        # load_initial_data before it reaches action_refresh() (which
+        # populates the instance list). Earlier regression: missing
+        # await on old_pane.remove() caused a duplicate-ID error from
+        # the subsequent mount, killing the whole load chain and
+        # leaving "Loading instances..." on screen.
         try:
-            pane_data = await asyncio.to_thread(provider_pane_data)
-            self._provider_pane_data = pane_data
+            self._provider_pane_data = await asyncio.to_thread(provider_pane_data)
         except Exception as exc:
             self.log_line(f"[warning]provider-pane-data failed:[/] {exc}")
             self._provider_pane_data = []
-        old_pane = self.query_one("#provider-pane", ProviderPane)
-        new_pane = ProviderPane(self._provider_pane_data, self._provider_reachability, id="provider-pane")
-        old_pane.remove()
-        await self.mount(new_pane, after=self.query_one("#providers", DataTable))
-        new_pane.on(ProviderPane.ActionRequested, self.handle_provider_pane_action)  # type: ignore[attr-defined]
+
+        try:
+            old_pane = self.query_one("#provider-pane", ProviderPane)
+            await old_pane.remove()
+            new_pane = ProviderPane(
+                self._provider_pane_data,
+                self._provider_reachability,
+                id="provider-pane",
+            )
+            await self.mount(new_pane, after=self.query_one("#providers", DataTable))
+        except Exception as exc:
+            self.log_line(f"[warning]provider-pane render failed:[/] {exc}")
 
     async def load_provider_health(self) -> None:
         table = self.query_one("#providers", DataTable)
@@ -1551,7 +1563,7 @@ class EveTui(App[None]):
     def action_queue_provider(self, command: str) -> None:
         self.start_task(self.action_provider(command))
 
-    def handle_provider_pane_action(self, event: ProviderPane.ActionRequested) -> None:
+    def on_provider_pane_action_requested(self, event: ProviderPane.ActionRequested) -> None:
         provider_id = event.provider_id
         action = event.action
         command = str(action.get("target", "")).replace("provider.", "", 1)
