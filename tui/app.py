@@ -42,7 +42,9 @@ from tui.commands import (
     make_args,
     package_make_args,
     provider_dispatch_args,
+    provider_dispatch_provider_args,
     provider_has_capability,
+    provider_pane_data,
     provider_status_table,
     upload_folders,
 )
@@ -67,6 +69,7 @@ from tui.widgets import (
     ChoiceScreen,
     ConfirmScreen,
     NewInstanceScreen,
+    ProviderPane,
     UploadScreen,
 )
 
@@ -381,6 +384,8 @@ class EveTui(App[None]):
         self._cached_aggregate: dict[str, int] = {"running": 0, "stopped": 0, "failed": 0, "other": 0}
         self.detail_tab = "overview"
         self.show_disabled = False
+        self._provider_pane_data: list[dict[str, Any]] = []
+        self._provider_reachability: dict[str, bool] = {}
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -396,6 +401,7 @@ class EveTui(App[None]):
                 with Vertical(id="left"):
                     yield Static("Providers", classes="section-title")
                     yield DataTable(id="providers")
+                    yield ProviderPane([], id="provider-pane")
                     yield Static("Instances", classes="section-title")
                     yield Input(placeholder="Filter instances", id="filter")
                     yield Button("Refresh", id="refresh", variant="primary")
@@ -515,8 +521,22 @@ class EveTui(App[None]):
 
     async def load_initial_data(self) -> None:
         await self.load_catalog_options()
+        await self.load_provider_pane_data()
         await self.action_refresh()
         self.call_after_refresh(self.focus_instance_list_if_empty)
+
+    async def load_provider_pane_data(self) -> None:
+        try:
+            pane_data = await asyncio.to_thread(provider_pane_data)
+            self._provider_pane_data = pane_data
+        except Exception as exc:
+            self.log_line(f"[warning]provider-pane-data failed:[/] {exc}")
+            self._provider_pane_data = []
+        old_pane = self.query_one("#provider-pane", ProviderPane)
+        new_pane = ProviderPane(self._provider_pane_data, self._provider_reachability, id="provider-pane")
+        old_pane.remove()
+        await self.mount(new_pane, after=self.query_one("#providers", DataTable))
+        new_pane.on(ProviderPane.ActionRequested, self.handle_provider_pane_action)  # type: ignore[attr-defined]
 
     async def load_provider_health(self) -> None:
         table = self.query_one("#providers", DataTable)
@@ -528,6 +548,7 @@ class EveTui(App[None]):
             return
         lines = text.splitlines()
         table.clear()
+        reachability: dict[str, bool] = {}
         for row in lines[2:]:
             parts = row.split(None, 3)
             if len(parts) < 3:
@@ -537,8 +558,12 @@ class EveTui(App[None]):
             configured_text = "[success]yes[/]" if configured == "yes" else "[dim]no[/]"
             reachable_text = "[success]yes[/]" if reachable == "yes" else "[warning]no[/]"
             table.add_row(name, configured_text, reachable_text, notes)
+            reachability[name] = reachable == "yes"
         if not table.row_count:
             table.add_row("[dim]none[/]", "-", "-", "-")
+        self._provider_reachability = reachability
+        pane = self.query_one("#provider-pane", ProviderPane)
+        pane.update_reachability(reachability)
 
     async def load_catalog_options(self) -> None:
         try:
@@ -1525,6 +1550,28 @@ class EveTui(App[None]):
 
     def action_queue_provider(self, command: str) -> None:
         self.start_task(self.action_provider(command))
+
+    def handle_provider_pane_action(self, event: ProviderPane.ActionRequested) -> None:
+        provider_id = event.provider_id
+        action = event.action
+        command = str(action.get("target", "")).replace("provider.", "", 1)
+        label = str(action.get("label") or command)
+        args = provider_dispatch_provider_args(provider_id, command)
+        if bool(action.get("interactive")):
+            self.start_task(self._run_provider_interactive(label, args))
+        else:
+            self.start_task(self._run_provider_stream(label, args))
+
+    async def _run_provider_interactive(self, label: str, args: list[str]) -> None:
+        self.log_line(f"[primary]Opening {label}. Exit the session to return to the TUI.[/]")
+        self.refresh()
+        await asyncio.sleep(0.05)
+        with self.suspend():
+            subprocess.call(args, cwd=ROOT, env=os.environ.copy())
+        self.log_line(f"[primary]{label} session closed.[/]")
+
+    async def _run_provider_stream(self, label: str, args: list[str]) -> None:
+        await self.stream_command(label, args)
 
     async def action_provider_manifest(self, index: int) -> None:
         if not self.current_instance or index >= len(self.current_provider_actions):

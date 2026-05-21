@@ -19,6 +19,8 @@ from textual.widgets import (
 )
 from textual.widgets.selection_list import Selection
 
+from textual.message import Message
+
 from tui.commands import (
     catalog_options,
     create_instance_args,
@@ -28,6 +30,117 @@ from tui.render import (
     command_label,
     package_summary_label,
 )
+
+
+class ProviderPane(Static):
+    DEFAULT_CSS = """
+    ProviderPane {
+        height: auto;
+        margin-bottom: 1;
+    }
+
+    .provider-row {
+        height: 3;
+        layout: horizontal;
+        margin-bottom: 0;
+    }
+
+    .provider-name {
+        width: 12;
+        height: 3;
+        content-align: left middle;
+        padding-left: 1;
+    }
+
+    .provider-reachability {
+        width: 4;
+        height: 3;
+        content-align: center middle;
+    }
+
+    .provider-actions-row {
+        height: 3;
+    }
+
+    .provider-actions-row Button {
+        height: 3;
+        min-width: 10;
+    }
+    """
+
+    class ActionRequested(Message):
+        def __init__(self, provider_id: str, action: dict[str, Any]) -> None:
+            super().__init__()
+            self.provider_id = provider_id
+            self.action = action
+
+    def __init__(
+        self,
+        providers: list[dict[str, Any]],
+        reachability: dict[str, bool] | None = None,
+        *,
+        id: str | None = None,
+    ) -> None:
+        super().__init__(id=id)
+        self.providers = providers
+        self.reachability = reachability or {}
+        self._provider_ids: list[str] = []
+
+    def compose(self) -> ComposeResult:
+        self._provider_ids = []
+        for provider in self.providers:
+            provider_id = str(provider.get("id", ""))
+            self._provider_ids.append(provider_id)
+            display_name = str(provider.get("display_name", provider_id))
+            actions = provider.get("actions", [])
+            reachable = self.reachability.get(provider_id)
+            if reachable is True:
+                reach_text = "[success]●[/]"
+            elif reachable is False:
+                reach_text = "[warning]○[/]"
+            else:
+                reach_text = "[dim]?[/]"
+            with Horizontal(classes="provider-row"):
+                yield Static(display_name, classes="provider-name")
+                yield Static(reach_text, classes="provider-reachability")
+                with Horizontal(classes="provider-actions-row"):
+                    for action in actions:
+                        label = str(action.get("label") or action.get("id", ""))
+                        button = Button(label, id=f"ppa-{provider_id}-{action.get('id', '')}")
+                        button.variant = "primary" if bool(action.get("interactive")) else "default"
+                        yield button
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        button_id = event.button.id or ""
+        if not button_id.startswith("ppa-"):
+            return
+        rest = button_id[4:]
+        for provider in self.providers:
+            provider_id = str(provider.get("id", ""))
+            prefix = f"{provider_id}-"
+            if rest.startswith(prefix):
+                action_id = rest[len(prefix):]
+                for action in provider.get("actions", []):
+                    if str(action.get("id")) == action_id:
+                        event.stop()
+                        self.post_message(self.ActionRequested(provider_id, action))
+                        return
+
+    def update_reachability(self, reachability: dict[str, bool]) -> None:
+        self.reachability = reachability
+        rows = self.query(".provider-row")
+        for idx, row in enumerate(rows):
+            if idx >= len(self._provider_ids):
+                break
+            provider_id = self._provider_ids[idx]
+            reach_widget = row.query_one(".provider-reachability", Static)
+            reachable = reachability.get(provider_id)
+            if reachable is True:
+                reach_widget.update("[success]●[/]")
+            elif reachable is False:
+                reach_widget.update("[warning]○[/]")
+            else:
+                reach_widget.update("[dim]?[/]")
 
 
 class ConfirmScreen(ModalScreen[bool]):

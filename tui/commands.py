@@ -121,6 +121,52 @@ def bundle_make_args(target: str, instance: str, bundle: str) -> list[str]:
     return ["make", "--no-print-directory", target, f"INSTANCE={instance}", f"BUNDLE={bundle}"]
 
 
+PROVIDER_DEBUG_ACTION_IDS = frozenset({"status-details", "plan", "init"})
+
+
+def provider_pane_data() -> list[dict[str, Any]]:
+    doc = load_json([str(ROOT / "scripts/plugin-list"), "--kind", "provider", "--json"])
+    result: list[dict[str, Any]] = []
+    for plugin in doc.get("plugins", []):
+        if not isinstance(plugin, dict):
+            continue
+        plugin_id = str(plugin.get("id", ""))
+        display_name = str(plugin.get("display_name") or plugin_id)
+        actions: list[dict[str, Any]] = []
+        for action in plugin.get("actions", []):
+            if not isinstance(action, dict):
+                continue
+            action_id = str(action.get("id", ""))
+            target = str(action.get("target") or "")
+            if not target.startswith("provider."):
+                continue
+            if action_id in PROVIDER_DEBUG_ACTION_IDS:
+                continue
+            label = str(action.get("label") or action_id)
+            actions.append({
+                "id": action_id,
+                "label": label,
+                "target": target,
+                "interactive": bool(action.get("interactive")),
+            })
+        result.append({
+            "id": plugin_id,
+            "display_name": display_name,
+            "actions": actions,
+        })
+    return sorted(result, key=lambda p: p["id"])
+
+
+def provider_dispatch_provider_args(provider_id: str, command: str) -> list[str]:
+    return [
+        str(ROOT / "scripts/provider-dispatch"),
+        "--provider",
+        provider_id,
+        "--command",
+        command,
+    ]
+
+
 def create_instance_args(
     name: str,
     platform_choice: dict[str, Any],
