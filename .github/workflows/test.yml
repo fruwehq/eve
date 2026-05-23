@@ -46,6 +46,9 @@ jobs:
           pipx install poetry
           poetry install --no-interaction --no-root
 
+      - name: Generate Terramate code
+        run: terramate generate
+
       - name: Run provision runner smoke
         run: make test.provision-runner
 
