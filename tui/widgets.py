@@ -30,6 +30,12 @@ from tui.render import (
     command_label,
     package_summary_label,
 )
+from tui.settings import (
+    CONFIG_SECTIONS,
+    field_label,
+    load_structured,
+    save_value,
+)
 
 
 class ProviderPane(Static):
@@ -1017,3 +1023,156 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
                 "provider_ip": provider_ip if provider_has_capability(str(platform_choice.get("provider") or ""), "needs-provider-ip") else "",
             }
         )
+
+
+class EditFieldScreen(ModalScreen[str | None]):
+    CSS = """
+    EditFieldScreen {
+        align: center middle;
+    }
+
+    #edit-dialog {
+        width: 64;
+        height: 11;
+        border: round $primary;
+        background: $surface;
+        padding: 1 2;
+    }
+
+    #edit-label {
+        margin-bottom: 1;
+    }
+
+    #edit-input {
+        margin-bottom: 1;
+    }
+
+    #edit-actions {
+        height: 3;
+        width: 36;
+        background: transparent;
+    }
+
+    #edit-actions Button {
+        width: 14;
+        min-width: 14;
+    }
+    """
+
+    def __init__(self, label: str, current: str) -> None:
+        super().__init__()
+        self.field_label_text = label
+        self.current_value = current
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="edit-dialog"):
+            yield Label(f"[b]{self.field_label_text}[/b]", id="edit-label")
+            yield Input(value=self.current_value, id="edit-input")
+            with Horizontal(id="edit-actions"):
+                yield Button("Cancel", id="cancel")
+                yield Button("Save", id="save", variant="primary")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "save":
+            self.dismiss(self.query_one("#edit-input", Input).value.strip())
+        else:
+            self.dismiss(None)
+
+    def on_key(self, event: Any) -> None:
+        if event.key == "escape":
+            self.dismiss(None)
+
+
+class SettingsScreen(ModalScreen[None]):
+    CSS = """
+    SettingsScreen {
+        align: center middle;
+    }
+
+    #settings-dialog {
+        width: 80;
+        height: 32;
+        border: round $primary;
+        background: $surface;
+        padding: 1 2;
+    }
+
+    #settings-title {
+        text-align: center;
+        margin-bottom: 1;
+    }
+
+    #settings-table {
+        height: 22;
+    }
+
+    #settings-actions {
+        height: 3;
+        width: 24;
+        background: transparent;
+    }
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._structured: dict[str, dict[str, dict[str, Any]]] = {}
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="settings-dialog"):
+            yield Label("[b]Settings[/b]", id="settings-title")
+            table: DataTable[Any] = DataTable(id="settings-table")
+            table.add_columns("Section", "Field", "Value")
+            yield table
+            with Horizontal(id="settings-actions"):
+                yield Button("Close", id="close")
+
+    def on_mount(self) -> None:
+        self._load_values()
+
+    def _load_values(self) -> None:
+        try:
+            self._structured = load_structured()
+        except Exception:
+            self._structured = {}
+
+        table = self.query_one("#settings-table", DataTable)
+        table.clear()
+
+        for section_info in CONFIG_SECTIONS:
+            section_id = section_info["id"]
+            section_label = section_info["label"]
+            fields = self._structured.get(section_id, {})
+            if not fields:
+                continue
+            for field_id in sorted(fields.keys()):
+                info = fields[field_id]
+                value = info.get("value") or ""
+                label = field_label(section_id, field_id)
+                table.add_row(section_label, label, value or "\u2014", key=f"{section_id}.{field_id}")
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        row_key = str(event.row_key.value)
+        section, field = row_key.split(".", 1)
+        label = field_label(section, field)
+        fields = self._structured.get(section, {})
+        info = fields.get(field, {})
+        current = info.get("value") or ""
+
+        def handle_edit(result: str | None) -> None:
+            if result is not None:
+                try:
+                    save_value(section, field, result)
+                    self._load_values()
+                    self.notify(f"Saved {label}")
+                except Exception as e:
+                    self.notify(f"Save failed: {e}", severity="error")
+
+        self.push_screen(EditFieldScreen(label, current), handle_edit)  # type: ignore[attr-defined]
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "close":
+            self.dismiss(None)
+
+    def on_key(self, event: Any) -> None:
+        if event.key == "escape":
+            self.dismiss(None)

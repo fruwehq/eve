@@ -1,0 +1,25 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "yaml"
+require "fileutils"
+
+section = ARGV[0]
+field = ARGV[1]
+value = ARGV[2]
+
+config_path = ENV.fetch("EVE_CONFIG_PATH", File.join(Dir.pwd, ".eve", "config.yaml"))
+
+existing = if File.exist?(config_path)
+             YAML.safe_load(File.read(config_path), aliases: false) || {}
+           else
+             {}
+           end
+
+keys = [section, field]
+cursor = existing
+keys[0...-1].each { |k| cursor = (cursor[k] ||= {}) }
+cursor[keys.last] = value.empty? ? nil : value
+
+FileUtils.mkdir_p(File.dirname(config_path))
+File.write(config_path, existing.to_yaml)

@@ -125,7 +125,7 @@ else
   exit 2
 end
 
-unless %w[--make --shell --json].include?(format)
+unless %w[--make --shell --json --structured].include?(format)
   usage
   exit 2
 end
@@ -142,6 +142,19 @@ begin
   when "--json"
     require "json"
     puts JSON.pretty_generate(env)
+  when "--structured"
+    require "json"
+    sections = {}
+    MAPPINGS.each do |path, name|
+      section = path[0]
+      field = path[1]
+      sections[section] ||= {}
+      sections[section][field] = {
+        "env" => name,
+        "value" => env[name]
+      }
+    end
+    puts JSON.pretty_generate(sections)
   when "--shell"
     env.sort.each { |key, value| puts "export #{key}=#{Shellwords.escape(value)}" }
   when "--make"

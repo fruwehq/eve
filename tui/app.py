@@ -70,6 +70,7 @@ from tui.widgets import (
     ConfirmScreen,
     NewInstanceScreen,
     ProviderPane,
+    SettingsScreen,
     UploadScreen,
 )
 
@@ -357,6 +358,7 @@ class EveTui(App[None]):
         Binding("y", "copy_log", "Copy Log", priority=True),
         Binding("ctrl+y", "copy_log", "Copy Log", priority=True),
         Binding("q", "quit", "Quit"),
+        Binding("s", "open_settings", "Settings"),
     ]
 
     def __init__(self) -> None:
@@ -1397,6 +1399,9 @@ class EveTui(App[None]):
 
     def action_queue_refresh(self) -> None:
         self.start_task(self.action_refresh())
+
+    def action_open_settings(self) -> None:
+        self.push_screen(SettingsScreen())
 
     async def action_cancel_command(self) -> None:
         proc = self.current_process
