@@ -30,10 +30,10 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Install shellcheck + jq
+      - name: Install shellcheck + jq + ripgrep
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y shellcheck jq
+          sudo apt-get install -y shellcheck jq ripgrep
 
       - name: Install Ruby
         uses: ruby/setup-ruby@v1

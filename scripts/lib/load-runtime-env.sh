@@ -8,7 +8,7 @@ eve_load_dotenv() {
 
   set -a
   # shellcheck disable=SC1090
-  . "$file"
+  . "./$file"
   set +a
 }
 
