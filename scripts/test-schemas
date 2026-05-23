@@ -4,6 +4,7 @@
 # Validate JSON Schemas (draft 2020-12) and their fixtures.
 # Usage: scripts/test-schemas
 
+require "bundler/setup"
 require "json"
 require "yaml"
 require "json_schemer"
@@ -211,6 +212,52 @@ if Dir.exist?(state_dir)
 else
   puts "  (no live state directory)"
 end
+
+# ---------- config defaults validation ----------
+puts "\n== schemas: config (defaults) =="
+
+config_schema_path = File.join(SCHEMA_DIR, "config.schema.json")
+config_schemer = schemer_from_file(config_schema_path)
+defaults_path = File.join(ROOT, "config", "defaults.yaml")
+
+if File.exist?(defaults_path)
+  defaults_data = load_yaml(defaults_path)
+  if validate_data(config_schemer, defaults_data)
+    pass "config/defaults.yaml validates against config.schema.json"
+  else
+    fail "config/defaults.yaml validates against config.schema.json"
+  end
+else
+  puts "  (config/defaults.yaml not found)"
+end
+
+# ---------- plugin-manifest: config_schema validation ----------
+puts "\n== schemas: plugin-manifest config_schema (shipped) =="
+
+shipped_config = 0
+Dir.glob(File.join(ROOT, "plugins", "*", "*", "eve-plugin.yaml")).sort.each do |path|
+  data = load_yaml(path)
+  next unless data.is_a?(Hash) && data.key?("config_schema")
+
+  rel = path.sub(%r{^#{ROOT}/plugins/}, "")
+  config_schema_data = data["config_schema"]
+  if config_schema_data.is_a?(Hash)
+    errors = manifest_schemer.validate(data).to_a
+    schema_errors = errors.select { |e| e["data_pointer"].include?("config_schema") }
+    if schema_errors.empty?
+      pass "config_schema: #{rel}"
+    else
+      fail "config_schema: #{rel}"
+      schema_errors.each do |err|
+        ptr = err["data_pointer"]
+        detail = err["error"] || err["type"].to_s
+        $stderr.puts "    #{ptr}: #{detail}"
+      end
+    end
+  end
+  shipped_config += 1
+end
+puts "  (#{shipped_config} shipped config_schema blocks checked)" if shipped_config.positive?
 
 # ---------- provision-manifest validation ----------
 puts "\n== schemas: provision-manifest (fixtures) =="
