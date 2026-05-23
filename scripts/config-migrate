@@ -6,6 +6,8 @@ require "time"
 require "yaml"
 
 ROOT = File.expand_path("..", __dir__)
+$LOAD_PATH.unshift(File.join(ROOT, "core"))
+require "sdk"
 ENV_PATH = ENV.fetch("EVE_ENV_LOCAL", File.join(ROOT, ".env.local"))
 CONFIG_PATH = ENV.fetch("EVE_CONFIG_PATH", File.join(ROOT, ".eve/config.yaml"))
 
@@ -49,6 +51,21 @@ MIGRATIONS = {
   "TRUENAS_VM_ZVOL_PREFIX" => %w[truenas vm_zvol_prefix],
   "VAGRANT_SHOW_CONSOLE" => %w[vagrant show_console],
   "VM_USER_NAME" => %w[global vm_user_name]
+}.freeze
+
+SECRET_MIGRATIONS = {
+  "AWS_ACCESS_KEY_ID" => %w[aws access_key_id],
+  "AWS_SECRET_ACCESS_KEY" => %w[aws secret_access_key],
+  "GOOGLE_APPLICATION_CREDENTIALS" => %w[gcp application_credentials],
+  "VULTR_API_KEY" => %w[vultr api_key],
+  "TRUENAS_API_KEY" => %w[truenas api_key],
+  "TRUENAS_SSH_PRIVATE_KEY_FILE" => %w[truenas ssh_private_key_file],
+  "RASPBERRY_PI_USER_PASSWORD" => %w[raspberry-pi user_password],
+  "EPHEMERAL_SUNSHINE_PASSWORD" => %w[sunshine password],
+  "EPHEMERAL_RUSTDESK_PASSWORD" => %w[rustdesk password],
+  "EPHEMERAL_WINDOWS_PASSWORD" => %w[windows password],
+  "HUMAN_USER_PASSWORD" => %w[human_user password],
+  "RDP_GATE_PASSWORD" => %w[rdp gate_password]
 }.freeze
 
 def usage
@@ -106,40 +123,65 @@ end
 lines = File.readlines(ENV_PATH, chomp: true)
 config = load_config(CONFIG_PATH)
 migrated = []
+secret_migrated = []
 
 lines.each_with_index do |line, index|
   parsed = parse_assignment(line)
   next unless parsed
 
   key, value = parsed
-  path = MIGRATIONS[key]
-  next unless path
   next if value.empty?
 
-  set_path(config, path, value)
-  migrated << [index, key]
+  path = MIGRATIONS[key]
+  if path
+    set_path(config, path, value)
+    migrated << [index, key, "config"]
+    next
+  end
+
+  secret_path = SECRET_MIGRATIONS[key]
+  if secret_path
+    secret_migrated << [index, key, secret_path[0], secret_path[1], value]
+    next
+  end
 end
 
-if migrated.empty?
-  puts "No non-secret .env.local values to migrate."
+if migrated.empty? && secret_migrated.empty?
+  puts "No .env.local values to migrate."
   exit 0
 end
 
-puts "Will migrate #{migrated.length} values to #{CONFIG_PATH}:"
-migrated.each { |_index, key| puts "  - #{key}" }
+unless migrated.empty?
+  puts "Will migrate #{migrated.length} config values to #{CONFIG_PATH}:"
+  migrated.each { |_i, key, _type| puts "  - #{key}" }
+end
+
+unless secret_migrated.empty?
+  puts "Will migrate #{secret_migrated.length} secret values to .eve/secrets/:"
+  secret_migrated.each { |_i, key, provider, _sk, _v| puts "  - #{key} → #{provider}" }
+end
 
 exit 0 if mode == "--dry-run"
 
-FileUtils.mkdir_p(File.dirname(CONFIG_PATH))
-File.write(CONFIG_PATH, config.to_yaml)
+unless migrated.empty?
+  FileUtils.mkdir_p(File.dirname(CONFIG_PATH))
+  File.write(CONFIG_PATH, config.to_yaml)
+end
+
+secret_migrated.group_by { |_i, _key, provider, _sk, _v| provider }.each do |provider, entries|
+  partial = entries.each_with_object({}) { |e, h| h[e[3]] = e[4] }
+  Eve::SDK::Secrets.update(provider, partial)
+end
 
 backup_path = "#{ENV_PATH}.bak.#{Time.now.utc.strftime("%Y%m%d%H%M%S")}"
 FileUtils.cp(ENV_PATH, backup_path)
 
-migrated.each do |index, _key|
+(migrated + secret_migrated).each do |entry|
+  index = entry[0]
   next if lines[index].lstrip.start_with?("#")
 
-  lines[index] = "# migrated to .eve/config.yaml: #{lines[index]}"
+  dest = entry[2] == "config" ? ".eve/config.yaml" : "secrets"
+  lines[index] = "# migrated to #{dest}: #{lines[index]}"
 end
 
 File.write(ENV_PATH, lines.join("\n") + "\n")
