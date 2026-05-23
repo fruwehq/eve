@@ -33,7 +33,7 @@ jobs:
       - name: Install shellcheck + jq + ruby
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y shellcheck jq ruby
+          sudo apt-get install -y shellcheck jq ruby ruby-bundler
 
       - name: Install Python dependencies
         run: |
