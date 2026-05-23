@@ -1,6 +1,6 @@
 # Makefile
 .DEFAULT_GOAL := default
-.PHONY: bundle.select bundle.unselect catalog.list clean config.migrate default docker.build \
+.PHONY: bundle.select bundle.unselect catalog.list clean default docker.build \
 				docker.shell docker.test doctor down env eve generate help info init.all install-cli instance.create \
 				instance.delete instance.env instance.info instance.list instance.observe instance.paths instance.provision \
 				instance.recover instance.state instance.status instance.validate instance.view integration.packages \
@@ -106,9 +106,6 @@ clean: ## Remove terramate-generated terraform files and cache
 	rm -rf .terraform-cache-dir/data/*
 	rm -rf .terraform-cache-dir/plugins/*
 	rm -rf .terraform-cache-dir/state/*
-
-config.migrate: ## Move non-secret .env.local values to .eve/config.yaml (YES=1 to apply)
-	@if [ "$(YES)" = "1" ]; then ./scripts/config-migrate --apply; else ./scripts/config-migrate --dry-run; fi
 
 default: help  ## Show help
 

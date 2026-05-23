@@ -42,6 +42,7 @@
       "additionalProperties": false,
       "properties": {
         "my_ip":               { "$ref": "#/$defs/nullable_cidr" },
+        "provision_user":      { "$ref": "#/$defs/nullable_string" },
         "ssh_public_key_file": { "$ref": "#/$defs/path" },
         "timezone":            { "$ref": "#/$defs/nullable_string" },
         "vm_user_name":        { "$ref": "#/$defs/nullable_string" }

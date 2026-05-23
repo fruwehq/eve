@@ -12,7 +12,7 @@
 # --- Provider/OS coupling ---
 scripts/catalog-options:provider/OS reference - provider-specific OS image metadata gating - Part 2 moves key checks into provider plugins
 scripts/config-env:provider/OS reference - provider-to-config-key mapping - Part 2 moves into provider plugin config
-scripts/config-migrate:provider/OS reference - provider-to-config-key mapping - Part 2 moves into provider plugin config
+scripts/config-env:provider/OS reference - provider-to-config-key mapping - config_schema will replace
 scripts/doctor:provider/OS reference - provider-specific CLI tool checks - Part 2 moves into provider plugins
 scripts/instance-create:provider/OS reference - provider-specific CLI usage hints - Part 2 derives from provider manifests
 scripts/instance-password:provider/OS reference - vultr-specific password retrieval - Part 2 moves into vultr plugin
