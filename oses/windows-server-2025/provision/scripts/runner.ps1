@@ -200,19 +200,15 @@ try {
     $stepExitCode = 0
     try {
       $LASTEXITCODE = 0
-      $savedEAP = $ErrorActionPreference
-      $ErrorActionPreference = 'Stop'
       & $Step.FullName 2>&1 | ForEach-Object { Log $_ }
       $nativeExitCode = $LASTEXITCODE
       $stepSucceeded = $?
-      $ErrorActionPreference = $savedEAP
       if ($nativeExitCode -ne 0) {
         $stepExitCode = $nativeExitCode
       } elseif (-not $stepSucceeded) {
         $stepExitCode = 1
       }
     } catch {
-      $ErrorActionPreference = $savedEAP
       $stepError = $_
       $stepExitCode = if ($LASTEXITCODE -ne 0) { $LASTEXITCODE } else { 1 }
     }
