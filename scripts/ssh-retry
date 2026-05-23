@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Retry short SSH/SCP operations that can fail during early boot or transient
+# network churn. Intended for idempotent preparation/upload commands.
+
+set -euo pipefail
+
+LABEL="${1:?Usage: scripts/ssh-retry <label> <command> [args...]}"
+shift
+[ "$#" -gt 0 ] || { echo "ssh-retry: missing command for $LABEL" >&2; exit 2; }
+
+ATTEMPTS="${EVE_SSH_RETRY_ATTEMPTS:-6}"
+DELAY="${EVE_SSH_RETRY_DELAY:-5}"
+
+attempt=1
+while [ "$attempt" -le "$ATTEMPTS" ]; do
+  "$@" && exit 0
+  status=$?
+  if [ "$attempt" -eq "$ATTEMPTS" ]; then
+    echo "[ssh-retry] $LABEL failed after $ATTEMPTS attempts (exit $status)" >&2
+    exit "$status"
+  fi
+  echo "[ssh-retry] $LABEL failed with exit $status; retrying in ${DELAY}s ($attempt/$ATTEMPTS)" >&2
+  sleep "$DELAY"
+  attempt=$((attempt + 1))
+done

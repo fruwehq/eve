@@ -162,14 +162,20 @@ packages = catalog["packages"].map do |package|
   plugin = package_plugin_by_id[package["id"]] || {}
   supports = plugin["supports"].is_a?(Hash) ? plugin["supports"] : {}
   actions = plugin["actions"].is_a?(Array) ? plugin["actions"] : []
+  compatibility = plugin["compatibility"].is_a?(Array) ? plugin["compatibility"] : []
   install = plugin["install"].is_a?(Hash) ? plugin["install"] : nil
+  installable_os_families = install ? install.keys : []
 
   {
     "id" => package["id"],
     "display_name" => plugin["display_name"] || package["id"],
     "supports" => supports,
+    "conflicts_with" => plugin["conflicts_with"].is_a?(Array) ? plugin["conflicts_with"] : [],
     "installable" => !install.nil?,
-    "actions" => actions
+    "installable_os_families" => installable_os_families,
+    "actions" => actions,
+    "compatibility_enforced" => plugin["compatibility_enforced"] == true,
+    "compatibility" => compatibility
   }
 end
 

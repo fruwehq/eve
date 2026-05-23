@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# Run Eve CLI tasks inside the optional containerized toolchain.
+
+set -euo pipefail
+
+ROOT="$(git rev-parse --show-toplevel)"
+IMAGE="${EVE_TOOLCHAIN_IMAGE:-eve-toolchain:local}"
+
+if ! command -v docker >/dev/null 2>&1; then
+  echo "eve-docker: docker is not installed." >&2
+  exit 2
+fi
+
+if ! docker info >/dev/null 2>&1; then
+  echo "eve-docker: docker daemon is not reachable." >&2
+  exit 2
+fi
+
+if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
+  echo "eve-docker: image '$IMAGE' does not exist." >&2
+  echo "eve-docker: run: make docker.build" >&2
+  exit 2
+fi
+
+docker_args=(
+  run
+  --rm
+  -it
+  --workdir /workspace
+  --volume "$ROOT:/workspace"
+)
+
+if [ -f "$ROOT/.env.local" ]; then
+  docker_args+=(--env-file "$ROOT/.env.local")
+fi
+
+if [ -d "$HOME/.ssh" ]; then
+  docker_args+=(--volume "$HOME/.ssh:/home/eve/.ssh:ro")
+fi
+
+if [ -S /run/host-services/ssh-auth.sock ]; then
+  docker_args+=(--volume /run/host-services/ssh-auth.sock:/run/host-services/ssh-auth.sock)
+  docker_args+=(--env SSH_AUTH_SOCK=/run/host-services/ssh-auth.sock)
+elif [ -n "${SSH_AUTH_SOCK:-}" ] && [ -S "$SSH_AUTH_SOCK" ]; then
+  docker_args+=(--volume "$SSH_AUTH_SOCK:/ssh-agent")
+  docker_args+=(--env SSH_AUTH_SOCK=/ssh-agent)
+fi
+
+exec docker "${docker_args[@]}" "$IMAGE" "$@"

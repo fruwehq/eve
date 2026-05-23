@@ -1,0 +1,10 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+instance = ENV["EVE_INSTANCE_NAME"] || ARGV.first
+unless instance && !instance.empty?
+  warn "Usage: commands/init <instance>"
+  exit 2
+end
+
+warn "[init] instance=#{instance} uses local-qemu; no Terraform backend to initialize."

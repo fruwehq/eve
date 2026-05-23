@@ -17,8 +17,8 @@ def usage
     Dry-run mode prints the commands a human or LLM should run/review.
     Live mode creates/starts, waits for SSH, provisions, checks selected packages,
     and writes a JSON report. Live mode requires YES=1 and runs provider down
-    after each instance unless --no-cleanup or EGAME_INTEGRATION_CLEANUP=0 is set.
-    Set EGAME_INTEGRATION_DELETE_INSTANCES=1 for temporary smoke entries.
+    after each instance unless --no-cleanup or EVE_INTEGRATION_CLEANUP=0 is set.
+    Set EVE_INTEGRATION_DELETE_INSTANCES=1 for temporary smoke entries.
     --all-packages additionally installs and status-checks every package plugin
     supported by the selected instance OS/architecture.
   USAGE
@@ -80,13 +80,13 @@ def run_json(env, *cmd)
 end
 
 instances = []
-registry_path = ENV["EGAME_INSTANCE_REGISTRY"]
+registry_path = ENV["EVE_INSTANCE_REGISTRY"]
 live = false
 json = false
 report_path = nil
-cleanup = ENV.fetch("EGAME_INTEGRATION_CLEANUP", "1") != "0"
-delete_instances = ENV["EGAME_INTEGRATION_DELETE_INSTANCES"] == "1"
-all_packages = ENV["EGAME_INTEGRATION_ALL_PACKAGES"] == "1"
+cleanup = ENV.fetch("EVE_INTEGRATION_CLEANUP", "1") != "0"
+delete_instances = ENV["EVE_INTEGRATION_DELETE_INSTANCES"] == "1"
+all_packages = ENV["EVE_INTEGRATION_ALL_PACKAGES"] == "1"
 
 args = ARGV.dup
 until args.empty?
@@ -116,8 +116,8 @@ until args.empty?
   end
 end
 
-if instances.empty? && ENV["EGAME_INTEGRATION_INSTANCES"]
-  instances = ENV.fetch("EGAME_INTEGRATION_INSTANCES").split(",").map(&:strip).reject(&:empty?)
+if instances.empty? && ENV["EVE_INTEGRATION_INSTANCES"]
+  instances = ENV.fetch("EVE_INTEGRATION_INSTANCES").split(",").map(&:strip).reject(&:empty?)
 end
 
 if instances.empty?
@@ -131,7 +131,7 @@ if live && ENV["YES"] != "1"
 end
 
 env = ENV.to_h
-env["EGAME_INSTANCE_REGISTRY"] = registry_path if registry_path
+env["EVE_INSTANCE_REGISTRY"] = registry_path if registry_path
 
 plans = instances.map do |instance|
   resolved_cmd = [File.join(ROOT, "scripts/instance-resolve"), "--instance", instance, "--emit", "json"]

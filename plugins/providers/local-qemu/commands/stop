@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Stop a running vagrant profile (suspend).
+# Usage: scripts/vagrant-stop <instance>
+
+if [ -n "${EVE_INSTANCE_NAME:-}" ]; then
+  PROFILE="$EVE_INSTANCE_NAME"
+else
+  PROFILE="${1:?Usage: commands/stop <instance>}"
+fi
+cd "$(git rev-parse --show-toplevel)"
+# shellcheck source=scripts/lib/instance-workdir.sh
+. ./scripts/lib/instance-workdir.sh
+
+RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
+ENGINE=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^ENGINE=/{print $2}')
+
+if [ "$ENGINE" != "vagrant" ]; then
+  echo "[vagrant-stop] not supported for engine=$ENGINE" >&2
+  exit 1
+fi
+
+echo "[vagrant-stop] profile=$PROFILE"
+
+WORKDIR="$(eve_instance_workdir "$PROFILE")"
+if [ -f "$WORKDIR/Vagrantfile" ]; then
+  cd "$WORKDIR"
+  vagrant halt
+else
+  echo "No generated Vagrantfile for instance $PROFILE. Nothing to stop." >&2
+  exit 1
+fi

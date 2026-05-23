@@ -7,15 +7,10 @@ require "time"
 require "yaml"
 
 ROOT = File.expand_path("..", __dir__)
-DEFAULT_REGISTRY_PATH = File.join(ROOT, ".egame/instances.yaml")
+DEFAULT_REGISTRY_PATH = File.join(ROOT, ".eve/instances.yaml")
 
-def state_root
-  ENV["EGAME_STATE_DIR"] || File.join(ROOT, ".egame/state")
-end
-
-def state_path(instance)
-  File.join(state_root, "instances", "#{instance}.json")
-end
+$LOAD_PATH.unshift(File.join(ROOT, "core"))
+require "sdk"
 
 def with_registry_lock(registry_path)
   FileUtils.mkdir_p(File.dirname(registry_path))
@@ -26,7 +21,7 @@ def with_registry_lock(registry_path)
 end
 
 def write_registry!(registry_path, registry)
-  Tempfile.create(["egame-registry-", ".yaml"], File.dirname(registry_path)) do |tmp|
+  Tempfile.create(["eve-registry-", ".yaml"], File.dirname(registry_path)) do |tmp|
     tmp.write(registry.to_yaml)
     tmp.close
     FileUtils.mv(tmp.path, registry_path)
@@ -44,6 +39,8 @@ def usage
       --os <os-id>
       --init <init-id>     Override automatic init selection when more than one init matches.
       --location <location>
+      --provider-host <host>
+      --provider-ip <ip>
       --bundles <bundle-a,bundle-b>
       --packages <package-a,package-b>
       --disk-gb <gb>
@@ -57,11 +54,12 @@ def usage
 end
 
 name = nil
-registry_path = ENV["EGAME_INSTANCE_REGISTRY"] && !ENV["EGAME_INSTANCE_REGISTRY"].empty? \
-                ? File.expand_path(ENV["EGAME_INSTANCE_REGISTRY"], Dir.pwd) \
+registry_path = ENV["EVE_INSTANCE_REGISTRY"] && !ENV["EVE_INSTANCE_REGISTRY"].empty? \
+                ? File.expand_path(ENV["EVE_INSTANCE_REGISTRY"], Dir.pwd) \
                 : DEFAULT_REGISTRY_PATH
 fields = {}
 overrides = {}
+provider_config = {}
 
 args = ARGV.dup
 until args.empty?
@@ -78,6 +76,10 @@ until args.empty?
     fields["init"] = args.shift
   when "--location"
     fields["location"] = args.shift
+  when "--provider-host"
+    provider_config["host"] = args.shift
+  when "--provider-ip"
+    provider_config["ip"] = args.shift
   when "--bundles"
     fields["bundles"] = args.shift.to_s.split(",").map(&:strip).reject(&:empty?)
   when "--packages"
@@ -142,10 +144,11 @@ with_registry_lock(registry_path) do
     "updated_at" => now
   }.merge(fields)
   entry["overrides"] = overrides unless overrides.empty?
+  entry["provider_config"] = provider_config unless provider_config.empty?
 
   registry["instances"] << entry
 
-  Tempfile.create(["egame-instance-", ".yaml"]) do |tmp|
+  Tempfile.create(["eve-instance-", ".yaml"]) do |tmp|
     tmp.write(registry.to_yaml)
     tmp.close
 
@@ -165,7 +168,7 @@ with_registry_lock(registry_path) do
   write_registry!(registry_path, registry)
 end
 
-FileUtils.rm_f(state_path(name))
+Eve::SDK::State.delete!(name)
 
 puts "Created instance: #{name}"
 puts "Registry: #{registry_path}"

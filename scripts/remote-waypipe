@@ -2,11 +2,11 @@
 # Run a remote Wayland app through waypipe.
 #
 # Usage:
-#   scripts/remote-waypipe <profile-or-instance> [app [args...]]
+#   scripts/remote-waypipe <instance> [app [args...]]
 
 set -euo pipefail
 
-PROFILE="${1:?Usage: scripts/remote-waypipe <profile-or-instance> [app [args...]]}"
+PROFILE="${1:?Usage: scripts/remote-waypipe <instance> [app [args...]]}"
 shift || true
 APP=("$@")
 if [ "${#APP[@]}" -eq 0 ]; then
@@ -46,15 +46,16 @@ fi
 
 if [ "$ENGINE" = "vagrant" ]; then
   ./scripts/vagrant-up --plan "$PROFILE" >/dev/null
-  tmp_config="$(mktemp "${TMPDIR:-/tmp}/egame-waypipe-ssh.XXXXXX")"
+  tmp_config="$(mktemp "${TMPDIR:-/tmp}/eve-waypipe-ssh.XXXXXX")"
   trap 'rm -f "$tmp_config"' EXIT
-  (cd "$(egame_instance_workdir "$PROFILE")" && vagrant ssh-config >"$tmp_config")
+  (cd "$(eve_instance_workdir "$PROFILE")" && vagrant ssh-config >"$tmp_config")
   exec waypipe ssh -o StreamLocalBindUnlink=yes -F "$tmp_config" default "${APP[@]}"
 fi
 
 SSH_USER=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^SSH_USER=/{print $2}')
-if [ "$ENGINE" = "metal" ] && [ "$PROVIDER" = "raspberry-pi" ] && [ -n "${RASPBERRY_PI_IP:-}" ]; then
-  IP="$RASPBERRY_PI_IP"
+RESOLVED_RASPBERRY_PI_IP=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^RASPBERRY_PI_IP=/{print substr($0, index($0, "=") + 1)}')
+if [ "$ENGINE" = "metal" ] && [ "$PROVIDER" = "raspberry-pi" ] && [ -n "$RESOLVED_RASPBERRY_PI_IP" ]; then
+  IP="$RESOLVED_RASPBERRY_PI_IP"
 else
   IP=$(./scripts/instance-ip "$PROFILE")
 fi

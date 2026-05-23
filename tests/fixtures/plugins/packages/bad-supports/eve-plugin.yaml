@@ -1,0 +1,12 @@
+api_version: eve.plugin/v1
+kind: package
+id: bad-supports
+display_name: Bad Supports Package
+commands:
+  install: {exec: scripts/package-plugin, args: [bad-supports, install]}
+  status: {exec: scripts/package-plugin, args: [bad-supports, status]}
+  down: {exec: scripts/package-plugin, args: [bad-supports, down]}
+supports:
+  os_families: ubuntu
+down: {destructive: false}
+env: []

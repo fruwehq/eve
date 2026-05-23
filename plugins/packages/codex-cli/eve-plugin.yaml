@@ -1,0 +1,15 @@
+api_version: eve.plugin/v1
+kind: package
+id: codex-cli
+display_name: Codex CLI
+commands:
+  install: {exec: scripts/package-plugin, args: [codex-cli, install]}
+  status: {exec: scripts/package-plugin, args: [codex-cli, status]}
+  down: {exec: scripts/package-plugin, args: [codex-cli, down]}
+supports: {os_families: [ubuntu]}
+depends_on: [dev-toolchain]
+down: {destructive: true}
+env: []
+install:
+  ubuntu:
+    steps: [base.sh, timezone.sh, provision/ubuntu/codex-cli.sh]

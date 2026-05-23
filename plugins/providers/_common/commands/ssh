@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# Provider-agnostic SSH for cloud/Terraform providers.
+# Resolves the instance IP via the provider's own `ip` command,
+# constructs a workdir-scoped known_hosts file, and exec's ssh.
+# Engine-specific SSH (vagrant, metal) lives in the relevant provider
+# plugin instead of routing through this generic command.
+#
+# Usage:
+#   commands/ssh <instance>                         # interactive shell
+#   commands/ssh <instance> -- <cmd> [args...]      # remote command
+#   commands/ssh <instance> --scp <local> <remote>  # scp helper
+
+set -euo pipefail
+
+if [ -n "${EVE_INSTANCE_NAME:-}" ]; then
+  PROFILE="$EVE_INSTANCE_NAME"
+else
+  PROFILE="${1:?Usage: commands/ssh <instance> [-- <cmd>] [--scp <local> <remote>]}"
+  shift || true
+fi
+cd "$(git rev-parse --show-toplevel)"
+# shellcheck source=scripts/lib/load-runtime-env.sh
+. ./scripts/lib/load-runtime-env.sh
+# shellcheck source=scripts/lib/instance-workdir.sh
+. ./scripts/lib/instance-workdir.sh
+# shellcheck source=plugins/providers/_common/lib/profile-env.sh
+. ./plugins/providers/_common/lib/profile-env.sh
+# shellcheck source=plugins/providers/_common/lib/ssh-helpers.sh
+. ./plugins/providers/_common/lib/ssh-helpers.sh
+
+eve_load_profile_env "$PROFILE"
+
+if [ "$OS_FAMILY" != "windows" ] && [ -z "$SSH_USER" ]; then
+  ./scripts/env-require VM_USER_NAME
+  SSH_USER="$VM_USER_NAME"
+fi
+IP=$(./scripts/instance-ip "$PROFILE")
+[ -n "$IP" ] || { echo "instance-ssh: could not resolve IP for $PROFILE" >&2; exit 1; }
+
+WORKDIR="$(eve_instance_workdir "$PROFILE")"
+mkdir -p "$WORKDIR/ssh"
+KNOWN_HOSTS_FILE="$WORKDIR/ssh/known_hosts"
+
+PRIV_KEY="$(eve_resolve_priv_key)"
+
+SSH_OPTS=()
+while IFS= read -r opt; do
+  SSH_OPTS+=("$opt")
+done < <(eve_default_ssh_opts "$KNOWN_HOSTS_FILE")
+[ -n "$PRIV_KEY" ] && SSH_OPTS+=(-i "$PRIV_KEY" -o IdentitiesOnly=yes)
+
+if [ "${1:-}" = "--scp" ]; then
+  shift
+  LOCAL_PATH="${1:?--scp requires <local> <remote>}"
+  REMOTE_PATH="${2:?--scp requires <local> <remote>}"
+  exec scp "${SSH_OPTS[@]}" -r "$LOCAL_PATH" "$SSH_USER@$IP:$REMOTE_PATH"
+fi
+
+if [ "${1:-}" = "--" ]; then
+  shift
+  exec ssh "${SSH_OPTS[@]}" "$SSH_USER@$IP" "$@"
+fi
+
+exec ssh "${SSH_OPTS[@]}" "$SSH_USER@$IP"

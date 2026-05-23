@@ -23,7 +23,7 @@ check_aws() {
       reachable=yes
       notes="aws sts ok"
     else
-      notes="configured, but aws sts failed - Please, run: make aws.login"
+      notes="configured, but aws sts failed - use the AWS Login provider action"
     fi
   fi
 }

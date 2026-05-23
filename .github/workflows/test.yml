@@ -30,15 +30,27 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Install shellcheck + jq + ruby
+      - name: Install shellcheck + jq + ripgrep
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y shellcheck jq ruby
+          sudo apt-get install -y shellcheck jq ripgrep
+
+      - name: Install Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+          bundler-cache: true
 
       - name: Install Python dependencies
         run: |
           pipx install poetry
           poetry install --no-interaction --no-root
+
+      - name: Generate Terramate code
+        run: terramate generate
+
+      - name: Run provision runner smoke
+        run: make test.provision-runner
 
       - name: Run make test
         run: make test

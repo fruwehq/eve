@@ -25,9 +25,19 @@ for command in bash jq ruby ssh scp; do
 done
 
 section "optional provider tools"
-for command in aws curl gcloud nc terraform terramate vagrant qemu-system-aarch64 qemu-system-x86_64; do
+for command in aws curl docker gcloud nc terraform terramate vagrant qemu-system-aarch64 qemu-system-x86_64; do
   check_command "$command"
 done
+
+if command -v docker >/dev/null 2>&1; then
+  if ! docker info >/dev/null 2>&1; then
+    printf '  [INFO] Docker daemon not reachable; start Docker before using make docker.build\n'
+  elif docker image inspect "${EVE_TOOLCHAIN_IMAGE:-eve-toolchain:local}" >/dev/null 2>&1; then
+    printf '  [OK] Eve toolchain image: %s\n' "${EVE_TOOLCHAIN_IMAGE:-eve-toolchain:local}"
+  else
+    printf '  [INFO] Eve toolchain image missing; build with: make docker.build\n'
+  fi
+fi
 
 section "catalog"
 if ./scripts/catalog-options --json >/dev/null; then
@@ -49,8 +59,8 @@ section "providers"
 ./scripts/providers-status
 
 section "state"
-mkdir -p .egame/state/instances
-printf '  [OK] state directory: .egame/state/instances\n'
+mkdir -p .eve/state/instances
+printf '  [OK] state directory: .eve/state/instances\n'
 printf '  [INFO] recover interrupted state with: make instance.recover INSTANCE=<name>\n'
 
 exit "$fail"

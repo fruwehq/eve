@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+set -eu
+
+exec ./scripts/package-status-command discord 'if command -v discord >/dev/null 2>&1 || dpkg -s discord >/dev/null 2>&1; then echo installed; else echo missing; fi'

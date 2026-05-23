@@ -1,0 +1,11 @@
+api_version: eve.plugin/v1
+kind: package
+id: local-exec
+display_name: Local Exec Test Package
+commands:
+  install: {exec: bin/package-command, args: [install]}
+  status: {exec: bin/package-command, args: [status]}
+  down: {exec: bin/package-command, args: [down]}
+supports: {os_families: [ubuntu]}
+down: {destructive: false}
+env: []

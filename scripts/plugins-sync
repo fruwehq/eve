@@ -1,12 +1,12 @@
 #!/usr/bin/env ruby
-# Synchronize external plugin repositories into .egame/plugins.
+# Synchronize external plugin repositories into .eve/plugins.
 
 require "fileutils"
 require "yaml"
 
 ROOT = File.expand_path("..", __dir__)
-DEFAULT_SOURCES = File.join(ROOT, ".egame/plugin-sources.yaml")
-DEFAULT_DEST = File.join(ROOT, ".egame/plugins")
+DEFAULT_SOURCES = File.join(ROOT, ".eve/plugin-sources.yaml")
+DEFAULT_DEST = File.join(ROOT, ".eve/plugins")
 
 def usage
   warn <<~USAGE
@@ -16,7 +16,7 @@ def usage
     Source file shape:
       sources:
         - id: example
-          url: https://github.com/org/egame-plugin-example.git
+          url: https://github.com/org/eve-plugin-example.git
           ref: <tag-or-sha>
   USAGE
 end
@@ -78,8 +78,8 @@ normalized_sources = sources.each_with_index.map do |source, index|
     exit 2
   end
 
-  if ref.empty? && ENV["EGAME_ALLOW_UNPINNED_PLUGINS"] != "1"
-    warn "plugins-sync: source #{id} is missing ref; set EGAME_ALLOW_UNPINNED_PLUGINS=1 to allow this"
+  if ref.empty? && ENV["EVE_ALLOW_UNPINNED_PLUGINS"] != "1"
+    warn "plugins-sync: source #{id} is missing ref; set EVE_ALLOW_UNPINNED_PLUGINS=1 to allow this"
     exit 1
   end
 

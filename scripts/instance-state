@@ -1,80 +1,21 @@
 #!/usr/bin/env ruby
 # Read or update local v3 instance state.
+# All reads and writes go through core/sdk/state.rb (sole state owner).
 
-require "fileutils"
 require "json"
-require "time"
 
 ROOT = File.expand_path("..", __dir__)
-OPERATION_STATUSES = %w[running succeeded failed skipped].freeze
-DESIRED_STATES = %w[unknown running stopped absent].freeze
-PROVIDER_STATES = %w[unknown initializing initialized planned changing running stopped absent error].freeze
-PROVISION_STATES = %w[unknown provisioning provisioned error].freeze
-PACKAGE_STATES = %w[unknown installed missing failed removed reinstalled].freeze
-DEFAULT_HISTORY_LIMIT = 50
+$LOAD_PATH.unshift(File.join(ROOT, "core"))
+require "sdk"
 
 def usage
   warn <<~USAGE
     Usage:
       scripts/instance-state --instance <name> --get
       scripts/instance-state --instance <name> --recover-running
+      scripts/instance-state --instance <name> --observed-json <json>
       scripts/instance-state --instance <name> --operation <name> --status <status> [--desired-state <state>] [--provider-state <state>] [--provision-state <state>] [--package <id> --package-state <state>] [--error <message>]
   USAGE
-end
-
-def state_root
-  ENV["EGAME_STATE_DIR"] || File.join(ROOT, ".egame/state")
-end
-
-def state_path(instance)
-  File.join(state_root, "instances", "#{instance}.json")
-end
-
-def default_state(instance, now = nil)
-  state = {
-    "instance" => instance,
-    "desired_state" => "unknown",
-    "provider_state" => "unknown",
-    "provision_state" => "unknown",
-    "package_state" => {},
-    "operation_history" => [],
-    "last_operation" => nil,
-    "last_error" => nil
-  }
-  state["created_at"] = now if now
-  state["updated_at"] = now if now
-  state
-end
-
-def read_state(instance)
-  path = state_path(instance)
-  return default_state(instance) unless File.exist?(path)
-
-  JSON.parse(File.read(path))
-end
-
-def write_state(instance, state)
-  path = state_path(instance)
-  FileUtils.mkdir_p(File.dirname(path))
-  File.write(path, JSON.pretty_generate(state) + "\n")
-end
-
-def require_value!(value, allowed, label)
-  return unless value
-  return if allowed.include?(value)
-
-  raise "#{label} must be one of: #{allowed.join(", ")}"
-end
-
-def operation_type(operation)
-  operation.split(".", 2).first
-end
-
-def history_limit
-  raw = ENV.fetch("EGAME_STATE_HISTORY_LIMIT", DEFAULT_HISTORY_LIMIT.to_s)
-  Integer(raw).clamp(1, 500)
-rescue ArgumentError
-  DEFAULT_HISTORY_LIMIT
 end
 
 instance = nil
@@ -87,6 +28,7 @@ provider_state = nil
 provision_state = nil
 package = nil
 package_state = nil
+observed_json = nil
 error = nil
 
 args = ARGV.dup
@@ -112,6 +54,8 @@ until args.empty?
     package = args.shift
   when "--package-state"
     package_state = args.shift
+  when "--observed-json"
+    observed_json = args.shift
   when "--error"
     error = args.shift
   when "-h", "--help"
@@ -128,82 +72,45 @@ unless instance
   exit 2
 end
 
-state = read_state(instance)
-
-if get
-  puts JSON.pretty_generate(state)
-  exit 0
-end
-
-if recover_running
-  state = default_state(instance, Time.now.utc.iso8601).merge(state)
-  state["operation_history"] ||= []
-  last_operation = state["last_operation"]
-  if last_operation && last_operation["status"] == "running"
-    error = "Recovered interrupted operation #{last_operation.fetch("name", "unknown")}"
-    recovered = last_operation.merge("status" => "failed", "error" => error)
-    state["last_operation"] = recovered
-    state["last_error"] = error
-    state["updated_at"] = Time.now.utc.iso8601
-    state["operation_history"] = state.fetch("operation_history").map do |entry|
-      entry["id"] == recovered["id"] ? entry.merge("status" => "failed", "error" => error) : entry
-    end
-    case recovered["type"]
-    when "provider"
-      state["provider_state"] = "error" unless %w[provider.resolve provider.status provider.ip provider.ssh].include?(recovered["name"])
-    when "provision"
-      state["provision_state"] = "error"
-    end
-    write_state(instance, state)
-  end
-  puts JSON.pretty_generate(state)
-  exit 0
-end
-
-unless operation && status
-  usage
-  exit 2
-end
-
 begin
-  require_value!(status, OPERATION_STATUSES, "status")
-  require_value!(desired_state, DESIRED_STATES, "desired_state")
-  require_value!(provider_state, PROVIDER_STATES, "provider_state")
-  require_value!(provision_state, PROVISION_STATES, "provision_state")
-  require_value!(package_state, PACKAGE_STATES, "package_state")
+  if get
+    puts JSON.pretty_generate(Eve::SDK::State.read(instance))
+    exit 0
+  end
+
+  if observed_json
+    observed = JSON.parse(observed_json)
+    raise "observed_json must be an object" unless observed.is_a?(Hash)
+
+    state = Eve::SDK::State.update_observed(instance, observed)
+    puts JSON.pretty_generate(state)
+    exit 0
+  end
+
+  if recover_running
+    state = Eve::SDK::State.recover_running(instance)
+    puts JSON.pretty_generate(state)
+    exit 0
+  end
+
+  unless operation && status
+    usage
+    exit 2
+  end
+
   raise "package and package_state must be provided together" if package.nil? != package_state.nil?
-rescue StandardError => e
+
+  state = Eve::SDK::State.record_operation(
+    instance, operation, status,
+    error: error,
+    desired_state: desired_state,
+    provider_state: provider_state,
+    provision_state: provision_state,
+    package: package,
+    package_state: package_state
+  )
+  puts JSON.pretty_generate(state)
+rescue Eve::SDK::StateError, Eve::SDK::SchemaValidationError, JSON::ParserError, ArgumentError => e
   warn "instance-state: #{e.message}"
   exit 2
 end
-
-now = Time.now.utc.iso8601
-state = default_state(instance, now).merge(state)
-state["package_state"] ||= {}
-state["operation_history"] ||= []
-state["created_at"] ||= now
-state["updated_at"] = now
-operation_entry = {
-  "id" => state["operation_history"].length + 1,
-  "name" => operation,
-  "type" => operation_type(operation),
-  "status" => status,
-  "at" => now
-}
-state["last_operation"] = operation_entry
-state["operation_history"] << operation_entry.merge("error" => error).compact
-state["operation_history"] = state["operation_history"].last(history_limit)
-state["last_error"] = error
-state["desired_state"] = desired_state if desired_state
-state["provider_state"] = provider_state if provider_state
-state["provision_state"] = provision_state if provision_state
-
-if package && package_state
-  state["package_state"][package] = {
-    "status" => package_state,
-    "updated_at" => now
-  }
-end
-
-write_state(instance, state)
-puts JSON.pretty_generate(state)

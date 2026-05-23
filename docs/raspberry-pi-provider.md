@@ -128,7 +128,7 @@ Less ideal as an initial target:
 
 1. Add catalog support for `provider: raspberry-pi` and `kind: metal`.
 2. Add a provider-specific `init` entry such as `ssh-ubuntu-metal`.
-3. Reuse the existing Linux provisioning runner in `linux/provision/`.
+3. Reuse the existing Linux provisioning runner in `oses/<catalog-os-id>/provision/`.
 4. Make `up`/`instance.provision` for Raspberry Pi primarily an SSH/bootstrap/provision flow.
 5. Add optional reset/cleanup semantics later if the repo gains image-based reinstallation workflows.
 

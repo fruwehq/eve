@@ -2,21 +2,21 @@
 # Start, stop, or run apps on a remote Xpra session over SSH.
 #
 # Usage:
-#   scripts/remote-xpra <profile> start [app [args...]]
-#   scripts/remote-xpra <profile> stop
-#   scripts/remote-xpra <profile> run <app> [args...]
-#   scripts/remote-xpra <profile> attach
-#   scripts/remote-xpra <profile> desktop
-#   scripts/remote-xpra <profile> apps
-#   scripts/remote-xpra <profile> status
+#   scripts/remote-xpra <instance> start [app [args...]]
+#   scripts/remote-xpra <instance> stop
+#   scripts/remote-xpra <instance> run <app> [args...]
+#   scripts/remote-xpra <instance> attach
+#   scripts/remote-xpra <instance> desktop
+#   scripts/remote-xpra <instance> apps
+#   scripts/remote-xpra <instance> status
 #
 # Linux:    uses virtual displays (xpra start :N)
 # Windows:  uses shadow mode via Scheduled Task (interactive session) + SSH tunnel
 
 set -euo pipefail
 
-PROFILE="${1:?Usage: scripts/remote-xpra <profile> <start|stop|run|attach|apps|status> [args...]}"
-ACTION="${2:?Usage: scripts/remote-xpra <profile> <start|stop|run|attach|apps|status> [args...]}"
+PROFILE="${1:?Usage: scripts/remote-xpra <instance> <start|stop|run|attach|apps|status> [args...]}"
+ACTION="${2:?Usage: scripts/remote-xpra <instance> <start|stop|run|attach|apps|status> [args...]}"
 shift 2
 cd "$(git rev-parse --show-toplevel)"
 # shellcheck source=lib/instance-workdir.sh
@@ -28,7 +28,7 @@ ENGINE=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^ENGINE=/{print $2}')
 if [ "$ENGINE" = "vagrant" ]; then
   SSH_USER=vagrant
   IP=$(./scripts/instance-ip "$PROFILE")
-  WORKDIR="$(egame_instance_workdir "$PROFILE")"
+  WORKDIR="$(eve_instance_workdir "$PROFILE")"
   SSH_PORT=$(cd "$WORKDIR" && vagrant ssh-config | awk '/Port/ {print $2; exit}')
   PRIV_KEY=$(cd "$WORKDIR" && vagrant ssh-config | awk '/IdentityFile/ {print $2; exit}')
 else
@@ -132,7 +132,7 @@ case "$ACTION" in
 
   run)
     if [ "$#" -lt 1 ]; then
-      echo "Usage: scripts/remote-xpra <profile> run <app> [args...]" >&2
+      echo "Usage: scripts/remote-xpra <instance> run <app> [args...]" >&2
       exit 1
     fi
     APP_BIN="$1"

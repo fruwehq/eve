@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+# Resolve a Raspberry Pi's IP from RASPBERRY_PI_IP / RASPBERRY_PI_HOST,
+# falling back to host resolution and SSH probing.
+set -euo pipefail
+
+if [ -n "${EVE_INSTANCE_NAME:-}" ]; then
+  PROFILE="$EVE_INSTANCE_NAME"
+else
+  PROFILE="${1:?Usage: commands/ip <instance>}"
+fi
+cd "$(git rev-parse --show-toplevel)"
+# shellcheck source=scripts/lib/load-runtime-env.sh
+. ./scripts/lib/load-runtime-env.sh
+# shellcheck source=plugins/providers/_common/lib/profile-env.sh
+. ./plugins/providers/_common/lib/profile-env.sh
+
+eve_load_profile_env "$PROFILE"
+
+RESOLVED_PI_HOST=$(eve_resolved_value RASPBERRY_PI_HOST)
+RESOLVED_PI_IP=$(eve_resolved_value RASPBERRY_PI_IP)
+
+resolve_host_ip() {
+  local host="$1"
+  local ip
+  case "$host" in
+    ''|*[!0-9.]*) ;;
+    *.*) printf '%s\n' "$host"; return 0 ;;
+  esac
+
+  if command -v getent >/dev/null 2>&1; then
+    ip=$(getent ahostsv4 "$host" 2>/dev/null | awk '{print $1; exit}')
+    [ -n "$ip" ] && { printf '%s\n' "$ip"; return 0; }
+  fi
+  if command -v dscacheutil >/dev/null 2>&1; then
+    ip=$(dscacheutil -q host -a name "$host" 2>/dev/null | awk '/ip_address:/ {print $2; exit}')
+    [ -n "$ip" ] && { printf '%s\n' "$ip"; return 0; }
+  fi
+  if command -v dig >/dev/null 2>&1; then
+    ip=$(dig +short "$host" A 2>/dev/null | awk '/^[0-9.]+$/ {print; exit}')
+    [ -n "$ip" ] && { printf '%s\n' "$ip"; return 0; }
+  fi
+  if command -v host >/dev/null 2>&1; then
+    ip=$(host "$host" 2>/dev/null | awk '/has address/ {print $4; exit}')
+    [ -n "$ip" ] && { printf '%s\n' "$ip"; return 0; }
+  fi
+  return 1
+}
+
+ssh_host_ip() {
+  local host="$1" user="$2" priv ip
+  local key_file="${SSH_PUBLIC_KEY_FILE:-}"
+  if [ -n "$key_file" ] && [ "${key_file%.pub}" != "$key_file" ]; then
+    priv="${key_file%.pub}"
+  else
+    priv="${SSH_PRIVATE_KEY_FILE:-}"
+  fi
+  local ssh_opts=(-o StrictHostKeyChecking=no -o ServerAliveInterval=10 -o BatchMode=yes -o ConnectTimeout=5 -o WarnWeakCrypto=no-pq-kex)
+  [ -n "$priv" ] && ssh_opts+=(-i "$priv" -o IdentitiesOnly=yes)
+  ip=$(ssh "${ssh_opts[@]}" "$user@$host" "hostname -I | awk '{print \$1}'" 2>/dev/null || true)
+  [ -n "$ip" ] && printf '%s\n' "$ip"
+}
+
+discover_ssh_ip() {
+  local user="$1" priv candidate found
+  local key_file="${SSH_PUBLIC_KEY_FILE:-}"
+  if [ -n "$key_file" ] && [ "${key_file%.pub}" != "$key_file" ]; then
+    priv="${key_file%.pub}"
+  else
+    priv="${SSH_PRIVATE_KEY_FILE:-}"
+  fi
+  local candidates=""
+  if command -v arp >/dev/null 2>&1; then
+    candidates=$(arp -an 2>/dev/null | awk '
+      /\([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+\)/ && $0 !~ /incomplete/ {
+        gsub(/[()]/, "", $2)
+        print $2
+      }' | sort -u)
+  fi
+  local ssh_opts=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes -o ConnectTimeout=2 -o ConnectionAttempts=1 -o WarnWeakCrypto=no-pq-kex)
+  [ -n "$priv" ] && ssh_opts+=(-i "$priv" -o IdentitiesOnly=yes)
+  for candidate in $candidates; do
+    found=$(ssh "${ssh_opts[@]}" "$user@$candidate" "hostname -I | awk '{print \$1}'" 2>/dev/null || true)
+    if [ -n "$found" ]; then
+      printf '%s\n' "$found"
+      return 0
+    fi
+  done
+  return 1
+}
+
+./scripts/env-require VM_USER_NAME
+PI_HOST="${RESOLVED_PI_HOST:-${RASPBERRY_PI_HOST:-}}"
+IP="${RESOLVED_PI_IP:-${RASPBERRY_PI_IP:-}}"
+if [ -z "$IP" ]; then
+  [ -n "$PI_HOST" ] || ./scripts/env-require RASPBERRY_PI_HOST
+  PI_HOST="${PI_HOST:-$RASPBERRY_PI_HOST}"
+  IP=$(resolve_host_ip "$PI_HOST" || true)
+fi
+PI_SSH_USER="${SSH_USER:-$VM_USER_NAME}"
+if [ -z "$IP" ]; then
+  IP=$(ssh_host_ip "$PI_HOST" "$PI_SSH_USER" || true)
+fi
+if [ -z "$IP" ]; then
+  IP=$(discover_ssh_ip "$PI_SSH_USER" || true)
+fi
+if [ -z "$IP" ]; then
+  echo "instance-ip: could not resolve Raspberry Pi host '${PI_HOST:-}' to an IP address" >&2
+  exit 1
+fi
+printf '%s\n' "$IP"

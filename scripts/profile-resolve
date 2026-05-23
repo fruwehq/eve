@@ -2,7 +2,7 @@
 set -eu
 
 CATALOG_PATH="config/catalog.yaml"
-LOCAL_CATALOG_PATH="${EGAME_CATALOG_LOCAL:-config/catalog.local.yaml}"
+LOCAL_CATALOG_PATH="${EVE_CATALOG_LOCAL:-config/catalog.local.yaml}"
 PROFILE=""
 VALIDATE=0
 EMIT=""
@@ -16,7 +16,7 @@ Usage:
 Notes:
   - Base catalog: config/catalog.yaml
   - Optional local overlay: config/catalog.local.yaml (if present)
-  - EGAME_CATALOG_LOCAL can point at a generated overlay for INSTANCE workflows.
+  - EVE_CATALOG_LOCAL can point at a generated overlay for INSTANCE workflows.
 
 Examples:
   scripts/profile-resolve --profile aws-ubuntu-dev-headless --validate
@@ -65,7 +65,21 @@ if [ -z "$PROFILE" ]; then
   exit 2
 fi
 
-if [ ! -f "$CATALOG_PATH" ]; then
+# SDK fast-path: if a caller (provider-dispatch, package-dispatch) has already
+# resolved+validated the instance and exported EVE_RESOLVED_JSON, reuse it
+# instead of re-loading the catalog. The instance-resolve output is a strict
+# superset of this script's RESOLVED_JSON shape (same .profile/.machine/.os/
+# .init/.location/.bundle_packages/.engine/.stack_tags keys), so the
+# downstream jq emitters work unchanged. This keeps the SDK-validated
+# contract flowing through into bash dispatchers under
+# plugins/providers/_common.
+if [ -n "${EVE_RESOLVED_JSON:-}" ]; then
+  RESOLVED_JSON_INPUT="$EVE_RESOLVED_JSON"
+else
+  RESOLVED_JSON_INPUT=""
+fi
+
+if [ -z "$RESOLVED_JSON_INPUT" ] && [ ! -f "$CATALOG_PATH" ]; then
   echo "Catalog not found: $CATALOG_PATH" >&2
   exit 1
 fi
@@ -75,7 +89,10 @@ if ! command -v ruby >/dev/null 2>&1; then
   exit 1
 fi
 
-CATALOG_JSON="$(ruby -rjson -ryaml -e '
+if [ -n "$RESOLVED_JSON_INPUT" ]; then
+  CATALOG_JSON=""
+else
+  CATALOG_JSON="$(ruby -rjson -ryaml -e '
   def load_any(path)
     return nil unless File.exist?(path)
     ext = File.extname(path).downcase
@@ -136,6 +153,7 @@ CATALOG_JSON="$(ruby -rjson -ryaml -e '
 
   puts JSON.generate(merged)
 ' "$CATALOG_PATH" "$LOCAL_CATALOG_PATH")"
+fi
 
 # shellcheck disable=SC2016
 # $-prefixed names below are jq variables, not shell expansions.
@@ -180,13 +198,11 @@ else
     error("Init/provider mismatch: init \($i.id) expects provider \($i.provider), got machine provider \($m.provider)")
   else . end |
 
-  if (($bundle_packages | index("codex-cli")) != null and ($bundle_packages | index("dev-toolchain")) == null) then
-    error("Compatibility: codex-cli requires dev-toolchain in bundles")
-  else . end |
-
-  if (($bundle_packages | index("goose")) != null and ($bundle_packages | index("dev-toolchain")) == null) then
-    error("Compatibility: goose requires dev-toolchain in bundles")
-  else . end |
+  # Package dependency validation lives in scripts/instance-resolve via
+  # the depends_on manifest field. profile-resolve only enforces
+  # catalog/profile integrity here; dependency checks would duplicate
+  # logic and require keeping a hardcoded list of dep edges in this jq
+  # filter.
 
   if ($l[($m.provider // "")] == null) then
     error("Location \($l.name) has no mapping for provider \($m.provider)")
@@ -209,7 +225,22 @@ else
   }
 end'
 
-RESOLVED_JSON="$(printf '%s' "$CATALOG_JSON" | jq -ce --arg profile "$PROFILE" "$jq_get")"
+if [ -n "$RESOLVED_JSON_INPUT" ]; then
+  # SDK fast-path: caller supplied a validated resolved-instance JSON
+  # (output of scripts/instance-resolve, schema:
+  # core/schema/resolved-instance.schema.json). That shape carries the
+  # catalog-resolved data under .machine/.os/.init/.location plus an
+  # .instance block with the instance name. profile-resolve's downstream
+  # jq emitters expect a .profile.name field (legacy profile shape), so
+  # map .instance.name -> .profile.name without touching other keys.
+  RESOLVED_JSON="$(printf '%s' "$RESOLVED_JSON_INPUT" | jq -c '
+    if (.profile // null) == null then
+      .profile = ((.instance // {}) + { name: ((.instance // {}).name // "") })
+    else . end
+  ')"
+else
+  RESOLVED_JSON="$(printf '%s' "$CATALOG_JSON" | jq -ce --arg profile "$PROFILE" "$jq_get")"
+fi
 
 if [ "$VALIDATE" -eq 1 ]; then
   echo "Profile validated: $PROFILE"
@@ -222,8 +253,19 @@ fi
 emit_env() {
   echo "$RESOLVED_JSON" | jq -r '
     def env_or($name; $fallback): ((env[$name] | select(. != "")) // $fallback);
+    def provision_user($locp):
+      if (.os.family == "windows") then "Administrator"
+      elif (.machine.provider == "truenas") then env_or("EVE_PROVISION_USER"; $locp.provision_user // "")
+      else env_or("VM_USER_NAME"; "")
+      end;
+    def human_user($locp):
+      (env_or("VM_USER_NAME"; "")) as $human |
+      if $human != "" then $human else provision_user($locp) end;
     (.machine.provider) as $provider |
     (.location[$provider] // {}) as $locp |
+    "ACCESS_BOOTSTRAP_USER=" + provision_user($locp),
+    "ACCESS_HUMAN_USER=" + human_user($locp),
+    "ACCESS_PROVISION_USER=" + provision_user($locp),
     "PROFILE_NAME=" + .profile.name,
     "ENGINE=" + .engine,
     "PROVIDER=" + $provider,
@@ -253,14 +295,20 @@ emit_env() {
     "LOCATION_REGION=" + ($locp.region // ""),
     "LOCATION_AVAILABILITY_ZONE=" + ($locp.availability_zone // ""),
     "LOCATION_ZONE=" + ($locp.zone // ""),
-    "SSH_USER=" + (
-      if (.os.family == "windows") then "Administrator"
-      elif ($provider == "raspberry-pi") then env_or("VM_USER_NAME"; "")
-      else env_or("VM_USER_NAME"; "ubuntu")
+    "SSH_USER=" + provision_user($locp),
+    "CLOUD_IMAGE_URL=" + (.os.cloud_image_url // ""),
+    "HUMAN_USER_NAME=" + human_user($locp),
+    "PROVISION_USER_NAME=" + provision_user($locp),
+    "RASPBERRY_PI_HOST=" + (
+      if (.machine.provider == "raspberry-pi" and (($locp.host // "") != "")) then $locp.host
+      else env_or("RASPBERRY_PI_HOST"; $locp.host // "")
       end
     ),
-    "CLOUD_IMAGE_URL=" + (.os.cloud_image_url // ""),
-    "RASPBERRY_PI_HOST=" + env_or("RASPBERRY_PI_HOST"; $locp.host // ""),
+    "RASPBERRY_PI_IP=" + (
+      if (.machine.provider == "raspberry-pi" and (($locp.ip // "") != "")) then $locp.ip
+      else env_or("RASPBERRY_PI_IP"; $locp.ip // "")
+      end
+    ),
     "TRUENAS_HOST=" + env_or("TRUENAS_HOST"; $locp.host // ""),
     "TRUENAS_SSH_PORT=" + env_or("TRUENAS_SSH_PORT"; (($locp.ssh_port // 22) | tostring)),
     "TRUENAS_SSH_USER=" + env_or("TRUENAS_SSH_USER"; $locp.ssh_user // ""),
@@ -321,6 +369,10 @@ emit_vagrant() {
       (if ($r.bundle_packages | index("rdp")) != null then
         "  # RDP\n" +
         "  config.vm.network \"forwarded_port\", guest: 3389, host: 3389, auto_correct: true\n"
+      else "" end) +
+      (if ($r.bundle_packages | index("thinlinc")) != null then
+        "  # ThinLinc Web Access\n" +
+        "  config.vm.network \"forwarded_port\", guest: 300, host: 300, auto_correct: true\n"
       else "" end)
     ) as $port_forwards |
 

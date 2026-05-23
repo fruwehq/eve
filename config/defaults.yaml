@@ -1,0 +1,64 @@
+# Non-secret structured defaults. Empty values are ignored.
+#
+# Personal overrides can go in .eve/config.yaml, which is git-ignored and safe
+# for UI-editable preferences. Keep secrets such as API keys and passwords in
+# .env.local.
+
+aws:
+  config_file:
+  profile:
+  region:
+  shared_credentials_file:
+
+display:
+  fps:
+  resolution:
+
+gcp:
+  application_credentials:
+  project:
+
+global:
+  my_ip:
+  ssh_public_key_file:
+  timezone:
+  vm_user_name:
+
+moonlight:
+  bitrate_kbps:
+  display_mode:
+  video_codec:
+  video_decoder:
+
+raspberry_pi:
+  hdmi_connector:
+  hdmi_mode:
+  host:
+  ip:
+
+rustdesk:
+  server:
+
+sunshine:
+  max_bitrate_kbps:
+  version:
+
+thinlinc:
+  agent_hostname:
+  server_bundle_path:
+  server_bundle_url:
+  webaccess_port:
+
+truenas:
+  api_user:
+  host:
+  ssh_host_key_fingerprint:
+  ssh_port:
+  ssh_private_key_file:
+  ssh_user:
+  vm_base_dir:
+  vm_pool:
+  vm_zvol_prefix:
+
+vagrant:
+  show_console:

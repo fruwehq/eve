@@ -5,7 +5,7 @@ require "json"
 require "yaml"
 
 ROOT = File.expand_path("..", __dir__)
-DEFAULT_REGISTRY_PATH = File.join(ROOT, ".egame/instances.yaml")
+DEFAULT_REGISTRY_PATH = File.join(ROOT, ".eve/instances.yaml")
 
 def usage
   warn "Usage: scripts/instance-list [--json] [--registry <path>]"
@@ -17,8 +17,8 @@ def load_any(path)
 end
 
 json = false
-registry_path = ENV["EGAME_INSTANCE_REGISTRY"] && !ENV["EGAME_INSTANCE_REGISTRY"].empty? \
-                ? File.expand_path(ENV["EGAME_INSTANCE_REGISTRY"], Dir.pwd) \
+registry_path = ENV["EVE_INSTANCE_REGISTRY"] && !ENV["EVE_INSTANCE_REGISTRY"].empty? \
+                ? File.expand_path(ENV["EVE_INSTANCE_REGISTRY"], Dir.pwd) \
                 : DEFAULT_REGISTRY_PATH
 
 args = ARGV.dup

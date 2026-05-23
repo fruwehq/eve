@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Power on a local QEMU instance via vagrant up.
+set -euo pipefail
+
+if [ -n "${EVE_INSTANCE_NAME:-}" ]; then
+  PROFILE="$EVE_INSTANCE_NAME"
+else
+  PROFILE="${1:?Usage: commands/start <instance>}"
+fi
+cd "$(git rev-parse --show-toplevel)"
+exec ./scripts/vagrant-up "$PROFILE"

@@ -23,18 +23,26 @@ def run_json(*cmd)
 end
 
 def prepare_instance_overlay(instance_name)
-  paths = run_json(File.join(ROOT, "scripts/instance-paths"), "--instance", instance_name, "--emit", "json")
+  path_args = [File.join(ROOT, "scripts/instance-paths"), "--instance", instance_name, "--emit", "json"]
+  if ENV["EVE_INSTANCE_REGISTRY"] && !ENV["EVE_INSTANCE_REGISTRY"].empty?
+    path_args += ["--registry", ENV["EVE_INSTANCE_REGISTRY"]]
+  end
+  paths = run_json(*path_args)
   overlay = paths.fetch("INSTANCE_OVERLAY_PATH")
   FileUtils.mkdir_p(File.dirname(overlay))
-  out, status = Open3.capture2e(
+  overlay_args = [
     File.join(ROOT, "scripts/instance-profile-overlay"),
     "--instance", instance_name,
     "--output", overlay
-  )
+  ]
+  if ENV["EVE_INSTANCE_REGISTRY"] && !ENV["EVE_INSTANCE_REGISTRY"].empty?
+    overlay_args += ["--registry", ENV["EVE_INSTANCE_REGISTRY"]]
+  end
+  out, status = Open3.capture2e(*overlay_args)
   raise out unless status.success?
 
-  ENV["EGAME_CATALOG_LOCAL"] = overlay
-  ENV["EGAME_INSTANCE_NAME"] = instance_name
+  ENV["EVE_CATALOG_LOCAL"] = overlay
+  ENV["EVE_INSTANCE_NAME"] = instance_name
 end
 
 def run_action_target(target, instance_name)
@@ -64,6 +72,10 @@ def run_action_target(target, instance_name)
     exec "xdg-open", url
   when "sunshine.wait"
     exec File.join(ROOT, "scripts/remote-sunshine-wait"), instance_name
+  when "thinlinc.web"
+    exec File.join(ROOT, "scripts/remote-thinlinc"), instance_name
+  when "thinlinc.client"
+    exec File.join(ROOT, "scripts/remote-thinlinc-client"), instance_name
   when "vnc.open"
     exec File.join(ROOT, "scripts/remote-vnc"), instance_name
   when "waypipe.open"

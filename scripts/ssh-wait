@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Wait until SSH on the profile's instance accepts connections.
-# Usage: scripts/ssh-wait <profile> [max-wait-seconds]
+# Usage: scripts/ssh-wait <instance> [max-wait-seconds]
 
 set -euo pipefail
 
-PROFILE="${1:?Usage: scripts/ssh-wait <profile> [max-wait-seconds]}"
+PROFILE="${1:?Usage: scripts/ssh-wait <instance> [max-wait-seconds]}"
 MAX_SECONDS=${2:-1200}
 POLL_INTERVAL=2
 cd "$(git rev-parse --show-toplevel)"
@@ -22,7 +22,7 @@ SECONDS=0
 
 try_ssh() {
   if [ "$ENGINE" = "vagrant" ]; then
-    (cd "$(egame_instance_workdir "$PROFILE")" && vagrant ssh -c "exit 0" >/dev/null 2>&1)
+    (cd "$(eve_instance_workdir "$PROFILE")" && vagrant ssh -c "exit 0" >/dev/null 2>&1)
   else
     EPHEMERAL_SSH_BATCH=1 ./scripts/instance-ssh "$PROFILE" -- exit 0 >/dev/null 2>&1
   fi

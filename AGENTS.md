@@ -2,9 +2,10 @@
 
 ## Configuration and defaults
 
-**All configurable defaults live in `.env`.** Never use shell `${VAR:-default}` to encode a meaningful default inside a script. If a variable needs a default, declare it (commented or uncommented) in `.env` so it is discoverable in one place.
+**All configurable defaults live in `.env`, `config/defaults.yaml`, or the catalog.** Never use shell `${VAR:-default}` to encode a meaningful default inside a script. If a variable needs a default, declare it (commented or uncommented) in one of those files so it is discoverable in one place.
 
 - User-specific overrides go in `.env.local` (git-ignored).
+- Non-secret structured preferences go in `.eve/config.yaml` (git-ignored), using `config/defaults.yaml` as the documented shape.
 - Machine-level defaults (cpu, memory, disk_gb, network, state) belong in `config/catalog.yaml` under the machine's `defaults:` block.
 - Local catalog overrides (different machine sizes, personal zvol paths, etc.) go in `config/catalog.local.yaml` (git-ignored).
 - Scripts and terraform modules may declare variable defaults as a safety net (e.g. a terraform `default = "..."`) but the canonical, human-readable default always lives in `.env` or the catalog.
@@ -42,18 +43,18 @@ config/
   catalog.yaml                # Single source of truth: machines / oses / inits / bundles / locations
   catalog.local.example.yaml  # Template for personal overrides
   catalog.local.yaml          # Personal overrides (git-ignored, merged over base)
-modules/
-  aws/ec2/                    # AWS EC2 instance + VPC + security group
-  gcp/compute/                # GCP Compute Engine instance + firewall
-  truenas/vm.tm.hcl           # truenas_zvol + cloud-init + truenas_vm
-  vultr/instance.tm.hcl       # os_family-aware Vultr module (Windows script vs Linux cloud-init)
 stacks/
-  aws/        gcp/        truenas/        vultr/       # provider stacks
+  config.tm.hcl               # Legacy shared Terramate globals only
+plugins/providers/
+  aws/                         # AWS plugin, Terramate stacks, EC2 modules
+  gcp/                         # GCP plugin, Terramate stacks, Compute modules
+  truenas/                     # TrueNAS plugin, Terramate stacks, VM module
+  vultr/                       # Vultr plugin, Terramate stacks, instance module
 scripts/
   catalog-options             # List provider/platform/content choices
   profile-resolve             # Lower-level compatibility resolver for generated overlays
   instance-ip / instance-ssh    # Instance IP + SSH wrappers (engine/provider aware)
-  tf-env                      # Emits TF_VAR_* exports, gated by provider
+  tf-env                      # Emits common TF_VAR_* exports, then calls provider tf-env hooks
   provision                   # Upload + run the OS-appropriate provisioning tree
   ssh-wait                    # Poll SSH until reachable
   logs                        # Stream remote provisioning logs
@@ -61,12 +62,10 @@ scripts/
   instance-password            # Display the instance's default password (Windows)
   tf-init / tf-plan / tf-apply / tf-destroy  # Terraform dispatchers used by provider plugins
   vagrant-up / vagrant-destroy  # Vagrant dispatchers for local-qemu
-  truenas-cloudinit-upload    # Generates NoCloud seed ISO and uploads to TrueNAS REST API
-  truenas-cloudinit-delete    # Removes cloud-init ISO from TrueNAS on destroy
-  test / test-catalog / test-instances / test-lint  # Test suite
-linux/provision/               # Bash state-machine runner (systemd unit)
+  test / test-catalog / test-core-boundary / test-instances / test-lint  # Test suite
+oses/<catalog-os-id>/provision/       # Bash state-machine runner (systemd unit)
   scripts/bootstrap.sh / runner.sh / lib/common.sh / steps/NN_*.sh
-windows/provision/             # PowerShell state-machine runner (Scheduled Task)
+oses/windows-server-2025/provision/             # PowerShell state-machine runner (Scheduled Task)
   scripts/bootstrap.ps1 / runner.ps1 / lib/*.ps1 / steps/NN_*.ps1
 tests/golden/                  # Frozen instance env snapshots
 .github/workflows/test.yml     # CI: runs make test
@@ -78,7 +77,7 @@ tests/golden/                  # Frozen instance env snapshots
 
 1. Add it (commented, with its default) to `.env` with a short inline comment.
 2. Export it in the `Makefile` export block.
-3. Thread it through `scripts/tf-env` as a `TF_VAR_*` if terraform needs it (remember to gate it inside the right `PROVIDER` case), or use it directly via the exported environment.
+3. Thread it through the provider plugin's `tf-env` command as a `TF_VAR_*` if terraform needs it, or use it directly via the exported environment.
 4. Do **not** use `${VAR:-fallback}` in scripts — the fallback belongs in `.env`.
 
 ## Adding a new machine / OS / init / bundle
@@ -102,8 +101,9 @@ Init entries are bootstrap/access methods, not user-facing workload choices. The
 
 - Provider blocks and `required_providers` live in `providers.tm.hcl` files, not in stack or resource config files.
 - Each provider's variables (host, key paths, ports) are declared alongside the provider block in the same generated file.
-- Instance-driven values (region, instance type, plan, OS id, AZ) are threaded through as `TF_VAR_*` from `scripts/tf-env`; do **not** hardcode them in stack globals.
-- TrueNAS is a special case: the parent `stacks/truenas/providers.tm.hcl` generates only `required_version`; the child `stacks/truenas/20-services/providers.tm.hcl` generates the full provider + variables (which the module at `modules/truenas/vm.tm.hcl` then relies on — see the note at `null_resource.cloudinit_iso` about `var.truenas_host`).
+- Instance-driven values (region, instance type, plan, OS id, AZ) are threaded through as `TF_VAR_*` from provider plugin `tf-env` commands; do **not** hardcode them in stack globals.
+- Terraform/Terramate provider implementations live with their provider plugins under `plugins/providers/<id>/stacks/` and `plugins/providers/<id>/modules/`. The remaining top-level `stacks/config.tm.hcl` is legacy shared global context only; do not add new provider implementation files there.
+- TrueNAS is a special case inside that layout: the parent `providers.tm.hcl` generates only `required_version`; the child `20-services/providers.tm.hcl` generates the full provider + variables (which the module then relies on — see the note at `null_resource.cloudinit_iso` about `var.truenas_host`).
 
 ## Windows SSH shell
 
@@ -122,12 +122,19 @@ Machine entries declare a `kind:` field. Current supported kinds:
 
 See [docs/raspberry-pi-provider.md](docs/raspberry-pi-provider.md) for the metal design guardrails.
 
+## Language policy
+
+- **Core orchestration:** Ruby. All new orchestration scripts under `scripts/` must be Ruby (`#!/usr/bin/env ruby`).
+- **Guest-side provisioning:** bash under `oses/<catalog-os-id>/provision/` for Linux, PowerShell under `oses/windows-server-2025/provision/` for Windows. These are the only places new bash is acceptable.
+- **TUI:** Python. The TUI (`scripts/eve-tui`) stays Python because Textual is Python.
+- **No new bash in `scripts/`.** The boundary lint (`make test.core-boundary`) enforces this; existing bash scripts are enumerated in `scripts/test-core-boundary.allowlist` and will be ported to Ruby over time.
+
 ## Post-boot provisioning
 
 Per-instance post-boot provisioning is OS-family driven:
 
-- `linux/provision/` — bash state-machine runner for Ubuntu/Linux hosts.
-- `windows/provision/` — PowerShell state-machine runner for Windows hosts.
+- `oses/ubuntu-26.04/provision/` — shared bash state-machine runner for catalog Ubuntu OSes; `oses/ubuntu-26.04-amd64/provision` and `oses/ubuntu-26.04-arm64/provision` point here.
+- `oses/windows-server-2025/provision/` — PowerShell state-machine runner for Windows hosts.
 
 Both use the same shape: `bootstrap` registers a runner (systemd unit or Scheduled Task), the runner walks a sorted `steps/` directory, and a `state.json` file tracks `currentStep` so provisioning is resumable across reboots. Steps are package-aware: a Linux step exits 0 early if its package id is not selected for the instance.
 
@@ -138,7 +145,7 @@ Entry points:
 - `make logs INSTANCE=…` — stream remote provisioning logs.
 
 Adding a new Linux step:
-1. Drop `linux/provision/scripts/steps/NN_<name>.sh` (NN controls order).
+1. Drop `oses/<catalog-os-id>/provision/scripts/steps/NN_<name>.sh` (NN controls order).
 2. Source `$PROVISION_ROOT/scripts/lib/common.sh` for helpers (`log`, `apt_install`, `has_pkg`, `skip_unless_pkg`, `request_reboot`). Add `# shellcheck source=../lib/common.sh` above the source line.
 3. Call `skip_unless_pkg <package-id>` at the top if the step is bundle-gated.
 4. Keep steps idempotent — they will re-run if provisioning is restarted.
@@ -148,10 +155,15 @@ Adding a new Linux step:
 `make test` runs the suites from `scripts/test`:
 
 - **catalog** (`test-catalog`) — validates provider/platform/content choice emission and provider-specific OS image metadata gating.
+- **core-boundary** (`test-core-boundary`) — fails if central `scripts/` reference provider or catalog OS IDs outside a committed allowlist of known violations.
 - **instances** (`test-instances`) — validates local instance registry fixtures, generated overlays, provider dispatch routing, and state contracts.
+- **lifecycle** (`test-lifecycle`) — exercises fake-provider up/status/ip/stop/down/start state transitions through `provider-dispatch`, asserting provider state and observed-state cache transitions. No live VM, no cloud credentials.
+- **plugins** (`test-plugins`) — validates plugin manifests and dry-run dispatch contracts.
+- **provision-runner** (`test-provision-runner`) — directly executes Ubuntu (bash) and optional Windows (PowerShell) provision runners in tempdirs, asserting step status, resume behaviour, manifest validation, and structured status output. Skips host-incompatible checks with `[SKIP]`.
 - **terraform** (`test-terraform`) — `terramate generate` + `terraform init -backend=false` + `terraform validate` across `aws-services`, `gcp-services`, `vultr-services`, and `truenas-services`. Uses a fake `MY_IP` and a tempfile SSH key. No cloud credentials required.
-- **shellcheck** (`test-shellcheck`) — runs `shellcheck -x --source-path=SCRIPTDIR` over every shell script with a bash/sh shebang in `scripts/` and `linux/provision/`.
+- **shellcheck** (`test-shellcheck`) — runs `shellcheck -x --source-path=SCRIPTDIR` over every shell script with a bash/sh shebang in `scripts/` and `oses/<catalog-os-id>/provision/`.
 - **python** (`test-python`) — runs ruff and strict mypy for Python TUI code.
+- **schemas** (`test-schemas`) — validates JSON Schemas (draft 2020-12) for resolved instance, observed state, plugin manifests, and command I/O. Checks all shipped manifests, fixture instances, and negative-test fixtures. Uses Ruby `json_schemer`.
 - **lint** (`test-lint`) — checks Ruby syntax, YAML syntax, Terraform formatting, and Terramate formatting.
 
 CI runs the same target via [.github/workflows/test.yml](.github/workflows/test.yml) on push to `main` and every pull request.

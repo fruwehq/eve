@@ -14,6 +14,13 @@ USAGE
 INSTANCE_NAME=""
 PACKAGE=""
 DRY_RUN=0
+TMP_OVERLAY=""
+
+cleanup() {
+  [ -z "$TMP_OVERLAY" ] || rm -f "$TMP_OVERLAY"
+  [ -z "${STAGE:-}" ] || rm -rf "$STAGE"
+}
+trap cleanup EXIT
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -47,44 +54,105 @@ fi
 
 cd "$(git rev-parse --show-toplevel)"
 
+if [ -n "${EVE_INSTANCE_REGISTRY:-}" ]; then
+  TMP_OVERLAY=$(mktemp "${TMPDIR:-/tmp}/eve-package-provision-overlay.XXXXXX.yaml")
+  ./scripts/instance-profile-overlay --registry "$EVE_INSTANCE_REGISTRY" --instance "$INSTANCE_NAME" --output "$TMP_OVERLAY" >/dev/null
+  export EVE_CATALOG_LOCAL="$TMP_OVERLAY"
+fi
 RESOLVED_ENV=$(./scripts/profile-resolve --profile "$INSTANCE_NAME" --emit env)
 env_value() {
   printf '%s\n' "$RESOLVED_ENV" | awk -F= -v key="$1" '$1 == key { print substr($0, index($0, "=") + 1) }'
 }
 
 OS_FAMILY=$(env_value OS_FAMILY)
+OS_ID=$(env_value OS_ID)
 PROFILE_NAME=$(env_value PROFILE_NAME)
 PROVIDER=$(env_value PROVIDER)
+BUNDLE_PACKAGES=$(env_value BUNDLE_PACKAGES)
+OS_PROVISION_DIR="oses/$OS_ID/provision"
 
 if [ "$OS_FAMILY" != "ubuntu" ]; then
   echo "package-provision: granular package install is only implemented for ubuntu, got $OS_FAMILY" >&2
   exit 2
 fi
+if [ ! -d "$OS_PROVISION_DIR" ]; then
+  echo "package-provision: OS provisioning directory not found: $OS_PROVISION_DIR" >&2
+  exit 2
+fi
+OS_PROVISION_DIR=$(cd "$OS_PROVISION_DIR" && pwd -P)
 
 # Read install metadata from the package plugin manifest so adding a new
-# package only requires touching its plugins/packages/<id>/egame-plugin.yaml.
+# package only requires touching its plugins/packages/<id>/eve-plugin.yaml.
 PLUGIN_DOC=$(./scripts/plugin-list --kind package --json)
-PLUGIN_INSTALL=$(printf '%s' "$PLUGIN_DOC" | jq --arg id "$PACKAGE" '.plugins[] | select(.id == $id) | .install.ubuntu // null')
 
-if [ -z "$PLUGIN_INSTALL" ] || [ "$PLUGIN_INSTALL" = "null" ]; then
-  echo "package-provision: no ubuntu install step mapping for package: $PACKAGE" >&2
+# Topologically expand the install chain for $PACKAGE: any package the
+# manifest lists under depends_on contributes its install steps and
+# markers first, so a single `make package.install` for a dependent
+# package brings the dependency along automatically. Cycles raise.
+chain_json=$(
+  printf '%s' "$PLUGIN_DOC" | jq --arg root "$PACKAGE" '
+    .plugins as $plugins
+    | ($plugins | map({key: .id, value: .}) | from_entries) as $by_id
+    | def visit(id; stack):
+        if ($by_id[id] // null) == null then
+          error("package-provision: unknown package id: " + id)
+        elif (stack | index(id)) then
+          error("package-provision: dependency cycle: " + ((stack + [id]) | join(" -> ")))
+        else
+          ($by_id[id] as $plugin
+            | ($plugin.depends_on // []) as $deps
+            | reduce $deps[] as $dep ([]; . + visit($dep; stack + [id]))
+            | . + [$plugin]) end;
+    # Stable first-occurrence dedup; unique_by would reorder by id and
+    # destroy the topological ordering.
+    reduce visit($root; [])[] as $p ([];
+      if any(.[]; .id == $p.id) then . else . + [$p] end)
+  '
+)
+
+if [ -z "$chain_json" ]; then
+  echo "package-provision: no install chain for $PACKAGE" >&2
   exit 2
 fi
 
 steps=()
-while IFS= read -r step; do
-  steps+=("$step")
-done < <(printf '%s' "$PLUGIN_INSTALL" | jq -r '.steps // [] | .[]')
+step_roots=()
+package_markers=()
+while IFS= read -r plugin_id; do
+  plugin_install=$(printf '%s' "$chain_json" | jq --arg id "$plugin_id" '.[] | select(.id == $id) | .install.ubuntu // null')
+  if [ -z "$plugin_install" ] || [ "$plugin_install" = "null" ]; then
+    echo "package-provision: no ubuntu install step mapping for package: $plugin_id" >&2
+    exit 2
+  fi
+
+  plugin_root=$(printf '%s' "$chain_json" | jq -r --arg id "$plugin_id" '.[] | select(.id == $id) | .path' | xargs dirname)
+
+  while IFS= read -r step; do
+    [ -n "$step" ] || continue
+    skip=0
+    for existing in "${steps[@]:-}"; do
+      [ "$existing" = "$step" ] && skip=1 && break
+    done
+    if [ "$skip" -eq 0 ]; then
+      steps+=("$step")
+      step_roots+=("$plugin_root")
+    fi
+  done < <(printf '%s' "$plugin_install" | jq -r '.steps // [] | .[]')
+
+  while IFS= read -r marker; do
+    [ -n "$marker" ] || continue
+    skip=0
+    for existing in "${package_markers[@]:-}"; do
+      [ "$existing" = "$marker" ] && skip=1 && break
+    done
+    [ "$skip" -eq 0 ] && package_markers+=("$marker")
+  done < <(printf '%s' "$plugin_install" | jq -r --arg id "$plugin_id" '(.package_markers // [$id]) | .[]')
+done < <(printf '%s' "$chain_json" | jq -r '.[].id')
+
 if [ "${#steps[@]}" -eq 0 ]; then
   echo "package-provision: ubuntu install steps for $PACKAGE are empty in plugin manifest" >&2
   exit 2
 fi
-
-# package_markers default to [PACKAGE] when the manifest does not override it.
-package_markers=()
-while IFS= read -r marker; do
-  package_markers+=("$marker")
-done < <(printf '%s' "$PLUGIN_INSTALL" | jq -r --arg id "$PACKAGE" '(.package_markers // [$id]) | .[]')
 
 if [ "$DRY_RUN" -eq 1 ]; then
   jq -n \
@@ -104,7 +172,7 @@ if ! ./scripts/instance-ssh "$INSTANCE_NAME" -- 'sudo -n true' >/dev/null 2>&1; 
     echo "[package-provision] configuring passwordless sudo for Raspberry Pi provisioning"
     # shellcheck disable=SC2016
     printf '%s\n' "$RASPBERRY_PI_USER_PASSWORD" | ./scripts/instance-ssh "$INSTANCE_NAME" -- \
-      'tmp=$(mktemp); printf "%s ALL=(ALL) NOPASSWD:ALL\n" "$USER" > "$tmp"; chmod 0440 "$tmp"; sudo -S -p "" install -o root -g root -m 0440 "$tmp" /etc/sudoers.d/90-egame-provision; rm -f "$tmp"; sudo -n visudo -cf /etc/sudoers.d/90-egame-provision'
+      'tmp=$(mktemp); printf "%s ALL=(ALL) NOPASSWD:ALL\n" "$USER" > "$tmp"; chmod 0440 "$tmp"; sudo -S -p "" install -o root -g root -m 0440 "$tmp" /etc/sudoers.d/90-eve-provision; rm -f "$tmp"; sudo -n visudo -cf /etc/sudoers.d/90-eve-provision'
   fi
 fi
 
@@ -114,27 +182,63 @@ if ! ./scripts/instance-ssh "$INSTANCE_NAME" -- 'sudo -n true' >/dev/null 2>&1; 
 fi
 
 STAGE=$(mktemp -d)
-trap 'rm -rf "$STAGE"' EXIT
-cp -R linux/provision/scripts "$STAGE/scripts"
+cp -R "$OS_PROVISION_DIR/scripts" "$STAGE/scripts"
 mkdir -p "$STAGE/state"
+
+copy_step() {
+  local step="$1"
+  local plugin_root="$2"
+  local source=""
+  local target
+  target="$STAGE/scripts/steps/$(basename "$step")"
+
+  if [ -f "$OS_PROVISION_DIR/scripts/steps/$step" ]; then
+    source="$OS_PROVISION_DIR/scripts/steps/$step"
+  elif [ -f "$plugin_root/$step" ]; then
+    source="$plugin_root/$step"
+  else
+    echo "package-provision: install step not found: $step" >&2
+    exit 2
+  fi
+
+  cp "$source" "$target"
+}
+
+for index in "${!steps[@]}"; do
+  copy_step "${steps[$index]}" "${step_roots[$index]}"
+done
 
 # The provision steps are package-gated. Include only the requested package and
 # explicit dependency markers so installs do not accidentally run the full bundle.
 printf '%s\n' "${package_markers[@]}" > "$STAGE/state/bundle_packages"
+printf '%s\n' "$BUNDLE_PACKAGES" | tr ',' '\n' > "$STAGE/state/selected_packages"
 
 _HOST_TZ="${TIMEZONE:-}"
 if [ -z "$_HOST_TZ" ]; then
   _LINK=$(readlink /etc/localtime 2>/dev/null || true)
   _HOST_TZ=$(echo "$_LINK" | sed -n 's|.*/zoneinfo/||p')
 fi
+THINLINC_AGENT_HOSTNAME_DEFAULT="${THINLINC_AGENT_HOSTNAME:-}"
+if [ "$PACKAGE" = "thinlinc" ] && [ -z "$THINLINC_AGENT_HOSTNAME_DEFAULT" ]; then
+  THINLINC_AGENT_HOSTNAME_DEFAULT="$(./scripts/instance-ip "$INSTANCE_NAME" 2>/dev/null || true)"
+fi
 
 cat > "$STAGE/state/env" <<EOF
+export ACCESS_BOOTSTRAP_USER="$(env_value ACCESS_BOOTSTRAP_USER)"
+export ACCESS_HUMAN_USER="$(env_value ACCESS_HUMAN_USER)"
+export ACCESS_PROVISION_USER="$(env_value ACCESS_PROVISION_USER)"
 export OS_FAMILY="$OS_FAMILY"
 export PROFILE_NAME="$PROFILE_NAME"
+export HUMAN_USER_NAME="$(env_value HUMAN_USER_NAME)"
+export PROVISION_USER_NAME="$(env_value PROVISION_USER_NAME)"
+export VM_USER_NAME="$(env_value VM_USER_NAME)"
+export VM_USER_PASSWORD="${VM_USER_PASSWORD:-}"
 export EPHEMERAL_DISPLAY_RESOLUTION="${EPHEMERAL_DISPLAY_RESOLUTION:-}"
 export EPHEMERAL_DISPLAY_FPS="${EPHEMERAL_DISPLAY_FPS:-}"
 export PROVIDER="$PROVIDER"
 export EPHEMERAL_SUNSHINE_PASSWORD="${EPHEMERAL_SUNSHINE_PASSWORD:-}"
+export RDP_GATE_PASSWORD="${RDP_GATE_PASSWORD:-}"
+export RDP_GATE_USER="${RDP_GATE_USER:-}"
 export RASPBERRY_PI_HDMI_CONNECTOR="${RASPBERRY_PI_HDMI_CONNECTOR:-}"
 export RASPBERRY_PI_HDMI_MODE="${RASPBERRY_PI_HDMI_MODE:-}"
 export RUSTDESK_KEY="${RUSTDESK_KEY:-}"
@@ -142,18 +246,39 @@ export RUSTDESK_PASSWORD="${RUSTDESK_PASSWORD:-}"
 export RUSTDESK_SERVER="${RUSTDESK_SERVER:-}"
 export SUNSHINE_MAX_BITRATE_KBPS="${SUNSHINE_MAX_BITRATE_KBPS:-}"
 export SUNSHINE_VERSION="${SUNSHINE_VERSION:-}"
+export THINLINC_ACCEPT_EULA="${THINLINC_ACCEPT_EULA:-}"
+export THINLINC_AGENT_HOSTNAME="${THINLINC_AGENT_HOSTNAME_DEFAULT:-}"
+export THINLINC_SERVER_BUNDLE_PATH="${THINLINC_REMOTE_SERVER_BUNDLE_PATH:-${THINLINC_SERVER_BUNDLE_PATH:-}}"
+export THINLINC_SERVER_BUNDLE_URL="${THINLINC_SERVER_BUNDLE_URL:-}"
+export THINLINC_WEBACCESS_PORT="${THINLINC_WEBACCESS_PORT:-}"
 export TIMEZONE="$_HOST_TZ"
+export VIRTUAL_MONITOR_WIDTH="${VIRTUAL_MONITOR_WIDTH:-1920}"
+export VIRTUAL_MONITOR_HEIGHT="${VIRTUAL_MONITOR_HEIGHT:-1080}"
 EOF
 
-echo "[package-provision] uploading linux/provision scripts for package=$PACKAGE"
-./scripts/instance-ssh "$INSTANCE_NAME" -- 'rm -rf ~/provision/scripts && mkdir -p ~/provision/state ~/provision/logs ~/provision/downloads'
-./scripts/instance-ssh "$INSTANCE_NAME" --scp "$STAGE/scripts" 'provision/'
-./scripts/instance-ssh "$INSTANCE_NAME" --scp "$STAGE/state/bundle_packages" 'provision/state/'
-./scripts/instance-ssh "$INSTANCE_NAME" --scp "$STAGE/state/env" 'provision/state/'
+echo "[package-provision] uploading $OS_PROVISION_DIR scripts for package=$PACKAGE"
+./scripts/ssh-retry "prepare linux package provision directory" ./scripts/instance-ssh "$INSTANCE_NAME" -- 'rm -rf ~/provision/scripts && mkdir -p ~/provision/state ~/provision/logs ~/provision/downloads'
+if [ "$PACKAGE" = "thinlinc" ] && [ -n "${THINLINC_SERVER_BUNDLE_PATH:-}" ]; then
+  if [ ! -e "$THINLINC_SERVER_BUNDLE_PATH" ]; then
+    echo "package-provision: THINLINC_SERVER_BUNDLE_PATH does not exist: $THINLINC_SERVER_BUNDLE_PATH" >&2
+    exit 2
+  fi
+  bundle_basename="$(basename "$THINLINC_SERVER_BUNDLE_PATH")"
+  THINLINC_REMOTE_SERVER_BUNDLE_PATH="\$HOME/provision/downloads/thinlinc/$bundle_basename"
+  # Regenerate env after resolving the remote upload path.
+  sed -i.bak "s|^export THINLINC_SERVER_BUNDLE_PATH=.*|export THINLINC_SERVER_BUNDLE_PATH=\"$THINLINC_REMOTE_SERVER_BUNDLE_PATH\"|" "$STAGE/state/env"
+  rm -f "$STAGE/state/env.bak"
+  ./scripts/ssh-retry "prepare ThinLinc bundle directory" ./scripts/instance-ssh "$INSTANCE_NAME" -- 'rm -rf ~/provision/downloads/thinlinc && mkdir -p ~/provision/downloads/thinlinc'
+  ./scripts/ssh-retry "upload ThinLinc server bundle" ./scripts/instance-ssh "$INSTANCE_NAME" --scp "$THINLINC_SERVER_BUNDLE_PATH" 'provision/downloads/thinlinc'
+fi
+./scripts/ssh-retry "upload linux package scripts" ./scripts/instance-ssh "$INSTANCE_NAME" --scp "$STAGE/scripts" 'provision/'
+./scripts/ssh-retry "upload linux package bundle list" ./scripts/instance-ssh "$INSTANCE_NAME" --scp "$STAGE/state/bundle_packages" 'provision/state/'
+./scripts/ssh-retry "upload linux selected package list" ./scripts/instance-ssh "$INSTANCE_NAME" --scp "$STAGE/state/selected_packages" 'provision/state/'
+./scripts/ssh-retry "upload linux package environment" ./scripts/instance-ssh "$INSTANCE_NAME" --scp "$STAGE/state/env" 'provision/state/'
 
 remote_steps=""
 for step in "${steps[@]}"; do
-  remote_steps="$remote_steps ~/provision/scripts/steps/$step"
+  remote_steps="$remote_steps ~/provision/scripts/steps/$(basename "$step")"
 done
 
 echo "[package-provision] running package=$PACKAGE steps:${remote_steps}"

@@ -2,9 +2,9 @@
 set -euo pipefail
 
 # Run terraform plan for a profile's stacks.
-# Usage: scripts/tf-plan <profile>
+# Usage: scripts/tf-plan <instance>
 
-PROFILE="${1:?Usage: scripts/tf-plan <profile>}"
+PROFILE="${1:?Usage: scripts/tf-plan <instance>}"
 cd "$(git rev-parse --show-toplevel)"
 
 RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
@@ -17,13 +17,6 @@ fi
 
 TAGS=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^STACK_TAGS=/{print $2}')
 echo "[tf-plan] profile=$PROFILE tags=$TAGS"
-PROVIDER=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^PROVIDER=/{print $2}')
-if [ "$PROVIDER" = "gcp" ]; then
-  PROJECT=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^GOOGLE_CLOUD_PROJECT=/{print $2}')
-  REGION=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^LOCATION_REGION=/{print $2}')
-  ZONE=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^LOCATION_ZONE=/{print $2}')
-  echo "[tf-plan] gcp project=$PROJECT region=$REGION zone=$ZONE"
-fi
 
 terramate generate
 

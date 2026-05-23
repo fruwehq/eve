@@ -1,10 +1,13 @@
 #!/usr/bin/env ruby
 # Dispatch package lifecycle commands through package plugins.
+# State writes go through core/sdk/state.rb (sole state owner).
 
 require "json"
 require "open3"
 
 ROOT = File.expand_path("..", __dir__)
+$LOAD_PATH.unshift(File.join(ROOT, "core"))
+require "sdk"
 
 def usage
   warn <<~USAGE
@@ -31,17 +34,14 @@ def command_vector(plugin, spec)
 end
 
 def record_state(instance_name, operation, status, package_id, package_state = nil, error = nil)
-  return if ENV["EGAME_DISABLE_STATE"] == "1"
+  return if ENV["EVE_DISABLE_STATE"] == "1"
 
-  cmd = [
-    File.join(ROOT, "scripts/instance-state"),
-    "--instance", instance_name,
-    "--operation", operation,
-    "--status", status
-  ]
-  cmd += ["--package", package_id, "--package-state", package_state] if package_state
-  cmd += ["--error", error] if error
-  system(*cmd, out: File::NULL, err: File::NULL)
+  Eve::SDK::State.record_operation(
+    instance_name, operation, status,
+    package: package_id,
+    package_state: package_state,
+    error: error
+  )
 end
 
 PACKAGE_STATUS_VALUES = %w[installed missing unknown failed].freeze
@@ -51,21 +51,33 @@ def run_plugin(plugin, command, resolved, dry_run)
   raise "package plugin #{plugin["id"]} has no command: #{command}" unless spec
 
   env = ENV.to_h.merge(
-    "EGAME_INSTANCE_NAME" => resolved.fetch("instance").fetch("name"),
-    "EGAME_PACKAGE_PLUGIN" => plugin.fetch("id"),
-    "EGAME_PACKAGE_PLUGIN_ROOT" => File.dirname(plugin.fetch("path"))
+    "EVE_INSTANCE_NAME" => resolved.fetch("instance").fetch("name"),
+    "EVE_PACKAGE_PLUGIN" => plugin.fetch("id"),
+    "EVE_PACKAGE_PLUGIN_ROOT" => File.dirname(plugin.fetch("path")),
+    "EVE_RESOLVED_JSON" => JSON.generate(resolved)
   )
-  env["EGAME_PLUGIN_DRY_RUN"] = "1" if dry_run
+  env["EVE_PLUGIN_DRY_RUN"] = "1" if dry_run
 
   cmd = command_vector(plugin, spec)
-  out = nil
+  out = +""
   Open3.popen3(env, *cmd, chdir: ROOT) do |stdin, stdout, stderr, wait_thr|
     stdin.write(JSON.generate(resolved))
     stdin.close
-    out = stdout.read
-    err = stderr.read
-    warn err unless err.empty?
-    print out
+
+    stdout_reader = Thread.new do
+      stdout.each_line do |line|
+        out << line
+        print line
+      end
+    end
+    stderr_reader = Thread.new do
+      stderr.each_line do |line|
+        warn line
+      end
+    end
+
+    stdout_reader.join
+    stderr_reader.join
     raise "package command failed: #{command}" unless wait_thr.value.success?
   end
   out
@@ -73,6 +85,11 @@ end
 
 def package_status_from_output(output)
   return nil if output.nil? || output.empty?
+
+  validate_pkg_output = lambda do |parsed|
+    return nil unless parsed.key?("status")
+    Eve::SDK::Contract.validate_output!(parsed, def_name: "package_command_output")
+  end
 
   (output.length - 1).downto(0) do |index|
     next unless output[index] == "{"
@@ -82,6 +99,7 @@ def package_status_from_output(output)
     rescue JSON::ParserError
       next
     end
+    next unless validate_pkg_output.call(parsed)
     status = parsed["status"]
     return status if PACKAGE_STATUS_VALUES.include?(status)
   end
@@ -95,6 +113,7 @@ def package_status_from_output(output)
     rescue JSON::ParserError
       next
     end
+    next unless validate_pkg_output.call(parsed)
     status = parsed["status"]
     return status if PACKAGE_STATUS_VALUES.include?(status)
   end
@@ -117,12 +136,15 @@ def validate_package_support!(package_id, plugin, resolved)
   validate_support_value!(package_id, supports, os.fetch("id"), "os_ids", "OS")
   validate_support_value!(package_id, supports, os.fetch("version", ""), "os_versions", "OS version")
   validate_support_value!(package_id, supports, os.fetch("version", ""), "#{os_family}_versions", "#{os_family} version")
+  if os_family == "ubuntu" && package_id == "rustdesk" && resolved.fetch("bundle_packages", []).include?("gnome-desktop")
+    raise "package plugin rustdesk is disabled for gnome-desktop because RustDesk cannot unattended-capture GNOME/Wayland sessions"
+  end
 end
 
 instance_name = nil
 package_id = nil
 command = nil
-registry_path = ENV["EGAME_INSTANCE_REGISTRY"] ? File.expand_path(ENV["EGAME_INSTANCE_REGISTRY"], Dir.pwd) : nil
+registry_path = ENV["EVE_INSTANCE_REGISTRY"] ? File.expand_path(ENV["EVE_INSTANCE_REGISTRY"], Dir.pwd) : nil
 dry_run = false
 yes = false
 
@@ -165,6 +187,13 @@ begin
   resolve_cmd += ["--registry", registry_path] if registry_path
   resolved = run_json(*resolve_cmd)
 
+  begin
+    Eve::SDK::Contract.validate_input!(resolved)
+  rescue Eve::SDK::ContractError => e
+    warn "package-dispatch: #{e.message}"
+    exit 1
+  end
+
   plugin_doc = run_json(File.join(ROOT, "scripts/plugin-list"), "--kind", "package", "--json")
   plugin = plugin_doc.fetch("plugins").find { |entry| entry["id"] == package_id }
   raise "package plugin not found: #{package_id}" unless plugin
@@ -172,8 +201,8 @@ begin
   validate_package_support!(package_id, plugin, resolved)
 
   destructive = plugin.dig("down", "destructive") == true
-  if %w[down reinstall].include?(command) && destructive && !yes && ENV["EGAME_CONFIRM_DESTRUCTIVE"] != "1"
-    raise "package #{package_id} down is destructive; pass --yes or EGAME_CONFIRM_DESTRUCTIVE=1"
+  if %w[down reinstall].include?(command) && destructive && !yes && ENV["EVE_CONFIRM_DESTRUCTIVE"] != "1"
+    raise "package #{package_id} down is destructive; pass --yes or EVE_CONFIRM_DESTRUCTIVE=1"
   end
 
   paths_cmd = [File.join(ROOT, "scripts/instance-paths"), "--instance", instance_name, "--emit", "json"]
@@ -184,8 +213,8 @@ begin
   overlay_cmd += ["--registry", registry_path] if registry_path
   overlay_out, overlay_status = Open3.capture2e(*overlay_cmd)
   raise overlay_out unless overlay_status.success?
-  ENV["EGAME_CATALOG_LOCAL"] = overlay
-  ENV["EGAME_INSTANCE_REGISTRY"] = registry_path if registry_path
+  ENV["EVE_CATALOG_LOCAL"] = overlay
+  ENV["EVE_INSTANCE_REGISTRY"] = registry_path if registry_path
 
   record_state(instance_name, "package.#{command}", "running", package_id) unless dry_run
 
@@ -205,14 +234,20 @@ begin
                   end
   record_state(instance_name, "package.#{command}", "succeeded", package_id, package_state) unless dry_run
 rescue StandardError => e
-  record_state(
-    instance_name,
-    "package.#{command || "unknown"}",
-    "failed",
-    package_id || "unknown",
-    "failed",
-    e.message
-  ) if instance_name && package_id && !dry_run
+  if instance_name && package_id && !dry_run
+    begin
+      record_state(
+        instance_name,
+        "package.#{command || "unknown"}",
+        "failed",
+        package_id || "unknown",
+        "failed",
+        e.message
+      )
+    rescue StandardError => se
+      warn "package-dispatch: failed to record failure state: #{se.message}"
+    end
+  end
   warn "package-dispatch: #{e.message}"
   exit 1
 end

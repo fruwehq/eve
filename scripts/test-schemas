@@ -1,0 +1,330 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Validate JSON Schemas (draft 2020-12) and their fixtures.
+# Usage: scripts/test-schemas
+
+require "bundler/setup"
+require "json"
+require "yaml"
+require "json_schemer"
+
+ROOT = File.expand_path("..", __dir__)
+SCHEMA_DIR = File.join(ROOT, "core", "schema")
+FIXTURE_REGISTRY = File.join(ROOT, "tests", "fixtures", "instances.yaml")
+OBSERVED_DIR = File.join(ROOT, "tests", "fixtures", "observed-state")
+
+$failures = 0
+
+def pass(msg)
+  puts "[OK]   #{msg}"
+end
+
+def fail(msg)
+  puts "[FAIL] #{msg}"
+  $failures += 1
+end
+
+def load_schema(path)
+  raw = File.read(path)
+  JSON.parse(raw)
+end
+
+def load_yaml(path)
+  raw = File.read(path)
+  YAML.safe_load(raw, permitted_classes: [], aliases: true)
+end
+
+def schemer_from_file(path)
+  JSONSchemer.schema(load_schema(path))
+end
+
+def validate_data(schemer, data)
+  errors = schemer.validate(data).to_a
+  errors.each do |err|
+    ptr = err["data_pointer"]
+    detail = err["error"] || err["type"].to_s
+    $stderr.puts "    #{ptr.empty? ? "/" : ptr}: #{detail}"
+  end
+  errors.empty?
+end
+
+# ---------- Schema meta-validation ----------
+puts "\n== schemas: meta-validation =="
+
+Dir.glob(File.join(SCHEMA_DIR, "*.schema.json")).sort.each do |path|
+  name = File.basename(path)
+  schema = load_schema(path)
+  errors = JSONSchemer.validate_schema(schema).to_a
+  if errors.empty?
+    pass "#{name} meta-valid"
+  else
+    fail "#{name} meta-valid"
+    errors.each do |err|
+      ptr = err["data_pointer"]
+      detail = err["error"] || err["type"].to_s
+      $stderr.puts "    #{ptr.empty? ? "/" : ptr}: #{detail}"
+    end
+  end
+end
+
+# ---------- resolved-instance validation ----------
+puts "\n== schemas: resolved-instance =="
+
+resolved_schema_path = File.join(SCHEMA_DIR, "resolved-instance.schema.json")
+resolved_schemer = schemer_from_file(resolved_schema_path)
+
+registry = load_yaml(FIXTURE_REGISTRY)
+instances = registry["instances"] || []
+
+instances.each do |inst|
+  name = inst["name"]
+  label = "resolved-instance: #{name}"
+
+  json_str = IO.popen(
+    { "EVE_INSTANCE_REGISTRY" => FIXTURE_REGISTRY },
+    [File.join(ROOT, "scripts", "instance-resolve"), "--instance", name, "--emit", "json"],
+    err: File::NULL
+  ) { |io| io.read }
+
+  if $?.nil? || !$?.success?
+    fail "#{label} (resolve failed)"
+    next
+  end
+
+  begin
+    data = JSON.parse(json_str)
+  rescue JSON::ParserError => e
+    fail "#{label} (JSON parse: #{e.message})"
+    next
+  end
+
+  if validate_data(resolved_schemer, data)
+    pass label
+  else
+    fail label
+  end
+end
+
+# ---------- plugin-manifest validation (shipped) ----------
+puts "\n== schemas: plugin-manifest (shipped) =="
+
+manifest_schema_path = File.join(SCHEMA_DIR, "plugin-manifest.schema.json")
+manifest_schemer = schemer_from_file(manifest_schema_path)
+shipped = 0
+
+Dir.glob(File.join(ROOT, "plugins", "*", "*", "eve-plugin.yaml")).sort.each do |path|
+  rel = path.sub(%r{^#{ROOT}/plugins/}, "")
+  shipped += 1
+  data = load_yaml(path)
+  if validate_data(manifest_schemer, data)
+    pass "shipped: #{rel}"
+  else
+    fail "shipped: #{rel}"
+  end
+end
+puts "  (#{shipped} shipped manifests checked)"
+
+# ---------- plugin-manifest: test fixtures (positive) ----------
+puts "\n== schemas: plugin-manifest (fixture positive) =="
+
+Dir.glob(File.join(ROOT, "tests", "fixtures", "plugins", "*", "*", "eve-plugin.yaml")).sort.each do |path|
+  dir_name = File.basename(File.dirname(path))
+  next if dir_name.start_with?("bad")
+
+  rel = path.sub(%r{^#{ROOT}/tests/fixtures/plugins/}, "")
+  data = load_yaml(path)
+  if validate_data(manifest_schemer, data)
+    pass "fixture+: #{rel}"
+  else
+    fail "fixture+: #{rel}"
+  end
+end
+
+# ---------- plugin-manifest: negative fixtures ----------
+puts "\n== schemas: plugin-manifest (negative) =="
+
+negative_patterns = [
+  File.join(ROOT, "tests", "fixtures", "plugins", "*", "bad*", "eve-plugin.yaml"),
+  File.join(ROOT, "tests", "fixtures", "plugins", "*", "*", "bad*", "eve-plugin.yaml")
+]
+negative_manifests = negative_patterns.flat_map { |p| Dir.glob(p) }.uniq.sort
+
+negative_manifests.each do |path|
+  next unless File.file?(path)
+  rel = path.sub(%r{^#{ROOT}/tests/fixtures/plugins/}, "")
+  data = load_yaml(path)
+  errors = manifest_schemer.validate(data).to_a
+  if errors.empty?
+    fail "negative: #{rel} (should have failed validation)"
+  else
+    pass "negative: #{rel} (correctly rejected)"
+  end
+end
+
+# ---------- observed-state validation ----------
+puts "\n== schemas: observed-state (fixtures) =="
+
+observed_schema_path = File.join(SCHEMA_DIR, "observed-state.schema.json")
+observed_schemer = schemer_from_file(observed_schema_path)
+
+if Dir.exist?(OBSERVED_DIR)
+  Dir.glob(File.join(OBSERVED_DIR, "*.json")).sort.each do |path|
+    name = File.basename(path)
+    data = load_schema(path)
+
+    if name.start_with?("bad")
+      errors = observed_schemer.validate(data).to_a
+      if errors.empty?
+        fail "negative observed-state: #{name} (should have failed validation)"
+      else
+        pass "negative observed-state: #{name} (correctly rejected)"
+      end
+    else
+      if validate_data(observed_schemer, data)
+        pass "observed-state: #{name}"
+      else
+        fail "observed-state: #{name}"
+      end
+    end
+  end
+else
+  puts "  (no observed-state fixtures found)"
+end
+
+# ---------- observed-state: live state files ----------
+puts "\n== schemas: observed-state (live) =="
+
+state_dir = File.join(ROOT, ".eve", "state", "instances")
+if Dir.exist?(state_dir)
+  found = 0
+  Dir.glob(File.join(state_dir, "*.json")).sort.each do |path|
+    found += 1
+    name = File.basename(path)
+    data = load_schema(path)
+    if validate_data(observed_schemer, data)
+      pass "live-state: #{name}"
+    else
+      fail "live-state: #{name}"
+    end
+  end
+  puts "  (no live state files)" if found.zero?
+else
+  puts "  (no live state directory)"
+end
+
+# ---------- config defaults validation ----------
+puts "\n== schemas: config (defaults) =="
+
+config_schema_path = File.join(SCHEMA_DIR, "config.schema.json")
+config_schemer = schemer_from_file(config_schema_path)
+defaults_path = File.join(ROOT, "config", "defaults.yaml")
+
+if File.exist?(defaults_path)
+  defaults_data = load_yaml(defaults_path)
+  if validate_data(config_schemer, defaults_data)
+    pass "config/defaults.yaml validates against config.schema.json"
+  else
+    fail "config/defaults.yaml validates against config.schema.json"
+  end
+else
+  puts "  (config/defaults.yaml not found)"
+end
+
+# ---------- plugin-manifest: config_schema validation ----------
+puts "\n== schemas: plugin-manifest config_schema (shipped) =="
+
+shipped_config = 0
+Dir.glob(File.join(ROOT, "plugins", "*", "*", "eve-plugin.yaml")).sort.each do |path|
+  data = load_yaml(path)
+  next unless data.is_a?(Hash) && data.key?("config_schema")
+
+  rel = path.sub(%r{^#{ROOT}/plugins/}, "")
+  config_schema_data = data["config_schema"]
+  if config_schema_data.is_a?(Hash)
+    errors = manifest_schemer.validate(data).to_a
+    schema_errors = errors.select { |e| e["data_pointer"].include?("config_schema") }
+    if schema_errors.empty?
+      pass "config_schema: #{rel}"
+    else
+      fail "config_schema: #{rel}"
+      schema_errors.each do |err|
+        ptr = err["data_pointer"]
+        detail = err["error"] || err["type"].to_s
+        $stderr.puts "    #{ptr}: #{detail}"
+      end
+    end
+  end
+  shipped_config += 1
+end
+puts "  (#{shipped_config} shipped config_schema blocks checked)" if shipped_config.positive?
+
+# ---------- provision-manifest validation ----------
+puts "\n== schemas: provision-manifest (fixtures) =="
+
+manifest_prov_schema_path = File.join(SCHEMA_DIR, "provision-manifest.schema.json")
+manifest_prov_schemer = schemer_from_file(manifest_prov_schema_path)
+manifest_prov_dir = File.join(ROOT, "tests", "fixtures", "provision-manifest")
+
+if Dir.exist?(manifest_prov_dir)
+  Dir.glob(File.join(manifest_prov_dir, "*.json")).sort.each do |path|
+    name = File.basename(path)
+    data = load_schema(path)
+
+    if name.start_with?("bad")
+      errors = manifest_prov_schemer.validate(data).to_a
+      if errors.empty?
+        fail "negative provision-manifest: #{name} (should have failed validation)"
+      else
+        pass "negative provision-manifest: #{name} (correctly rejected)"
+      end
+    else
+      if validate_data(manifest_prov_schemer, data)
+        pass "provision-manifest: #{name}"
+      else
+        fail "provision-manifest: #{name}"
+      end
+    end
+  end
+else
+  puts "  (no provision-manifest fixtures found)"
+end
+
+# ---------- provision-status validation ----------
+puts "\n== schemas: provision-status (fixtures) =="
+
+status_prov_schema_path = File.join(SCHEMA_DIR, "provision-status.schema.json")
+status_prov_schemer = schemer_from_file(status_prov_schema_path)
+status_prov_dir = File.join(ROOT, "tests", "fixtures", "provision-status")
+
+if Dir.exist?(status_prov_dir)
+  Dir.glob(File.join(status_prov_dir, "*.json")).sort.each do |path|
+    name = File.basename(path)
+    data = load_schema(path)
+
+    if name.start_with?("bad")
+      errors = status_prov_schemer.validate(data).to_a
+      if errors.empty?
+        fail "negative provision-status: #{name} (should have failed validation)"
+      else
+        pass "negative provision-status: #{name} (correctly rejected)"
+      end
+    else
+      if validate_data(status_prov_schemer, data)
+        pass "provision-status: #{name}"
+      else
+        fail "provision-status: #{name}"
+      end
+    end
+  end
+else
+  puts "  (no provision-status fixtures found)"
+end
+
+# ---------- Summary ----------
+puts ""
+if $failures.positive?
+  $stderr.puts "#{$failures} check(s) failed."
+  exit 1
+end
+puts "All schema checks passed."

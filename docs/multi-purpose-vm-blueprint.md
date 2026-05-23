@@ -85,7 +85,7 @@ Instead of path-only presets like `aws/linux/dev-sandbox`, define reusable catal
 - `inits[]`
 - `packages[]` and/or `bundles[]`
 - `locations[]`
-- concrete instances in `.egame/instances.yaml` (composition entries)
+- concrete instances in `.eve/instances.yaml` (composition entries)
 
 ## Example manifest (aligned with your idea)
 
@@ -239,9 +239,10 @@ Fail fast at plan time with actionable errors.
 
 ## How this maps to current repo
 
-Given your current Terramate/Terraform layout:
+Given the current Terramate/Terraform layout:
 
-- Keep existing `stacks/aws/*` and `stacks/vultr/*` working.
+- Provider Terraform/Terramate implementation lives with each provider plugin
+  under `plugins/providers/<id>/stacks/` and `plugins/providers/<id>/modules/`.
 - Add a generated layer that resolves one concrete instance into provider-specific working files and Terraform/Terramate inputs.
 - Existing provider blocks (`aws`, `vultr`) and local backend setup remain valid.
 
@@ -272,7 +273,7 @@ Given your current Terramate/Terraform layout:
 
 - TrueNAS-hosted VM mapping.
   - Catalog scaffold is in place (`provider: truenas` + sample instance).
-  - Terramate stack/module implementation is in place (`stacks/truenas/*`, `modules/truenas/*`) with `deevus/truenas` provider and `truenas_vm` resource wiring.
+  - Terramate stack/module implementation is in place under `plugins/providers/truenas/` with `deevus/truenas` provider and `truenas_vm` resource wiring.
   - Current instance defaults are conservative (STOPPED by default, explicit SSH host key fingerprint required).
 - USB/metal (Raspberry Pi) machine kind with cloud-init/ansible init adaptation.
   - Prefer a dedicated machine/provider model such as `provider: raspberry-pi`, `kind: metal`.

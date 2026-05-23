@@ -1,4 +1,4 @@
 #!/usr/bin/env sh
 set -eu
 
-exec ./scripts/package-down-command opencode 'npm uninstall -g opencode-ai || true; rm -f ~/.local/bin/opencode'
+exec ./scripts/package-down-command opencode 'npm uninstall -g opencode-ai || true; sudo rm -f "$EVE_HUMAN_HOME/.local/bin/opencode"'

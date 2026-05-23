@@ -47,7 +47,12 @@ gha-creds-*.json
 # node
 node_modules
 
+# Python
+__pycache__/
+*.pyc
+
 # dotenv environment variable files
+.env.local.bak.*
 .env.*.local
 .env.local
 
@@ -58,7 +63,7 @@ node_modules
 .generated
 
 # v3 local instance registry and state
-.egame
+.eve
 
 # local catalog overrides (developer-specific, not committed)
 config/catalog.local.yaml

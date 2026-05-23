@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+set -eu
+
+exec ./scripts/package-down-command gnome-desktop-headless 'sudo sed -i "s/^user-session=.*/user-session=xfce/" /etc/lightdm/lightdm.conf.d/50-ephemeral-autologin.conf 2>/dev/null || true; sudo DEBIAN_FRONTEND=noninteractive apt-get remove -y gnome-session gnome-shell gnome-terminal nautilus mutter gdm3 gnome-remote-desktop ubuntu-desktop-minimal ubuntu-session yaru-theme-gtk yaru-theme-icon || true'

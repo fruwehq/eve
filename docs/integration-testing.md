@@ -45,7 +45,7 @@ smoked packages.
 
 It writes a JSON report under `tmp/integration-report-*.json`. Give that report
 to an LLM to summarize failures, propose next commands, or compare Linux versus
-Windows readiness. Use `--no-cleanup` or `EGAME_INTEGRATION_CLEANUP=0` when you
+Windows readiness. Use `--no-cleanup` or `EVE_INTEGRATION_CLEANUP=0` when you
 intentionally want to keep provider resources running after the test.
 
 For temporary smoke entries, also delete the local instance registry entries:

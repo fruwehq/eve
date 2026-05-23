@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Request a graceful shutdown of a Raspberry Pi via SSH.
+set -euo pipefail
+
+if [ -n "${EVE_INSTANCE_NAME:-}" ]; then
+  PROFILE="$EVE_INSTANCE_NAME"
+else
+  PROFILE="${1:?Usage: commands/stop <instance>}"
+fi
+cd "$(git rev-parse --show-toplevel)"
+
+echo "[stop] Requesting Raspberry Pi shutdown over SSH"
+./scripts/instance-ssh "$PROFILE" -- 'sudo shutdown -h now'

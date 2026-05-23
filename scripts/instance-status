@@ -1,10 +1,14 @@
 #!/usr/bin/env ruby
 # Emit a combined local status view for a concrete v3 instance.
+# State reads go through core/sdk/state.rb (sole state owner).
+# The JSON output is the shared view object consumed by the TUI.
 
 require "json"
 require "open3"
 
 ROOT = File.expand_path("..", __dir__)
+$LOAD_PATH.unshift(File.join(ROOT, "core"))
+require "sdk"
 
 def usage
   warn <<~USAGE
@@ -21,7 +25,7 @@ def run_json(*cmd)
 end
 
 instance_name = nil
-registry_path = ENV["EGAME_INSTANCE_REGISTRY"] ? File.expand_path(ENV["EGAME_INSTANCE_REGISTRY"], Dir.pwd) : nil
+registry_path = ENV["EVE_INSTANCE_REGISTRY"] ? File.expand_path(ENV["EVE_INSTANCE_REGISTRY"], Dir.pwd) : nil
 json = false
 
 args = ARGV.dup
@@ -59,39 +63,16 @@ begin
 
   resolved = run_json(*resolve_cmd)
   paths = run_json(*paths_cmd)
-  state = run_json(File.join(ROOT, "scripts/instance-state"), "--instance", instance_name, "--get")
-  package_state = state.fetch("package_state", {})
-  packages = run_json(*package_cmd).fetch("packages").map do |package|
-    package.merge("state" => package_state.fetch(package.fetch("id"), { "status" => "unknown" }))
-  end
-  selected_packages = packages.select { |package| package["selected"] }
-  package_summary = selected_packages.each_with_object(Hash.new(0)) do |package, summary|
-    summary[package.dig("state", "status") || "unknown"] += 1
-  end
-  %w[installed missing unknown failed removed reinstalled].each do |status_key|
-    package_summary[status_key] = package_summary.fetch(status_key, 0)
-  end
+  packages = run_json(*package_cmd).fetch("packages")
 
-  status = {
-    "instance" => {
-      "name" => instance_name,
-      "provider" => resolved.dig("machine", "provider"),
-      "provider_plugin" => resolved["provider_plugin"],
-      "engine" => resolved["engine"],
-      "machine" => resolved.dig("composition", "machine"),
-      "os" => resolved.dig("os", "id"),
-      "os_family" => resolved.dig("os", "family"),
-      "location" => resolved.dig("location", "name"),
-      "bundles" => resolved.dig("composition", "bundles") || []
-    },
-    "state" => state,
-    "packages" => {
-      "summary" => package_summary.sort.to_h,
-      "selected" => selected_packages,
-      "all" => packages
-    },
-    "paths" => paths
-  }
+  status = Eve::SDK::State.build_view(
+    instance_name: instance_name,
+    resolved: resolved,
+    packages: packages,
+    paths: paths
+  )
+
+  state = status["state"]
 
   if json
     puts JSON.pretty_generate(status)
@@ -104,8 +85,18 @@ begin
            state.fetch("desired_state"),
            state.fetch("provider_state"),
            state.fetch("provision_state")
+    observed = state.fetch("observed_state", {})
+    unless observed.empty?
+      printf "Observed: provider=%s ip=%s at=%s\n",
+             observed.fetch("provider_status", "unknown"),
+             observed.fetch("ip", "-"),
+             observed.fetch("observed_at", "unknown")
+      printf "Refresh error: %s\n", observed["refresh_error"] if observed["refresh_error"]
+    end
     printf "Last operation: %s\n", state["last_operation"] ? "#{state.dig("last_operation", "name")} #{state.dig("last_operation", "status")}" : "none"
     printf "Last error: %s\n", state["last_error"] || "none"
+    package_summary = status.fetch("packages", {}).fetch("summary", {})
+    selected_packages = status.fetch("packages", {}).fetch("selected", [])
     printf "Selected package states: installed=%d missing=%d unknown=%d failed=%d\n",
            package_summary.fetch("installed"),
            package_summary.fetch("missing"),

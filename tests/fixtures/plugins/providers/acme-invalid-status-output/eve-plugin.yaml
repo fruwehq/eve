@@ -1,0 +1,25 @@
+api_version: eve.plugin/v1
+kind: provider
+id: acme
+display_name: ACME Invalid Status Output
+commands:
+  resolve: {exec: commands/provider-command, args: [resolve]}
+  init: {exec: commands/provider-command, args: [init]}
+  plan: {exec: commands/provider-command, args: [plan]}
+  up: {exec: commands/provider-command, args: [up]}
+  down: {exec: commands/provider-command, args: [down]}
+  start: {exec: commands/provider-command, args: [start]}
+  stop: {exec: commands/provider-command, args: [stop]}
+  status: {exec: commands/provider-command, args: [status]}
+  ip: {exec: commands/provider-command, args: [ip]}
+  ssh: {exec: commands/provider-command, args: [ssh]}
+  validate: {exec: plugins/providers/_common/commands/validate-os, args: [all, Vagrant box, vagrant_box]}
+access:
+  ubuntu:
+    bootstrap_user: {env: VM_USER_NAME}
+    provision_user: {env: VM_USER_NAME}
+    human_user: {env: VM_USER_NAME, fallback: provision_user}
+supports:
+  engines: [terraform]
+  kinds: [vm]
+env: []

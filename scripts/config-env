@@ -1,0 +1,151 @@
+#!/usr/bin/env ruby
+# Emit non-secret structured config as environment assignments.
+
+require "shellwords"
+require "yaml"
+
+ROOT = File.expand_path("..", __dir__)
+DEFAULT_CONFIG = File.join(ROOT, "config/defaults.yaml")
+LOCAL_CONFIG = ENV.fetch("EVE_CONFIG_PATH", File.join(ROOT, ".eve/config.yaml"))
+
+MAPPINGS = [
+  [%w[aws config_file], "AWS_CONFIG_FILE"],
+  [%w[aws profile], "AWS_PROFILE"],
+  [%w[aws region], "AWS_REGION"],
+  [%w[aws shared_credentials_file], "AWS_SHARED_CREDENTIALS_FILE"],
+  [%w[display fps], "EPHEMERAL_DISPLAY_FPS"],
+  [%w[display resolution], "EPHEMERAL_DISPLAY_RESOLUTION"],
+  [%w[gcp application_credentials], "GOOGLE_APPLICATION_CREDENTIALS"],
+  [%w[gcp project], "GOOGLE_CLOUD_PROJECT"],
+  [%w[gcp project], "GOOGLE_PROJECT"],
+  [%w[global my_ip], "MY_IP"],
+  [%w[global ssh_public_key_file], "SSH_PUBLIC_KEY_FILE"],
+  [%w[global timezone], "TIMEZONE"],
+  [%w[global vm_user_name], "VM_USER_NAME"],
+  [%w[moonlight bitrate_kbps], "EPHEMERAL_MOONLIGHT_BITRATE_KBPS"],
+  [%w[moonlight display_mode], "EPHEMERAL_MOONLIGHT_DISPLAY_MODE"],
+  [%w[moonlight video_codec], "EPHEMERAL_MOONLIGHT_VIDEO_CODEC"],
+  [%w[moonlight video_decoder], "EPHEMERAL_MOONLIGHT_VIDEO_DECODER"],
+  [%w[raspberry_pi hdmi_connector], "RASPBERRY_PI_HDMI_CONNECTOR"],
+  [%w[raspberry_pi hdmi_mode], "RASPBERRY_PI_HDMI_MODE"],
+  [%w[raspberry_pi host], "RASPBERRY_PI_HOST"],
+  [%w[raspberry_pi ip], "RASPBERRY_PI_IP"],
+  [%w[rustdesk server], "RUSTDESK_SERVER"],
+  [%w[sunshine max_bitrate_kbps], "SUNSHINE_MAX_BITRATE_KBPS"],
+  [%w[sunshine version], "SUNSHINE_VERSION"],
+  [%w[thinlinc agent_hostname], "THINLINC_AGENT_HOSTNAME"],
+  [%w[thinlinc accept_eula], "THINLINC_ACCEPT_EULA"],
+  [%w[thinlinc server_bundle_path], "THINLINC_SERVER_BUNDLE_PATH"],
+  [%w[thinlinc server_bundle_url], "THINLINC_SERVER_BUNDLE_URL"],
+  [%w[thinlinc webaccess_port], "THINLINC_WEBACCESS_PORT"],
+  [%w[truenas api_user], "TRUENAS_API_USER"],
+  [%w[truenas host], "TRUENAS_HOST"],
+  [%w[truenas ssh_host_key_fingerprint], "TRUENAS_SSH_HOST_KEY_FINGERPRINT"],
+  [%w[truenas ssh_port], "TRUENAS_SSH_PORT"],
+  [%w[truenas ssh_private_key_file], "TRUENAS_SSH_PRIVATE_KEY_FILE"],
+  [%w[truenas ssh_user], "TRUENAS_SSH_USER"],
+  [%w[truenas vm_base_dir], "TRUENAS_VM_BASE_DIR"],
+  [%w[truenas vm_pool], "TRUENAS_VM_POOL"],
+  [%w[truenas vm_zvol_prefix], "TRUENAS_VM_ZVOL_PREFIX"],
+  [%w[vagrant show_console], "VAGRANT_SHOW_CONSOLE"]
+].freeze
+
+PATH_ENV_NAMES = %w[
+  AWS_CONFIG_FILE
+  AWS_SHARED_CREDENTIALS_FILE
+  GOOGLE_APPLICATION_CREDENTIALS
+  SSH_PUBLIC_KEY_FILE
+  TRUENAS_SSH_PRIVATE_KEY_FILE
+].freeze
+
+def usage
+  warn <<~USAGE
+    Usage:
+      scripts/config-env [--make|--shell|--json]
+  USAGE
+end
+
+def load_config(path)
+  return {} unless File.exist?(path)
+
+  data = YAML.safe_load(File.read(path), aliases: false)
+  return {} if data.nil?
+  raise "#{path}: expected a mapping" unless data.is_a?(Hash)
+
+  data
+end
+
+def deep_merge(base, override)
+  base.merge(override) do |_key, left, right|
+    left.is_a?(Hash) && right.is_a?(Hash) ? deep_merge(left, right) : right
+  end
+end
+
+def fetch_path(data, path)
+  path.reduce(data) do |memo, key|
+    return nil unless memo.is_a?(Hash)
+
+    memo[key]
+  end
+end
+
+def scalar_value(value)
+  return nil if value.nil?
+  return nil if value == ""
+  raise "structured config values must be scalars, got #{value.class}" if value.is_a?(Array) || value.is_a?(Hash)
+
+  value.to_s
+end
+
+def normalize_pathish(value)
+  case value
+  when "~"
+    ENV.fetch("HOME")
+  when %r{\A~/}
+    File.join(ENV.fetch("HOME"), value[2..])
+  when %r{\A\$HOME(/|\z)}
+    "#{ENV.fetch("HOME")}#{value[5..]}"
+  when %r{\A\$\(HOME\)(/|\z)}
+    "#{ENV.fetch("HOME")}#{value[7..]}"
+  else
+    value
+  end
+end
+
+format = "--make"
+case ARGV.length
+when 0
+  # default
+when 1
+  format = ARGV.first
+else
+  usage
+  exit 2
+end
+
+unless %w[--make --shell --json].include?(format)
+  usage
+  exit 2
+end
+
+begin
+  config = deep_merge(load_config(DEFAULT_CONFIG), load_config(LOCAL_CONFIG))
+  env = MAPPINGS.each_with_object({}) do |(path, name), out|
+    value = scalar_value(fetch_path(config, path))
+    value = normalize_pathish(value) if value && PATH_ENV_NAMES.include?(name)
+    out[name] = value if value
+  end
+
+  case format
+  when "--json"
+    require "json"
+    puts JSON.pretty_generate(env)
+  when "--shell"
+    env.sort.each { |key, value| puts "export #{key}=#{Shellwords.escape(value)}" }
+  when "--make"
+    env.sort.each { |key, value| puts "#{key}=#{value}" }
+  end
+rescue StandardError => e
+  warn "config-env: #{e.message}"
+  exit 1
+end

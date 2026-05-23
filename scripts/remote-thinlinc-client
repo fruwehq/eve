@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+INSTANCE="${1:-}"
+if [ -z "$INSTANCE" ]; then
+  echo "Usage: scripts/remote-thinlinc-client <instance>" >&2
+  exit 2
+fi
+
+RESOLVED_ENV=$(./scripts/profile-resolve --profile "$INSTANCE" --emit env)
+USER_NAME=$(printf '%s\n' "$RESOLVED_ENV" | awk -F= '/^VM_USER_NAME=/{print $2}')
+IP=$(./scripts/instance-ip "$INSTANCE")
+
+if [ -z "$IP" ]; then
+  echo "remote-thinlinc-client: could not resolve IP for $INSTANCE" >&2
+  exit 1
+fi
+
+ARGS=()
+if [ -n "$USER_NAME" ]; then
+  ARGS+=("-u" "$USER_NAME")
+fi
+ARGS+=("$IP")
+
+if [ "$(uname -s)" = "Darwin" ]; then
+  if [ -d "/Applications/ThinLinc Client.app" ]; then
+    exec open -a "ThinLinc Client" --args "${ARGS[@]}"
+  fi
+  if [ -f "/Users/chris/src/personal/thinlinc/tl-4.20.0_4284-client-macos.dmg" ]; then
+    open "/Users/chris/src/personal/thinlinc/tl-4.20.0_4284-client-macos.dmg"
+    echo "remote-thinlinc-client: ThinLinc Client is not installed in /Applications; opened the local DMG." >&2
+    exit 1
+  fi
+  echo "remote-thinlinc-client: install ThinLinc Client.app, then retry." >&2
+  exit 2
+fi
+
+if command -v tlclient >/dev/null 2>&1; then
+  exec tlclient "${ARGS[@]}"
+fi
+
+echo "remote-thinlinc-client: tlclient not found" >&2
+exit 2

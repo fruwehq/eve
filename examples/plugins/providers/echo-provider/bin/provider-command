@@ -2,7 +2,7 @@
 set -eu
 
 command="${1:?Usage: provider-command <command>}"
-payload="${EGAME_RESOLVED_JSON:-$(cat)}"
+payload="${EVE_RESOLVED_JSON:-$(cat)}"
 instance="$(printf '%s\n' "$payload" | jq -r '.instance.name')"
 provider="$(printf '%s\n' "$payload" | jq -r '.machine.provider')"
 engine="$(printf '%s\n' "$payload" | jq -r '.engine')"

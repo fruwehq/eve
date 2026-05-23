@@ -1,0 +1,40 @@
+api_version: eve.plugin/v1
+kind: provider
+id: local-qemu
+display_name: Local QEMU
+commands:
+  resolve: {exec: commands/provider-command, args: [resolve]}
+  init: {exec: commands/init}
+  plan: {exec: commands/up, args: [--plan]}
+  up: {exec: commands/up}
+  down: {exec: commands/down}
+  start: {exec: commands/start}
+  stop: {exec: commands/stop}
+  status: {exec: commands/status}
+  ip: {exec: commands/ip}
+  ssh: {exec: commands/ssh}
+  validate: {exec: ../_common/commands/validate-os, args: [all, Vagrant box, vagrant_box]}
+actions:
+  - id: status-details
+    label: Status
+    target: provider.status
+  - id: plan
+    label: Plan
+    target: provider.plan
+  - id: init
+    label: Init
+    target: provider.init
+access:
+  ubuntu:
+    bootstrap_user: {env: VM_USER_NAME}
+    provision_user: {env: VM_USER_NAME}
+    human_user: {env: VM_USER_NAME, fallback: provision_user}
+config_schema:
+  config:
+    show_console:
+      type: boolean
+      description: "Set to true to open the hypervisor console window."
+supports:
+  engines: [vagrant]
+  kinds: [vm]
+env: [VAGRANT_SHOW_CONSOLE]

@@ -15,11 +15,13 @@ if printf '%s\n' "$catalog_options_json" |
     any(.platforms[]; .provider == "vultr" and .machine == "vultr-vcg-a40-2c" and .os == "windows-server-2025") and
     any(.platforms[]; .provider == "truenas" and .machine == "truenas-scale-medium" and .os == "ubuntu-26.04-amd64") and
     any(.platforms[]; .provider == "gcp" and .machine == "gcp-cheap-x86" and .os == "ubuntu-26.04-amd64") and
-    any(.bundles[]; .id == "desktop-streaming" and (.includes | index("sunshine")) and (.includes | index("rustdesk")) and (.includes | index("vnc")) and (.includes | index("rdp")) and (.includes | index("waypipe"))) and
+    any(.bundles[]; .id == "desktop-streaming" and (.includes | index("gnome-desktop") | not) and (.includes | index("sunshine")) and (.includes | index("rustdesk")) and (.includes | index("vnc")) and (.includes | index("rdp")) and (.includes | index("waypipe"))) and
     any(.bundles[]; .id == "gaming-streaming" and (.includes | index("steam"))) and
     all(.bundles[]; .id != "desktop-rustdesk-vnc" and .id != "desktop-vnc" and .id != "remote-rdp" and .id != "remote-waypipe" and .id != "dev-ai-arm64") and
     any(.packages[]; .id == "codex-cli" and .supports.os_families == ["ubuntu"]) and
     any(.packages[]; .id == "xpra" and .supports.ubuntu_versions == ["22.04", "24.04"]) and
+    any(.packages[]; .id == "rdp" and .supports.os_families == ["ubuntu", "windows"] and .installable_os_families == ["ubuntu"]) and
+    any(.packages[]; .id == "thinlinc" and .supports.os_families == ["ubuntu"] and .supports.arches == ["amd64"] and .installable_os_families == ["ubuntu"]) and
     any(.packages[]; .id == "steam" and .supports.arches == ["amd64"])
   ' >/dev/null; then
   printf '  [OK] catalog-options emits provider/platform/content choices with package support metadata\n'

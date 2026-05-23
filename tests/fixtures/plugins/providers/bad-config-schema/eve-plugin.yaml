@@ -1,0 +1,32 @@
+api_version: eve.plugin/v1
+kind: provider
+id: bad-config-schema
+display_name: Bad Config Schema Provider
+commands:
+  resolve: {exec: tests/fixtures/plugins/providers/acme/commands/provider-command, args: [resolve]}
+  init: {exec: tests/fixtures/plugins/providers/acme/commands/provider-command, args: [init]}
+  plan: {exec: tests/fixtures/plugins/providers/acme/commands/provider-command, args: [plan]}
+  up: {exec: tests/fixtures/plugins/providers/acme/commands/provider-command, args: [up]}
+  down: {exec: tests/fixtures/plugins/providers/acme/commands/provider-command, args: [down]}
+  start: {exec: tests/fixtures/plugins/providers/acme/commands/provider-command, args: [start]}
+  stop: {exec: tests/fixtures/plugins/providers/acme/commands/provider-command, args: [stop]}
+  status: {exec: tests/fixtures/plugins/providers/acme/commands/provider-command, args: [status]}
+  ip: {exec: tests/fixtures/plugins/providers/acme/commands/provider-command, args: [ip]}
+  ssh: {exec: tests/fixtures/plugins/providers/acme/commands/provider-command, args: [ssh]}
+  validate: {exec: plugins/providers/_common/commands/validate-os, args: [any, AWS image selector, aws_ami_name_pattern, aws_ami_id, aws_ssm_parameter]}
+access:
+  ubuntu:
+    bootstrap_user: {env: VM_USER_NAME}
+    provision_user: {env: VM_USER_NAME}
+    human_user: {env: VM_USER_NAME, fallback: provision_user}
+config_schema:
+  config:
+    bad_field:
+      type: unknown_type
+  secrets:
+    another_bad:
+      type: enum
+supports:
+  engines: [terraform]
+  kinds: [vm]
+env: []

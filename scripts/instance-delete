@@ -9,7 +9,10 @@ require "tempfile"
 require "yaml"
 
 ROOT = File.expand_path("..", __dir__)
-DEFAULT_REGISTRY_PATH = File.join(ROOT, ".egame/instances.yaml")
+DEFAULT_REGISTRY_PATH = File.join(ROOT, ".eve/instances.yaml")
+
+$LOAD_PATH.unshift(File.join(ROOT, "core"))
+require "sdk"
 
 def with_registry_lock(registry_path)
   FileUtils.mkdir_p(File.dirname(registry_path))
@@ -20,7 +23,7 @@ def with_registry_lock(registry_path)
 end
 
 def write_registry!(registry_path, registry)
-  Tempfile.create(["egame-registry-", ".yaml"], File.dirname(registry_path)) do |tmp|
+  Tempfile.create(["eve-registry-", ".yaml"], File.dirname(registry_path)) do |tmp|
     tmp.write(registry.to_yaml)
     tmp.close
     FileUtils.mv(tmp.path, registry_path)
@@ -35,14 +38,18 @@ def usage
     Options:
       --registry <path>
       --purge   Remove generated workdir and state files
+      --force   Delete the registry entry even when observed state suggests
+                provider resources may still exist. Use only after confirming
+                the cloud-side VM was already destroyed.
   USAGE
 end
 
 instance_name = nil
-registry_path = ENV["EGAME_INSTANCE_REGISTRY"] && !ENV["EGAME_INSTANCE_REGISTRY"].empty? \
-                ? File.expand_path(ENV["EGAME_INSTANCE_REGISTRY"], Dir.pwd) \
+registry_path = ENV["EVE_INSTANCE_REGISTRY"] && !ENV["EVE_INSTANCE_REGISTRY"].empty? \
+                ? File.expand_path(ENV["EVE_INSTANCE_REGISTRY"], Dir.pwd) \
                 : DEFAULT_REGISTRY_PATH
 purge = false
+force = false
 
 args = ARGV.dup
 until args.empty?
@@ -53,6 +60,8 @@ until args.empty?
     registry_path = File.expand_path(args.shift, Dir.pwd)
   when "--purge"
     purge = true
+  when "--force"
+    force = true
   when "-h", "--help"
     usage
     exit 0
@@ -89,6 +98,42 @@ with_registry_lock(registry_path) do
     exit 1
   end
 
+  # Refuse to drop a registry entry whose provider resources may still
+  # exist. A user who runs `make instance.delete` without first running
+  # `make down` can otherwise leak billable cloud VMs whose only handle
+  # was the registry entry. Bypass with --force after manually
+  # confirming the cloud side is gone.
+  #
+  # `absent` = provider resources confirmed destroyed.
+  # `unknown` = no provider lifecycle has ever recorded state (fresh
+  #             instance, or only package ops have run); safe to drop
+  #             the entry.
+  # Anything else (running/stopped/error/changing/...) means a
+  # provider lifecycle has touched the cloud side and we cannot
+  # confirm it's gone.
+  unless force
+    state_path = Eve::SDK::Workdir.state_path(instance_name)
+    if File.exist?(state_path)
+      state = Eve::SDK::State.read(instance_name)
+      provider_state = state["provider_state"]
+      safe_states = %w[absent unknown]
+      if provider_state && !safe_states.include?(provider_state)
+        warn <<~MSG
+          instance-delete: refusing to delete #{instance_name}; provider_state=#{provider_state}.
+          Provider resources may still exist (cloud VM, terraform state, etc.).
+
+          Recommended:
+            make down INSTANCE=#{instance_name}     # destroys provider resources
+            make instance.delete INSTANCE=#{instance_name}#{purge ? " PURGE=1" : ""}
+
+          Or bypass this check if you have already destroyed the cloud side:
+            make instance.delete INSTANCE=#{instance_name}#{purge ? " PURGE=1" : ""} FORCE=1
+        MSG
+        exit 1
+      end
+    end
+  end
+
   if purge
     out, status = Open3.capture2e(
       File.join(ROOT, "scripts/instance-paths"),
@@ -117,15 +162,12 @@ puts "Registry: #{registry_path}"
 
 if purge
   workdir = paths.fetch("INSTANCE_WORKDIR")
-  state = paths.fetch("INSTANCE_STATE_PATH")
 
   if File.exist?(workdir)
     FileUtils.rm_rf(workdir)
     puts "Removed workdir: #{workdir}"
   end
 
-  if File.exist?(state)
-    FileUtils.rm_f(state)
-    puts "Removed state: #{state}"
-  end
+  Eve::SDK::State.delete!(instance_name)
+  puts "Removed state: #{paths.fetch("INSTANCE_STATE_PATH")}"
 end

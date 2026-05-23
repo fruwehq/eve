@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Raspberry Pi is physical hardware; check reachability and instruct
+# the user to power on manually if it is not.
+set -euo pipefail
+
+if [ -n "${EVE_INSTANCE_NAME:-}" ]; then
+  PROFILE="$EVE_INSTANCE_NAME"
+else
+  PROFILE="${1:?Usage: commands/start <instance>}"
+fi
+cd "$(git rev-parse --show-toplevel)"
+
+if ./scripts/instance-ssh "$PROFILE" -- exit 0 >/dev/null 2>&1; then
+  echo "[start] Raspberry Pi is already reachable"
+  exit 0
+fi
+echo "[start] Raspberry Pi is not reachable. Power it on physically, then retry." >&2
+exit 1

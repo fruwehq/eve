@@ -1,0 +1,65 @@
+api_version: eve.plugin/v1
+kind: provider
+id: aws
+display_name: AWS EC2
+commands:
+  resolve: {exec: commands/provider-command, args: [resolve]}
+  init: {exec: ../_terraform-common/commands/init}
+  plan: {exec: ../_terraform-common/commands/plan}
+  up: {exec: ../_terraform-common/commands/up}
+  down: {exec: ../_terraform-common/commands/down}
+  start: {exec: commands/start}
+  stop: {exec: commands/stop}
+  status: {exec: commands/status}
+  ip: {exec: commands/ip}
+  ssh: {exec: ../_common/commands/ssh}
+  login: {exec: commands/login}
+  tf-env: {exec: commands/tf-env}
+  validate: {exec: ../_common/commands/validate-os, args: [any, AWS image selector, aws_ami_name_pattern, aws_ami_id, aws_ssm_parameter]}
+actions:
+  - id: status-details
+    label: Status
+    target: provider.status
+  - id: plan
+    label: Plan
+    target: provider.plan
+  - id: init
+    label: Init
+    target: provider.init
+  - id: login
+    label: AWS Login
+    target: provider.login
+    interactive: true
+access:
+  ubuntu:
+    bootstrap_user: {env: VM_USER_NAME}
+    provision_user: {env: VM_USER_NAME}
+    human_user: {env: VM_USER_NAME, fallback: provision_user}
+capabilities: [login]
+config_schema:
+  config:
+    config_file:
+      type: path
+      default: "~/.aws/config"
+      description: "AWS CLI config file used by Terraform/Terramate."
+    profile:
+      type: string
+      description: "AWS CLI profile name used by Terraform/Terramate."
+    region:
+      type: string
+      description: "AWS region for AWS provider resources."
+    shared_credentials_file:
+      type: path
+      default: "~/.aws/credentials"
+      description: "AWS CLI credentials file used by Terraform/Terramate."
+  secrets:
+    access_key_id:
+      type: string
+      description: "AWS_ACCESS_KEY_ID"
+    secret_access_key:
+      type: string
+      description: "AWS_SECRET_ACCESS_KEY"
+supports:
+  engines: [terraform]
+  kinds: [vm]
+env: [AWS_CONFIG_FILE, AWS_PROFILE, AWS_REGION, AWS_SHARED_CREDENTIALS_FILE]

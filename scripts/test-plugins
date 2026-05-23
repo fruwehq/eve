@@ -14,16 +14,19 @@ BAD_PLUGIN_FIXTURE="tests/fixtures/plugins/packages/bad"
 BAD_INSTALL_UBUNTU_FIXTURE="tests/fixtures/plugins/packages/bad-install-ubuntu"
 BAD_INSTALL_WINDOWS_STATE_FIXTURE="tests/fixtures/plugins/packages/bad-install-windows-state"
 BAD_INSTALL_NON_STRING_FIXTURE="tests/fixtures/plugins/packages/bad-install-non-string"
+BAD_STATUS_FIXTURE="tests/fixtures/plugins/packages/invalid-status-output"
 BAD_PACKAGE_SUPPORTS_FIXTURE="tests/fixtures/plugins/packages/bad-supports"
+BAD_PROVIDER_STATUS_FIXTURE="tests/fixtures/plugins/providers/acme-invalid-status-output"
 BAD_PROVIDER_SUPPORTS_FIXTURE="tests/fixtures/plugins/providers/bad-supports"
 WIN_ONLY_PLUGIN_FIXTURE="tests/fixtures/plugins/packages/win-only"
-profile_catalog_dir="$(mktemp -d "${TMPDIR:-/tmp}/egame-plugin-profiles.XXXXXX")"
+profile_catalog_dir="$(mktemp -d "${TMPDIR:-/tmp}/eve-plugin-profiles.XXXXXX")"
 profile_catalog="$profile_catalog_dir/catalog.local.yaml"
 state_dir=""
 waypipe_bin_dir=""
+gnome_registry=""
 FAIL=0
 
-trap 'rm -rf "$profile_catalog_dir"; if [ -n "$state_dir" ]; then rm -rf "$state_dir"; fi; if [ -n "$waypipe_bin_dir" ]; then rm -rf "$waypipe_bin_dir"; fi' EXIT
+trap 'rm -rf "$profile_catalog_dir"; if [ -n "$state_dir" ]; then rm -rf "$state_dir"; fi; if [ -n "$waypipe_bin_dir" ]; then rm -rf "$waypipe_bin_dir"; fi; if [ -n "$gnome_registry" ]; then rm -f "$gnome_registry"; fi' EXIT
 
 cat >"$profile_catalog" <<'YAML'
 profiles:
@@ -41,7 +44,7 @@ profiles:
     bundles: [gaming-streaming]
     location: tokyo
 YAML
-export EGAME_CATALOG_LOCAL="$profile_catalog"
+export EVE_CATALOG_LOCAL="$profile_catalog"
 
 check() {
   local label="$1"
@@ -70,17 +73,17 @@ instance_maps_plugins() {
 }
 
 dummy_plugin_listed() {
-  EGAME_PLUGIN_ROOTS="$PLUGIN_FIXTURE" ./scripts/plugin-list --kind package --json |
+  EVE_PLUGIN_ROOTS="$PLUGIN_FIXTURE" ./scripts/plugin-list --kind package --json |
     jq -e '.plugins[] | select(.id == "dummy" and .kind == "package")' >/dev/null
 }
 
 local_exec_plugin_listed() {
-  EGAME_PLUGIN_ROOTS="$LOCAL_EXEC_PLUGIN_FIXTURE" ./scripts/plugin-list --kind package --json |
+  EVE_PLUGIN_ROOTS="$LOCAL_EXEC_PLUGIN_FIXTURE" ./scripts/plugin-list --kind package --json |
     jq -e '.plugins[] | select(.id == "local-exec" and .kind == "package")' >/dev/null
 }
 
 override_plugin_replaces_builtin() {
-  EGAME_PLUGIN_ALLOW_OVERRIDE=1 EGAME_PLUGIN_ROOTS="$OVERRIDE_PLUGIN_FIXTURE" ./scripts/plugin-list --kind package --json |
+  EVE_PLUGIN_ALLOW_OVERRIDE=1 EVE_PLUGIN_ROOTS="$OVERRIDE_PLUGIN_FIXTURE" ./scripts/plugin-list --kind package --json |
     jq -e '[.plugins[] | select(.id == "docker")] | length == 1 and .[0].display_name == "Docker Override Test Package"' >/dev/null
 }
 
@@ -98,15 +101,15 @@ check "external plugin-local exec listed" local_exec_plugin_listed
 
 check "external plugin override replaces built-in" override_plugin_replaces_builtin
 
-if EGAME_PLUGIN_ROOTS="$EXAMPLE_PACKAGE_PLUGIN:$EXAMPLE_PROVIDER_PLUGIN" ./scripts/plugin-list --validate >/dev/null; then
+if EVE_PLUGIN_ROOTS="$EXAMPLE_PACKAGE_PLUGIN:$EXAMPLE_PROVIDER_PLUGIN" ./scripts/plugin-list --validate >/dev/null; then
   printf '  [OK] documented example plugins validate\n'
 else
   printf '  [FAIL] documented example plugins validate\n' >&2
-  EGAME_PLUGIN_ROOTS="$EXAMPLE_PACKAGE_PLUGIN:$EXAMPLE_PROVIDER_PLUGIN" ./scripts/plugin-list --validate >&2 || true
+  EVE_PLUGIN_ROOTS="$EXAMPLE_PACKAGE_PLUGIN:$EXAMPLE_PROVIDER_PLUGIN" ./scripts/plugin-list --validate >&2 || true
   FAIL=$((FAIL + 1))
 fi
 
-if EGAME_PLUGIN_ROOTS="$BAD_PLUGIN_FIXTURE" ./scripts/plugin-list --json >/dev/null 2>&1; then
+if EVE_PLUGIN_ROOTS="$BAD_PLUGIN_FIXTURE" ./scripts/plugin-list --json >/dev/null 2>&1; then
   printf '  [FAIL] invalid external plugin rejected\n' >&2
   FAIL=$((FAIL + 1))
 else
@@ -131,11 +134,34 @@ else
   FAIL=$((FAIL + 1))
 fi
 
+if ./scripts/plugin-list --kind package --json | \
+  jq -e '.plugins[] | select(.id == "thinlinc") | (.env | index("THINLINC_SERVER_BUNDLE_URL")) and (.actions[] | select(.id == "web" and .target == "thinlinc.web"))' >/dev/null; then
+  printf '  [OK] ThinLinc package metadata validates\n'
+else
+  printf '  [FAIL] ThinLinc package metadata mismatch\n' >&2
+  FAIL=$((FAIL + 1))
+fi
+
 if ./scripts/package-list --registry "$FIXTURE" --instance dev-a --json | \
   jq -e '.packages[] | select(.id == "rustdesk") | (.actions[] | select(.id == "rustdesk" and .target == "rustdesk.connect"))' >/dev/null; then
   printf '  [OK] package-list exposes package actions to callers\n'
 else
   printf '  [FAIL] package-list exposes package actions to callers\n' >&2
+  FAIL=$((FAIL + 1))
+fi
+
+gnome_registry="$(mktemp)"
+cp "$FIXTURE" "$gnome_registry"
+if EVE_INSTANCE_REGISTRY="$gnome_registry" make bundle.select INSTANCE=dev-a BUNDLE=desktop-gnome >/dev/null &&
+  ./scripts/package-list --registry "$gnome_registry" --instance dev-a --json |
+    jq -e '
+      ([.packages[] | select(.id as $id | ["rustdesk", "sunshine", "thinlinc", "vnc", "waypipe"] | index($id)) | .supported == false and .installable == false and .actions == []] | all) and
+      (.packages[] | select(.id == "rdp") | .supported == true and .installable == true)
+    ' >/dev/null; then
+  printf '  [OK] package-list keeps only GNOME Remote Desktop RDP for GNOME desktop selections\n'
+else
+  printf '  [FAIL] package-list GNOME remote desktop compatibility mismatch\n' >&2
+  ./scripts/package-list --registry "$gnome_registry" --instance dev-a --json >&2 || true
   FAIL=$((FAIL + 1))
 fi
 
@@ -148,15 +174,15 @@ else
 fi
 
 if ./scripts/package-list --registry "$FIXTURE" --instance dev-a --json | \
-  jq -e '.packages[] | select(.id == "rdp") | .actions == []' >/dev/null; then
-  printf '  [OK] package-list hides Windows-only RDP action on Ubuntu\n'
+  jq -e '.packages[] | select(.id == "rdp") | .supported == true and (.actions[] | select(.id == "rdp" and .target == "rdp.open" and .native == true))' >/dev/null; then
+  printf '  [OK] package-list exposes RDP as native-capable package action\n'
 else
-  printf '  [FAIL] package-list hides Windows-only RDP action on Ubuntu\n' >&2
+  printf '  [FAIL] package-list RDP package metadata mismatch\n' >&2
   ./scripts/package-list --registry "$FIXTURE" --instance dev-a --json >&2 || true
   FAIL=$((FAIL + 1))
 fi
 
-if EGAME_INSTANCE_REGISTRY="$FIXTURE" ./scripts/package-action --instance dev-a --package rustdesk --action rustdesk-info --dry-run | \
+if EVE_INSTANCE_REGISTRY="$FIXTURE" ./scripts/package-action --instance dev-a --package rustdesk --action rustdesk-info --dry-run | \
   jq -e '.kind == "package-action" and .package == "rustdesk" and .action == "rustdesk-info" and .target == "rustdesk.info" and .dry_run == true' >/dev/null; then
   printf '  [OK] package action dry-run resolves manifest target\n'
 else
@@ -164,7 +190,38 @@ else
   FAIL=$((FAIL + 1))
 fi
 
-waypipe_bin_dir="$(mktemp -d "${TMPDIR:-/tmp}/egame-waypipe-bin.XXXXXX")"
+if EVE_INSTANCE_REGISTRY="$FIXTURE" ./scripts/package-action --instance dev-a --package thinlinc --action web --dry-run | \
+  jq -e '.kind == "package-action" and .package == "thinlinc" and .action == "web" and .target == "thinlinc.web" and .dry_run == true' >/dev/null; then
+  printf '  [OK] ThinLinc package action dry-run resolves manifest target\n'
+else
+  printf '  [FAIL] ThinLinc package action dry-run resolves manifest target\n' >&2
+  FAIL=$((FAIL + 1))
+fi
+
+if EVE_INSTANCE_REGISTRY="$FIXTURE" ./scripts/package-provision --instance dev-a --package rustdesk --dry-run | \
+  jq -e '.kind == "package-provision" and .instance == "dev-a" and .package == "rustdesk" and .dry_run == true' >/dev/null; then
+  printf '  [OK] package-provision dry-run honors EVE_INSTANCE_REGISTRY\n'
+else
+  printf '  [FAIL] package-provision dry-run honors EVE_INSTANCE_REGISTRY\n' >&2
+  FAIL=$((FAIL + 1))
+fi
+
+if EVE_INSTANCE_REGISTRY="$FIXTURE" ./scripts/package-provision --instance dev-a --package thinlinc --dry-run | \
+  jq -e '.kind == "package-provision" and .instance == "dev-a" and .package == "thinlinc" and (.steps | index("provision/ubuntu/thinlinc.sh")) and (.package_markers | index("thinlinc")) and .dry_run == true' >/dev/null; then
+  printf '  [OK] ThinLinc package-provision dry-run resolves install steps\n'
+else
+  printf '  [FAIL] ThinLinc package-provision dry-run resolves install steps\n' >&2
+  FAIL=$((FAIL + 1))
+fi
+
+if ! grep -Eq 'Sunshine not responding|starting via SSH|Start-Process.*Sunshine|systemctl --user start sunshine' scripts/remote-sunshine-wait; then
+  printf '  [OK] remote-sunshine-wait only waits and does not start Sunshine\n'
+else
+  printf '  [FAIL] remote-sunshine-wait must not start Sunshine as a fallback\n' >&2
+  FAIL=$((FAIL + 1))
+fi
+
+waypipe_bin_dir="$(mktemp -d "${TMPDIR:-/tmp}/eve-waypipe-bin.XXXXXX")"
 printf '#!/usr/bin/env sh\nexit 99\n' >"$waypipe_bin_dir/waypipe"
 chmod +x "$waypipe_bin_dir/waypipe"
 waypipe_err="$(env PATH="$waypipe_bin_dir:$PATH" WAYLAND_DISPLAY= DISPLAY=/tmp/org.xquartz:0 ./scripts/remote-waypipe dev-a 2>&1 >/dev/null || true)"
@@ -176,7 +233,7 @@ else
   FAIL=$((FAIL + 1))
 fi
 
-bad_install_ubuntu_err="$(EGAME_PLUGIN_ROOTS="$BAD_INSTALL_UBUNTU_FIXTURE" ./scripts/plugin-list --validate 2>&1 || true)"
+bad_install_ubuntu_err="$(EVE_PLUGIN_ROOTS="$BAD_INSTALL_UBUNTU_FIXTURE" ./scripts/plugin-list --validate 2>&1 || true)"
 if printf '%s' "$bad_install_ubuntu_err" | grep -q "install.ubuntu.steps must be a non-empty list"; then
   printf '  [OK] plugin with empty install.ubuntu.steps rejected\n'
 else
@@ -185,7 +242,7 @@ else
   FAIL=$((FAIL + 1))
 fi
 
-bad_install_windows_err="$(EGAME_PLUGIN_ROOTS="$BAD_INSTALL_WINDOWS_STATE_FIXTURE" ./scripts/plugin-list --validate 2>&1 || true)"
+bad_install_windows_err="$(EVE_PLUGIN_ROOTS="$BAD_INSTALL_WINDOWS_STATE_FIXTURE" ./scripts/plugin-list --validate 2>&1 || true)"
 if printf '%s' "$bad_install_windows_err" | grep -q "install.windows.state_files contains unsupported entries"; then
   printf '  [OK] plugin with unsupported install.windows.state_files rejected\n'
 else
@@ -194,7 +251,7 @@ else
   FAIL=$((FAIL + 1))
 fi
 
-bad_install_non_string_err="$(EGAME_PLUGIN_ROOTS="$BAD_INSTALL_NON_STRING_FIXTURE" ./scripts/plugin-list --validate 2>&1 || true)"
+bad_install_non_string_err="$(EVE_PLUGIN_ROOTS="$BAD_INSTALL_NON_STRING_FIXTURE" ./scripts/plugin-list --validate 2>&1 || true)"
 if printf '%s' "$bad_install_non_string_err" | grep -q "install.ubuntu.steps must be a list of strings"; then
   printf '  [OK] plugin with non-string install.ubuntu.steps entry rejected\n'
 else
@@ -203,7 +260,7 @@ else
   FAIL=$((FAIL + 1))
 fi
 
-bad_provider_supports_err="$(EGAME_PLUGIN_ROOTS="$BAD_PROVIDER_SUPPORTS_FIXTURE" ./scripts/plugin-list --validate 2>&1 || true)"
+bad_provider_supports_err="$(EVE_PLUGIN_ROOTS="$BAD_PROVIDER_SUPPORTS_FIXTURE" ./scripts/plugin-list --validate 2>&1 || true)"
 if printf '%s' "$bad_provider_supports_err" | grep -q "supports.engines must be a list"; then
   printf '  [OK] provider plugin with malformed supports.engines rejected\n'
 else
@@ -212,7 +269,7 @@ else
   FAIL=$((FAIL + 1))
 fi
 
-bad_package_supports_err="$(EGAME_PLUGIN_ROOTS="$BAD_PACKAGE_SUPPORTS_FIXTURE" ./scripts/plugin-list --validate 2>&1 || true)"
+bad_package_supports_err="$(EVE_PLUGIN_ROOTS="$BAD_PACKAGE_SUPPORTS_FIXTURE" ./scripts/plugin-list --validate 2>&1 || true)"
 if printf '%s' "$bad_package_supports_err" | grep -q "supports.os_families must be a list"; then
   printf '  [OK] package plugin with malformed supports.os_families rejected\n'
 else
@@ -233,7 +290,7 @@ $provider_case
 EOF
   for provider_command in resolve init plan up down start stop status ip ssh; do
     provider_dry_run="$(
-      EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-provider-dispatch-test" \
+      EVE_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/eve-provider-dispatch-test" \
         ./scripts/provider-dispatch --registry "$FIXTURE" --instance "$provider_instance" --command "$provider_command" --dry-run
     )"
     if ! printf '%s\n' "$provider_dry_run" |
@@ -251,8 +308,105 @@ else
   FAIL=$((FAIL + 1))
 fi
 
+provider_command_boundary_failed=0
+while IFS= read -r provider_manifest; do
+  provider_dir="$(dirname "$provider_manifest")"
+  if ! [ -x "$provider_dir/commands/provider-command" ]; then
+    printf '  [FAIL] provider command wrapper missing or not executable: %s\n' "$provider_dir/commands/provider-command" >&2
+    provider_command_boundary_failed=1
+  fi
+  if grep -q 'scripts/provider-plugin' "$provider_manifest"; then
+    printf '  [FAIL] provider manifest still points at central provider-plugin: %s\n' "$provider_manifest" >&2
+    provider_command_boundary_failed=1
+  fi
+  if grep -nE '^  (init|plan|up|down|start|stop|status|ip|ssh): \{exec: commands/provider-command' "$provider_manifest" >/dev/null; then
+    printf '  [FAIL] provider manifest keeps lifecycle command on provider-command: %s\n' "$provider_manifest" >&2
+    provider_command_boundary_failed=1
+  fi
+done <<EOF
+$(find plugins/providers -name eve-plugin.yaml -print | sort)
+EOF
+if [ "$provider_command_boundary_failed" -eq 0 ]; then
+  printf '  [OK] provider manifests route lifecycle commands through plugin-owned implementations\n'
+else
+  FAIL=$((FAIL + 1))
+fi
+
+if provider_command_exec_err="$(
+  ruby <<'RUBY' 2>&1
+require "yaml"
+
+commands = %w[init plan up down start stop status ip ssh]
+Dir.glob("plugins/providers/*/eve-plugin.yaml").sort.each do |manifest|
+  provider_dir = File.dirname(manifest)
+  manifest_commands = YAML.load_file(manifest).fetch("commands")
+  commands.each do |command|
+    spec = manifest_commands[command]
+    raise "#{manifest}: missing command #{command}" unless spec
+
+    exec_path = spec.fetch("exec")
+    path = exec_path.start_with?("/") ? exec_path : File.expand_path(exec_path, provider_dir)
+    next if File.file?(path) && File.executable?(path)
+
+    raise "#{manifest}: #{command} exec is not executable: #{exec_path}"
+  end
+end
+RUBY
+)"; then
+  printf '  [OK] provider lifecycle command exec paths are executable\n'
+else
+  printf '  [FAIL] provider lifecycle command exec paths are executable\n' >&2
+  printf '%s\n' "$provider_command_exec_err" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+if provider_action_err="$(
+  ruby <<'RUBY' 2>&1
+require "yaml"
+
+Dir.glob("plugins/providers/*/eve-plugin.yaml").sort.each do |manifest|
+  provider_dir = File.dirname(manifest)
+  plugin = YAML.load_file(manifest)
+  actions = plugin["actions"]
+  raise "#{manifest}: provider actions must be declared" unless actions.is_a?(Array) && !actions.empty?
+
+  actions.each do |action|
+    target = action.fetch("target")
+    next unless target.start_with?("provider.")
+
+    command = target.split(".", 2).fetch(1)
+    spec = plugin.fetch("commands")[command]
+    raise "#{manifest}: action #{action.fetch("id")} targets missing provider command #{command}" unless spec
+
+    exec_path = spec.fetch("exec")
+    path = exec_path.start_with?("/") ? exec_path : File.expand_path(exec_path, provider_dir)
+    raise "#{manifest}: action #{action.fetch("id")} command is not executable: #{exec_path}" unless File.file?(path) && File.executable?(path)
+  end
+end
+RUBY
+)"; then
+  printf '  [OK] provider action metadata targets executable provider commands\n'
+else
+  printf '  [FAIL] provider action metadata targets executable provider commands\n' >&2
+  printf '%s\n' "$provider_action_err" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+provider_actions_view="$(
+  EVE_INSTANCE_REGISTRY="$FIXTURE" EVE_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/eve-provider-action-view" EVE_STATE_DIR="${TMPDIR:-/tmp}/eve-provider-action-state" \
+    ./scripts/instance-view --registry "$FIXTURE" --instance aws-gpu-a
+)"
+if printf '%s\n' "$provider_actions_view" |
+  jq -e 'any(.provider_actions[]; .id == "login" and .target == "provider.login") and any(.provider_actions[]; .id == "status-details" and .target == "provider.status")' >/dev/null; then
+  printf '  [OK] instance-view exposes provider action metadata\n'
+else
+  printf '  [FAIL] instance-view exposes provider action metadata\n' >&2
+  printf '%s\n' "$provider_actions_view" >&2
+  FAIL=$((FAIL + 1))
+fi
+
 package_status="$(
-  EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-package-dispatch-test" \
+  EVE_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/eve-package-dispatch-test" \
     ./scripts/package-dispatch --registry "$FIXTURE" --instance dev-a --package docker --command status --dry-run
 )"
 if printf '%s\n' "$package_status" | jq -e '.package == "docker" and .command == "status" and .selected == true and .status == "unknown"' >/dev/null; then
@@ -264,8 +418,8 @@ else
 fi
 
 unsupported_package_err="$(
-  EGAME_PLUGIN_ROOTS="$WIN_ONLY_PLUGIN_FIXTURE" \
-    EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-package-dispatch-test" \
+  EVE_PLUGIN_ROOTS="$WIN_ONLY_PLUGIN_FIXTURE" \
+    EVE_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/eve-package-dispatch-test" \
     ./scripts/package-dispatch --registry "$FIXTURE" --instance dev-a --package win-only --command status --dry-run 2>&1 >/dev/null || true
 )"
 if printf '%s\n' "$unsupported_package_err" | grep -q "package plugin win-only does not support os family ubuntu"; then
@@ -277,7 +431,7 @@ else
 fi
 
 unsupported_version_err="$(
-  EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-package-dispatch-test" \
+  EVE_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/eve-package-dispatch-test" \
     ./scripts/package-dispatch --registry "$FIXTURE" --instance truenas-all-a --package xpra --command status --dry-run 2>&1 >/dev/null || true
 )"
 if printf '%s\n' "$unsupported_version_err" | grep -q "package plugin xpra does not support ubuntu version 26.04"; then
@@ -289,10 +443,10 @@ else
 fi
 
 package_install="$(
-  EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-package-dispatch-test" \
+  EVE_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/eve-package-dispatch-test" \
     ./scripts/package-provision --profile local-qemu-ubuntu-dev-gui --package docker --dry-run
 )"
-if printf '%s\n' "$package_install" | jq -e '.kind == "package-provision" and .package == "docker" and .steps == ["00_base.sh", "05_timezone.sh", "10_docker.sh"] and .dry_run == true' >/dev/null; then
+if printf '%s\n' "$package_install" | jq -e '.kind == "package-provision" and .package == "docker" and .steps == ["base.sh", "timezone.sh", "provision/ubuntu/docker.sh"] and .dry_run == true' >/dev/null; then
   printf '  [OK] ubuntu package install maps to granular provision steps\n'
 else
   printf '  [FAIL] ubuntu package install maps to granular provision steps\n' >&2
@@ -303,7 +457,7 @@ fi
 codex_install="$(
   ./scripts/package-provision --profile local-qemu-ubuntu-dev-gui --package codex-cli --dry-run
 )"
-if printf '%s\n' "$codex_install" | jq -e '.package == "codex-cli" and .steps == ["00_base.sh", "05_timezone.sh", "20_dev-toolchain.sh", "30_codex-cli.sh"] and .package_markers == ["dev-toolchain", "codex-cli"]' >/dev/null; then
+if printf '%s\n' "$codex_install" | jq -e '.package == "codex-cli" and .steps == ["base.sh", "timezone.sh", "provision/ubuntu/dev-toolchain.sh", "provision/ubuntu/codex-cli.sh"] and .package_markers == ["dev-toolchain", "codex-cli"]' >/dev/null; then
   printf '  [OK] package install includes dependency package markers\n'
 else
   printf '  [FAIL] package install includes dependency package markers\n' >&2
@@ -314,7 +468,7 @@ fi
 windows_steam_install="$(
   ./scripts/package-provision-windows --profile vultr-windows-gaming --package steam --dry-run
 )"
-if printf '%s\n' "$windows_steam_install" | jq -e '.kind == "package-provision-windows" and .package == "steam" and .os_family == "windows" and .steps == ["30_steam.ps1"] and .state_files == [] and .fallback == false and .dry_run == true' >/dev/null; then
+if printf '%s\n' "$windows_steam_install" | jq -e '.kind == "package-provision-windows" and .package == "steam" and .os_family == "windows" and .steps == ["provision/windows/steam.ps1"] and .state_files == [] and .fallback == false and .dry_run == true' >/dev/null; then
   printf '  [OK] windows steam install maps to steam step\n'
 else
   printf '  [FAIL] windows steam install maps to steam step\n' >&2
@@ -325,7 +479,7 @@ fi
 windows_rustdesk_install="$(
   ./scripts/package-provision-windows --profile vultr-windows-gaming --package rustdesk --dry-run
 )"
-if printf '%s\n' "$windows_rustdesk_install" | jq -e '.package == "rustdesk" and .steps == ["40_rustdesk.ps1"] and .state_files == ["env.json"] and .fallback == false' >/dev/null; then
+if printf '%s\n' "$windows_rustdesk_install" | jq -e '.package == "rustdesk" and .steps == ["provision/windows/rustdesk.ps1"] and .state_files == ["env.json"] and .fallback == false' >/dev/null; then
   printf '  [OK] windows rustdesk install maps to rustdesk step\n'
 else
   printf '  [FAIL] windows rustdesk install maps to rustdesk step\n' >&2
@@ -344,7 +498,7 @@ fi
 windows_xpra_install="$(
   ./scripts/package-provision-windows --profile vultr-windows-gaming --package xpra --dry-run
 )"
-if printf '%s\n' "$windows_xpra_install" | jq -e '.package == "xpra" and .steps == ["35_xpra.ps1"] and .state_files == [] and .fallback == false' >/dev/null; then
+if printf '%s\n' "$windows_xpra_install" | jq -e '.package == "xpra" and .steps == ["provision/windows/xpra.ps1"] and .state_files == [] and .fallback == false' >/dev/null; then
   printf '  [OK] windows xpra install maps to xpra step\n'
 else
   printf '  [FAIL] windows xpra install maps to xpra step\n' >&2
@@ -378,10 +532,22 @@ manifest_steam_steps="$(
   ./scripts/plugin-list --kind package --json | \
     jq -r '.plugins[] | select(.id == "steam") | .install.ubuntu.steps | join(",")'
 )"
-if [ "$manifest_steam_steps" = "00_base.sh,05_timezone.sh,70_steam.sh" ]; then
+if [ "$manifest_steam_steps" = "base.sh,timezone.sh,provision/ubuntu/steam.sh" ]; then
   printf '  [OK] steam plugin manifest declares ubuntu install steps\n'
 else
   printf '  [FAIL] steam plugin manifest declares ubuntu install steps (got: %s)\n' "$manifest_steam_steps" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+manifest_sunshine_windows_steps="$(
+  ./scripts/plugin-list --kind package --json | \
+    jq -r '.plugins[] | select(.id == "sunshine") | .install.windows.steps | join(",")'
+)"
+expected_sunshine_windows_steps="provision/windows/10_sunshine.ps1,provision/windows/11_vigembus.ps1,provision/windows/20_vdd.ps1,provision/windows/21_vdd_config.ps1,provision/windows/22_vdd_only_display.ps1,provision/windows/23_sunshine_target_vdd.ps1,provision/windows/31_virtual_audio.ps1"
+if [ "$manifest_sunshine_windows_steps" = "$expected_sunshine_windows_steps" ]; then
+  printf '  [OK] sunshine plugin manifest owns reboot-coupled Windows steps\n'
+else
+  printf '  [FAIL] sunshine plugin manifest declares unexpected Windows steps (got: %s)\n' "$manifest_sunshine_windows_steps" >&2
   FAIL=$((FAIL + 1))
 fi
 
@@ -399,7 +565,7 @@ else
   printf '  [OK] package install scripts have no hardcoded case "$PACKAGE" mapping\n'
 fi
 
-hardcoded_step_refs="$(grep -nE '\b(00_base\.sh|05_timezone\.sh|10_docker\.sh|20_dev-toolchain\.sh|30_codex-cli\.sh|40_goose\.sh|45_xpra\.sh|46_vnc\.sh|47_waypipe\.sh|48_gnome_desktop\.sh|49_macos_desktop_theme\.sh|50_rustdesk\.sh|60_sunshine\.sh|70_steam\.sh|10_sunshine\.ps1|30_steam\.ps1|35_xpra\.ps1|40_rustdesk\.ps1)\b' scripts/package-provision scripts/package-provision-windows || true)"
+hardcoded_step_refs="$(grep -nE '\b(base\.sh|timezone\.sh|10_docker\.sh|20_dev-toolchain\.sh|30_codex-cli\.sh|40_goose\.sh|45_xpra\.sh|46_vnc\.sh|47_waypipe\.sh|48_gnome_desktop\.sh|49_macos_desktop_theme\.sh|50_rustdesk\.sh|60_sunshine\.sh|70_steam\.sh|10_sunshine\.ps1|30_steam\.ps1|35_xpra\.ps1|40_rustdesk\.ps1)\b' scripts/package-provision scripts/package-provision-windows || true)"
 if [ -n "$hardcoded_step_refs" ]; then
   printf '  [FAIL] package install scripts still reference step files directly\n' >&2
   printf '%s\n' "$hardcoded_step_refs" >&2
@@ -409,7 +575,7 @@ else
 fi
 
 package_list="$(
-  EGAME_INSTANCE_REGISTRY="$FIXTURE" make --no-print-directory package.list INSTANCE=dev-a EMIT=json
+  EVE_INSTANCE_REGISTRY="$FIXTURE" make --no-print-directory package.list INSTANCE=dev-a EMIT=json
 )"
 if printf '%s\n' "$package_list" | jq -e '.instance == "dev-a" and (.packages[] | select(.id == "docker" and .selected == true and .supported == true and .plugin == "docker" and (.selected_by | index("bundle:dev-ai")))) and (.packages[] | select(.id == "steam" and .selected == false and .selected_by == []))' >/dev/null; then
   printf '  [OK] package list shows selected and available packages\n'
@@ -419,7 +585,7 @@ else
   FAIL=$((FAIL + 1))
 fi
 
-if EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-package-dispatch-test" \
+if EVE_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/eve-package-dispatch-test" \
   ./scripts/package-dispatch --registry "$FIXTURE" --instance dev-a --package docker --command down --dry-run >/dev/null 2>&1; then
   printf '  [FAIL] destructive package down requires confirmation\n' >&2
   FAIL=$((FAIL + 1))
@@ -428,8 +594,8 @@ else
 fi
 
 dummy_reinstall="$(
-  EGAME_PLUGIN_ROOTS="$PLUGIN_FIXTURE" \
-    EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-package-dispatch-test" \
+  EVE_PLUGIN_ROOTS="$PLUGIN_FIXTURE" \
+    EVE_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/eve-package-dispatch-test" \
     ./scripts/package-dispatch --registry "$FIXTURE" --instance dev-a --package dummy --command reinstall --dry-run
 )"
 if printf '%s\n' "$dummy_reinstall" | jq -s -e 'map(.command) == ["down", "install"]' >/dev/null; then
@@ -441,9 +607,9 @@ else
 fi
 
 dummy_hook="$(
-  EGAME_PLUGIN_ROOTS="$PLUGIN_FIXTURE" \
-    EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-package-dispatch-test" \
-    EGAME_DISABLE_STATE=1 \
+  EVE_PLUGIN_ROOTS="$PLUGIN_FIXTURE" \
+    EVE_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/eve-package-dispatch-test" \
+    EVE_DISABLE_STATE=1 \
     ./scripts/package-dispatch --registry "$FIXTURE" --instance dev-a --package dummy --command status
 )"
 if printf '%s\n' "$dummy_hook" | jq -e '.kind == "package-hook" and .package == "dummy" and .instance == "dev-a" and .command == "status" and .status == "installed"' >/dev/null; then
@@ -455,9 +621,9 @@ else
 fi
 
 local_exec_output="$(
-  EGAME_PLUGIN_ROOTS="$LOCAL_EXEC_PLUGIN_FIXTURE" \
-    EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-package-dispatch-test" \
-    EGAME_DISABLE_STATE=1 \
+  EVE_PLUGIN_ROOTS="$LOCAL_EXEC_PLUGIN_FIXTURE" \
+    EVE_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/eve-package-dispatch-test" \
+    EVE_DISABLE_STATE=1 \
     ./scripts/package-dispatch --registry "$FIXTURE" --instance dev-a --package local-exec --command status
 )"
 if printf '%s\n' "$local_exec_output" | jq -e '.kind == "package-local-exec" and .package == "local-exec" and .instance == "dev-a" and .command == "status"' >/dev/null; then
@@ -469,10 +635,10 @@ else
 fi
 
 override_output="$(
-  EGAME_PLUGIN_ALLOW_OVERRIDE=1 \
-    EGAME_PLUGIN_ROOTS="$OVERRIDE_PLUGIN_FIXTURE" \
-    EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-package-dispatch-test" \
-    EGAME_DISABLE_STATE=1 \
+  EVE_PLUGIN_ALLOW_OVERRIDE=1 \
+    EVE_PLUGIN_ROOTS="$OVERRIDE_PLUGIN_FIXTURE" \
+    EVE_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/eve-package-dispatch-test" \
+    EVE_DISABLE_STATE=1 \
     ./scripts/package-dispatch --registry "$FIXTURE" --instance dev-a --package docker --command status
 )"
 if printf '%s\n' "$override_output" | jq -e '.kind == "package-override" and .package == "docker" and .instance == "dev-a" and .command == "status"' >/dev/null; then
@@ -536,7 +702,7 @@ else
 fi
 
 builtin_docker_down_dry_run="$(
-  EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-package-dispatch-test" \
+  EVE_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/eve-package-dispatch-test" \
     ./scripts/package-dispatch --registry "$FIXTURE" --instance dev-a --package docker --command down --dry-run --yes
 )"
 if printf '%s\n' "$builtin_docker_down_dry_run" |
@@ -557,7 +723,7 @@ else
   printf '  [OK] package down implementations live in plugin hooks\n'
 fi
 
-state_dir="$(mktemp -d "${TMPDIR:-/tmp}/egame-state-test.XXXXXX")"
+state_dir="$(mktemp -d "${TMPDIR:-/tmp}/eve-state-test.XXXXXX")"
 tmp_err="$state_dir/error.txt"
 fake_ssh="$state_dir/fake-instance-ssh"
 fake_capture_ssh="$state_dir/fake-capture-instance-ssh"
@@ -577,14 +743,21 @@ chmod +x "$fake_down_ssh"
 cat >"$fake_capture_ssh" <<'SH'
 #!/usr/bin/env sh
 set -eu
-printf '%s\n' "$*" >"${EGAME_FAKE_SSH_ARGS:?}"
+printf '%s\n' "$*" >"${EVE_FAKE_SSH_ARGS:?}"
 printf '#< CLIXML\n'
 printf 'installed\n'
 SH
 chmod +x "$fake_capture_ssh"
+fake_running_ssh="$state_dir/fake-running-ssh"
+cat >"$fake_running_ssh" <<'SH'
+#!/usr/bin/env sh
+set -eu
+printf 'running\n'
+SH
+chmod +x "$fake_running_ssh"
 
 status_contract="$(
-  EGAME_PACKAGE_STATUS_SSH="$fake_ssh" EGAME_INSTANCE_NAME=dev-a \
+  EVE_PACKAGE_STATUS_SSH="$fake_ssh" EVE_INSTANCE_NAME=dev-a \
     ./scripts/package-status-command docker 'ignored remote command'
 )"
 if printf '%s\n' "$status_contract" | jq -e '.kind == "package-status" and .package == "docker" and .instance == "dev-a" and .os_family == "ubuntu" and .status == "installed"' >/dev/null; then
@@ -596,7 +769,7 @@ else
 fi
 
 windows_status_contract="$(
-  EGAME_PACKAGE_STATUS_SSH="$fake_capture_ssh" EGAME_FAKE_SSH_ARGS="$state_dir/fake-ssh-args.txt" EGAME_INSTANCE_NAME=win-a \
+  EVE_PACKAGE_STATUS_SSH="$fake_capture_ssh" EVE_FAKE_SSH_ARGS="$state_dir/fake-ssh-args.txt" EVE_INSTANCE_NAME=win-a \
     ./scripts/package-status-windows steam 'C:\Program Files (x86)\Steam\steam.exe'
 )"
 if printf '%s\n' "$windows_status_contract" | jq -e '.kind == "package-status" and .package == "steam" and .instance == "win-a" and .os_family == "windows" and .status == "installed" and .details == "installed"' >/dev/null; then
@@ -604,6 +777,18 @@ if printf '%s\n' "$windows_status_contract" | jq -e '.kind == "package-status" a
 else
   printf '  [FAIL] windows package status helper contract mismatch\n' >&2
   printf '%s\n' "$windows_status_contract" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+windows_running_contract="$(
+  EVE_PACKAGE_STATUS_SSH="$fake_running_ssh" EVE_INSTANCE_NAME=win-a EVE_PACKAGE_STATUS_PROCESS=rustdesk EVE_PACKAGE_STATUS_SERVICE_PATTERN=rustdesk \
+    ./scripts/package-status-windows rustdesk 'C:\Program Files\RustDesk\rustdesk.exe'
+)"
+if printf '%s\n' "$windows_running_contract" | jq -e '.kind == "package-status" and .package == "rustdesk" and .instance == "win-a" and .os_family == "windows" and .status == "installed" and .details == "running"' >/dev/null; then
+  printf '  [OK] windows package status helper keeps running packages installed\n'
+else
+  printf '  [FAIL] windows package status helper running contract mismatch\n' >&2
+  printf '%s\n' "$windows_running_contract" >&2
   FAIL=$((FAIL + 1))
 fi
 
@@ -616,7 +801,7 @@ else
 fi
 
 down_contract="$(
-  EGAME_PACKAGE_DOWN_SSH="$fake_down_ssh" EGAME_INSTANCE_NAME=dev-a \
+  EVE_PACKAGE_DOWN_SSH="$fake_down_ssh" EVE_INSTANCE_NAME=dev-a \
     ./scripts/package-down-command docker 'sudo apt-get remove -y docker-ce || true'
 )"
 if printf '%s\n' "$down_contract" | jq -e '.kind == "package-down" and .package == "docker" and .instance == "dev-a" and .os_family == "ubuntu" and .status == "removed"' >/dev/null; then
@@ -628,7 +813,7 @@ else
 fi
 
 windows_down_contract="$(
-  EGAME_PACKAGE_DOWN_SSH="$fake_down_ssh" EGAME_INSTANCE_NAME=win-a \
+  EVE_PACKAGE_DOWN_SSH="$fake_down_ssh" EVE_INSTANCE_NAME=win-a \
     ./scripts/package-down-windows steam 'winget uninstall --id Valve.Steam --silent; exit 0'
 )"
 if printf '%s\n' "$windows_down_contract" | jq -e '.kind == "package-down" and .package == "steam" and .instance == "win-a" and .os_family == "windows" and .status == "removed"' >/dev/null; then
@@ -639,7 +824,7 @@ else
   FAIL=$((FAIL + 1))
 fi
 
-empty_state="$(EGAME_STATE_DIR="$state_dir" ./scripts/instance-state --instance fresh-a --get)"
+empty_state="$(EVE_STATE_DIR="$state_dir" ./scripts/instance-state --instance fresh-a --get)"
 if printf '%s\n' "$empty_state" | jq -e '.instance == "fresh-a" and .desired_state == "unknown" and .provider_state == "unknown" and .provision_state == "unknown" and .package_state == {} and .operation_history == []' >/dev/null; then
   printf '  [OK] instance state get returns default state shape\n'
 else
@@ -649,7 +834,7 @@ else
 fi
 
 state_json="$(
-  EGAME_STATE_DIR="$state_dir" ./scripts/instance-state \
+  EVE_STATE_DIR="$state_dir" ./scripts/instance-state \
     --instance dev-a \
     --operation package.down \
     --status succeeded \
@@ -667,13 +852,13 @@ else
 fi
 
 running_state="$(
-  EGAME_STATE_DIR="$state_dir" ./scripts/instance-state \
+  EVE_STATE_DIR="$state_dir" ./scripts/instance-state \
     --instance recover-a \
     --operation provider.up \
     --status running \
     --provider-state changing
 )"
-recovered_state="$(EGAME_STATE_DIR="$state_dir" ./scripts/instance-state --instance recover-a --recover-running)"
+recovered_state="$(EVE_STATE_DIR="$state_dir" ./scripts/instance-state --instance recover-a --recover-running)"
 if printf '%s\n' "$running_state" "$recovered_state" |
   jq -s -e '.[0].last_operation.status == "running" and .[1].last_operation.status == "failed" and .[1].provider_state == "error" and (.[1].last_error | test("Recovered interrupted operation provider.up"))' >/dev/null; then
   printf '  [OK] instance state recovers interrupted running operation\n'
@@ -683,17 +868,17 @@ else
   FAIL=$((FAIL + 1))
 fi
 
-EGAME_STATE_DIR="$state_dir" ./scripts/instance-state \
+EVE_STATE_DIR="$state_dir" ./scripts/instance-state \
   --instance recover-read-a \
   --operation provider.up \
   --status succeeded \
   --desired-state running \
   --provider-state running >/dev/null
-EGAME_STATE_DIR="$state_dir" ./scripts/instance-state \
+EVE_STATE_DIR="$state_dir" ./scripts/instance-state \
   --instance recover-read-a \
   --operation provider.ip \
   --status running >/dev/null
-recovered_read_state="$(EGAME_STATE_DIR="$state_dir" ./scripts/instance-state --instance recover-read-a --recover-running)"
+recovered_read_state="$(EVE_STATE_DIR="$state_dir" ./scripts/instance-state --instance recover-read-a --recover-running)"
 if printf '%s\n' "$recovered_read_state" |
   jq -e '.last_operation.name == "provider.ip" and .last_operation.status == "failed" and .provider_state == "running" and (.last_error | test("Recovered interrupted operation provider.ip"))' >/dev/null; then
   printf '  [OK] instance state recover preserves read-only provider state\n'
@@ -703,7 +888,7 @@ else
   FAIL=$((FAIL + 1))
 fi
 
-if EGAME_STATE_DIR="$state_dir" ./scripts/instance-state \
+if EVE_STATE_DIR="$state_dir" ./scripts/instance-state \
   --instance dev-a \
   --operation provider.status \
   --status succeeded \
@@ -718,7 +903,7 @@ else
   FAIL=$((FAIL + 1))
 fi
 
-if EGAME_STATE_DIR="$state_dir" ./scripts/instance-state \
+if EVE_STATE_DIR="$state_dir" ./scripts/instance-state \
   --instance dev-a \
   --operation package.status \
   --status succeeded \
@@ -734,7 +919,7 @@ else
   FAIL=$((FAIL + 1))
 fi
 
-if EGAME_STATE_DIR="$state_dir" ./scripts/instance-state \
+if EVE_STATE_DIR="$state_dir" ./scripts/instance-state \
   --instance dev-a \
   --operation package.status \
   --status succeeded \
@@ -749,11 +934,11 @@ else
   FAIL=$((FAIL + 1))
 fi
 
-EGAME_STATE_DIR="$state_dir" \
-  EGAME_PACKAGE_STATUS_SSH="$fake_ssh" \
-  EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-package-dispatch-test" \
+EVE_STATE_DIR="$state_dir" \
+  EVE_PACKAGE_STATUS_SSH="$fake_ssh" \
+  EVE_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/eve-package-dispatch-test" \
   ./scripts/package-dispatch --registry "$FIXTURE" --instance dev-a --package docker --command status >/dev/null
-recorded_state="$(EGAME_STATE_DIR="$state_dir" ./scripts/instance-state --instance dev-a --get)"
+recorded_state="$(EVE_STATE_DIR="$state_dir" ./scripts/instance-state --instance dev-a --get)"
 if printf '%s\n' "$recorded_state" | jq -e '.last_operation.name == "package.status" and .last_operation.status == "succeeded" and .package_state.docker.status == "installed" and ([.operation_history[-2].status, .operation_history[-1].status] == ["running", "succeeded"])' >/dev/null; then
   printf '  [OK] package dispatch records state\n'
 else
@@ -762,11 +947,11 @@ else
   FAIL=$((FAIL + 1))
 fi
 
-EGAME_PLUGIN_ROOTS="$PLUGIN_FIXTURE" \
-  EGAME_STATE_DIR="$state_dir" \
-  EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-package-dispatch-test" \
+EVE_PLUGIN_ROOTS="$PLUGIN_FIXTURE" \
+  EVE_STATE_DIR="$state_dir" \
+  EVE_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/eve-package-dispatch-test" \
   ./scripts/package-dispatch --registry "$FIXTURE" --instance dev-a --package dummy --command status >/dev/null
-hook_status_state="$(EGAME_STATE_DIR="$state_dir" ./scripts/instance-state --instance dev-a --get)"
+hook_status_state="$(EVE_STATE_DIR="$state_dir" ./scripts/instance-state --instance dev-a --get)"
 if printf '%s\n' "$hook_status_state" | jq -e '.package_state.dummy.status == "installed"' >/dev/null; then
   printf '  [OK] package dispatch records hook status contract\n'
 else
@@ -775,10 +960,10 @@ else
   FAIL=$((FAIL + 1))
 fi
 
-EGAME_STATE_DIR="$state_dir" \
-  EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-package-dispatch-test" \
+EVE_STATE_DIR="$state_dir" \
+  EVE_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/eve-package-dispatch-test" \
   ./scripts/package-dispatch --registry "$FIXTURE" --instance dev-a --package missing-package --command status >/dev/null 2>&1 || true
-failed_package_state="$(EGAME_STATE_DIR="$state_dir" ./scripts/instance-state --instance dev-a --get)"
+failed_package_state="$(EVE_STATE_DIR="$state_dir" ./scripts/instance-state --instance dev-a --get)"
 if printf '%s\n' "$failed_package_state" | jq -e '.last_operation.name == "package.status" and .last_operation.status == "failed" and .last_error and .package_state["missing-package"].status == "failed"' >/dev/null; then
   printf '  [OK] package dispatch records failed package state\n'
 else
@@ -787,18 +972,18 @@ else
   FAIL=$((FAIL + 1))
 fi
 
-EGAME_STATE_DIR="$state_dir" \
-  EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-provider-dispatch-test" \
+EVE_STATE_DIR="$state_dir" \
+  EVE_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/eve-provider-dispatch-test" \
   ./scripts/instance-state \
     --instance dev-a \
     --operation provider.up \
     --status succeeded \
     --desired-state running \
     --provider-state running >/dev/null
-EGAME_STATE_DIR="$state_dir" \
-  EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-provider-dispatch-test" \
+EVE_STATE_DIR="$state_dir" \
+  EVE_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/eve-provider-dispatch-test" \
   ./scripts/provider-dispatch --registry "$FIXTURE" --instance dev-a --command ip >/dev/null 2>&1 || true
-failed_ip_state="$(EGAME_STATE_DIR="$state_dir" ./scripts/instance-state --instance dev-a --get)"
+failed_ip_state="$(EVE_STATE_DIR="$state_dir" ./scripts/instance-state --instance dev-a --get)"
 if printf '%s\n' "$failed_ip_state" | jq -e '.last_operation.name == "provider.ip" and .last_operation.status == "failed" and .provider_state == "running" and .last_error' >/dev/null; then
   printf '  [OK] provider dispatch read failures preserve lifecycle state\n'
 else
@@ -807,15 +992,221 @@ else
   FAIL=$((FAIL + 1))
 fi
 
-EGAME_STATE_DIR="$state_dir" \
-  EGAME_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/egame-provider-dispatch-test" \
+EVE_STATE_DIR="$state_dir" \
+  EVE_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/eve-provider-dispatch-test" \
   ./scripts/provider-dispatch --registry "$FIXTURE" --instance dev-a --command bogus >/dev/null 2>&1 || true
-failed_provider_state="$(EGAME_STATE_DIR="$state_dir" ./scripts/instance-state --instance dev-a --get)"
+failed_provider_state="$(EVE_STATE_DIR="$state_dir" ./scripts/instance-state --instance dev-a --get)"
 if printf '%s\n' "$failed_provider_state" | jq -e '.last_operation.name == "provider.bogus" and .last_operation.status == "failed" and .provider_state == "error" and .last_error' >/dev/null; then
   printf '  [OK] provider dispatch records failed provider state\n'
 else
   printf '  [FAIL] provider dispatch failed state mismatch\n' >&2
   printf '%s\n' "$failed_provider_state" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+contract_grep="$(rg 'Contract\.validate' core/sdk/provider.rb scripts/package-dispatch scripts/provider-dispatch || true)"
+if [ -n "$contract_grep" ]; then
+  printf '  [OK] Contract.validate has real callers in provider and package dispatch\n'
+else
+  printf '  [FAIL] Contract.validate has no callers outside contract.rb\n' >&2
+  FAIL=$((FAIL + 1))
+fi
+
+# shellcheck disable=SC2016
+invalid_status_err="$(printf '{"status":"not-a-valid-status"}' | ruby -rjson -e '
+  $LOAD_PATH.unshift(File.join(ENV["PWD"] || ".", "core"))
+  require "sdk"
+  begin
+    Eve::SDK::Contract.validate_output!(JSON.parse(STDIN.read), def_name: "package_command_output")
+    exit 0
+  rescue Eve::SDK::ContractError => e
+    warn e.message
+    exit 1
+  end
+' 2>&1 || true)"
+if printf '%s\n' "$invalid_status_err" | grep -q "failed schema validation"; then
+  printf '  [OK] Contract rejects invalid package command output\n'
+else
+  printf '  [FAIL] Contract should reject invalid package command output\n' >&2
+  printf '%s\n' "$invalid_status_err" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+bad_status_dispatch_err="$(
+  EVE_PLUGIN_ROOTS="$BAD_STATUS_FIXTURE" \
+    EVE_INSTANCE_WORKDIR="${TMPDIR:-/tmp}/eve-package-dispatch-test" \
+    EVE_DISABLE_STATE=1 \
+    ./scripts/package-dispatch --registry "$FIXTURE" --instance dev-a --package invalid-status-output --command status 2>&1 >/dev/null || true
+)"
+if printf '%s\n' "$bad_status_dispatch_err" | grep -q "failed schema validation"; then
+  printf '  [OK] package dispatch rejects invalid status from plugin command output\n'
+else
+  printf '  [FAIL] package dispatch should reject invalid status from plugin command output\n' >&2
+  printf '%s\n' "$bad_status_dispatch_err" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+# shellcheck disable=SC2016
+invalid_provider_status_err="$(printf '{"status":"not-a-valid-status"}' | ruby -rjson -e '
+  $LOAD_PATH.unshift(File.join(ENV["PWD"] || ".", "core"))
+  require "sdk"
+  begin
+    Eve::SDK::Contract.validate_output!(JSON.parse(STDIN.read), def_name: "provider_command_output")
+    exit 0
+  rescue Eve::SDK::ContractError => e
+    warn e.message
+    exit 1
+  end
+' 2>&1 || true)"
+if printf '%s\n' "$invalid_provider_status_err" | grep -q "failed schema validation"; then
+  printf '  [OK] Contract rejects invalid provider command output status\n'
+else
+  printf '  [FAIL] Contract should reject invalid provider command output status\n' >&2
+  printf '%s\n' "$invalid_provider_status_err" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+# shellcheck disable=SC2016
+empty_ip_err="$(printf '{"ip":""}' | ruby -rjson -e '
+  $LOAD_PATH.unshift(File.join(ENV["PWD"] || ".", "core"))
+  require "sdk"
+  begin
+    Eve::SDK::Contract.validate_output!(JSON.parse(STDIN.read), def_name: "provider_command_output")
+    exit 0
+  rescue Eve::SDK::ContractError => e
+    warn e.message
+    exit 1
+  end
+' 2>&1 || true)"
+if printf '%s\n' "$empty_ip_err" | grep -q "failed schema validation"; then
+  printf '  [OK] Contract rejects empty provider command output ip\n'
+else
+  printf '  [FAIL] Contract should reject empty provider command output ip\n' >&2
+  printf '%s\n' "$empty_ip_err" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+# shellcheck disable=SC2016
+valid_provider_output_err="$(printf '{"status":"running"}' | ruby -rjson -e '
+  $LOAD_PATH.unshift(File.join(ENV["PWD"] || ".", "core"))
+  require "sdk"
+  begin
+    Eve::SDK::Contract.validate_output!(JSON.parse(STDIN.read), def_name: "provider_command_output")
+    exit 0
+  rescue Eve::SDK::ContractError => e
+    warn e.message
+    exit 1
+  end
+' 2>&1 || true)"
+if [ -z "$valid_provider_output_err" ]; then
+  printf '  [OK] Contract accepts valid provider command output\n'
+else
+  printf '  [FAIL] Contract should accept valid provider command output\n' >&2
+  printf '%s\n' "$valid_provider_output_err" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+provider_status_catalog="$profile_catalog_dir/provider-status-catalog.local.yaml"
+provider_status_registry="$profile_catalog_dir/provider-status-instances.yaml"
+cat >"$provider_status_catalog" <<'YAML'
+machines:
+  - name: acme-small
+    provider: acme
+    kind: vm
+    defaults:
+      disk_gb: 30
+      memory_mb: 4096
+locations:
+  - name: tokyo
+    acme:
+      region: test-region
+inits:
+  - id: ssh-ubuntu-cloud-init
+    providers: [acme]
+YAML
+cat >"$provider_status_registry" <<'YAML'
+version: 1
+instances:
+  - name: acme-a
+    machine: acme-small
+    os: ubuntu-26.04-amd64
+    init: ssh-ubuntu-cloud-init
+    packages: [docker]
+    location: tokyo
+YAML
+provider_dispatch_output_err="$(
+  EVE_PLUGIN_ROOTS="$BAD_PROVIDER_STATUS_FIXTURE" \
+    EVE_CATALOG_LOCAL="$provider_status_catalog" \
+    EVE_INSTANCE_WORKDIR="$profile_catalog_dir/provider-dispatch-workdir" \
+    EVE_DISABLE_STATE=1 \
+    ./scripts/provider-dispatch --registry "$provider_status_registry" --instance acme-a --command status 2>&1 >/dev/null || true
+)"
+if printf '%s\n' "$provider_dispatch_output_err" | grep -q "failed schema validation"; then
+  printf '  [OK] provider dispatch rejects invalid status from provider command output\n'
+else
+  printf '  [FAIL] provider dispatch should reject invalid status from provider command output\n' >&2
+  printf '%s\n' "$provider_dispatch_output_err" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+# shellcheck disable=SC2016
+prov_status_jq='
+  .api_version == 1
+  and (.os_family | IN("ubuntu","windows"))
+  and has("started_at")
+  and ((.started_at | type) == "string" or (.started_at | type) == "null")
+  and (.status as $s | $s | IN("running","done","failed"))
+  and (.steps | type) == "array"
+  and ([.steps[] | (
+    (.step | type) == "string" and (.step | length) > 0
+    and (.phase as $p | $p | IN("pending","running","succeeded","failed","skipped"))
+    and has("started_at")
+    and has("ended_at")
+    and has("exit_code")
+    and ((.started_at | type) == "string" or (.started_at | type) == "null")
+    and ((.ended_at | type) == "string" or (.ended_at | type) == "null")
+    and ((.exit_code | type) == "number" or (.exit_code | type) == "null")
+    and (if .exit_code != null then (.exit_code | . == floor) else true end)
+  )] | all)
+'
+
+missing_os_family='{"api_version":1,"started_at":null,"status":"running","steps":[]}'
+if printf '%s' "$missing_os_family" | jq -e "$prov_status_jq" >/dev/null 2>&1; then
+  printf '  [FAIL] provision-status jq accepts missing os_family\n' >&2
+  FAIL=$((FAIL + 1))
+else
+  printf '  [OK] provision-status jq rejects missing os_family\n'
+fi
+
+missing_started_at='{"api_version":1,"os_family":"ubuntu","status":"running","steps":[]}'
+if printf '%s' "$missing_started_at" | jq -e "$prov_status_jq" >/dev/null 2>&1; then
+  printf '  [FAIL] provision-status jq accepts missing started_at\n' >&2
+  FAIL=$((FAIL + 1))
+else
+  printf '  [OK] provision-status jq rejects missing started_at\n'
+fi
+
+step_missing_timing='{"api_version":1,"os_family":"ubuntu","started_at":"2025-01-15T10:30:00Z","status":"running","steps":[{"step":"base.sh","phase":"running","exit_code":null}]}'
+if printf '%s' "$step_missing_timing" | jq -e "$prov_status_jq" >/dev/null 2>&1; then
+  printf '  [FAIL] provision-status jq accepts step missing started_at/ended_at\n' >&2
+  FAIL=$((FAIL + 1))
+else
+  printf '  [OK] provision-status jq rejects step missing started_at/ended_at\n'
+fi
+
+step_bad_timing_type='{"api_version":1,"os_family":"ubuntu","started_at":"2025-01-15T10:30:00Z","status":"running","steps":[{"step":"base.sh","phase":"running","started_at":123,"ended_at":null,"exit_code":null}]}'
+if printf '%s' "$step_bad_timing_type" | jq -e "$prov_status_jq" >/dev/null 2>&1; then
+  printf '  [FAIL] provision-status jq accepts non-string step started_at\n' >&2
+  FAIL=$((FAIL + 1))
+else
+  printf '  [OK] provision-status jq rejects non-string step started_at\n'
+fi
+
+valid_running='{"api_version":1,"os_family":"ubuntu","started_at":"2025-01-15T10:30:00Z","status":"running","steps":[{"step":"base.sh","phase":"succeeded","started_at":"2025-01-15T10:30:00Z","ended_at":"2025-01-15T10:31:00Z","exit_code":0},{"step":"human-user.sh","phase":"running","started_at":"2025-01-15T10:31:01Z","ended_at":null,"exit_code":null}]}'
+if printf '%s' "$valid_running" | jq -e "$prov_status_jq" >/dev/null 2>&1; then
+  printf '  [OK] provision-status jq accepts valid running status\n'
+else
+  printf '  [FAIL] provision-status jq rejects valid running status\n' >&2
   FAIL=$((FAIL + 1))
 fi
 

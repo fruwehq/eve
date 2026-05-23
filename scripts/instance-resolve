@@ -3,14 +3,15 @@
 
 require "json"
 require "open3"
+require "set"
 require "yaml"
 
 ROOT = File.expand_path("..", __dir__)
 CATALOG_PATH = File.join(ROOT, "config/catalog.yaml")
-LOCAL_CATALOG_PATH = ENV["EGAME_CATALOG_LOCAL"] && !ENV["EGAME_CATALOG_LOCAL"].empty? \
-                     ? File.expand_path(ENV["EGAME_CATALOG_LOCAL"], Dir.pwd) \
+LOCAL_CATALOG_PATH = ENV["EVE_CATALOG_LOCAL"] && !ENV["EVE_CATALOG_LOCAL"].empty? \
+                     ? File.expand_path(ENV["EVE_CATALOG_LOCAL"], Dir.pwd) \
                      : File.join(ROOT, "config/catalog.local.yaml")
-DEFAULT_REGISTRY_PATH = File.join(ROOT, ".egame/instances.yaml")
+DEFAULT_REGISTRY_PATH = File.join(ROOT, ".eve/instances.yaml")
 
 def usage
   warn <<~USAGE
@@ -39,6 +40,16 @@ def deep_merge(left, right)
   else
     right
   end
+end
+
+def provider_config_for(instance, provider)
+  config = instance["provider_config"]
+  return {} unless config.is_a?(Hash)
+
+  provider_config = config[provider]
+  return provider_config if provider_config.is_a?(Hash)
+
+  config
 end
 
 def merge_by_key(base_arr, over_arr, key)
@@ -93,9 +104,38 @@ def package_plugins
   plugin_doc.fetch("plugins")
 end
 
+def plugin_command_argv(plugin, spec)
+  exec_path = spec.fetch("exec").to_s
+  resolved_exec = if exec_path.start_with?("/")
+                    exec_path
+                  else
+                    plugin_exec = File.join(File.dirname(plugin.fetch("path")), exec_path)
+                    root_exec = File.join(ROOT, exec_path)
+                    File.exist?(plugin_exec) ? plugin_exec : root_exec
+                  end
+  raise "Provider plugin #{plugin.fetch("id")} command exec not found: #{exec_path}" unless File.file?(resolved_exec)
+
+  [resolved_exec] + Array(spec["args"])
+end
+
+def validate_provider_metadata!(provider_plugin, resolved)
+  spec = provider_plugin.fetch("commands").fetch("validate")
+  argv = plugin_command_argv(provider_plugin, spec)
+  out, err, status = Open3.capture3({ "EVE_RESOLVED_JSON" => JSON.generate(resolved) }, *argv)
+  return if status.success?
+
+  message = [err, out].reject { |part| part.to_s.strip.empty? }.join("\n").strip
+  raise(message.empty? ? "Provider plugin #{provider_plugin.fetch("id")} validate failed" : message)
+end
+
 def env_or(name, fallback)
   value = ENV[name]
   value && !value.empty? ? value : fallback
+end
+
+def env_value(name)
+  value = ENV[name]
+  value && !value.empty? ? value : nil
 end
 
 def resolve_bundle_packages(catalog, bundle_ids)
@@ -185,37 +225,9 @@ def validate!(catalog, composition, machine, os, init, location, bundle_packages
     raise "Machine/OS mismatch: machine #{machine["name"]} does not support OS #{os["id"]}"
   end
 
-  case provider
-  when "aws"
-    unless os.key?("aws_ami_name_pattern") || os.key?("aws_ami_id") || os.key?("aws_ssm_parameter")
-      raise "OS/provider mismatch: OS #{os["id"]} has no AWS image selector"
-    end
-  when "gcp"
-    unless os.key?("gcp_image_project") && os.key?("gcp_image_family")
-      raise "OS/provider mismatch: OS #{os["id"]} has no GCP image selector"
-    end
-  when "vultr"
-    raise "OS/provider mismatch: OS #{os["id"]} has no Vultr OS id" unless os.key?("vultr_os_id")
-  when "local-qemu"
-    raise "OS/provider mismatch: OS #{os["id"]} has no Vagrant box" unless os.key?("vagrant_box")
-  when "truenas"
-    raise "OS/provider mismatch: OS #{os["id"]} has no cloud image URL" unless os.key?("cloud_image_url")
-  when "raspberry-pi"
-    raise "OS/provider mismatch: OS #{os["id"]} has no metal image" unless os.key?("metal_image")
-  end
-
   package_catalog = (catalog["packages"] || []).map { |pkg| pkg["id"] }
   unknown_package = bundle_packages.find { |pkg| !package_catalog.include?(pkg) }
   raise "Bundle references unknown package id: #{unknown_package}" if unknown_package
-
-  if bundle_packages.include?("codex-cli") && !bundle_packages.include?("dev-toolchain")
-    raise "Compatibility: codex-cli requires dev-toolchain in bundles"
-  end
-
-  if bundle_packages.include?("goose") && !bundle_packages.include?("dev-toolchain")
-    raise "Compatibility: goose requires dev-toolchain in bundles"
-  end
-
 end
 
 def engine_for(machine)
@@ -245,6 +257,44 @@ def validate_provider_plugin!(machine, engine)
   unless supported_kinds.empty? || supported_kinds.include?(machine_kind)
     raise "Provider plugin #{provider} does not support machine kind #{machine_kind}"
   end
+
+  plugin
+end
+
+def resolve_access_value(rule, resolved_values, location)
+  value = nil
+  if rule["env"]
+    value = env_value(rule["env"])
+  end
+  if (value.nil? || value.empty?) && rule["value"]
+    value = rule["value"]
+  end
+  if (value.nil? || value.empty?) && rule["location"]
+    value = location[rule["location"]]
+  end
+  if (value.nil? || value.empty?) && rule["fallback"]
+    value = resolved_values[rule["fallback"]]
+  end
+  value.to_s
+end
+
+def resolve_access!(provider_plugin, os_family, location)
+  access = provider_plugin["access"]
+  raise "Provider plugin #{provider_plugin["id"]} has no access rules" unless access.is_a?(Hash)
+
+  rules = access[os_family] || access["default"]
+  unless rules.is_a?(Hash)
+    raise "Provider plugin #{provider_plugin["id"]} has no access rules for OS family #{os_family}"
+  end
+
+  resolved = {}
+  %w[bootstrap_user provision_user human_user].each do |field|
+    rule = rules[field]
+    raise "Provider plugin #{provider_plugin["id"]} access.#{os_family}.#{field} is missing" unless rule.is_a?(Hash)
+
+    resolved[field] = resolve_access_value(rule, resolved, location)
+  end
+  resolved
 end
 
 def validate_package_support_value!(plugin_id, supports, value, field, label)
@@ -256,8 +306,9 @@ end
 
 def validate_package_plugins!(bundle_packages, os)
   plugins = package_plugins
+  plugin_by_id = plugins.to_h { |entry| [entry.fetch("id"), entry] }
   bundle_packages.each do |package_id|
-    plugin = plugins.find { |entry| entry.fetch("id") == package_id }
+    plugin = plugin_by_id[package_id]
     raise "Package plugin not found: #{package_id}" unless plugin
 
     supports = plugin.fetch("supports", {})
@@ -267,16 +318,65 @@ def validate_package_plugins!(bundle_packages, os)
     validate_package_support_value!(package_id, supports, os.fetch("id"), "os_ids", "OS")
     validate_package_support_value!(package_id, supports, os.fetch("version", ""), "os_versions", "OS version")
     validate_package_support_value!(package_id, supports, os.fetch("version", ""), "#{os_family}_versions", "#{os_family} version")
+
+    conflicts = plugin["conflicts_with"].is_a?(Array) ? plugin["conflicts_with"] : []
+    conflict = conflicts.find { |candidate| bundle_packages.include?(candidate) }
+    raise "Package conflict: #{package_id} conflicts with #{conflict}" if conflict
+
+    depends = plugin["depends_on"].is_a?(Array) ? plugin["depends_on"] : []
+    missing = depends.reject { |dep| bundle_packages.include?(dep) }
+    raise "Package #{package_id} depends_on #{missing.join(", ")} but none are selected" unless missing.empty?
   end
+end
+
+# Topologically sort package ids so that any package's depends_on entries
+# appear before it. Cycles raise. Within an equal-rank tier, packages stay
+# in their input (already-alphabetical) order so the result is deterministic.
+def order_packages_by_dependency(package_ids)
+  plugin_by_id = package_plugins.to_h { |entry| [entry.fetch("id"), entry] }
+  selected = package_ids.to_a
+  selected_set = selected.to_set
+  # Skip-edge: only consider depends that are themselves selected, so
+  # unselected optional dependencies do not break ordering.
+  deps = selected.to_h do |pkg|
+    plugin = plugin_by_id[pkg] || {}
+    edges = (plugin["depends_on"].is_a?(Array) ? plugin["depends_on"] : [])
+              .select { |dep| selected_set.include?(dep) }
+    [pkg, edges]
+  end
+
+  ordered = []
+  visiting = {}
+  visited = {}
+  visit = lambda do |pkg, stack|
+    return if visited[pkg]
+    raise "Package dependency cycle: #{(stack + [pkg]).join(" -> ")}" if visiting[pkg]
+
+    visiting[pkg] = true
+    deps.fetch(pkg, []).each { |dep| visit.call(dep, stack + [pkg]) }
+    visiting.delete(pkg)
+    visited[pkg] = true
+    ordered << pkg
+  end
+
+  selected.each { |pkg| visit.call(pkg, []) }
+  ordered
 end
 
 def emit_env(resolved)
   provider = resolved.dig("machine", "provider")
   locp = resolved.dig("location", provider) || {}
+  provider_config = resolved["provider_config"] || {}
+  pi_host = provider_config["host"] || provider_config["ip"] || env_or("RASPBERRY_PI_HOST", locp["host"] || "")
+  pi_ip = provider_config["ip"] || env_or("RASPBERRY_PI_IP", locp["ip"] || "")
   os = resolved["os"]
   machine_defaults = resolved.dig("machine", "defaults") || {}
+  access = resolved.fetch("access")
 
   lines = {
+    "ACCESS_BOOTSTRAP_USER" => access.fetch("bootstrap_user"),
+    "ACCESS_HUMAN_USER" => access.fetch("human_user"),
+    "ACCESS_PROVISION_USER" => access.fetch("provision_user"),
     "INSTANCE_NAME" => resolved.dig("instance", "name"),
     "PROFILE_NAME" => resolved.dig("instance", "name"),
     "ENGINE" => resolved["engine"],
@@ -307,15 +407,12 @@ def emit_env(resolved)
     "LOCATION_REGION" => (locp["region"] || ""),
     "LOCATION_AVAILABILITY_ZONE" => (locp["availability_zone"] || ""),
     "LOCATION_ZONE" => (locp["zone"] || ""),
-    "SSH_USER" => if os["family"] == "windows"
-                    "Administrator"
-                  elsif provider == "raspberry-pi"
-                    env_or("VM_USER_NAME", "")
-                  else
-                    env_or("VM_USER_NAME", "ubuntu")
-                  end,
+    "SSH_USER" => access.fetch("bootstrap_user"),
     "CLOUD_IMAGE_URL" => (os["cloud_image_url"] || ""),
-    "RASPBERRY_PI_HOST" => env_or("RASPBERRY_PI_HOST", locp["host"] || ""),
+    "HUMAN_USER_NAME" => access.fetch("human_user"),
+    "PROVISION_USER_NAME" => access.fetch("provision_user"),
+    "RASPBERRY_PI_HOST" => pi_host,
+    "RASPBERRY_PI_IP" => pi_ip,
     "TRUENAS_HOST" => env_or("TRUENAS_HOST", locp["host"] || ""),
     "TRUENAS_SSH_PORT" => env_or("TRUENAS_SSH_PORT", (locp["ssh_port"] || 22).to_s),
     "TRUENAS_SSH_USER" => env_or("TRUENAS_SSH_USER", locp["ssh_user"] || ""),
@@ -328,8 +425,8 @@ end
 instance_name = nil
 emit = nil
 validate = false
-registry_path = ENV["EGAME_INSTANCE_REGISTRY"] && !ENV["EGAME_INSTANCE_REGISTRY"].empty? \
-                ? File.expand_path(ENV["EGAME_INSTANCE_REGISTRY"], Dir.pwd) \
+registry_path = ENV["EVE_INSTANCE_REGISTRY"] && !ENV["EVE_INSTANCE_REGISTRY"].empty? \
+                ? File.expand_path(ENV["EVE_INSTANCE_REGISTRY"], Dir.pwd) \
                 : DEFAULT_REGISTRY_PATH
 
 args = ARGV.dup
@@ -364,7 +461,7 @@ begin
   raise "Instance not found: #{instance_name} (registry: #{registry_path})" unless instance
 
   instance_overrides = instance.reject do |key, _value|
-    %w[name overrides created_at updated_at state].include?(key)
+    %w[name overrides provider_config created_at updated_at state].include?(key)
   end
   composition = instance_overrides
   composition["name"] = instance["name"]
@@ -386,16 +483,24 @@ begin
   validate!(catalog, composition, machine, os, init, location, bundle_packages)
 
   provider = machine["provider"]
+  provider_config = provider_config_for(instance, provider)
   engine = engine_for(machine)
-  validate_provider_plugin!(machine, engine)
+  provider_plugin = validate_provider_plugin!(machine, engine)
   validate_package_plugins!(bundle_packages, os)
+  # Order packages so each package's depends_on entries come before it.
+  # validate_package_plugins! already verified deps are selected and
+  # plugins exist; topo sort runs after to produce the canonical
+  # install order downstream consumers (scripts/provision) rely on.
+  bundle_packages = order_packages_by_dependency(bundle_packages)
   resolved = {
     "instance" => instance,
+    "access" => resolve_access!(provider_plugin, os.fetch("family"), location.fetch(provider, {})),
     "composition" => composition,
     "machine" => machine,
     "os" => os,
     "init" => init,
     "location" => location,
+    "provider_config" => provider_config,
     "bundle_packages" => bundle_packages,
     "package_sources" => package_sources,
     "provider_plugin" => provider,
@@ -403,6 +508,7 @@ begin
     "engine" => engine,
     "stack_tags" => provider
   }
+  validate_provider_metadata!(provider_plugin, resolved)
 
   puts "Instance validated: #{instance_name}" if validate
 

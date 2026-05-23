@@ -54,4 +54,15 @@ instances:
     os: ubuntu-26.04-arm64
     init: ssh-ubuntu-metal
     location: tokyo
+    provider_config:
+      ip: 192.0.2.10
     bundles: [desktop-streaming, dev-ai]
+
+  - name: rpi-all-b
+    machine: raspberry-pi-5
+    os: ubuntu-26.04-arm64
+    init: ssh-ubuntu-metal
+    location: tokyo
+    provider_config:
+      ip: 192.0.2.11
+    bundles: [dev-ai]

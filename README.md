@@ -7,12 +7,15 @@
 > Next boundary cleanup: [docs/v3.1-provider-plugin-boundaries-plan.md](docs/v3.1-provider-plugin-boundaries-plan.md)
 >
 > Planned runtime notes: [docs/raspberry-pi-provider.md](docs/raspberry-pi-provider.md)
+>
+> Remote desktop compatibility matrix:
+> [docs/remote-desktop-compatibility.md](docs/remote-desktop-compatibility.md)
 
 ## v3 instance workflow
 
 v3 introduces concrete local instances selected from provider/platform catalog
 choices. Instances live in the git-ignored local registry at
-`.egame/instances.yaml`.
+`.eve/instances.yaml`.
 
 ```bash
 # List supported provider / platform / content choices
@@ -32,6 +35,8 @@ make instance.validate INSTANCE=dev-a
 
 # Browse and operate instances from the optional Textual TUI
 make tui
+# or
+make eve
 
 # Run lifecycle targets through the selected concrete instance
 make init INSTANCE=dev-a
@@ -53,7 +58,7 @@ make package.unselect INSTANCE=dev-a PACKAGE=xpra
 ```
 
 The v3 command surface is instance-first. The catalog defines machines, OSes,
-init methods, locations, bundles, packages, and plugins; `.egame/instances.yaml`
+init methods, locations, bundles, packages, and plugins; `.eve/instances.yaml`
 defines concrete local instances composed from those catalog entries. Provider
 and package plugins receive resolved instance JSON, and legacy profile-shaped
 overlays are generated only as an internal compatibility detail for lower-level
@@ -163,9 +168,9 @@ best-effort dock-at-bottom, left-side window controls, dark color scheme, and
 Papirus icon setup on the next GNOME login.
 
 Providers and packages are now described by plugin manifests. Built-ins live in
-`plugins/providers/<id>/egame-plugin.yaml` and
-`plugins/packages/<id>/egame-plugin.yaml`; optional external plugins can be
-pinned in `.egame/plugin-sources.yaml` and synchronized with
+`plugins/providers/<id>/eve-plugin.yaml` and
+`plugins/packages/<id>/eve-plugin.yaml`; optional external plugins can be
+pinned in `.eve/plugin-sources.yaml` and synchronized with
 `make plugins.sync`. Package `down` and `reinstall` operations are explicit and
 destructive removals require `YES=1`.
 
@@ -181,23 +186,45 @@ Manual and AI-assisted live test flow is documented in
 package sweep, use
 `YES=1 make integration.packages INSTANCES=<linux>,<windows>` to install and
 status-check every installable package supported by each instance OS/arch.
-Optional host-side AI agent sandboxing is documented in
-[docs/ai-sandboxes.md](docs/ai-sandboxes.md).
-
-The optional `make tui` target opens a Textual instance manager for browsing
-instances, combined state, package state, and safe provider/package actions.
+The optional `make eve` target opens **Eve** (Ephemeral VM Environment), a
+Textual instance manager for browsing instances, combined state, package state,
+and safe provider/package actions. `make tui` remains available as a
+compatibility alias.
+Run `make install-cli` once to install an `eve` command into `~/.local/bin`;
+after that, `eve` opens the same TUI from any directory as long as
+`~/.local/bin` is on your `PATH`.
 Use `poetry install` once to install the optional Python dependencies; the rest
 of the v3 command surface has no Python package dependency.
+
+### Optional containerized toolchain
+
+The default Eve workflow is still native on macOS because remote-access clients
+such as Moonlight, RustDesk, VNC viewers, Cocoa-Way, XQuartz, and iTerm need
+host GUI and desktop integration. For contributors who only need the CLI
+toolchain, tests, Terraform/Terramate, and provider/package scripts, Eve also
+ships an optional Docker image.
+
+```bash
+make docker.build
+make docker.shell
+make docker.test
+```
+
+The container mounts the repository at `/workspace`, reads `.env.local` if it
+exists, and mounts `~/.ssh` read-only for SSH-based provider operations. On
+Docker Desktop for macOS it also uses the host SSH agent socket when available.
+Use this for reproducible CLI work; use native `eve` / `make tui` for anything
+that launches a local GUI client.
 
 Package plugins may provide host-side command hooks at
 `commands/<os_family>/<install|status|down>` or
 `commands/common/<install|status|down>`. The built-in compatibility wrapper
-passes the resolved instance JSON on stdin and sets `EGAME_INSTANCE_NAME`,
-`EGAME_PACKAGE_PLUGIN`, and `EGAME_PACKAGE_PLUGIN_ROOT`.
+passes the resolved instance JSON on stdin and sets `EVE_INSTANCE_NAME`,
+`EVE_PACKAGE_PLUGIN`, and `EVE_PACKAGE_PLUGIN_ROOT`.
 
 Manifest command `exec` paths may point at core repo scripts, such as
 `scripts/package-plugin`, or at plugin-local executables. External plugins that
-reuse a built-in id are rejected by default; set `EGAME_PLUGIN_ALLOW_OVERRIDE=1`
+reuse a built-in id are rejected by default; set `EVE_PLUGIN_ALLOW_OVERRIDE=1`
 only when you intentionally want the later external plugin to replace the
 built-in one.
 
@@ -212,7 +239,12 @@ Terraform provider versions are pinned exactly in the Terramate provider templat
 
 - Local instance choices (for example QEMU/Vagrant) should work without cloud API keys.
 - Cloud providers (AWS/Vultr/TrueNAS) only require their own env vars when used.
-- Keep personal settings in `.env.local`.
+- Keep secrets and credentials in `.env.local`.
+- Non-secret preferences can go in `.eve/config.yaml`, using the same shape
+  as [config/defaults.yaml](config/defaults.yaml). This is intended for
+  UI-editable settings such as display resolution and Moonlight preferences.
+  Run `make config.migrate` to preview moving existing non-secret `.env.local`
+  values into `.eve/config.yaml`; apply with `YES=1 make config.migrate`.
 
 ```bash
 # List catalog choices and create a concrete instance
@@ -281,8 +313,12 @@ make logs INSTANCE=aws-dev-a       # tail remote logs
 
 `make provision` dispatches by the instance OS family:
 
-- Linux: uploads [linux/provision/](linux/provision/) to `$HOME/provision` on the VM, installs a `systemd` unit, and runs numbered package steps. Each step is skipped if its package id is not selected by the instance.
-- Windows: uploads [windows/provision/](windows/provision/) to `C:\Users\Administrator\provision` and runs `bootstrap.ps1`, which registers a Scheduled Task that walks a similar sorted `steps/` directory. Requires `EPHEMERAL_WINDOWS_PASSWORD` (or a terraform output) and `EPHEMERAL_SUNSHINE_PASSWORD` — used to build `./tmp/env.json` and scp it into the provision state dir.
+- Linux: stages the shared provisioning runner plus selected package-local
+  install steps, uploads them to `$HOME/provision` on the VM, installs a
+  `systemd` unit, and runs numbered package steps. During the v3.1 migration,
+  manifests may still reference legacy shared steps, but package-specific steps
+  should live under `plugins/packages/<id>/provision/ubuntu/`.
+- Windows: uploads [oses/windows-server-2025/provision/](oses/windows-server-2025/provision/) to `C:\Users\Administrator\provision` and runs `bootstrap.ps1`, which registers a Scheduled Task that walks a similar sorted `steps/` directory. Requires `EPHEMERAL_WINDOWS_PASSWORD` (or a terraform output) and `EPHEMERAL_SUNSHINE_PASSWORD` — used to build `./tmp/env.json` and scp it into the provision state dir.
 
 State is tracked in `$HOME/provision/state/state.json` on the VM — provisioning resumes from the last completed step after a reboot.
 
@@ -335,6 +371,11 @@ The target starts an Xpra server on the VM, launches the requested app, and atta
 - [jq](https://jqlang.github.io/jq/download/) — JSON processing for profile resolution (`brew install jq` on macOS)
 - `make`
 
+For managed Linux guests, set `VM_USER_NAME` in `.env.local`. v3.1 no longer
+falls back to image-default users such as `ubuntu` on normal orchestration
+paths; provider init/cloud-init creates or enables the configured user, and
+later SSH/provision/package commands use that identity.
+
 ### AWS
 
 1. **AWS CLI** — [install](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html)
@@ -361,26 +402,26 @@ The target starts an Xpra server on the VM, launches the requested app, and atta
 1. **SSH key** — generate a keypair for Terraform to use
 2. **TrueNAS user** — create a Terraform user with SSH access and `terraform` group
 3. **API key** — generate one in TrueNAS → API Keys (used for cloud-init ISO upload)
- 4. **Required env vars** (in `.env.local`) — runtime errors out clearly if any are unset:
+4. **Required env vars** (in `.env.local`) — runtime errors out clearly if any are unset:
     - `TRUENAS_HOST` — e.g. `192.168.0.52` or `truenas.home.arpa`
     - `TRUENAS_SSH_USER` — e.g. `terraform` (required; no built-in default)
     - `TRUENAS_SSH_PRIVATE_KEY_FILE` — path to private key
     - `TRUENAS_SSH_HOST_KEY_FINGERPRINT` — e.g. `SHA256:...`
     - `TRUENAS_API_KEY` — REST API key for cloud-init ISO upload
-    - `TRUENAS_VM_BASE_DIR` — base directory for VM files (e.g. `/mnt/pool1/egame`)
+    - `TRUENAS_VM_BASE_DIR` — base directory for VM files (e.g. `/mnt/pool1/eve`)
     - `TRUENAS_VM_POOL` — ZFS pool for zvols (e.g. `pool1`)
-    - `TRUENAS_VM_ZVOL_PREFIX` — dataset path prefix for zvols (e.g. `egame`)
+    - `TRUENAS_VM_ZVOL_PREFIX` — dataset path prefix for zvols (e.g. `eve`)
  5. **Optional env vars** (defaults in `.env`, override in `.env.local`):
     - `TRUENAS_SSH_PORT` (default: `22`)
  6. **One-time ZFS setup** — create the parent dataset:
     ```bash
     # On TrueNAS web UI: Storage > pool1 > Add Dataset (preset: Generic)
-    #   Name: egame    →  creates pool1/egame
+    #   Name: eve    →  creates pool1/eve
     ```
-    The dataset (`pool1/egame`) must exist before `make up`. Subdirectories (`iso/`, `images/`) are created automatically.
+    The dataset (`pool1/eve`) must exist before `make up`. Subdirectories (`iso/`, `images/`) are created automatically.
  7. **One-time sudoers setup** — the Terraform user needs `sudo dd` access to write cloud images to zvols. Add to sudoers (`visudo` on TrueNAS):
     ```
-    terraform ALL=(ALL) NOPASSWD: /usr/bin/dd if=/mnt/pool1/egame/images/* of=/dev/zvol/pool1/egame/*
+    terraform ALL=(ALL) NOPASSWD: /usr/bin/dd if=/mnt/pool1/eve/images/* of=/dev/zvol/pool1/eve/*
     ```
     Adjust path to `/bin/dd` if using TrueNAS CORE (FreeBSD).
  8. **Disk image setup** — `make up` downloads the cloud image directly to the NAS, writes it to a zvol, and resizes the partition. No manual `dd` needed.
@@ -405,15 +446,26 @@ Recommended shape:
 - Let this repo manage first-boot/bootstrap and post-boot workload provisioning.
 - Reserve VM-host orchestration for x86/TrueNAS when you need stronger guest isolation or x86 compatibility.
 
-#### Required env vars
+#### Required config
 
-Set in `.env.local`:
+Raspberry Pi instances use the same global SSH key config as every other
+provider:
 
-- `RASPBERRY_PI_HOST` — e.g. `rapi.local` or the Pi's LAN IP
-- `VM_USER_NAME` — the username preseeded into the SD card image (see Imager step below)
-- `SSH_PUBLIC_KEY_FILE` — path to the public key whose private half is loaded in your agent
+- `global.vm_user_name` / `VM_USER_NAME` — the username preseeded into the SD card image (see Imager step below)
+- `global.ssh_public_key_file` / `SSH_PUBLIC_KEY_FILE` — path to the public key whose private half is loaded in your agent
 
-These are validated at runtime by [scripts/env-require](scripts/env-require) — `make ssh INSTANCE=<rpi-instance>` errors clearly if any are missing.
+The Pi address is instance-specific so multiple boards can be managed from one
+registry. Create each Pi instance with its own `PROVIDER_IP`:
+
+```sh
+make instance.create INSTANCE=rpi5-a MACHINE=raspberry-pi-5 OS=ubuntu-26.04-arm64 LOCATION=tokyo PROVIDER_IP=192.168.0.41 BUNDLES=dev-ai
+make instance.create INSTANCE=rpi5-b MACHINE=raspberry-pi-5 OS=ubuntu-26.04-arm64 LOCATION=tokyo PROVIDER_IP=192.168.0.42 BUNDLES=desktop-streaming
+```
+
+The TUI asks for this IP address when the selected platform is Raspberry Pi.
+`raspberry_pi.host` / `raspberry_pi.ip` in `.eve/config.yaml` remain useful as
+single-board defaults, but a per-instance `provider_config.ip` wins whenever it
+is present.
 
 #### Initial SD card image (first boot)
 

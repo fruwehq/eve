@@ -2,23 +2,34 @@
 # Upload the OS-appropriate provisioning tree to the profile's instance
 # and run the bootstrap entry point.
 #
-# Usage: scripts/provision <profile>
+# Usage: scripts/provision <instance>
 #
-# Linux:   uploads ./linux/provision/   -> $HOME/provision    runs bootstrap.sh
-# Windows: uploads ./windows/provision/ -> C:\Users\<user>\provision  runs bootstrap.ps1
+# Ubuntu: uploads ./oses/<catalog-os-id>/provision/ -> $HOME/provision
+# Windows: uploads ./oses/<catalog-os-id>/provision/ -> C:\Users\<user>\provision
 
 set -euo pipefail
 
-PROFILE="${1:?Usage: scripts/provision <profile>}"
+PROFILE="${1:?Usage: scripts/provision <instance>}"
 cd "$(git rev-parse --show-toplevel)"
 
 RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
+env_value() {
+  printf '%s\n' "$RESOLVED_ENV" | awk -F= -v key="$1" '$1 == key { print substr($0, index($0, "=") + 1) }'
+}
 OS_FAMILY=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^OS_FAMILY=/{print $2}')
+OS_ID=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^OS_ID=/{print $2}')
 BUNDLE_PACKAGES=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^BUNDLE_PACKAGES=/{print $2}')
 PROFILE_NAME=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^PROFILE_NAME=/{print $2}')
 PROVIDER=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^PROVIDER=/{print $2}')
+OS_PROVISION_DIR="oses/$OS_ID/provision"
 
-echo "[provision] profile=$PROFILE os_family=$OS_FAMILY"
+echo "[provision] profile=$PROFILE os=$OS_ID os_family=$OS_FAMILY"
+
+if [ ! -d "$OS_PROVISION_DIR" ]; then
+  echo "[provision] OS provisioning directory not found: $OS_PROVISION_DIR" >&2
+  exit 2
+fi
+OS_PROVISION_DIR=$(cd "$OS_PROVISION_DIR" && pwd -P)
 
 ./scripts/ssh-wait "$PROFILE"
 
@@ -29,7 +40,7 @@ case "$OS_FAMILY" in
         echo "[provision] configuring passwordless sudo for Raspberry Pi provisioning"
         # shellcheck disable=SC2016
         printf '%s\n' "$RASPBERRY_PI_USER_PASSWORD" | ./scripts/instance-ssh "$PROFILE" -- \
-          'tmp=$(mktemp); printf "%s ALL=(ALL) NOPASSWD:ALL\n" "$USER" > "$tmp"; chmod 0440 "$tmp"; sudo -S -p "" install -o root -g root -m 0440 "$tmp" /etc/sudoers.d/90-egame-provision; rm -f "$tmp"; sudo -n visudo -cf /etc/sudoers.d/90-egame-provision'
+          'tmp=$(mktemp); printf "%s ALL=(ALL) NOPASSWD:ALL\n" "$USER" > "$tmp"; chmod 0440 "$tmp"; sudo -S -p "" install -o root -g root -m 0440 "$tmp" /etc/sudoers.d/90-eve-provision; rm -f "$tmp"; sudo -n visudo -cf /etc/sudoers.d/90-eve-provision'
       fi
     fi
 
@@ -41,23 +52,149 @@ case "$OS_FAMILY" in
 
     STAGE=$(mktemp -d)
     trap 'rm -rf "$STAGE"' EXIT
-    cp -R linux/provision/scripts "$STAGE/scripts"
+    cp -R "$OS_PROVISION_DIR/scripts" "$STAGE/scripts"
     mkdir -p "$STAGE/state"
+    rm -f "$STAGE/scripts/steps/"*.sh
+
+    ordered_steps=()
+    ordered_plugin_roots=()
+
+    copy_step() {
+      local step="$1"
+      local plugin_root="$2"
+      local source=""
+      local target
+      target="$STAGE/scripts/steps/$(basename "$step")"
+
+      if [ -f "$OS_PROVISION_DIR/scripts/steps/$step" ]; then
+        source="$OS_PROVISION_DIR/scripts/steps/$step"
+      elif [ -f "$plugin_root/$step" ]; then
+        source="$plugin_root/$step"
+      else
+        echo "[provision] install step not found: $step" >&2
+        exit 2
+      fi
+
+      cp "$source" "$target"
+    }
+
+    add_step() {
+      local step="$1"
+      local plugin_root="$2"
+      local existing
+
+      if [ "${#ordered_steps[@]}" -gt 0 ]; then
+        for existing in "${ordered_steps[@]}"; do
+          [ "$existing" = "$step" ] && return 0
+        done
+      fi
+
+      ordered_steps+=("$step")
+      ordered_plugin_roots+=("$plugin_root")
+    }
+
+    add_step "base.sh" ""
+    add_step "human-user.sh" ""
+    add_step "timezone.sh" ""
+
+    PLUGIN_DOC=$(./scripts/plugin-list --kind package --json)
+    while IFS=$'\t' read -r plugin_path step; do
+      [ -n "$plugin_path" ] || continue
+      case "$step" in
+        base.sh|human-user.sh|timezone.sh|finish.sh) continue ;;
+      esac
+      add_step "$step" "$(dirname "$plugin_path")"
+    done < <(
+      # Iterate $selected in selection order so depends_on toposort from
+      # instance-resolve drives the step ordering. Iterating .plugins[]
+      # would re-sort alphabetically and put dependents before deps.
+      printf '%s' "$PLUGIN_DOC" |
+        jq -r --arg packages_csv "$BUNDLE_PACKAGES" '
+          ($packages_csv | split(",") | map(select(length > 0))) as $selected |
+          (.plugins | map({key: .id, value: .}) | from_entries) as $by_id |
+          $selected[] |
+          ($by_id[.] // empty) as $plugin |
+          ($plugin.install.ubuntu.steps // [])[] |
+          [$plugin.path, .] | @tsv
+        '
+    )
+    add_step "finish.sh" ""
+
+    for index in "${!ordered_steps[@]}"; do
+      copy_step "${ordered_steps[$index]}" "${ordered_plugin_roots[$index]}"
+    done
+    printf '%s\n' "${ordered_steps[@]##*/}" > "$STAGE/state/steps.list"
+
+    # Write provision manifest with step hashes so the guest runner can
+    # detect host-uploaded-vs-guest-executing drift.
+    manifest_steps="[]"
+    for index in "${!ordered_steps[@]}"; do
+      step_file="$STAGE/scripts/steps/${ordered_steps[$index]##*/}"
+      step_hash=$(shasum -a 256 "$step_file" | awk '{print $1}')
+      manifest_steps=$(printf '%s' "$manifest_steps" | jq \
+        --arg order "$index" \
+        --arg name "${ordered_steps[$index]##*/}" \
+        --arg sha "$step_hash" \
+        '. += [{"order": ($order|tonumber), "name": $name, "sha256": $sha}]')
+    done
+    jq -n \
+      --argjson steps "$manifest_steps" \
+      --arg os_family "$OS_FAMILY" \
+      --arg created_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      '{api_version: 1, os_family: $os_family, created_at: $created_at, steps: $steps}' \
+      > "$STAGE/state/provision-manifest.json"
+
     # bundle_packages: one package per line for cheap grep lookup in step scripts
     printf '%s\n' "$BUNDLE_PACKAGES" | tr ',' '\n' > "$STAGE/state/bundle_packages"
+    printf '%s\n' "$BUNDLE_PACKAGES" | tr ',' '\n' > "$STAGE/state/selected_packages"
+
+    THINLINC_REMOTE_SERVER_BUNDLE_PATH="${THINLINC_SERVER_BUNDLE_PATH:-}"
+    UPLOAD_THINLINC_BUNDLE=0
+    case ",$BUNDLE_PACKAGES," in
+      *,thinlinc,*)
+        if [ -n "${THINLINC_SERVER_BUNDLE_PATH:-}" ]; then
+          if [ ! -e "$THINLINC_SERVER_BUNDLE_PATH" ]; then
+            echo "[provision] THINLINC_SERVER_BUNDLE_PATH does not exist: $THINLINC_SERVER_BUNDLE_PATH" >&2
+            exit 2
+          fi
+          thinlinc_bundle_basename="$(basename "$THINLINC_SERVER_BUNDLE_PATH")"
+          THINLINC_REMOTE_SERVER_BUNDLE_PATH="\$HOME/provision/downloads/thinlinc/$thinlinc_bundle_basename"
+          UPLOAD_THINLINC_BUNDLE=1
+        fi
+        ;;
+    esac
+
     # Auto-detect host timezone if not explicitly set
     _HOST_TZ="${TIMEZONE:-}"
     if [ -z "$_HOST_TZ" ]; then
       _LINK=$(readlink /etc/localtime 2>/dev/null || true)
       _HOST_TZ=$(echo "$_LINK" | sed -n 's|.*/zoneinfo/||p')
     fi
+    THINLINC_AGENT_HOSTNAME_DEFAULT="${THINLINC_AGENT_HOSTNAME:-}"
+    case ",$BUNDLE_PACKAGES," in
+      *,thinlinc,*)
+        if [ -z "$THINLINC_AGENT_HOSTNAME_DEFAULT" ]; then
+          THINLINC_AGENT_HOSTNAME_DEFAULT="$(./scripts/instance-ip "$PROFILE" 2>/dev/null || true)"
+        fi
+        ;;
+    esac
     # env file: sourced by runner.sh so steps see PROFILE_NAME and local config.
     cat > "$STAGE/state/env" <<EOF
+export ACCESS_BOOTSTRAP_USER="$(env_value ACCESS_BOOTSTRAP_USER)"
+export ACCESS_HUMAN_USER="$(env_value ACCESS_HUMAN_USER)"
+export ACCESS_PROVISION_USER="$(env_value ACCESS_PROVISION_USER)"
 export OS_FAMILY="$OS_FAMILY"
 export PROFILE_NAME="$PROFILE_NAME"
+export HUMAN_USER_NAME="$(env_value HUMAN_USER_NAME)"
+export PROVISION_USER_NAME="$(env_value PROVISION_USER_NAME)"
+export VM_USER_NAME="$(env_value VM_USER_NAME)"
+export VM_USER_PASSWORD="${VM_USER_PASSWORD:-}"
 export EPHEMERAL_DISPLAY_RESOLUTION="${EPHEMERAL_DISPLAY_RESOLUTION:-}"
+export EPHEMERAL_DISPLAY_FPS="${EPHEMERAL_DISPLAY_FPS:-}"
 export PROVIDER="$PROVIDER"
 export EPHEMERAL_SUNSHINE_PASSWORD="${EPHEMERAL_SUNSHINE_PASSWORD:-}"
+export RDP_GATE_PASSWORD="${RDP_GATE_PASSWORD:-}"
+export RDP_GATE_USER="${RDP_GATE_USER:-}"
 export RASPBERRY_PI_HDMI_CONNECTOR="${RASPBERRY_PI_HDMI_CONNECTOR:-}"
 export RASPBERRY_PI_HDMI_MODE="${RASPBERRY_PI_HDMI_MODE:-}"
 export RUSTDESK_KEY="${RUSTDESK_KEY:-}"
@@ -65,17 +202,33 @@ export RUSTDESK_PASSWORD="${RUSTDESK_PASSWORD:-}"
 export RUSTDESK_SERVER="${RUSTDESK_SERVER:-}"
 export SUNSHINE_MAX_BITRATE_KBPS="${SUNSHINE_MAX_BITRATE_KBPS:-}"
 export SUNSHINE_VERSION="${SUNSHINE_VERSION:-}"
+export THINLINC_ACCEPT_EULA="${THINLINC_ACCEPT_EULA:-}"
+export THINLINC_AGENT_HOSTNAME="${THINLINC_AGENT_HOSTNAME_DEFAULT:-}"
+export THINLINC_SERVER_BUNDLE_PATH="${THINLINC_REMOTE_SERVER_BUNDLE_PATH:-}"
+export THINLINC_SERVER_BUNDLE_URL="${THINLINC_SERVER_BUNDLE_URL:-}"
+export THINLINC_WEBACCESS_PORT="${THINLINC_WEBACCESS_PORT:-}"
 export TIMEZONE="$_HOST_TZ"
+export VIRTUAL_MONITOR_WIDTH="${VIRTUAL_MONITOR_WIDTH:-1920}"
+export VIRTUAL_MONITOR_HEIGHT="${VIRTUAL_MONITOR_HEIGHT:-1080}"
 EOF
 
-    echo "[provision] uploading linux/provision/ to remote"
+    echo "[provision] uploading $OS_PROVISION_DIR/ to remote"
     # Remote paths are relative to $HOME (SFTP/SCP default) to avoid shell-expansion pitfalls.
-    ./scripts/instance-ssh "$PROFILE" -- 'rm -rf ~/provision/state ~/provision/scripts && mkdir -p ~/provision/state'
-    ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/scripts" 'provision/'
-    ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/state/bundle_packages" 'provision/state/'
-    ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/state/env" 'provision/state/'
+    ./scripts/ssh-retry "prepare linux provision directory" ./scripts/instance-ssh "$PROFILE" -- 'rm -rf ~/provision/state ~/provision/scripts ~/provision/logs && mkdir -p ~/provision/state'
+    if [ "$UPLOAD_THINLINC_BUNDLE" = "1" ]; then
+      ./scripts/ssh-retry "prepare ThinLinc bundle directory" ./scripts/instance-ssh "$PROFILE" -- 'rm -rf ~/provision/downloads/thinlinc && mkdir -p ~/provision/downloads/thinlinc'
+      ./scripts/ssh-retry "upload ThinLinc server bundle" ./scripts/instance-ssh "$PROFILE" --scp "$THINLINC_SERVER_BUNDLE_PATH" 'provision/downloads/thinlinc'
+    fi
+    ./scripts/ssh-retry "upload linux scripts" ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/scripts" 'provision/'
+    ./scripts/ssh-retry "upload linux bundle package list" ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/state/bundle_packages" 'provision/state/'
+    ./scripts/ssh-retry "upload linux selected package list" ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/state/selected_packages" 'provision/state/'
+    ./scripts/ssh-retry "upload linux environment" ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/state/env" 'provision/state/'
+    ./scripts/ssh-retry "upload linux step list" ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/state/steps.list" 'provision/state/'
+    ./scripts/ssh-retry "upload linux provision manifest" ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/state/provision-manifest.json" 'provision/state/'
     echo "[provision] running bootstrap.sh"
-    ./scripts/instance-ssh "$PROFILE" -- 'chmod +x ~/provision/scripts/bootstrap.sh ~/provision/scripts/runner.sh ~/provision/scripts/steps/*.sh ~/provision/scripts/lib/*.sh && ~/provision/scripts/bootstrap.sh'
+    ./scripts/ssh-retry "start linux provisioning runner" ./scripts/instance-ssh "$PROFILE" -- 'chmod +x ~/provision/scripts/bootstrap.sh ~/provision/scripts/runner.sh ~/provision/scripts/steps/*.sh ~/provision/scripts/lib/*.sh && ~/provision/scripts/bootstrap.sh'
+    echo "[provision] waiting for linux provisioning to finish (polling remote log every ${EVE_PROVISION_WAIT_POLL_INTERVAL:-5}s)"
+    ./scripts/wait-for-provision "$PROFILE"
     ;;
   windows)
     # Windows password: env var override, else terraform output (vultr only).
@@ -86,7 +239,10 @@ EOF
       case "$PROVIDER" in
         vultr)
           eval "$(./scripts/tf-env "$PROFILE")"
-          WINDOWS_PASSWORD=$(terramate run --quiet --tags="$TAGS-services" -- terraform output -raw vultr_instance_default_password)
+          WINDOWS_PASSWORD=$(
+            terramate run --quiet --disable-safeguards=git-untracked,git-uncommitted,git-out-of-sync,outdated-code --tags="$TAGS-services" -- \
+              terraform output -raw vultr_instance_default_password
+          )
           ;;
         *)
           echo "[provision] set EPHEMERAL_WINDOWS_PASSWORD (no terraform output available for provider=$PROVIDER)" >&2
@@ -108,12 +264,82 @@ EOF
       '{windows_password: $wp, sunshine_password: $sp, display_resolution: $dr, rustdesk_key: $rk, rustdesk_password: $rp, rustdesk_server: $rs, sunshine_version: $sv}' \
       > ./tmp/env.json
 
-    echo "[provision] uploading windows/provision/ to remote"
+    STAGE=$(mktemp -d)
+    trap 'rm -rf "$STAGE"' EXIT
+    cp -R "$OS_PROVISION_DIR" "$STAGE/provision"
+
+    copy_windows_step() {
+      local step="$1"
+      local plugin_root="$2"
+      local source=""
+      local target
+      target="$STAGE/provision/scripts/steps/$(basename "$step")"
+
+      if [ -f "$OS_PROVISION_DIR/scripts/steps/$step" ]; then
+        source="$OS_PROVISION_DIR/scripts/steps/$step"
+      elif [ -f "$plugin_root/$step" ]; then
+        source="$plugin_root/$step"
+      else
+        echo "[provision] windows install step not found: $step" >&2
+        exit 2
+      fi
+
+      cp "$source" "$target"
+      if [ -n "$plugin_root" ] && [ -d "$plugin_root/provision/windows/lib" ]; then
+        cp -R "$plugin_root/provision/windows/lib/." "$STAGE/provision/scripts/lib/"
+      fi
+      if [ -n "$plugin_root" ] && [ -d "$plugin_root/provision/windows/templates" ]; then
+        mkdir -p "$STAGE/provision/scripts/templates"
+        cp -R "$plugin_root/provision/windows/templates/." "$STAGE/provision/scripts/templates/"
+      fi
+    }
+
+    PLUGIN_DOC=$(./scripts/plugin-list --kind package --json)
+    while IFS=$'\t' read -r plugin_path step; do
+      [ -n "$plugin_path" ] || continue
+      [ -n "$step" ] || continue
+      copy_windows_step "$step" "$(dirname "$plugin_path")"
+    done < <(
+      # Iterate $selected in selection order; see ubuntu branch for rationale.
+      printf '%s' "$PLUGIN_DOC" |
+        jq -r --arg packages_csv "$BUNDLE_PACKAGES" '
+          ($packages_csv | split(",") | map(select(length > 0))) as $selected |
+          (.plugins | map({key: .id, value: .}) | from_entries) as $by_id |
+          $selected[] |
+          ($by_id[.] // empty) as $plugin |
+          ($plugin.install.windows.steps // [])[] |
+          [$plugin.path, .] | @tsv
+        '
+    )
+
+    # Write provision manifest with step hashes so the guest runner can
+    # detect host-uploaded-vs-guest-executing drift.
+    manifest_steps="[]"
+    step_index=0
+    for step_file in "$STAGE/provision/scripts/steps/"*.ps1; do
+      [ -f "$step_file" ] || continue
+      step_hash=$(shasum -a 256 "$step_file" | awk '{print $1}')
+      step_name=$(basename "$step_file")
+      manifest_steps=$(printf '%s' "$manifest_steps" | jq \
+        --arg order "$step_index" \
+        --arg name "$step_name" \
+        --arg sha "$step_hash" \
+        '. += [{"order": ($order|tonumber), "name": $name, "sha256": $sha}]')
+      step_index=$((step_index + 1))
+    done
+    jq -n \
+      --argjson steps "$manifest_steps" \
+      --arg os_family "$OS_FAMILY" \
+      --arg created_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      '{api_version: 1, os_family: $os_family, created_at: $created_at, steps: $steps}' \
+      > "$STAGE/provision/state/provision-manifest.json"
+
+    echo "[provision] uploading $OS_PROVISION_DIR/ to remote"
     # Clear scripts AND state — without state reset, currentStep can outrun the
     # available step files when new steps are added, silently skipping them.
-    ./scripts/instance-ssh "$PROFILE" -- 'New-Item -ItemType Directory -Force C:\Users\Administrator\provision | Out-Null; if (Test-Path "C:\Users\Administrator\provision\scripts") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\scripts" }; if (Test-Path "C:\Users\Administrator\provision\state") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\state" }; New-Item -ItemType Directory -Force C:\Users\Administrator\provision\state | Out-Null'
-    ./scripts/instance-ssh "$PROFILE" --scp windows/provision '/C:/Users/Administrator/'
-    ./scripts/instance-ssh "$PROFILE" --scp ./tmp/env.json '/C:/Users/Administrator/provision/state/env.json'
+    ./scripts/ssh-retry "prepare windows provision directory" ./scripts/instance-ssh "$PROFILE" -- 'New-Item -ItemType Directory -Force C:\Users\Administrator\provision | Out-Null; if (Test-Path "C:\Users\Administrator\provision\scripts") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\scripts" }; if (Test-Path "C:\Users\Administrator\provision\state") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\state" }; if (Test-Path "C:\Users\Administrator\provision\logs") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\logs" }; New-Item -ItemType Directory -Force C:\Users\Administrator\provision\state | Out-Null'
+    ./scripts/ssh-retry "upload windows provision tree" ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/provision" '/C:/Users/Administrator/'
+    ./scripts/ssh-retry "upload windows env.json" ./scripts/instance-ssh "$PROFILE" --scp ./tmp/env.json '/C:/Users/Administrator/provision/state/env.json'
     echo "[provision] running bootstrap.ps1"
     # The Windows runner may trigger a reboot mid-step, which drops the SSH
     # connection (exit 255). The Scheduled Task resumes the runner after
@@ -123,7 +349,7 @@ EOF
     if [ "$exit_code" -ne 0 ] && [ "$exit_code" -ne 255 ]; then
       exit "$exit_code"
     fi
-    echo "[provision] waiting for windows provisioning to finish"
+    echo "[provision] waiting for windows provisioning to finish (polling remote log every ${EVE_PROVISION_WAIT_POLL_INTERVAL:-5}s)"
     ./scripts/wait-for-provision "$PROFILE"
     ;;
   *)

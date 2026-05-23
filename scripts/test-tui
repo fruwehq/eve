@@ -4,30 +4,21 @@
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
-cache_dir="$(mktemp -d "${TMPDIR:-/tmp}/egame-tui-pycache.XXXXXX")"
+cache_dir="$(mktemp -d "${TMPDIR:-/tmp}/eve-tui-pycache.XXXXXX")"
 trap 'rm -rf "$cache_dir"' EXIT
 
-PYTHONPYCACHEPREFIX="$cache_dir" poetry run python -m py_compile scripts/egame-tui
-poetry run python ./scripts/egame-tui --check
+PYTHONPYCACHEPREFIX="$cache_dir" poetry run python -m py_compile scripts/eve-tui
+poetry run python ./scripts/eve-tui --check
 poetry run python - <<'PY'
 import runpy
 
-module = runpy.run_path("scripts/egame-tui")
+module = runpy.run_path("scripts/eve-tui")
 options = module["catalog_options"]()
 assert "vultr" in options["providers"]
 assert any(platform["provider"] == "vultr" and platform["os"] == "windows-server-2025" for platform in options["platforms"])
 
-should_apply_live_provider_state = module["should_apply_live_provider_state"]
-status_with_provider_state = module["status_with_provider_state"]
-
-stopped_status = {"state": {"desired_state": "stopped", "provider_state": "stopped", "last_error": None}}
-assert not should_apply_live_provider_state(stopped_status, "error")
-assert should_apply_live_provider_state(stopped_status, "running")
-
-error_status = {"state": {"desired_state": "running", "provider_state": "error", "last_error": "old"}}
-updated = status_with_provider_state(error_status, "stopped")
-assert updated["state"]["provider_state"] == "stopped"
-assert updated["state"]["last_error"] is None
+format_aggregate = module["format_aggregate"]
+assert "running" in format_aggregate({"running": 0, "stopped": 0, "failed": 0, "other": 0})
 PY
 
-printf '  [OK] egame-tui compiles without importing optional Textual dependency\n'
+printf '  [OK] eve-tui compiles without importing optional Textual dependency\n'

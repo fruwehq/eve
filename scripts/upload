@@ -1,43 +1,105 @@
 #!/usr/bin/env bash
-# Upload ./upload/* to a remote instance via instance-ssh / instance-ssh --scp.
+# Upload selected ./upload entries to a remote instance via instance-ssh / --scp.
 # Skips files that already exist remotely.
 set -euo pipefail
 
-PROFILE="${1:?Usage: scripts/upload <profile>}"
+INSTANCE_NAME="${1:?Usage: scripts/upload <instance> [upload-name ...]}"
+shift || true
 cd "$(git rev-parse --show-toplevel)"
 
-if [ ! -d ./upload ]; then
-  printf '%s\n' "No ./upload directory found. Skipping upload."
+UPLOAD_DIR="${EVE_UPLOAD_DIR:-./upload}"
+
+if [ ! -d "$UPLOAD_DIR" ]; then
+  printf '%s\n' "No upload directory found. Skipping upload."
   exit 0
 fi
 
-SSH="./scripts/instance-ssh $PROFILE --"
-REMOTE_UPLOAD_DIR='C:\Users\Administrator\upload'
-REMOTE_DESKTOP_DIR='C:\Users\Administrator\Desktop\upload'
+RESOLVED_ENV=$(./scripts/profile-resolve --profile "$INSTANCE_NAME" --emit env)
+OS_FAMILY=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^OS_FAMILY=/{print $2}')
 
-printf '%s\n' "Preparing remote upload folder..."
-$SSH "New-Item -ItemType Directory -Force '$REMOTE_UPLOAD_DIR' | Out-Null; if (!(Test-Path '$REMOTE_DESKTOP_DIR')) { cmd /c mklink /J \"$REMOTE_DESKTOP_DIR\" \"$REMOTE_UPLOAD_DIR\" >nul 2>&1 }"
+selected_paths=()
+if [ "$#" -gt 0 ]; then
+  for upload_name in "$@"; do
+    case "$upload_name" in
+      ""|.|..|*/*|*\\*|*[[:space:]]*)
+        printf 'upload: invalid upload name: %s\n' "$upload_name" >&2
+        exit 2
+        ;;
+    esac
+    if [ ! -d "$UPLOAD_DIR/$upload_name" ]; then
+      printf 'upload: selected upload is not a direct folder under upload: %s\n' "$upload_name" >&2
+      exit 2
+    fi
+    selected_paths+=("$UPLOAD_DIR/$upload_name")
+  done
+else
+  selected_paths=("$UPLOAD_DIR")
+fi
 
-find ./upload -type f ! -name '.gitkeep' -exec sh -c '
-  PROFILE="$1"
-  FILE="$2"
-  REL_PATH="${FILE#./upload/}"
-  REL_PATH_WIN=$(printf "%s" "$REL_PATH" | sed "s#/#\\\\\\\\#g")
-  REL_DIR=$(dirname "$REL_PATH")
+upload_files() {
+  find "$@" -type f ! -name '.gitkeep'
+}
 
-  if [ "$REL_DIR" = "." ]; then
-    REMOTE_DIR="C:\\Users\\Administrator\\upload"
-  else
-    REL_DIR_WIN=$(printf "%s" "$REL_DIR" | sed "s#/#\\\\\\\\#g")
-    REMOTE_DIR="C:\\Users\\Administrator\\upload\\$REL_DIR_WIN"
-  fi
+shell_quote() {
+  printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+}
 
-  ./scripts/instance-ssh "$PROFILE" -- "New-Item -ItemType Directory -Force '\"'$REMOTE_DIR'\"' | Out-Null"
+upload_windows() {
+  local remote_upload_dir remote_desktop_dir
+  remote_upload_dir='C:\Users\Administrator\upload'
+  remote_desktop_dir='C:\Users\Administrator\Desktop\upload'
 
-  if ./scripts/instance-ssh "$PROFILE" -- "if (Test-Path '\"'C:\\Users\\Administrator\\upload\\$REL_PATH_WIN'\"') { exit 0 } else { exit 1 }" >/dev/null 2>&1; then
-    printf "%s\n" "Skipping existing upload file: $REL_PATH"
-  else
-    printf "%s\n" "Uploading: $REL_PATH"
-    ./scripts/instance-ssh "$PROFILE" --scp "$FILE" "C:/Users/Administrator/upload/$REL_PATH"
-  fi
-' sh "$PROFILE" {} \;
+  printf '%s\n' "Preparing remote upload folder..."
+  ./scripts/instance-ssh "$INSTANCE_NAME" -- "New-Item -ItemType Directory -Force '$remote_upload_dir' | Out-Null; if (!(Test-Path '$remote_desktop_dir')) { cmd /c mklink /J \"$remote_desktop_dir\" \"$remote_upload_dir\" >nul 2>&1 }"
+
+  upload_files "${selected_paths[@]}" | while IFS= read -r file; do
+    rel_path="${file#"$UPLOAD_DIR"/}"
+    rel_path_win=$(printf "%s" "$rel_path" | sed "s#/#\\\\\\\\#g")
+    rel_dir=$(dirname "$rel_path")
+
+    if [ "$rel_dir" = "." ]; then
+      remote_dir="C:\\Users\\Administrator\\upload"
+    else
+      rel_dir_win=$(printf "%s" "$rel_dir" | sed "s#/#\\\\\\\\#g")
+      remote_dir="C:\\Users\\Administrator\\upload\\$rel_dir_win"
+    fi
+
+    ./scripts/instance-ssh "$INSTANCE_NAME" -- "New-Item -ItemType Directory -Force '\"'$remote_dir'\"' | Out-Null"
+
+    if ./scripts/instance-ssh "$INSTANCE_NAME" -- "if (Test-Path '\"'C:\\Users\\Administrator\\upload\\$rel_path_win'\"') { exit 0 } else { exit 1 }" >/dev/null 2>&1; then
+      printf "%s\n" "Skipping existing upload file: $rel_path"
+    else
+      printf "%s\n" "Uploading: $rel_path"
+      ./scripts/instance-ssh "$INSTANCE_NAME" --scp "$file" "C:/Users/Administrator/upload/$rel_path"
+    fi
+  done
+}
+
+upload_linux() {
+  printf '%s\n' "Preparing remote upload folder..."
+  ./scripts/instance-ssh "$INSTANCE_NAME" -- "mkdir -p ~/upload"
+
+  upload_files "${selected_paths[@]}" | while IFS= read -r file; do
+    rel_path="${file#"$UPLOAD_DIR"/}"
+    rel_dir=$(dirname "$rel_path")
+    if [ "$rel_dir" != "." ]; then
+      ./scripts/instance-ssh "$INSTANCE_NAME" -- "mkdir -p ~/upload/$(shell_quote "$rel_dir")"
+    fi
+
+    if ./scripts/instance-ssh "$INSTANCE_NAME" -- "test -f ~/upload/$(shell_quote "$rel_path")" >/dev/null 2>&1; then
+      printf "%s\n" "Skipping existing upload file: $rel_path"
+    else
+      printf "%s\n" "Uploading: $rel_path"
+      ./scripts/instance-ssh "$INSTANCE_NAME" --scp "$file" "upload/$rel_path"
+    fi
+  done
+}
+
+case "$OS_FAMILY" in
+  windows) upload_windows ;;
+  ubuntu|linux) upload_linux ;;
+  *)
+    printf 'upload: unsupported OS family: %s\n' "$OS_FAMILY" >&2
+    exit 2
+    ;;
+esac

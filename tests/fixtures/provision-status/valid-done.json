@@ -1,0 +1,23 @@
+{
+  "api_version": 1,
+  "os_family": "ubuntu",
+  "started_at": "2025-01-15T10:30:00Z",
+  "finished_at": "2025-01-15T10:35:00Z",
+  "status": "done",
+  "steps": [
+    {
+      "step": "base.sh",
+      "phase": "succeeded",
+      "started_at": "2025-01-15T10:30:00Z",
+      "ended_at": "2025-01-15T10:31:00Z",
+      "exit_code": 0
+    },
+    {
+      "step": "finish.sh",
+      "phase": "succeeded",
+      "started_at": "2025-01-15T10:34:00Z",
+      "ended_at": "2025-01-15T10:35:00Z",
+      "exit_code": 0
+    }
+  ]
+}

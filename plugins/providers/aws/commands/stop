@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Power off an AWS EC2 instance via the AWS CLI.
+set -euo pipefail
+
+if [ -n "${EVE_INSTANCE_NAME:-}" ]; then
+  PROFILE="$EVE_INSTANCE_NAME"
+else
+  PROFILE="${1:?Usage: commands/stop <instance>}"
+fi
+cd "$(git rev-parse --show-toplevel)"
+# shellcheck source=plugins/providers/_common/lib/profile-env.sh
+. ./plugins/providers/_common/lib/profile-env.sh
+# shellcheck source=plugins/providers/_common/lib/tf-state.sh
+. ./plugins/providers/_common/lib/tf-state.sh
+
+eve_load_profile_env "$PROFILE"
+eval "$(./scripts/tf-env "$PROFILE")"
+
+STATE_JSON=$(eve_tf_state_json "$TAGS" \
+  "plugins/providers/${PROVIDER}/stacks/20-services" \
+  "stacks/${PROVIDER}/20-services")
+if [ -z "$STATE_JSON" ]; then
+  echo "[stop] No instance in state." >&2
+  exit 1
+fi
+
+RAW=$(eve_tf_attr "$STATE_JSON" "aws_instance.main" "instance_state")
+if [ "$RAW" = "stopped" ]; then
+  echo "[stop] Already stopped"
+  exit 0
+fi
+
+INSTANCE_ID=$(terramate run --quiet --tags="$TAGS-services" -- terraform output -raw instance_id)
+REGION=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^LOCATION_REGION=/{print $2}')
+echo "[stop] Stopping AWS instance $INSTANCE_ID in $REGION"
+aws ec2 stop-instances --instance-ids "$INSTANCE_ID" --region "$REGION" --output table
+
+terramate run --quiet --tags="$TAGS-services" -- terraform refresh 2>/dev/null || true

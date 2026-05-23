@@ -1,4 +1,4 @@
 #!/usr/bin/env sh
 set -eu
 
-exec ./scripts/package-down-command rdp 'sudo systemctl disable --now xrdp || true; sudo apt-get remove -y xrdp || true'
+exec ./scripts/package-down-command rdp 'sudo systemctl disable --now xrdp gnome-remote-desktop || true; sudo grdctl --system rdp disable 2>/dev/null || true; sudo apt-get remove -y xrdp gnome-remote-desktop || true'

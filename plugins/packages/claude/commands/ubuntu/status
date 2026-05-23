@@ -1,4 +1,4 @@
 #!/usr/bin/env sh
 set -eu
 
-exec ./scripts/package-status-command claude 'if command -v claude >/dev/null 2>&1 || [ -x "$HOME/.local/bin/claude" ]; then echo installed; else echo missing; fi'
+exec ./scripts/package-status-command claude 'if eve_human_run sh -lc "command -v claude >/dev/null 2>&1 || [ -x \"\$HOME/.local/bin/claude\" ]"; then echo installed; else echo missing; fi'

@@ -1,4 +1,4 @@
 #!/usr/bin/env sh
 set -eu
 
-exec ./scripts/package-status-command opencode 'if command -v opencode >/dev/null 2>&1 || [ -x "$HOME/.local/bin/opencode" ]; then echo installed; else echo missing; fi'
+exec ./scripts/package-status-command opencode 'if eve_human_run sh -lc "command -v opencode >/dev/null 2>&1 || [ -x \"\$HOME/.local/bin/opencode\" ] || [ -x \"\$HOME/.opencode/bin/opencode\" ] || find \"\$HOME\" -maxdepth 4 -type f -name opencode -perm -111 -print -quit 2>/dev/null | grep -q ."; then echo installed; else echo missing; fi'

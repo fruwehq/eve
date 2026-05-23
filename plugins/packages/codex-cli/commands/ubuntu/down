@@ -1,4 +1,4 @@
 #!/usr/bin/env sh
 set -eu
 
-exec ./scripts/package-down-command codex-cli 'npm uninstall -g @openai/codex || true; rm -f ~/.local/bin/codex'
+exec ./scripts/package-down-command codex-cli 'npm uninstall -g @openai/codex || true; sudo rm -f "$EVE_HUMAN_HOME/.local/bin/codex"'

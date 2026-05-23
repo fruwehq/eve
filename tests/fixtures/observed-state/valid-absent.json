@@ -1,0 +1,20 @@
+{
+  "instance": "aws-gpu-a",
+  "desired_state": "absent",
+  "provider_state": "absent",
+  "provision_state": "unknown",
+  "package_state": {},
+  "observed_state": {
+    "observed_at": "2026-05-18T12:00:00Z",
+    "expires_at": "2026-05-18T12:00:30Z",
+    "provider_status": "absent",
+    "provider_status_raw": "Status: not created",
+    "ip": null,
+    "control_reachable": null,
+    "guest_reachable": null,
+    "refresh_error": null
+  },
+  "operation_history": [],
+  "last_operation": null,
+  "last_error": null
+}

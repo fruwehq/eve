@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Open a VNC session to a profile's VM.
-# Usage: scripts/remote-vnc <profile>
+# Usage: scripts/remote-vnc <instance>
 #
 # For vagrant profiles: tunnels VNC (5901) through SSH via vagrant
 # For terraform profiles: tunnels VNC (5901) through SSH via instance-ssh
 
 set -euo pipefail
 
-PROFILE="${1:?Usage: scripts/remote-vnc <profile>}"
+PROFILE="${1:?Usage: scripts/remote-vnc <instance>}"
 cd "$(git rev-parse --show-toplevel)"
 # shellcheck source=lib/instance-workdir.sh
 . ./scripts/lib/instance-workdir.sh
@@ -27,6 +27,14 @@ esac
 RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
 ENGINE=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^ENGINE=/{print $2}')
 SSH_USER=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^SSH_USER=/{print $2}')
+VM_USER_NAME=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^VM_USER_NAME=/{print $2}')
+VNC_USER="${VM_USER_NAME:-$SSH_USER}"
+case "$VNC_USER" in
+    *[!a-zA-Z0-9._-]*)
+        echo "remote-vnc: unsupported VM user name: $VNC_USER" >&2
+        exit 2
+        ;;
+esac
 
 echo "[remote-vnc] Checking that remote VNC server is listening on port $VNC_PORT..."
 set +e
@@ -55,7 +63,7 @@ fi
 
 if [ "$ENGINE" = "vagrant" ]; then
     IP=$(./scripts/instance-ip "$PROFILE")
-    WORKDIR="$(egame_instance_workdir "$PROFILE")"
+    WORKDIR="$(eve_instance_workdir "$PROFILE")"
     SSH_PORT=$(cd "$WORKDIR" && vagrant ssh-config | awk '/Port/ {print $2; exit}')
     PRIV_KEY=$(cd "$WORKDIR" && vagrant ssh-config | awk '/IdentityFile/ {print $2; exit}')
 
@@ -89,9 +97,9 @@ echo "[remote-vnc] Opening VNC viewer..."
 VNC_AUTH_ARGS=()
 VNC_PASSWD_FILE=""
 if [ "$VNC_VIEWER" != "system" ] && command -v mktemp >/dev/null 2>&1; then
-    VNC_PASSWD_FILE=$(mktemp "${TMPDIR:-/tmp}/egame-vnc-passwd.XXXXXX")
+    VNC_PASSWD_FILE=$(mktemp "${TMPDIR:-/tmp}/eve-vnc-passwd.XXXXXX")
     chmod 600 "$VNC_PASSWD_FILE"
-    if ./scripts/instance-ssh "$PROFILE" -- 'if [ -f ~/.config/tigervnc/passwd ]; then cat ~/.config/tigervnc/passwd; elif [ -f ~/.vnc/passwd ]; then cat ~/.vnc/passwd; else exit 1; fi' > "$VNC_PASSWD_FILE"; then
+    if ./scripts/instance-ssh "$PROFILE" -- "home=\$(getent passwd '$VNC_USER' | cut -d: -f6); if [ -f \"\$home/.config/tigervnc/passwd\" ]; then sudo cat \"\$home/.config/tigervnc/passwd\"; elif [ -f \"\$home/.vnc/passwd\" ]; then sudo cat \"\$home/.vnc/passwd\"; else exit 1; fi" > "$VNC_PASSWD_FILE"; then
         VNC_AUTH_ARGS=(-passwd "$VNC_PASSWD_FILE")
     else
         rm -f "$VNC_PASSWD_FILE"

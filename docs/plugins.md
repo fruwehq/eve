@@ -8,10 +8,10 @@ dispatch commands with resolved instance JSON on stdin.
 
 Built-in plugins live under:
 
-- `plugins/providers/<id>/egame-plugin.yaml`
-- `plugins/packages/<id>/egame-plugin.yaml`
+- `plugins/providers/<id>/eve-plugin.yaml`
+- `plugins/packages/<id>/eve-plugin.yaml`
 
-External plugins may be synchronized into `.egame/plugins/<source-id>/` with:
+External plugins may be synchronized into `.eve/plugins/<source-id>/` with:
 
 ```bash
 make plugins.sync
@@ -20,18 +20,18 @@ make plugins.sync
 Additional local roots can be tested without syncing:
 
 ```bash
-EGAME_PLUGIN_ROOTS=examples/plugins/packages/hello-package make plugins.validate
+EVE_PLUGIN_ROOTS=examples/plugins/packages/hello-package make plugins.validate
 ```
 
 If two plugins use the same `kind:id`, validation fails unless
-`EGAME_PLUGIN_ALLOW_OVERRIDE=1` is set.
+`EVE_PLUGIN_ALLOW_OVERRIDE=1` is set.
 
 ## Manifest Fields
 
 Every manifest uses:
 
 ```yaml
-api_version: egame.plugin/v1
+api_version: eve.plugin/v1
 kind: provider|package
 id: example-id
 display_name: Human Name
@@ -69,7 +69,7 @@ Core dispatch:
 ```
 
 Provider commands receive resolved instance JSON on stdin. Interactive `ssh`
-commands receive the same JSON in `EGAME_RESOLVED_JSON` because stdin/stdout are
+commands receive the same JSON in `EVE_RESOLVED_JSON` because stdin/stdout are
 reserved for the terminal session.
 
 Provider commands should write machine-readable JSON to stdout where practical
@@ -103,16 +103,40 @@ Core dispatch:
 
 Package commands receive resolved instance JSON on stdin and the following env:
 
-- `EGAME_INSTANCE_NAME`
-- `EGAME_PACKAGE_PLUGIN`
-- `EGAME_PACKAGE_PLUGIN_ROOT`
+- `EVE_INSTANCE_NAME`
+- `EVE_PACKAGE_PLUGIN`
+- `EVE_PACKAGE_PLUGIN_ROOT`
 
 Supported metadata:
 
 ```yaml
 supports:
   os_families: [ubuntu, windows]
+conflicts_with: [other-package]
+compatibility_enforced: true
+compatibility:
+  - platform: ubuntu
+    desktop: XFCE
+    session: X11
+    status: supported
+    notes: Uses an isolated XFCE session.
 ```
+
+`compatibility` is optional. It feeds Eve's new-instance package help and the
+remote desktop compatibility docs. Each row must include `platform`, `desktop`,
+`session`, `status`, and `notes`; status must be one of `supported`, `wip`,
+`unsupported`, or `legacy`.
+
+Set `compatibility_enforced: true` when package availability should be filtered
+by the matrix. Eve and `package-list` then require a `supported` row matching
+the selected OS family, desktop, and session. Leave it unset for ordinary
+packages whose compatibility rows are informational.
+
+`conflicts_with` is optional package metadata for mutually exclusive choices.
+It is used for desktop-mode packages such as XFCE, GNOME, KDE, and their
+headless variants. `instance-resolve`, `package-list`, and Eve all consume the
+same manifest field, so these selection rules stay in configuration instead of
+being embedded as package-name blocks in the UI.
 
 Package `status` commands should emit one JSON object with:
 
@@ -139,7 +163,7 @@ down:
 ```
 
 Destructive `down` and `reinstall` require `--yes`, `YES=1`, or
-`EGAME_CONFIRM_DESTRUCTIVE=1`.
+`EVE_CONFIRM_DESTRUCTIVE=1`.
 
 ## Built-In Compatibility Wrapper
 
@@ -169,7 +193,7 @@ Ubuntu package install metadata:
 ```yaml
 install:
   ubuntu:
-    steps: [00_base.sh, 05_timezone.sh, 10_docker.sh]
+    steps: [base.sh, timezone.sh, docker.sh]
     package_markers: [docker]
 ```
 
@@ -178,7 +202,7 @@ Windows package install metadata:
 ```yaml
 install:
   windows:
-    steps: [40_rustdesk.ps1]
+    steps: [provision/windows/rustdesk.ps1]
     state_files: [env.json]
     fallback: false
 ```
@@ -187,45 +211,45 @@ install:
 
 ## External Plugin Sources
 
-`.egame/plugin-sources.yaml` uses:
+`.eve/plugin-sources.yaml` uses:
 
 ```yaml
 sources:
   - id: my-plugins
-    url: https://github.com/example/egame-plugins.git
+    url: https://github.com/example/eve-plugins.git
     ref: v1.0.0
 ```
 
 `ref` is required by default. Unpinned sources require
-`EGAME_ALLOW_UNPINNED_PLUGINS=1`.
+`EVE_ALLOW_UNPINNED_PLUGINS=1`.
 
 External repositories should contain the same manifest shape as built-ins. A
 provider repository can expose one or more directories with
-`egame-plugin.yaml`; a package repository can do the same. Keep command
+`eve-plugin.yaml`; a package repository can do the same. Keep command
 implementations inside the plugin directory when possible so relative `exec`
 paths remain portable after `make plugins.sync`.
 
 Recommended repository layout:
 
 ```text
-my-egame-plugins/
+my-eve-plugins/
   packages/
     my-package/
-      egame-plugin.yaml
+      eve-plugin.yaml
       commands/ubuntu/install
       commands/ubuntu/status
       commands/ubuntu/down
   providers/
     my-provider/
-      egame-plugin.yaml
+      eve-plugin.yaml
       bin/provider-command
 ```
 
 Development loop:
 
 ```bash
-EGAME_PLUGIN_ROOTS=/path/to/my-egame-plugins/packages/my-package make plugins.validate
-EGAME_PLUGIN_ROOTS=/path/to/my-egame-plugins/packages/my-package \
+EVE_PLUGIN_ROOTS=/path/to/my-eve-plugins/packages/my-package make plugins.validate
+EVE_PLUGIN_ROOTS=/path/to/my-eve-plugins/packages/my-package \
   ./scripts/package-dispatch --instance dev-a --package my-package --command status --dry-run
 ```
 

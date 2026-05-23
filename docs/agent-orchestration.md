@@ -40,7 +40,7 @@ replaced later without rearchitecting.
 ### This repo (`ephemeral-cloud-gaming`) — Infrastructure
 
 - Machine / OS / bundle / profile definitions in `config/catalog.yaml`.
-- Provisioning steps in `linux/provision/scripts/steps/`.
+- Provisioning steps in `oses/<catalog-os-id>/provision/scripts/steps/`.
 - Backup tooling per provider.
 - New `.env` variables for Discord / Hermes.
 

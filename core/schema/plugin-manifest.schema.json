@@ -1,0 +1,467 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ephemeral.dev/schemas/plugin-manifest.schema.json",
+  "title": "Plugin Manifest",
+  "description": "Schema for eve-plugin.yaml manifests covering both provider and package plugin kinds.",
+
+  "type": "object",
+  "required": ["api_version", "kind", "id", "display_name", "commands", "supports"],
+  "additionalProperties": false,
+
+  "properties": {
+    "api_version": {
+      "description": "API version. Only eve.plugin/v1 is accepted; unknown versions must be refused.",
+      "type": "string",
+      "const": "eve.plugin/v1"
+    },
+
+    "kind": {
+      "description": "Plugin kind determines the required commands and allowed fields.",
+      "type": "string",
+      "enum": ["provider", "package"]
+    },
+
+    "id": {
+      "description": "Plugin identifier. Must match [a-z][a-z0-9-]*.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+
+    "display_name": {
+      "description": "Human-readable plugin name shown in the TUI and CLI listings.",
+      "type": "string",
+      "minLength": 1
+    },
+
+    "commands": {
+      "description": "Map of command name to execution spec. Required commands differ by kind.",
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/command_spec" }
+    },
+
+    "supports": {
+      "description": "Compatibility constraints. Shape differs by kind.",
+      "type": "object",
+      "additionalProperties": true
+    },
+
+    "env": {
+      "description": "List of environment variable names this plugin reads.",
+      "type": "array",
+      "items": { "type": "string" }
+    },
+
+    "actions": {
+      "description": "UI actions exposed by provider and package plugins.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/action" }
+    },
+
+    "capabilities": {
+      "description": "Behavioral flags the UI/core can consult. Distinct from supports (compatibility) and actions (user-clickable).",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["host-ssh", "login", "needs-provider-ip", "password"]
+      }
+    },
+
+    "compatibility": {
+      "description": "Compatibility matrix listing supported platform/desktop/session combinations (package plugins only).",
+      "type": "array",
+      "items": { "$ref": "#/$defs/compatibility_entry" }
+    },
+
+    "compatibility_enforced": {
+      "description": "Whether compatibility failures are hard errors during dispatch (package plugins only).",
+      "type": "boolean"
+    },
+
+    "access": {
+      "description": "Provider-owned VM access identity rules used to populate resolved access.bootstrap_user, provision_user, and human_user.",
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/access_rules" }
+    },
+
+    "conflicts_with": {
+      "description": "Package ids that cannot coexist with this package (package plugins only).",
+      "type": "array",
+      "items": { "type": "string" }
+    },
+
+    "config_schema": {
+      "description": "Provider config and secret field declarations. Only valid on provider manifests.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "config": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/field_spec" }
+        },
+        "secrets": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/field_spec" }
+        }
+      }
+    },
+
+    "down": {
+      "description": "Package down behavior metadata (package plugins only).",
+      "type": "object",
+      "properties": {
+        "destructive": {
+          "type": "boolean",
+          "description": "Whether down requires explicit confirmation."
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "install": {
+      "description": "Install metadata per OS family, consumed by provisioning scripts (package plugins only).",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ubuntu": { "$ref": "#/$defs/install_os_spec" },
+        "windows": { "$ref": "#/$defs/windows_install_spec" }
+      }
+    },
+
+    "depends_on": {
+      "description": "Package IDs this plugin requires. Used by the resolver to validate that dependencies are selected and to order install steps so dependencies run first.",
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true
+    }
+  },
+
+  "allOf": [
+    {
+      "if": { "properties": { "kind": { "const": "provider" } } },
+      "then": {
+        "required": ["access", "env"],
+        "properties": {
+          "commands": {
+            "required": ["resolve", "init", "plan", "up", "down", "start", "stop", "status", "ip", "ssh", "validate"]
+          },
+          "supports": { "$ref": "#/$defs/provider_supports" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "package" } } },
+      "then": {
+        "required": ["env"],
+        "properties": {
+          "commands": {
+            "required": ["install", "status", "down"]
+          },
+          "supports": { "$ref": "#/$defs/package_supports" }
+        }
+      }
+    }
+  ],
+
+  "$defs": {
+    "command_spec": {
+      "description": "Execution spec for a single plugin command.",
+      "type": "object",
+      "required": ["exec"],
+      "additionalProperties": false,
+      "properties": {
+        "exec": {
+          "type": "string",
+          "description": "Path to the executable, relative to the plugin directory or the project root."
+        },
+        "args": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Arguments passed to the executable."
+        }
+      }
+    },
+
+    "access_rules": {
+      "description": "Access identity rules for one OS family.",
+      "type": "object",
+      "required": ["bootstrap_user", "provision_user", "human_user"],
+      "additionalProperties": false,
+      "properties": {
+        "bootstrap_user": { "$ref": "#/$defs/access_user_rule" },
+        "provision_user": { "$ref": "#/$defs/access_user_rule" },
+        "human_user": { "$ref": "#/$defs/access_user_rule" }
+      }
+    },
+
+    "access_user_rule": {
+      "description": "Rule for resolving one user identity. env reads an environment variable, value is a constant, location reads a provider location field, and fallback references another access field.",
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": false,
+      "properties": {
+        "env": { "type": "string" },
+        "fallback": {
+          "type": "string",
+          "enum": ["bootstrap_user", "provision_user", "human_user"]
+        },
+        "location": { "type": "string" },
+        "value": { "type": "string" }
+      }
+    },
+
+    "provider_supports": {
+      "description": "Provider plugin compatibility constraints.",
+      "type": "object",
+      "properties": {
+        "engines": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["terraform", "vagrant", "metal"]
+          }
+        },
+        "kinds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["vm", "metal"]
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "package_supports": {
+      "description": "Package plugin compatibility constraints.",
+      "type": "object",
+      "properties": {
+        "os_families": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["ubuntu", "windows"]
+          }
+        },
+        "arches": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["amd64", "arm64"]
+          }
+        },
+        "os_ids": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "os_versions": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "ubuntu_versions": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "windows_versions": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "action": {
+      "description": "A UI action exposed by the plugin.",
+      "type": "object",
+      "required": ["id", "label", "target"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$",
+          "description": "Action identifier."
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Button label shown in the TUI."
+        },
+        "target": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Action target dispatched by package-action, provider dispatch, or a compatibility Make target."
+        },
+        "destructive": {
+          "type": "boolean",
+          "description": "Whether the UI must confirm before running this action."
+        },
+        "expected_output": {
+          "type": "string",
+          "description": "Expected output shape for callers that need to parse the action result."
+        },
+        "help": {
+          "type": "string",
+          "description": "Short operator-facing help text for the action."
+        },
+        "interactive": {
+          "type": "boolean",
+          "description": "Whether this action needs an attached terminal/browser-capable interactive session."
+        },
+        "native": {
+          "type": "boolean",
+          "description": "Whether this action uses a native protocol handler."
+        },
+        "prompt": { "$ref": "#/$defs/action_prompt" },
+        "requires": {
+          "type": "object",
+          "description": "Optional state predicates that control when this action is available.",
+          "additionalProperties": true
+        }
+      }
+    },
+
+    "action_prompt": {
+      "description": "A user-choice prompt rendered before the action fires.",
+      "type": "object",
+      "required": ["title", "message", "env", "choices"],
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        },
+        "env": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]*$",
+          "description": "Environment variable name for the selected choice."
+        },
+        "choices": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/prompt_choice" }
+        }
+      }
+    },
+
+    "prompt_choice": {
+      "description": "A single choice in an action prompt.",
+      "type": "object",
+      "required": ["value", "label"],
+      "additionalProperties": false,
+      "properties": {
+        "value": {
+          "type": "string",
+          "minLength": 1
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "variant": {
+          "type": "string",
+          "enum": ["default", "primary", "success", "warning", "error"]
+        }
+      }
+    },
+
+    "compatibility_entry": {
+      "description": "One row in the package compatibility matrix.",
+      "type": "object",
+      "required": ["platform", "desktop", "session", "status", "notes"],
+      "additionalProperties": false,
+      "properties": {
+        "platform": {
+          "type": "string",
+          "minLength": 1
+        },
+        "desktop": {
+          "type": "string",
+          "minLength": 1
+        },
+        "session": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "type": "string",
+          "enum": ["supported", "wip", "unsupported", "legacy"]
+        },
+        "notes": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+
+    "install_os_spec": {
+      "description": "Ubuntu install step specification.",
+      "type": "object",
+      "required": ["steps"],
+      "additionalProperties": false,
+      "properties": {
+        "steps": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1
+        },
+        "package_markers": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+
+    "field_spec": {
+      "description": "A single config or secret field declared by a provider manifest.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "enum": ["string", "integer", "boolean", "path", "url", "host", "enum"]
+        },
+        "enum": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1
+        },
+        "default": {},
+        "description": { "type": "string" },
+        "required": { "type": "boolean" }
+      },
+      "allOf": [
+        {
+          "if":   { "properties": { "type": { "const": "enum" } } },
+          "then": { "required": ["enum"] }
+        }
+      ]
+    },
+
+    "windows_install_spec": {
+      "description": "Windows install step specification.",
+      "type": "object",
+      "required": ["steps"],
+      "additionalProperties": false,
+      "properties": {
+        "steps": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1
+        },
+        "state_files": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["env.json"]
+          }
+        },
+        "fallback": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

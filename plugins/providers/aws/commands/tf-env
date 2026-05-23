@@ -1,0 +1,13 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+$LOAD_PATH.unshift(File.expand_path("../../_terraform-common/lib", __dir__))
+require "tf_env"
+
+env = EveProviderTfEnv.env
+
+EveProviderTfEnv.print_kv("TF_VAR_availability_zone", env["LOCATION_AVAILABILITY_ZONE"].to_s)
+EveProviderTfEnv.print_kv("TF_VAR_disk_gb", env["VM_DISK_GB"].to_s)
+EveProviderTfEnv.print_kv("TF_VAR_instance_type", env["VM_INSTANCE_TYPE"].to_s)
+EveProviderTfEnv.print_kv("TF_VAR_region", env["LOCATION_REGION"].to_s)
+EveProviderTfEnv.print_kv("TF_VAR_root_volume_type", env["VM_ROOT_VOLUME_TYPE"].to_s)

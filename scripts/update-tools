@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-USAGE="Usage: scripts/update-tools <profile>
+USAGE="Usage: scripts/update-tools <instance>
 
 Updates all installed tools on a remote instance to their latest versions.
 "
@@ -15,6 +15,9 @@ SSH_CMD=(./scripts/instance-ssh "$PROFILE" --)
 case "$OS_FAMILY" in
   ubuntu)
     log() { printf '[update] %s\n' "$*"; }
+
+    log "Checking SSH connectivity..."
+    "${SSH_CMD[@]}" true
 
     log "Updating apt packages..."
     "${SSH_CMD[@]}" 'sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq && sudo DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -qq' || true

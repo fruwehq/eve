@@ -4,7 +4,7 @@
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
-tmp_root="$(mktemp -d "${TMPDIR:-/tmp}/egame-plugins-sync-test.XXXXXX")"
+tmp_root="$(mktemp -d "${TMPDIR:-/tmp}/eve-plugins-sync-test.XXXXXX")"
 trap 'rm -rf "$tmp_root"' EXIT
 
 source_repo="$tmp_root/source-repo"
@@ -17,8 +17,8 @@ unpinned_err="$tmp_root/unpinned.err"
 bad_err="$tmp_root/bad.err"
 
 mkdir -p "$source_repo/packages/sample"
-cat >"$source_repo/packages/sample/egame-plugin.yaml" <<'YAML'
-api_version: egame.plugin/v1
+cat >"$source_repo/packages/sample/eve-plugin.yaml" <<'YAML'
+api_version: eve.plugin/v1
 kind: package
 id: sample
 display_name: Sample Synced Package
@@ -32,8 +32,8 @@ env: []
 YAML
 
 git -C "$source_repo" init -q
-git -C "$source_repo" add packages/sample/egame-plugin.yaml
-git -C "$source_repo" -c user.email=egame@example.invalid -c user.name=egame commit -q -m "sample plugin"
+git -C "$source_repo" add packages/sample/eve-plugin.yaml
+git -C "$source_repo" -c user.email=eve@example.invalid -c user.name=eve commit -q -m "sample plugin"
 ref="$(git -C "$source_repo" rev-parse HEAD)"
 
 cat >"$sources_file" <<YAML
@@ -44,7 +44,7 @@ sources:
 YAML
 
 if ./scripts/plugins-sync --sources "$sources_file" --dest "$dest_root" >/dev/null 2>"$sync_err" &&
-  [ -f "$dest_root/local/packages/sample/egame-plugin.yaml" ] &&
+  [ -f "$dest_root/local/packages/sample/eve-plugin.yaml" ] &&
   [ "$(git -C "$dest_root/local" rev-parse HEAD)" = "$ref" ]; then
   printf '  [OK] plugins-sync clones pinned local source\n'
 else

@@ -1,6 +1,0 @@
-api_version: egame.plugin/v1
-kind: package
-id: bad
-display_name: Bad Test Package
-supports: {}
-env: []

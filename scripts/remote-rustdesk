@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-USAGE="Usage: scripts/remote-rustdesk <profile> [connect]
+USAGE="Usage: scripts/remote-rustdesk <instance> [connect]
 
 Prints the RustDesk connection details for a profile's instance.
 With 'connect', configures the local RustDesk client and opens a connection.
@@ -13,12 +13,18 @@ cd "$(git rev-parse --show-toplevel)"
 
 SSH_CMD=(./scripts/instance-ssh "$PROFILE" --)
 
-OS_FAMILY=$(./scripts/profile-resolve --profile "$PROFILE" --emit env | awk -F= '/^OS_FAMILY=/{print $2}')
+RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
+OS_FAMILY=$(printf '%s\n' "$RESOLVED_ENV" | awk -F= '/^OS_FAMILY=/{print $2}')
+VM_USER_NAME_RESOLVED=$(printf '%s\n' "$RESOLVED_ENV" | awk -F= '/^VM_USER_NAME=/{print $2}')
+
+shell_quote() {
+  printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+}
 
 case "$OS_FAMILY" in
   windows)
     # shellcheck disable=SC2016
-    RD_LOCATE='$rd = @("$env:LOCALAPPDATA\rustdesk\rustdesk.exe","C:\Users\Administrator\AppData\Local\rustdesk\rustdesk.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1'
+    RD_LOCATE='$rd = @("C:\Program Files\RustDesk\rustdesk.exe","C:\Program Files (x86)\RustDesk\rustdesk.exe","C:\Users\Administrator\AppData\Local\rustdesk\rustdesk.exe","C:\Windows\System32\config\systemprofile\AppData\Local\rustdesk\rustdesk.exe","$env:LOCALAPPDATA\rustdesk\rustdesk.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1; if (-not $rd) { $proc = Get-Process rustdesk -ErrorAction SilentlyContinue | Select-Object -First 1; if ($proc -and $proc.Path) { $rd = $proc.Path } }'
     # shellcheck disable=SC2016
     CFG_LOCATE='$cfg = @("C:\Users\Administrator\AppData\Roaming\RustDesk\config\RustDesk2.toml","C:\Windows\System32\config\systemprofile\AppData\Roaming\RustDesk\config\RustDesk2.toml","$env:APPDATA\RustDesk\config\RustDesk2.toml") | Where-Object { Test-Path $_ } | Select-Object -First 1'
     # shellcheck disable=SC2016
@@ -27,13 +33,27 @@ case "$OS_FAMILY" in
     SERVER_CMD="$CFG_LOCATE; if (\$cfg) { Get-Content \$cfg | Select-String -Pattern '^(rendezvous_server|custom-rendezvous-server)' | Select-Object -Last 1 | ForEach-Object { (\$_ -split '=',2)[1].Trim().Trim(\"'\") } }"
     # shellcheck disable=SC2016
     KEY_CMD="$CFG_LOCATE; if (\$cfg) { Get-Content \$cfg | Select-String -Pattern '^key ' | Select-Object -First 1 | ForEach-Object { (\$_ -split '=',2)[1].Trim().Trim(\"'\") } }"
+    # shellcheck disable=SC2016
+    PREP_CMD="$RD_LOCATE; if (\$rd) { \$script = 'C:\Users\Administrator\provision\state\configure-rustdesk-user.ps1'; if (Test-Path \$script) { powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \$script | Out-Null }; \$proc = Get-Process rustdesk -ErrorAction SilentlyContinue | Select-Object -First 1; if (-not \$proc) { Start-Process -FilePath \$rd -WindowStyle Hidden; Start-Sleep -Seconds 5 } }"
     ;;
   *)
-    GET_ID_CMD='rustdesk --get-id 2>/dev/null'
+    # Start the admin service and nudge a user-session server if the desktop
+    # has already logged in. If the user desktop is not up yet, --get-id below
+    # still reports the admin-service ID rather than a misleading empty value.
+    if [ -n "$VM_USER_NAME_RESOLVED" ]; then
+      VM_USER_Q=$(shell_quote "$VM_USER_NAME_RESOLVED")
+      PREP_CMD="sudo systemctl start rustdesk 2>/dev/null || true; rd_user=$VM_USER_Q; if id \"\$rd_user\" >/dev/null 2>&1; then uid=\$(id -u \"\$rd_user\"); home=\$(getent passwd \"\$rd_user\" | cut -d: -f6); runtime=\"/run/user/\$uid\"; if [ -d \"\$runtime\" ]; then sudo -H -u \"\$rd_user\" env HOME=\"\$home\" USER=\"\$rd_user\" LOGNAME=\"\$rd_user\" XDG_RUNTIME_DIR=\"\$runtime\" DISPLAY=\"\${DISPLAY:-:0}\" XAUTHORITY=\"\${XAUTHORITY:-\$home/.Xauthority}\" systemctl --user import-environment DISPLAY XAUTHORITY XDG_RUNTIME_DIR 2>/dev/null || true; sudo -H -u \"\$rd_user\" env HOME=\"\$home\" USER=\"\$rd_user\" LOGNAME=\"\$rd_user\" XDG_RUNTIME_DIR=\"\$runtime\" DISPLAY=\"\${DISPLAY:-:0}\" XAUTHORITY=\"\${XAUTHORITY:-\$home/.Xauthority}\" setsid rustdesk --server >/tmp/eve-rustdesk-user.log 2>&1 < /dev/null & fi; fi; sleep 2"
+    else
+      # shellcheck disable=SC2016
+      PREP_CMD='sudo systemctl start rustdesk 2>/dev/null || true; uid=$(id -u); home=$(getent passwd "$USER" | cut -d: -f6); export XDG_RUNTIME_DIR="/run/user/$uid"; export DISPLAY="${DISPLAY:-:0}"; export XAUTHORITY="${XAUTHORITY:-$home/.Xauthority}"; if [ -d "$XDG_RUNTIME_DIR" ]; then systemctl --user import-environment DISPLAY XAUTHORITY XDG_RUNTIME_DIR 2>/dev/null || true; setsid rustdesk --server >/tmp/eve-rustdesk-user.log 2>&1 < /dev/null & fi; sleep 2'
+    fi
+    GET_ID_CMD='sudo rustdesk --get-id 2>/dev/null || rustdesk --get-id 2>/dev/null || true'
     SERVER_CMD='sudo grep -E "^(rendezvous_server|custom-rendezvous-server)" /root/.config/rustdesk/RustDesk2.toml 2>/dev/null | tail -1 | sed "s/^[^=]*= .//;s/.$//"'
     KEY_CMD='sudo grep "^key " /root/.config/rustdesk/RustDesk2.toml 2>/dev/null | sed "s/^key = .//;s/.$//"'
     ;;
 esac
+
+"${SSH_CMD[@]}" "$PREP_CMD" >/dev/null 2>&1 || true
 
 ID=$("${SSH_CMD[@]}" "$GET_ID_CMD" | tr -d '[:space:]' || true)
 if [ -z "$ID" ]; then

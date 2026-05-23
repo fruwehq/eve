@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# Report TrueNAS VM status, including live midclt query when NAS is reachable.
+set -euo pipefail
+
+if [ -n "${EVE_INSTANCE_NAME:-}" ]; then
+  PROFILE="$EVE_INSTANCE_NAME"
+else
+  PROFILE="${1:?Usage: commands/status <instance>}"
+fi
+cd "$(git rev-parse --show-toplevel)"
+# shellcheck source=plugins/providers/_common/lib/profile-env.sh
+. ./plugins/providers/_common/lib/profile-env.sh
+# shellcheck source=plugins/providers/_common/lib/tf-state.sh
+. ./plugins/providers/_common/lib/tf-state.sh
+# shellcheck source=plugins/providers/truenas/lib/truenas-host.sh
+. ./plugins/providers/truenas/lib/truenas-host.sh
+
+eve_load_profile_env "$PROFILE"
+
+printf '%-15s %s\n' "Profile:" "$PROFILE"
+printf '%-15s %s\n' "Engine:" "$ENGINE"
+printf '%-15s %s\n' "Provider:" "$PROVIDER"
+printf '%-15s %s\n' "OS:" "$OS_FAMILY"
+
+eval "$(./scripts/tf-env "$PROFILE")"
+STATE_JSON=$(eve_tf_state_json "$TAGS" \
+  "plugins/providers/truenas/stacks/truenas/20-services" \
+  "stacks/truenas/20-services")
+
+if [ -z "$STATE_JSON" ]; then
+  VM_STATUS="not created"
+else
+  RAW=$(eve_tf_attr "$STATE_JSON" "truenas_vm.this" "state")
+  case "$RAW" in
+    [Rr][Uu][Nn][Nn][Ii][Nn][Gg]) VM_STATUS="running" ;;
+    [Ss][Tt][Oo][Pp][Pp][Ee][Dd]) VM_STATUS="stopped" ;;
+    "") VM_STATUS="not created" ;;
+    *) VM_STATUS="$RAW" ;;
+  esac
+
+  if [ "$VM_STATUS" != "not created" ]; then
+    if truenas_control_reachable; then
+      VM_ID=$(eve_tf_attr "$STATE_JSON" "truenas_vm.this" "id")
+      LIVE_STATE=$(truenas_vm_state "$VM_ID" || true)
+      case "$LIVE_STATE" in
+        [Rr][Uu][Nn][Nn][Ii][Nn][Gg]) VM_STATUS="running" ;;
+        [Ss][Tt][Oo][Pp][Pp][Ee][Dd]) VM_STATUS="stopped" ;;
+        "") ;;
+        *) VM_STATUS="$LIVE_STATE" ;;
+      esac
+    else
+      VM_STATUS="unreachable"
+    fi
+  fi
+
+  if [ "$VM_STATUS" = "running" ]; then
+    IP=$(./scripts/instance-ip "$PROFILE" 2>/dev/null || true)
+    if [ -n "$IP" ]; then
+      printf '%-15s %s\n' "IP:" "$IP"
+    fi
+  fi
+fi
+
+printf '%-15s %s\n' "Status:" "$VM_STATUS"

@@ -21,7 +21,7 @@ def run_json(*cmd)
 end
 
 instance_name = nil
-registry_path = ENV["EGAME_INSTANCE_REGISTRY"] ? File.expand_path(ENV["EGAME_INSTANCE_REGISTRY"], Dir.pwd) : nil
+registry_path = ENV["EVE_INSTANCE_REGISTRY"] ? File.expand_path(ENV["EVE_INSTANCE_REGISTRY"], Dir.pwd) : nil
 json = false
 
 args = ARGV.dup
@@ -67,6 +67,41 @@ begin
     allowed.empty? || allowed.include?(value.to_s)
   end
 
+  compatibility_target = lambda do |package_ids|
+    if os_family == "windows"
+      { "platform" => "windows", "desktop" => "Windows", "session" => "Native" }
+    elsif os_family == "ubuntu" && package_ids.include?("gnome-desktop-headless")
+      { "platform" => "ubuntu", "desktop" => "GNOME Headless", "session" => "Wayland" }
+    elsif os_family == "ubuntu" && package_ids.include?("gnome-desktop")
+      { "platform" => "ubuntu", "desktop" => "GNOME", "session" => "Wayland" }
+    elsif os_family == "ubuntu" && package_ids.include?("kde-desktop-headless")
+      { "platform" => "ubuntu", "desktop" => "KDE Plasma Headless", "session" => "Wayland" }
+    elsif os_family == "ubuntu" && package_ids.include?("kde-desktop")
+      { "platform" => "ubuntu", "desktop" => "KDE Plasma", "session" => "Wayland" }
+    elsif os_family == "ubuntu" && package_ids.include?("xfce-desktop-headless")
+      { "platform" => "ubuntu", "desktop" => "XFCE Headless", "session" => "X11" }
+    elsif os_family == "ubuntu"
+      { "platform" => "ubuntu", "desktop" => "XFCE", "session" => "X11" }
+    else
+      { "platform" => os_family, "desktop" => "", "session" => "" }
+    end
+  end
+
+  compatibility_match = lambda do |plugin, target|
+    entries = plugin["compatibility"].is_a?(Array) ? plugin["compatibility"] : []
+    return true unless plugin["compatibility_enforced"] == true
+
+    entries.any? do |entry|
+      next false unless entry.is_a?(Hash)
+      next false unless entry["status"] == "supported"
+      next false unless entry["platform"] == target["platform"]
+      next false if entry["desktop"].to_s != "" && entry["desktop"] != target["desktop"]
+      next false if entry["session"].to_s != "" && entry["session"] != target["session"]
+
+      true
+    end
+  end
+
   packages = plugins.map do |plugin|
     supports = plugin.fetch("supports", {})
     supported = support_allowed.call(supports, "os_families", os_family) &&
@@ -76,7 +111,18 @@ begin
                 support_allowed.call(supports, "#{os_family}_versions", os_version)
     installable = plugin.dig("install", os_family).is_a?(Hash)
     actions = plugin.fetch("actions", [])
-    actions = [] if plugin.fetch("id") == "rdp" && os_family != "windows"
+    conflicts = plugin["conflicts_with"].is_a?(Array) ? plugin["conflicts_with"] : []
+    conflict = (conflicts & selected_ids).first
+    if conflict
+      supported = false
+      installable = false
+      actions = []
+    end
+    unless compatibility_match.call(plugin, compatibility_target.call(selected_ids))
+      supported = false
+      installable = false
+      actions = []
+    end
 
     {
       "id" => plugin.fetch("id"),
