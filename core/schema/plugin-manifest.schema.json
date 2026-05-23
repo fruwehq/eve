@@ -89,6 +89,22 @@
       "items": { "type": "string" }
     },
 
+    "config_schema": {
+      "description": "Provider config and secret field declarations. Only valid on provider manifests.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "config": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/field_spec" }
+        },
+        "secrets": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/field_spec" }
+        }
+      }
+    },
+
     "down": {
       "description": "Package down behavior metadata (package plugins only).",
       "type": "object",
@@ -396,6 +412,32 @@
           "items": { "type": "string" }
         }
       }
+    },
+
+    "field_spec": {
+      "description": "A single config or secret field declared by a provider manifest.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "enum": ["string", "integer", "boolean", "path", "url", "host", "enum"]
+        },
+        "enum": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1
+        },
+        "default": {},
+        "description": { "type": "string" },
+        "required": { "type": "boolean" }
+      },
+      "allOf": [
+        {
+          "if":   { "properties": { "type": { "const": "enum" } } },
+          "then": { "required": ["enum"] }
+        }
+      ]
     },
 
     "windows_install_spec": {

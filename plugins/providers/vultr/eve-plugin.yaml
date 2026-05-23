@@ -35,6 +35,12 @@ access:
     provision_user: {value: Administrator}
     human_user: {value: Administrator}
 capabilities: [password]
+config_schema:
+  secrets:
+    api_key:
+      type: string
+      required: true
+      description: "Vultr API key used by Terraform/Terramate."
 supports:
   engines: [terraform]
   kinds: [vm]

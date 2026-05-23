@@ -36,6 +36,41 @@ access:
     provision_user: {env: EVE_PROVISION_USER, location: provision_user}
     human_user: {env: VM_USER_NAME, fallback: provision_user}
 capabilities: [host-ssh]
+config_schema:
+  config:
+    api_user:
+      type: string
+      description: "TrueNAS API username associated with the API key."
+    host:
+      type: host
+      required: true
+      description: "TrueNAS host used for SSH/API access."
+    ssh_host_key_fingerprint:
+      type: string
+      description: "Expected TrueNAS SSH host key fingerprint for verification."
+    ssh_port:
+      type: integer
+      description: "TrueNAS SSH port."
+    ssh_user:
+      type: string
+      description: "TrueNAS SSH username."
+    vm_base_dir:
+      type: path
+      description: "Base directory for VM files on the TrueNAS host."
+    vm_pool:
+      type: string
+      description: "ZFS pool for VM zvols."
+    vm_zvol_prefix:
+      type: string
+      description: "ZFS dataset path prefix for VM zvols below vm_pool."
+  secrets:
+    api_key:
+      type: string
+      description: "TrueNAS API key used by provider status checks and API-backed automation."
+    ssh_private_key_file:
+      type: path
+      required: true
+      description: "Private key used for SSH to TrueNAS."
 supports:
   engines: [terraform]
   kinds: [vm]

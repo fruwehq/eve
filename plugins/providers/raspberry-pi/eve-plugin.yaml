@@ -30,6 +30,25 @@ access:
     provision_user: {env: VM_USER_NAME}
     human_user: {env: VM_USER_NAME, fallback: provision_user}
 capabilities: [needs-provider-ip]
+config_schema:
+  config:
+    hdmi_connector:
+      type: enum
+      enum: [HDMI-A-1, HDMI-A-2]
+      description: "Raspberry Pi HDMI connector name."
+    hdmi_mode:
+      type: string
+      description: "Raspberry Pi HDMI mode override."
+    host:
+      type: host
+      description: "Raspberry Pi host name used for IP discovery."
+    ip:
+      type: string
+      description: "Raspberry Pi fixed IP override."
+  secrets:
+    user_password:
+      type: string
+      description: "Raspberry Pi user's login password for bootstrap."
 supports:
   engines: [metal]
   kinds: [metal]

@@ -29,6 +29,11 @@ access:
     bootstrap_user: {env: VM_USER_NAME}
     provision_user: {env: VM_USER_NAME}
     human_user: {env: VM_USER_NAME, fallback: provision_user}
+config_schema:
+  config:
+    show_console:
+      type: boolean
+      description: "Set to true to open the hypervisor console window."
 supports:
   engines: [vagrant]
   kinds: [vm]

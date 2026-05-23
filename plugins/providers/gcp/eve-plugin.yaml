@@ -36,6 +36,15 @@ access:
     provision_user: {env: VM_USER_NAME}
     human_user: {env: VM_USER_NAME, fallback: provision_user}
 capabilities: [login]
+config_schema:
+  config:
+    project:
+      type: string
+      description: "GCP project used by the Terraform Google provider."
+  secrets:
+    application_credentials:
+      type: path
+      description: "Service-account JSON file for Terraform Application Default Credentials."
 supports:
   engines: [terraform]
   kinds: [vm]

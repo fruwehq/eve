@@ -36,6 +36,29 @@ access:
     provision_user: {env: VM_USER_NAME}
     human_user: {env: VM_USER_NAME, fallback: provision_user}
 capabilities: [login]
+config_schema:
+  config:
+    config_file:
+      type: path
+      default: "~/.aws/config"
+      description: "AWS CLI config file used by Terraform/Terramate."
+    profile:
+      type: string
+      description: "AWS CLI profile name used by Terraform/Terramate."
+    region:
+      type: string
+      description: "AWS region for AWS provider resources."
+    shared_credentials_file:
+      type: path
+      default: "~/.aws/credentials"
+      description: "AWS CLI credentials file used by Terraform/Terramate."
+  secrets:
+    access_key_id:
+      type: string
+      description: "AWS_ACCESS_KEY_ID"
+    secret_access_key:
+      type: string
+      description: "AWS_SECRET_ACCESS_KEY"
 supports:
   engines: [terraform]
   kinds: [vm]
