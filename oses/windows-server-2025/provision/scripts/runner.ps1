@@ -1,4 +1,4 @@
-$ProvisionPath  = "C:\Users\Administrator\provision"
+$ProvisionPath  = if ($env:ProvisionPath) { $env:ProvisionPath } else { "C:\Users\Administrator\provision" }
 $ScriptsPath    = "$ProvisionPath\scripts"
 $StatePath      = "$ProvisionPath\state"
 $LogsPath       = "$ProvisionPath\logs"
