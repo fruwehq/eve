@@ -94,11 +94,6 @@ provider = env["PROVIDER"]
 os_family = env["OS_FAMILY"]
 ssh_user = env["SSH_USER"]
 vm_user_name = env["VM_USER_NAME"]
-
-if os_family != "windows" && (ssh_user.nil? || ssh_user.empty?)
-  warn "tf-env: missing VM_USER_NAME for #{profile} (#{os_family})"
-  exit 2
-end
 vm_user_name = ssh_user if vm_user_name.nil? || vm_user_name.empty?
 
 def quote(value)
