@@ -4,7 +4,7 @@ set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 ./scripts/env-require TRUENAS_HOST TRUENAS_SSH_USER
 
-SSH_OPTS=(-o StrictHostKeyChecking=no -o IdentitiesOnly=yes)
+SSH_OPTS=(-o StrictHostKeyChecking=no -o IdentitiesOnly=yes -t)
 if [ -n "${TRUENAS_SSH_PRIVATE_KEY_FILE:-}" ]; then
   SSH_KEY="${TRUENAS_SSH_PRIVATE_KEY_FILE}"
   # shellcheck disable=SC2088,SC2016
