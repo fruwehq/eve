@@ -214,7 +214,7 @@ try {
     } catch {
       $ErrorActionPreference = $savedEAP
       $stepError = $_
-      $stepExitCode = 1
+      $stepExitCode = if ($LASTEXITCODE -ne 0) { $LASTEXITCODE } else { 1 }
     }
 
     if ($stepExitCode -ne 0) {
