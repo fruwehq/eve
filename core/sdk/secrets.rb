@@ -27,18 +27,14 @@ module Eve
 
       def self.with_read_lock(provider_id)
         ensure_secrets_dir
-        lp = lock_path(provider_id)
-        File.open(lp, File::RDWR | File::CREAT, 0o600) do |f|
-          f.flock(File::LOCK_SH)
+        AtomicYaml.with_lock(lock_path(provider_id)) do
           yield
         end
       end
 
       def self.with_write_lock(provider_id)
         ensure_secrets_dir
-        lp = lock_path(provider_id)
-        File.open(lp, File::RDWR | File::CREAT, 0o600) do |f|
-          f.flock(File::LOCK_EX)
+        AtomicYaml.with_lock(lock_path(provider_id)) do
           yield
         end
       end
@@ -80,7 +76,8 @@ module Eve
         ensure_secrets_dir
 
         with_write_lock(provider_id) do
-          atomic_write(path, provider_id => hash)
+          AtomicYaml.atomic_write(path, provider_id => hash)
+          File.chmod(0o600, path)
         end
 
         hash
@@ -89,12 +86,7 @@ module Eve
       def self.update(provider_id, partial)
         with_write_lock(provider_id) do
           path = path_for(provider_id)
-          current = if File.exist?(path)
-                      raw = File.read(path)
-                      raw.strip.empty? ? {} : YAML.safe_load(raw, permitted_classes: [Symbol]) || {}
-                    else
-                      {}
-                    end
+          current = AtomicYaml.load_yaml(path)
 
           current[provider_id] ||= {}
           partial.each do |k, v|
@@ -106,7 +98,8 @@ module Eve
           end
 
           validate_values!(provider_id, current[provider_id])
-          atomic_write(path, current)
+          AtomicYaml.atomic_write(path, current)
+          File.chmod(0o600, path) if File.exist?(path)
           current[provider_id]
         end
       end
@@ -123,12 +116,7 @@ module Eve
         end
 
         with_write_lock(provider_id) do
-          current = if File.exist?(path)
-                      raw = File.read(path)
-                      raw.strip.empty? ? {} : YAML.safe_load(raw, permitted_classes: [Symbol]) || {}
-                    else
-                      {}
-                    end
+          current = AtomicYaml.load_yaml(path)
 
           current[provider_id] ||= {}
           Array(keys).each { |k| current[provider_id].delete(k.to_s) }
@@ -136,7 +124,8 @@ module Eve
           if current[provider_id].empty?
             File.delete(path) if File.exist?(path)
           else
-            atomic_write(path, current)
+            AtomicYaml.atomic_write(path, current)
+            File.chmod(0o600, path) if File.exist?(path)
           end
         end
       end
@@ -146,18 +135,14 @@ module Eve
 
         with_write_lock(provider_id) do
           path = path_for(provider_id)
-          current = if File.exist?(path)
-                      raw = File.read(path)
-                      raw.strip.empty? ? {} : YAML.safe_load(raw, permitted_classes: [Symbol]) || {}
-                    else
-                      {}
-                    end
+          current = AtomicYaml.load_yaml(path)
 
           current[provider_id] ||= {}
           result = yield(current[provider_id].dup)
           validate_values!(provider_id, result)
           current[provider_id] = result
-          atomic_write(path, current)
+          AtomicYaml.atomic_write(path, current)
+          File.chmod(0o600, path) if File.exist?(path)
           result
         end
       end
@@ -167,16 +152,31 @@ module Eve
         secrets[key.to_s]
       end
 
-      def self.atomic_write(path, data)
-        dir = File.dirname(path)
-        basename = File.basename(path)
-        tmp = File.join(dir, ".#{basename}.tmp.#{$$}")
-        File.write(tmp, YAML.dump(data))
-        File.chmod(0o600, tmp)
-        File.rename(tmp, path)
-      rescue StandardError
-        File.delete(tmp) if File.exist?(tmp)
-        raise
+      def self.keys_set(provider_id)
+        path = path_for(provider_id)
+        with_read_lock(provider_id) do
+          return [] unless File.exist?(path)
+
+          raw = File.read(path)
+          return [] if raw.strip.empty?
+
+          parsed = YAML.safe_load(raw, permitted_classes: [Symbol])
+          return [] unless parsed.is_a?(Hash) && parsed.key?(provider_id)
+
+          secrets = parsed[provider_id]
+          return [] unless secrets.is_a?(Hash)
+
+          secrets.each do |k, v|
+            next if v.nil?
+            unless v.is_a?(String)
+              raise SecretsError, "Secret '#{provider_id}.#{k}' must be a string, got #{v.class}"
+            end
+          end
+
+          secrets.keys
+        end
+      rescue Psych::SyntaxError => e
+        raise SecretsError, "Cannot parse secrets for #{provider_id}: #{e.message}"
       end
 
       def self.validate_values!(provider_id, hash)

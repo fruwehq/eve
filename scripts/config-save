@@ -1,25 +1,45 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-require "yaml"
-require "fileutils"
+require "shellwords"
 
 section = ARGV[0]
 field = ARGV[1]
 value = ARGV[2]
 
-config_path = ENV.fetch("EVE_CONFIG_PATH", File.join(Dir.pwd, ".eve", "config.yaml"))
+if section.nil? || field.nil?
+  warn "usage: config-save [--unset] <section> <field> [value]"
+  exit 2
+end
 
-existing = if File.exist?(config_path)
-             YAML.safe_load(File.read(config_path), aliases: false) || {}
-           else
-             {}
-           end
+unset = false
+if section == "--unset"
+  unset = true
+  section = ARGV[1]
+  field = ARGV[2]
+  if section.nil? || field.nil?
+    warn "usage: config-save --unset <section> <field>"
+    exit 2
+  end
+end
 
-keys = [section, field]
-cursor = existing
-keys[0...-1].each { |k| cursor = (cursor[k] ||= {}) }
-cursor[keys.last] = value.empty? ? nil : value
+root = File.expand_path("..", __dir__)
+$LOAD_PATH.unshift(File.join(root, "core"))
+require "sdk"
 
-FileUtils.mkdir_p(File.dirname(config_path))
-File.write(config_path, existing.to_yaml)
+config_path = ENV.fetch("EVE_CONFIG_PATH", File.join(Eve::SDK::Workdir.root, ".eve", "config.yaml"))
+lock_path = "#{config_path}.lock"
+
+Eve::SDK::AtomicYaml.with_lock(lock_path) do
+  existing = Eve::SDK::AtomicYaml.load_yaml(config_path)
+
+  if unset
+    existing[section]&.delete(field) if existing[section].is_a?(Hash)
+    existing.delete(section) if existing[section].is_a?(Hash) && existing[section].empty?
+  else
+    existing[section] ||= {}
+    existing[section][field] = value.to_s.empty? ? nil : value.to_s
+  end
+
+  Eve::SDK::AtomicYaml.atomic_write(config_path, existing)
+end

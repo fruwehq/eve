@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative "sdk/atomic_yaml"
 require_relative "sdk/resolve"
 require_relative "sdk/workdir"
 require_relative "sdk/state"

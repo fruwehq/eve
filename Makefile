@@ -9,7 +9,7 @@
 				plugins.list plugins.sync plugins.validate provider.action provider.status providers.status provision \
 				provision.clear-state provision.restart provision.wait reboot show-password ssh ssh.run \
 				ssh.wait start status stop test test.catalog test.core-boundary test.instances test.lifecycle test.lint test.plugins \
-				test.plugins-sync test.provision-runner test.python test.schemas test.secrets test.shellcheck test.state-concurrency test.terraform test.tf-isolation test.tui \
+				test.plugins-sync test.provision-runner test.python test.config-save test.schemas test.secrets test.shellcheck test.state-concurrency test.terraform test.tf-isolation test.tui \
 				test.update-golden tui up update upload validate
 
 TM_PARALLEL ?= 8
@@ -412,6 +412,9 @@ test.provision-runner: ## Run provision runner (Ubuntu bash + optional Windows p
 
 test.python: ## Run Python lint and type checks
 	@./scripts/test-python
+
+test.config-save: ## Run config-save concurrency tests
+	@./scripts/test-config-save
 
 test.schemas: ## Validate JSON schemas and their fixtures
 	@./scripts/test-schemas
