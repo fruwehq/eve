@@ -31,19 +31,13 @@ eve_tf_attr() {
 }
 
 # eve_tf_state_json <tags> <stack-candidate-1> [<stack-candidate-2> ...]
-# Returns the terraform state JSON for the instance. Tries `terramate run
-# terraform show -json` first; falls back to reading a tfstate file from
-# each supplied stack candidate path under $EVE_TF_STATE_BASE.
+# Returns the terraform state JSON for the instance. In instance mode, reads the
+# explicit state path first; otherwise generates Terramate code and asks
+# terraform for normalized state JSON.
 eve_tf_state_json() {
   local tags="$1"; shift
   local candidates=("$@")
   local state_json="" state_path="" workspace="${TF_WORKSPACE:-default}"
-
-  state_json=$(terramate run "${EVE_TM_READ_FLAGS[@]}" --quiet --tags="$tags-services" -- terraform show -json 2>/dev/null) || true
-  if [ -n "$state_json" ] && printf '%s\n' "$state_json" | jq -e . >/dev/null 2>&1; then
-    printf '%s\n' "$state_json"
-    return 0
-  fi
 
   if [ -n "${EVE_TF_STATE_BASE:-}" ]; then
     local candidate
@@ -60,5 +54,12 @@ eve_tf_state_json() {
         return 0
       fi
     done
+  fi
+
+  terramate generate >/dev/null
+  state_json=$(terramate run "${EVE_TM_READ_FLAGS[@]}" --quiet --tags="$tags-services" -- terraform show -json 2>/dev/null) || true
+  if [ -n "$state_json" ] && printf '%s\n' "$state_json" | jq -e . >/dev/null 2>&1; then
+    printf '%s\n' "$state_json"
+    return 0
   fi
 }

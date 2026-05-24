@@ -130,7 +130,12 @@ RUN apt-get update \
 WORKDIR /opt/eve
 COPY . /opt/eve
 
-RUN bundle install \
+RUN git init -q \
+  && git config user.email eve-container@example.invalid \
+  && git config user.name "Eve Container" \
+  && git add . \
+  && git commit -q -m "docker image snapshot" \
+  && bundle install \
   && poetry install --no-interaction --no-root
 
 FROM base AS runtime-base

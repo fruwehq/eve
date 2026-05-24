@@ -33,11 +33,11 @@ def os_key(os_name)
 end
 
 def shell_ok?(command)
-  system(command, out: File::NULL, err: File::NULL)
+  system("sh", "-c", command, out: File::NULL, err: File::NULL)
 end
 
 def command_output(command)
-  stdout, stderr, status = Open3.capture3(command)
+  stdout, stderr, status = Open3.capture3("sh", "-c", command)
   { "ok" => status.success?, "stdout" => stdout, "stderr" => stderr, "status" => status.exitstatus }
 end
 

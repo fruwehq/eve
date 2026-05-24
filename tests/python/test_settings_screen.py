@@ -26,7 +26,9 @@ def test_field_labels_dict_covers_expected_fields() -> None:
 
 
 def test_root_dir_points_to_project_root() -> None:
-    assert Path(root_dir()).name == "ephemeral-cloud-gaming"
+    root = Path(root_dir())
+    assert (root / "config" / "catalog.yaml").is_file()
+    assert (root / "scripts" / "eve-tui").is_file()
 
 
 def test_source_tag_derivation(monkeypatch) -> None:
