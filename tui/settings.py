@@ -63,6 +63,17 @@ def load_provider_secrets(provider_id: str) -> dict[str, str]:
     return json.loads(stdout) if stdout.strip() else {}
 
 
+def load_provider_secret_keys(provider_id: str) -> list[str]:
+    code, stdout, _ = _run([
+        "ruby", "-I", "core", "-r", "sdk", "-e",
+        'require "sdk"; begin; puts Eve::SDK::Secrets.keys_set(ARGV[0]).join("\\n"); rescue Eve::SDK::Secrets::SecretsError; end',
+        provider_id,
+    ])
+    if code != 0 or not stdout.strip():
+        return []
+    return stdout.strip().split("\n")
+
+
 def save_provider_secret(provider_id: str, key: str, value: str) -> None:
     env_addition = {"_EVE_SECRET_VALUE": value}
     code, _, stderr = _run_env([

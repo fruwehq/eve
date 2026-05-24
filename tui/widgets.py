@@ -35,7 +35,7 @@ from tui.settings import (
     CONFIG_SECTIONS,
     field_label,
     load_provider_schema,
-    load_provider_secrets,
+    load_provider_secret_keys,
     load_structured,
     save_provider_secret,
     save_value,
@@ -1080,15 +1080,16 @@ class EditFieldScreen(ModalScreen[str | None]):
     }
     """
 
-    def __init__(self, label: str, current: str) -> None:
+    def __init__(self, label: str, current: str, *, password: bool = False) -> None:
         super().__init__()
         self.field_label_text = label
         self.current_value = current
+        self.password_mode = password
 
     def compose(self) -> ComposeResult:
         with Vertical(id="edit-dialog"):
             yield Label(f"[b]{self.field_label_text}[/b]", id="edit-label")
-            yield Input(value=self.current_value, id="edit-input")
+            yield Input(value=self.current_value, id="edit-input", password=self.password_mode)
             with Horizontal(id="edit-actions"):
                 yield Button("Cancel", id="cancel")
                 yield Button("Save", id="save", variant="primary")
@@ -1273,7 +1274,7 @@ class ProviderConfigScreen(ModalScreen[None]):
         self.provider_id = provider_id
         self.provider_name = provider_name
         self._schema: dict[str, Any] = {}
-        self._secrets: dict[str, str] = {}
+        self._secret_keys_set: list[str] = []
 
     def compose(self) -> ComposeResult:
         with Vertical(id="pc-dialog"):
@@ -1290,7 +1291,7 @@ class ProviderConfigScreen(ModalScreen[None]):
 
     def _load(self) -> None:
         self._schema = load_provider_schema(self.provider_id)
-        self._secrets = load_provider_secrets(self.provider_id)
+        self._secret_keys_set = load_provider_secret_keys(self.provider_id)
 
         structured: dict[str, dict[str, dict[str, Any]]] = {}
         try:
@@ -1316,8 +1317,8 @@ class ProviderConfigScreen(ModalScreen[None]):
         for field_id in sorted(secret_fields.keys()):
             spec = secret_fields[field_id]
             label = spec.get("description") or field_label(self.provider_id, field_id)
-            value = self._secrets.get(field_id, "")
-            display = "\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf" if value else "\u2014"
+            is_set = field_id in self._secret_keys_set
+            display = "\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf" if is_set else "\u2014"
             ftype = "secret"
             if spec.get("required"):
                 ftype += " *"
@@ -1330,10 +1331,9 @@ class ProviderConfigScreen(ModalScreen[None]):
         spec = fields.get(field, {})
         label = spec.get("description") or field_label(self.provider_id, field)
 
+        is_secret = scope == "secret"
         current = ""
-        if scope == "secret":
-            current = self._secrets.get(field, "")
-        else:
+        if not is_secret:
             try:
                 structured = load_structured()
                 section_data = structured.get(self.provider_id.replace("-", "_"), {})
@@ -1344,9 +1344,13 @@ class ProviderConfigScreen(ModalScreen[None]):
         def handle_edit(result: str | None) -> None:
             if result is not None:
                 try:
-                    if scope == "secret":
+                    if is_secret:
+                        allowed = self._schema.get("secrets", {}).keys()
+                        if field not in allowed:
+                            self.notify(f"Unknown secret key: {field}", severity="error")
+                            return
                         save_provider_secret(self.provider_id, field, result)
-                        self._secrets[field] = result
+                        self._secret_keys_set.append(field)
                     else:
                         save_value(self.provider_id.replace("-", "_"), field, result)
                     self._load()
@@ -1354,14 +1358,13 @@ class ProviderConfigScreen(ModalScreen[None]):
                 except Exception as e:
                     self.notify(f"Save failed: {e}", severity="error")
 
-        self.push_screen(EditFieldScreen(label, current), handle_edit)  # type: ignore[attr-defined]
+        self.push_screen(EditFieldScreen(label, current, password=is_secret), handle_edit)  # type: ignore[attr-defined]
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "pc-close":
             self.dismiss(None)
         elif event.button.id == "pc-test":
-            parent = self.app.query_one("#provider-pane", ProviderPane)
-            parent.post_message(ProviderPane.TestConnectionRequested(self.provider_id))
+            self.post_message(ProviderPane.TestConnectionRequested(self.provider_id))
             self.notify("Testing connection...")
             self.dismiss(None)
 
