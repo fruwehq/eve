@@ -13,38 +13,13 @@ cd "$(git rev-parse --show-toplevel)"
 . ./scripts/lib/load-runtime-env.sh
 # shellcheck source=plugins/providers/_common/lib/profile-env.sh
 . ./plugins/providers/_common/lib/profile-env.sh
+# shellcheck source=plugins/providers/raspberry-pi/lib/host-resolver.sh
+. ./plugins/providers/raspberry-pi/lib/host-resolver.sh
 
 eve_load_profile_env "$PROFILE"
 
 RESOLVED_PI_HOST=$(eve_resolved_value RASPBERRY_PI_HOST)
 RESOLVED_PI_IP=$(eve_resolved_value RASPBERRY_PI_IP)
-
-resolve_host_ip() {
-  local host="$1"
-  local ip
-  case "$host" in
-    ''|*[!0-9.]*) ;;
-    *.*) printf '%s\n' "$host"; return 0 ;;
-  esac
-
-  if command -v getent >/dev/null 2>&1; then
-    ip=$(getent ahostsv4 "$host" 2>/dev/null | awk '{print $1; exit}')
-    [ -n "$ip" ] && { printf '%s\n' "$ip"; return 0; }
-  fi
-  if command -v dscacheutil >/dev/null 2>&1; then
-    ip=$(dscacheutil -q host -a name "$host" 2>/dev/null | awk '/ip_address:/ {print $2; exit}')
-    [ -n "$ip" ] && { printf '%s\n' "$ip"; return 0; }
-  fi
-  if command -v dig >/dev/null 2>&1; then
-    ip=$(dig +short "$host" A 2>/dev/null | awk '/^[0-9.]+$/ {print; exit}')
-    [ -n "$ip" ] && { printf '%s\n' "$ip"; return 0; }
-  fi
-  if command -v host >/dev/null 2>&1; then
-    ip=$(host "$host" 2>/dev/null | awk '/has address/ {print $4; exit}')
-    [ -n "$ip" ] && { printf '%s\n' "$ip"; return 0; }
-  fi
-  return 1
-}
 
 ssh_host_ip() {
   local host="$1" user="$2" priv ip

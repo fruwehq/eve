@@ -139,7 +139,8 @@ else
   # actual desktop, producing a black Moonlight stream while the API still
   # looks healthy.
   set_sunshine_config capture x11
-  sudo setcap -r "$(readlink -f "$(command -v sunshine)")" 2>/dev/null || true
+  sunshine_realpath=$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$(command -v sunshine)")
+  sudo setcap -r "$sunshine_realpath" 2>/dev/null || true
 fi
 
 # Set Sunshine web UI credentials (matches Windows step 10's behavior).

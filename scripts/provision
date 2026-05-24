@@ -167,8 +167,7 @@ case "$OS_FAMILY" in
     # Auto-detect host timezone if not explicitly set
     _HOST_TZ="${TIMEZONE:-}"
     if [ -z "$_HOST_TZ" ]; then
-      _LINK=$(readlink /etc/localtime 2>/dev/null || true)
-      _HOST_TZ=$(echo "$_LINK" | sed -n 's|.*/zoneinfo/||p')
+      _HOST_TZ="$(./scripts/host-timezone 2>/dev/null || true)"
     fi
     THINLINC_AGENT_HOSTNAME_DEFAULT="${THINLINC_AGENT_HOSTNAME:-}"
     case ",$BUNDLE_PACKAGES," in

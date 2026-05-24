@@ -8,7 +8,7 @@
 				package.reinstall package.select package.status package.uninstall package.unselect package.verify \
 				plugins.list plugins.sync plugins.validate provider.action provider.status providers.status provision \
 				provision.clear-state provision.restart provision.wait reboot show-password ssh ssh.run \
-				ssh.wait start status stop test test.catalog test.core-boundary test.instances test.lifecycle test.lint test.plugins \
+				ssh.wait start status stop test test.catalog test.core-boundary test.instances test.lifecycle test.lint test.os-portability test.plugins \
 				test.plugins-sync test.provision-runner test.python test.config-save test.schemas test.secrets test.shellcheck test.state-concurrency test.terraform test.tf-isolation test.tui \
 				test.update-golden tui up update upload validate
 
@@ -36,7 +36,7 @@ $(foreach assignment,$(EVE_CONFIG_EXPORTS),$(eval export $(assignment)))
 # TIMEZONE is the only "documented in .env" variable that defaults instead of
 # erroring when unset: fall back to the host's configured timezone.
 ifeq ($(strip $(TIMEZONE)),)
-TIMEZONE := $(shell readlink /etc/localtime 2>/dev/null | sed 's|.*/zoneinfo/||')
+TIMEZONE := $(shell ./scripts/host-timezone 2>/dev/null)
 endif
 
 export AWS_CONFIG_FILE
@@ -400,6 +400,9 @@ test.lifecycle: ## Run fake-provider lifecycle test (up/status/ip/stop/down stat
 
 test.lint: ## Run non-Python language lint and syntax checks
 	@./scripts/test-lint
+
+test.os-portability: ## Validate explicit host OS dispatch branches
+	@./scripts/test-os-portability
 
 test.plugins: ## Validate plugin manifests and dry-run dispatch contracts
 	@./scripts/test-plugins
