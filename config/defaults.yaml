@@ -24,6 +24,9 @@ global:
   timezone:
   vm_user_name:
 
+human_user:
+  password:
+
 moonlight:
   bitrate_kbps:
   display_mode:
@@ -31,6 +34,7 @@ moonlight:
   video_decoder:
 
 rdp:
+  gate_password:
   gate_user:
 
 raspberry_pi:
@@ -40,10 +44,12 @@ raspberry_pi:
   ip:
 
 rustdesk:
+  password:
   server:
 
 sunshine:
   max_bitrate_kbps:
+  password:
   version:
 
 thinlinc:
@@ -66,3 +72,6 @@ truenas:
 
 vagrant:
   show_console:
+
+windows:
+  password:

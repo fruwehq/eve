@@ -259,6 +259,21 @@ Dir.glob(File.join(ROOT, "plugins", "*", "*", "eve-plugin.yaml")).sort.each do |
 end
 puts "  (#{shipped_config} shipped config_schema blocks checked)" if shipped_config.positive?
 
+# ---------- provider manifests must have config_schema ----------
+puts "\n== schemas: provider config_schema presence =="
+
+Dir.glob(File.join(ROOT, "plugins", "providers", "*", "eve-plugin.yaml")).sort.each do |path|
+  data = load_yaml(path)
+  next unless data.is_a?(Hash) && data["kind"] == "provider"
+
+  rel = path.sub(%r{^#{ROOT}/plugins/providers/}, "")
+  if data.key?("config_schema") && data["config_schema"].is_a?(Hash)
+    pass "presence: #{rel}"
+  else
+    fail "presence: #{rel} (missing config_schema)"
+  end
+end
+
 # ---------- provision-manifest validation ----------
 puts "\n== schemas: provision-manifest (fixtures) =="
 
