@@ -5,6 +5,8 @@ on:
     branches:
       - main
   pull_request:
+  schedule:
+    - cron: "0 9 * * *"
 
 jobs:
   test:
@@ -79,3 +81,23 @@ jobs:
 
       - name: Run make test
         run: make test
+
+  docker-runtime-slim:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build slim runtime image
+        run: docker build -f docker/Dockerfile --target runtime-slim -t eve/eve:slim -t eve/eve:latest .
+
+      - name: Smoke slim runtime image
+        run: docker run --rm eve/eve:slim make help
+
+  docker-runtime-full:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build full runtime image
+        run: docker build -f docker/Dockerfile --target runtime-full -t eve/eve:full .

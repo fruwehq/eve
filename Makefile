@@ -1,6 +1,6 @@
 # Makefile
 .DEFAULT_GOAL := default
-.PHONY: bundle.select bundle.unselect catalog.list clean default docker.build \
+.PHONY: bundle.select bundle.unselect catalog.list clean default docker.build docker.runtime.full docker.runtime.slim \
 				docker.shell docker.test doctor down env eve generate help info init.all install-cli instance.create \
 				instance.delete instance.env instance.info instance.list instance.observe instance.paths instance.provision \
 				instance.recover instance.state instance.status instance.validate instance.view integration.packages \
@@ -111,6 +111,12 @@ default: help  ## Show help
 
 docker.build: ## Build optional Eve CLI/toolchain container
 	docker build -f docker/Dockerfile.toolchain -t $(EVE_TOOLCHAIN_IMAGE) .
+
+docker.runtime.full: ## Build the full Eve runtime container with Vagrant and QEMU
+	./docker/build.sh full
+
+docker.runtime.slim: ## Build the slim Eve runtime container
+	./docker/build.sh slim
 
 docker.shell: ## Open a shell inside the optional Eve toolchain container
 	EVE_TOOLCHAIN_IMAGE=$(EVE_TOOLCHAIN_IMAGE) ./scripts/eve-docker bash
