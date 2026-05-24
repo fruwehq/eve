@@ -81,6 +81,12 @@ def save_value(section: str, field: str, value: str) -> None:
         raise RuntimeError(stderr.strip() or "config-save failed")
 
 
+def unset_value(section: str, field: str) -> None:
+    code, _, stderr = _run(["./scripts/config-save", "--unset", section, field])
+    if code != 0:
+        raise RuntimeError(stderr.strip() or "config-save --unset failed")
+
+
 CONFIG_SECTIONS: list[dict[str, str]] = [
     {"id": "global", "label": "Global"},
     {"id": "display", "label": "Display"},

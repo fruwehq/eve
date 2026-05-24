@@ -6,6 +6,7 @@ from __future__ import annotations
 from typing import Any, Literal, cast
 
 from textual.app import ComposeResult
+from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import (
@@ -38,6 +39,7 @@ from tui.settings import (
     load_structured,
     save_provider_secret,
     save_value,
+    unset_value,
 )
 
 
@@ -1135,15 +1137,21 @@ class SettingsScreen(ModalScreen[None]):
     def __init__(self) -> None:
         super().__init__()
         self._structured: dict[str, dict[str, dict[str, Any]]] = {}
+        self._row_keys: list[str] = []
 
     def compose(self) -> ComposeResult:
         with Vertical(id="settings-dialog"):
             yield Label("[b]Settings[/b]", id="settings-title")
             table: DataTable[Any] = DataTable(id="settings-table")
-            table.add_columns("Section", "Field", "Value")
+            table.add_columns("Section", "Field", "Value", "Source")
             yield table
             with Horizontal(id="settings-actions"):
+                yield Button("Reset", id="settings-reset", variant="warning")
                 yield Button("Close", id="close")
+
+    BINDINGS = [
+        Binding("r", "reset_field", "Reset"),
+    ]
 
     def on_mount(self) -> None:
         self._load_values()
@@ -1156,6 +1164,7 @@ class SettingsScreen(ModalScreen[None]):
 
         table = self.query_one("#settings-table", DataTable)
         table.clear()
+        self._row_keys = []
 
         for section_info in CONFIG_SECTIONS:
             section_id = section_info["id"]
@@ -1166,8 +1175,12 @@ class SettingsScreen(ModalScreen[None]):
             for field_id in sorted(fields.keys()):
                 info = fields[field_id]
                 value = info.get("value") or ""
+                source = info.get("source") or "unset"
                 label = field_label(section_id, field_id)
-                table.add_row(section_label, label, value or "\u2014", key=f"{section_id}.{field_id}")
+                source_display = f"[{source}]"
+                key = f"{section_id}.{field_id}"
+                self._row_keys.append(key)
+                table.add_row(section_label, label, value or "\u2014", source_display, key=key)
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         row_key = str(event.row_key.value)
@@ -1191,6 +1204,29 @@ class SettingsScreen(ModalScreen[None]):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "close":
             self.dismiss(None)
+        elif event.button.id == "settings-reset":
+            self._reset_selected_field()
+
+    def action_reset_field(self) -> None:
+        self._reset_selected_field()
+
+    def _reset_selected_field(self) -> None:
+        table = self.query_one("#settings-table", DataTable)
+        row = table.cursor_row
+        if row is None or row < 0 or row >= len(self._row_keys):
+            return
+        key = self._row_keys[row]
+        section, field = key.split(".", 1)
+        info = self._structured.get(section, {}).get(field, {})
+        if info.get("source") == "config.yaml":
+            try:
+                unset_value(section, field)
+                self._load_values()
+                self.notify(f"Reset {field_label(section, field)}")
+            except Exception as e:
+                self.notify(f"Reset failed: {e}", severity="error")
+        else:
+            self.notify("Field is not overridden in config.yaml")
 
     def on_key(self, event: Any) -> None:
         if event.key == "escape":

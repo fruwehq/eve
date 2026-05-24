@@ -131,7 +131,10 @@ unless %w[--make --shell --json --structured].include?(format)
 end
 
 begin
-  config = deep_merge(load_config(DEFAULT_CONFIG), load_config(LOCAL_CONFIG))
+  defaults_raw = load_config(DEFAULT_CONFIG)
+  local_raw = load_config(LOCAL_CONFIG)
+  config = deep_merge(defaults_raw, local_raw)
+
   env = MAPPINGS.each_with_object({}) do |(path, name), out|
     value = scalar_value(fetch_path(config, path))
     value = normalize_pathish(value) if value && PATH_ENV_NAMES.include?(name)
@@ -148,10 +151,20 @@ begin
     MAPPINGS.each do |path, name|
       section = path[0]
       field = path[1]
+      source = if scalar_value(fetch_path(local_raw, path))
+                 "config.yaml"
+               elsif ENV.key?(name) && !ENV[name].nil? && !ENV[name].empty?
+                 "env"
+               elsif scalar_value(fetch_path(defaults_raw, path))
+                 "default"
+               else
+                 "unset"
+               end
       sections[section] ||= {}
       sections[section][field] = {
         "env" => name,
-        "value" => env[name]
+        "value" => env[name],
+        "source" => source
       }
     end
     puts JSON.pretty_generate(sections)
