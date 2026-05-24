@@ -3,8 +3,19 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import time
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
+
+
+_CACHE_TTL = 5.0
+_cache: dict[tuple[str, tuple[str, ...]], tuple[float, Any]] = {}
+
+
+def _invalidate_cache() -> None:
+    keys_to_remove = [k for k in _cache if k[0] in ("load_structured", "load_provider_schema")]
+    for k in keys_to_remove:
+        del _cache[k]
 
 
 def root_dir() -> str:
@@ -33,14 +44,27 @@ def _run_env(args: list[str], extra_env: dict[str, str] | None = None) -> tuple[
 
 
 def load_structured() -> dict[str, dict[str, dict[str, Any]]]:
+    cache_key = ("load_structured", ())
+    now = time.monotonic()
+    if cache_key in _cache:
+        ts, cached = _cache[cache_key]
+        if now - ts < _CACHE_TTL:
+            return cast("dict[str, dict[str, dict[str, Any]]]", cached)
     code, stdout, stderr = _run(["./scripts/config-env", "--structured"])
     if code != 0:
         raise RuntimeError(stderr.strip() or "config-env failed")
     result: dict[str, dict[str, dict[str, Any]]] = json.loads(stdout)
+    _cache[cache_key] = (now, result)
     return result
 
 
 def load_provider_schema(provider_id: str) -> dict[str, Any]:
+    cache_key = ("load_provider_schema", (provider_id,))
+    now = time.monotonic()
+    if cache_key in _cache:
+        ts, cached = _cache[cache_key]
+        if now - ts < _CACHE_TTL:
+            return cast("dict[str, Any]", cached)
     code, stdout, stderr = _run(["./scripts/plugin-list", "--kind", "provider", "--json"])
     if code != 0:
         raise RuntimeError(stderr.strip() or "plugin-list failed")
@@ -48,7 +72,9 @@ def load_provider_schema(provider_id: str) -> dict[str, Any]:
     for plugin in plugins:
         if plugin.get("id") == provider_id:
             schema: dict[str, Any] = plugin.get("config_schema", {})
+            _cache[cache_key] = (now, schema)
             return schema
+    _cache[cache_key] = (now, {})
     return {}
 
 
@@ -84,18 +110,21 @@ def save_provider_secret(provider_id: str, key: str, value: str) -> None:
     ], extra_env=env_addition)
     if code != 0:
         raise RuntimeError(stderr.strip() or "secret write failed")
+    _invalidate_cache()
 
 
 def save_value(section: str, field: str, value: str) -> None:
     code, _, stderr = _run(["./scripts/config-save", section, field, value])
     if code != 0:
         raise RuntimeError(stderr.strip() or "config-save failed")
+    _invalidate_cache()
 
 
 def unset_value(section: str, field: str) -> None:
     code, _, stderr = _run(["./scripts/config-save", "--unset", section, field])
     if code != 0:
         raise RuntimeError(stderr.strip() or "config-save --unset failed")
+    _invalidate_cache()
 
 
 CONFIG_SECTIONS: list[dict[str, str]] = [
