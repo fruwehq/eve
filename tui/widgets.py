@@ -33,7 +33,10 @@ from tui.render import (
 from tui.settings import (
     CONFIG_SECTIONS,
     field_label,
+    load_provider_schema,
+    load_provider_secrets,
     load_structured,
+    save_provider_secret,
     save_value,
 )
 
@@ -80,6 +83,16 @@ class ProviderPane(Static):
             self.provider_id = provider_id
             self.action = action
 
+    class ConfigureRequested(Message):
+        def __init__(self, provider_id: str) -> None:
+            super().__init__()
+            self.provider_id = provider_id
+
+    class TestConnectionRequested(Message):
+        def __init__(self, provider_id: str) -> None:
+            super().__init__()
+            self.provider_id = provider_id
+
     def __init__(
         self,
         providers: list[dict[str, Any]],
@@ -115,9 +128,15 @@ class ProviderPane(Static):
                         button = Button(label, id=f"ppa-{provider_id}-{action.get('id', '')}")
                         button.variant = "primary" if bool(action.get("interactive")) else "default"
                         yield button
+                    yield Button("Configure", id=f"ppc-{provider_id}", variant="success")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         button_id = event.button.id or ""
+        if button_id.startswith("ppc-"):
+            provider_id = button_id[4:]
+            event.stop()
+            self.post_message(self.ConfigureRequested(provider_id))
+            return
         if not button_id.startswith("ppa-"):
             return
         rest = button_id[4:]
@@ -1171,6 +1190,143 @@ class SettingsScreen(ModalScreen[None]):
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "close":
+            self.dismiss(None)
+
+    def on_key(self, event: Any) -> None:
+        if event.key == "escape":
+            self.dismiss(None)
+
+
+class ProviderConfigScreen(ModalScreen[None]):
+    CSS = """
+    ProviderConfigScreen {
+        align: center middle;
+    }
+
+    #pc-dialog {
+        width: 80;
+        height: 34;
+        border: round $success;
+        background: $surface;
+        padding: 1 2;
+    }
+
+    #pc-title {
+        text-align: center;
+        margin-bottom: 1;
+    }
+
+    #pc-table {
+        height: 22;
+    }
+
+    #pc-actions {
+        height: 3;
+        width: 48;
+        background: transparent;
+    }
+
+    #pc-actions Button {
+        width: 16;
+        min-width: 16;
+    }
+    """
+
+    def __init__(self, provider_id: str, provider_name: str) -> None:
+        super().__init__()
+        self.provider_id = provider_id
+        self.provider_name = provider_name
+        self._schema: dict[str, Any] = {}
+        self._secrets: dict[str, str] = {}
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="pc-dialog"):
+            yield Label(f"[b]Configure {self.provider_name}[/b]", id="pc-title")
+            table: DataTable[Any] = DataTable(id="pc-table")
+            table.add_columns("Field", "Value", "Type")
+            yield table
+            with Horizontal(id="pc-actions"):
+                yield Button("Test", id="pc-test", variant="primary")
+                yield Button("Close", id="pc-close")
+
+    def on_mount(self) -> None:
+        self._load()
+
+    def _load(self) -> None:
+        self._schema = load_provider_schema(self.provider_id)
+        self._secrets = load_provider_secrets(self.provider_id)
+
+        structured: dict[str, dict[str, dict[str, Any]]] = {}
+        try:
+            structured = load_structured()
+        except Exception:
+            pass
+
+        table = self.query_one("#pc-table", DataTable)
+        table.clear()
+
+        config_fields = self._schema.get("config", {})
+        for field_id in sorted(config_fields.keys()):
+            spec = config_fields[field_id]
+            label = spec.get("description") or field_label(self.provider_id, field_id)
+            section_data = structured.get(self.provider_id.replace("-", "_"), {})
+            value = section_data.get(field_id, {}).get("value") or ""
+            ftype = spec.get("type", "string")
+            if spec.get("required"):
+                ftype += " *"
+            table.add_row(label, value or "\u2014", ftype, key=f"config.{field_id}")
+
+        secret_fields = self._schema.get("secrets", {})
+        for field_id in sorted(secret_fields.keys()):
+            spec = secret_fields[field_id]
+            label = spec.get("description") or field_label(self.provider_id, field_id)
+            value = self._secrets.get(field_id, "")
+            display = "\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf" if value else "\u2014"
+            ftype = "secret"
+            if spec.get("required"):
+                ftype += " *"
+            table.add_row(label, display, ftype, key=f"secret.{field_id}")
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        row_key = str(event.row_key.value)
+        scope, field = row_key.split(".", 1)
+        fields = self._schema.get(scope, {})
+        spec = fields.get(field, {})
+        label = spec.get("description") or field_label(self.provider_id, field)
+
+        current = ""
+        if scope == "secret":
+            current = self._secrets.get(field, "")
+        else:
+            try:
+                structured = load_structured()
+                section_data = structured.get(self.provider_id.replace("-", "_"), {})
+                current = section_data.get(field, {}).get("value") or ""
+            except Exception:
+                pass
+
+        def handle_edit(result: str | None) -> None:
+            if result is not None:
+                try:
+                    if scope == "secret":
+                        save_provider_secret(self.provider_id, field, result)
+                        self._secrets[field] = result
+                    else:
+                        save_value(self.provider_id.replace("-", "_"), field, result)
+                    self._load()
+                    self.notify(f"Saved {label}")
+                except Exception as e:
+                    self.notify(f"Save failed: {e}", severity="error")
+
+        self.push_screen(EditFieldScreen(label, current), handle_edit)  # type: ignore[attr-defined]
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "pc-close":
+            self.dismiss(None)
+        elif event.button.id == "pc-test":
+            parent = self.app.query_one("#provider-pane", ProviderPane)
+            parent.post_message(ProviderPane.TestConnectionRequested(self.provider_id))
+            self.notify("Testing connection...")
             self.dismiss(None)
 
     def on_key(self, event: Any) -> None:

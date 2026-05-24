@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -20,12 +21,58 @@ def _run(args: list[str]) -> tuple[int, str, str]:
         return 1, "", "command timed out"
 
 
+def _run_env(args: list[str], extra_env: dict[str, str] | None = None) -> tuple[int, str, str]:
+    env = {**os.environ, **(extra_env or {})}
+    try:
+        result = subprocess.run(args, capture_output=True, text=True, timeout=30, env=env)
+        return result.returncode, result.stdout, result.stderr
+    except FileNotFoundError:
+        return 1, "", f"command not found: {args[0]}"
+    except subprocess.TimeoutExpired:
+        return 1, "", "command timed out"
+
+
 def load_structured() -> dict[str, dict[str, dict[str, Any]]]:
     code, stdout, stderr = _run(["./scripts/config-env", "--structured"])
     if code != 0:
         raise RuntimeError(stderr.strip() or "config-env failed")
     result: dict[str, dict[str, dict[str, Any]]] = json.loads(stdout)
     return result
+
+
+def load_provider_schema(provider_id: str) -> dict[str, Any]:
+    code, stdout, stderr = _run(["./scripts/plugin-list", "--kind", "provider", "--json"])
+    if code != 0:
+        raise RuntimeError(stderr.strip() or "plugin-list failed")
+    plugins: list[Any] = json.loads(stdout).get("plugins", [])
+    for plugin in plugins:
+        if plugin.get("id") == provider_id:
+            schema: dict[str, Any] = plugin.get("config_schema", {})
+            return schema
+    return {}
+
+
+def load_provider_secrets(provider_id: str) -> dict[str, str]:
+    code, stdout, stderr = _run([
+        "ruby", "-I", "core", "-r", "sdk", "-e",
+        'require "sdk"; begin; puts JSON.generate(Eve::SDK::Secrets.read(ARGV[0])); rescue Eve::SDK::Secrets::SecretsError; puts "{}"; end',
+        provider_id,
+    ])
+    if code != 0:
+        return {}
+    return json.loads(stdout) if stdout.strip() else {}
+
+
+def save_provider_secret(provider_id: str, key: str, value: str) -> None:
+    env_addition = {"_EVE_SECRET_VALUE": value}
+    code, _, stderr = _run_env([
+        "ruby", "-I", "core", "-r", "sdk", "-e",
+        'require "sdk"; Eve::SDK::Secrets.update(ARGV[0], {ARGV[1] => ENV["_EVE_SECRET_VALUE"]})',
+        provider_id,
+        key,
+    ], extra_env=env_addition)
+    if code != 0:
+        raise RuntimeError(stderr.strip() or "secret write failed")
 
 
 def save_value(section: str, field: str, value: str) -> None:

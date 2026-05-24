@@ -69,6 +69,7 @@ from tui.widgets import (
     ChoiceScreen,
     ConfirmScreen,
     NewInstanceScreen,
+    ProviderConfigScreen,
     ProviderPane,
     SettingsScreen,
     UploadScreen,
@@ -1578,6 +1579,24 @@ class EveTui(App[None]):
             self.start_task(self._run_provider_interactive(label, args))
         else:
             self.start_task(self._run_provider_stream(label, args))
+
+    def on_provider_pane_configure_requested(self, event: ProviderPane.ConfigureRequested) -> None:
+        provider_id = event.provider_id
+        display_name = provider_id.replace("-", " ").title()
+        for provider in self._provider_pane_data:
+            if provider.get("id") == provider_id:
+                display_name = str(provider.get("display_name", display_name))
+                break
+        self.push_screen(ProviderConfigScreen(provider_id, display_name))
+
+    def on_provider_pane_test_connection_requested(self, event: ProviderPane.TestConnectionRequested) -> None:
+        provider_id = event.provider_id
+        args = provider_dispatch_provider_args(provider_id, "status")
+
+        async def _test() -> None:
+            await self.stream_command(f"Test {provider_id}", args)
+
+        self.start_task(_test())
 
     async def _run_provider_interactive(self, label: str, args: list[str]) -> None:
         self.log_line(f"[primary]Opening {label}. Exit the session to return to the TUI.[/]")
