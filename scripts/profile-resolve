@@ -430,22 +430,14 @@ emit_vagrant() {
 
 PROVIDER_FROM_RESOLVE="$(echo "$RESOLVED_JSON" | jq -r '.machine.provider // empty' 2>/dev/null || true)"
 if [ -n "$PROVIDER_FROM_RESOLVE" ]; then
-  SECRETS_EXPORT="$(ruby -e '
+  SECRETS_EXPORT="$(ruby -I "$(dirname "$0")/../core" -r sdk -e '
     require "shellwords"
-    require "yaml"
-    root = File.expand_path("..", __dir__)
-    $LOAD_PATH.unshift(File.join(root, "core"))
-    require "sdk"
-    begin
-      secrets = Eve::SDK::Secrets.read(ARGV[0])
-      secrets.each do |k, v|
-        next if v.nil? || ENV.key?(k)
-        puts "export #{k}=#{Shellwords.escape(v)}"
-      end
-    rescue Eve::SDK::Secrets::SecretsError
-      warn "secrets: #{$!.message}"
+    secrets = Eve::SDK::Secrets.read(ARGV[0])
+    secrets.each do |k, v|
+      next if v.nil? || ENV.key?(k)
+      puts "export #{k}=#{Shellwords.escape(v)}"
     end
-  ' "$PROVIDER_FROM_RESOLVE" 2>/dev/null || true)"
+  ' "$PROVIDER_FROM_RESOLVE")"
   if [ -n "$SECRETS_EXPORT" ]; then
     eval "$SECRETS_EXPORT"
   fi
