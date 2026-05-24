@@ -1,0 +1,14 @@
+services:
+  eve:
+    image: eve/eve:slim
+    tty: true
+    stdin_open: true
+    volumes:
+      - ${HOME}/.eve-data:/data
+      - ${HOME}/.ssh:/root/.ssh:ro
+      # macOS Docker Desktop exposes the agent through a host socket path; keep SSH_AUTH_SOCK exported in the shell that runs docker compose.
+      # Linux hosts usually use /run/user/<uid>/ssh-agent sockets; Docker must be allowed to bind-mount that path.
+      - ${SSH_AUTH_SOCK}:/ssh-agent
+    environment:
+      EVE_HOME: /data
+      SSH_AUTH_SOCK: /ssh-agent

@@ -63,6 +63,7 @@ ARG TERRAFORM_VERSION
 ARG TERRAMATE_VERSION
 
 ENV DEBIAN_FRONTEND=noninteractive
+ENV EVE_HOME=/data
 ENV LD_LIBRARY_PATH="/opt/python/lib"
 ENV PATH="/opt/ruby/bin:/opt/python/bin:/root/.local/bin:/usr/local/bin:${PATH}"
 ENV POETRY_NO_INTERACTION=1
@@ -98,6 +99,8 @@ RUN apt-get update \
     zlib1g-dev \
   && ln -sf /opt/python/bin/python3.13 /usr/local/bin/python3 \
   && ln -sf /opt/python/bin/pip3.13 /usr/local/bin/pip3 \
+  && ln -sf /opt/python/bin/python3.13 /usr/local/bin/python \
+  && ln -sf /opt/python/bin/pip3.13 /usr/local/bin/pip \
   && gem install bundler -v 4.0.11 \
   && python3 -m pip install --no-cache-dir poetry \
   && rm -rf /var/lib/apt/lists/*
