@@ -6,6 +6,7 @@
 # --json: full report. --missing: just missing field names.
 
 require "json"
+require "open3"
 require "yaml"
 
 ROOT = File.expand_path("..", __dir__)
@@ -23,6 +24,51 @@ config = YAML.safe_load(File.read(config_path), aliases: false) if File.exist?(c
 config ||= {}
 
 missing = []
+warnings = []
+
+def command_available?(command)
+  system("command -v #{command} >/dev/null 2>&1")
+end
+
+def host_os
+  stdout, status = Open3.capture2("uname", "-s")
+  return stdout.strip if status.success? && !stdout.strip.empty?
+
+  "unknown"
+rescue Errno::ENOENT
+  "unknown"
+end
+
+case host_os
+when "Linux"
+  warnings << {
+    "id" => "linux-getent-missing",
+    "scope" => "os-portability",
+    "description" => "Raspberry Pi hostname resolution on Linux requires getent."
+  } unless command_available?("getent")
+  warnings << {
+    "id" => "linux-xfreerdp-missing",
+    "scope" => "os-portability",
+    "description" => "Opening RDP sessions on Linux requires xfreerdp."
+  } unless command_available?("xfreerdp")
+when "Darwin"
+  warnings << {
+    "id" => "darwin-dscacheutil-missing",
+    "scope" => "os-portability",
+    "description" => "Raspberry Pi hostname resolution on macOS requires dscacheutil."
+  } unless command_available?("dscacheutil")
+  warnings << {
+    "id" => "darwin-pbcopy-missing",
+    "scope" => "os-portability",
+    "description" => "Opening RDP sessions on macOS copies passwords with pbcopy."
+  } unless command_available?("pbcopy")
+else
+  warnings << {
+    "id" => "unsupported-host-os",
+    "scope" => "os-portability",
+    "description" => "This host OS is not supported by the v3.3 portability contract."
+  }
+end
 
 Dir.glob(File.join(manifest_dir, "*", "eve-plugin.yaml")).sort.each do |path|
   data = YAML.safe_load(File.read(path), aliases: false)
@@ -53,7 +99,7 @@ end
 
 case format
 when "json"
-  puts JSON.pretty_generate("missing" => missing, "ok" => missing.empty?)
+  puts JSON.pretty_generate("missing" => missing, "warnings" => warnings, "ok" => missing.empty?)
 when "missing"
   missing.each { |m| puts "#{m['provider']}.#{m['scope']}.#{m['field']}" }
 end

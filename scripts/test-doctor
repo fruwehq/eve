@@ -1,0 +1,80 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "fileutils"
+require "json"
+require "open3"
+require "tmpdir"
+
+ROOT = File.expand_path("..", __dir__)
+DOCTOR = File.join(ROOT, "scripts", "doctor")
+
+$failures = 0
+
+def pass(message)
+  puts "  [OK] #{message}"
+end
+
+def fail(message)
+  warn "  [FAIL] #{message}"
+  $failures += 1
+end
+
+def write_executable(path, body)
+  File.write(path, body)
+  FileUtils.chmod("+x", path)
+end
+
+def run_doctor(fake_os: nil)
+  env = {}
+  Dir.mktmpdir("eve-doctor-test.") do |dir|
+    if fake_os
+      bin = File.join(dir, "bin")
+      FileUtils.mkdir_p(bin)
+      write_executable(File.join(bin, "uname"), "#!/usr/bin/env sh\nprintf '%s\\n' #{fake_os}\n")
+      env["PATH"] = "#{bin}:#{ENV.fetch("PATH")}"
+    end
+    stdout, stderr, status = Open3.capture3(env, DOCTOR, "--json")
+    return [JSON.parse(stdout), stderr, status]
+  end
+end
+
+native, native_stderr, native_status = run_doctor
+if native_status.success? && native["tools"].is_a?(Array) && native.dig("checks", 0, "name") == "catalog-options"
+  pass "doctor --json emits native report"
+else
+  fail "doctor --json native report failed status=#{native_status.exitstatus} stderr=#{native_stderr.inspect}"
+end
+
+linux, linux_stderr, linux_status = run_doctor(fake_os: "Linux")
+linux_getent = linux.fetch("tools").find { |tool| tool["tool"] == "getent" }
+linux_dscacheutil = linux.fetch("tools").find { |tool| tool["tool"] == "dscacheutil" }
+if linux_status.success? &&
+   linux.dig("os", "key") == "linux" &&
+   linux_getent&.fetch("install") == "apt install libc-bin" &&
+   linux_dscacheutil&.fetch("status") == "skipped"
+  pass "doctor --json emits Linux-specific tool hints"
+else
+  fail "doctor --json Linux report failed stderr=#{linux_stderr.inspect}"
+end
+
+darwin, darwin_stderr, darwin_status = run_doctor(fake_os: "Darwin")
+darwin_dscacheutil = darwin.fetch("tools").find { |tool| tool["tool"] == "dscacheutil" }
+darwin_getent = darwin.fetch("tools").find { |tool| tool["tool"] == "getent" }
+if darwin_status.success? &&
+   darwin.dig("os", "key") == "darwin" &&
+   darwin_dscacheutil&.fetch("install") == "bundled with macOS" &&
+   darwin_getent&.fetch("status") == "skipped"
+  pass "doctor --json emits macOS-specific tool hints"
+else
+  fail "doctor --json Darwin report failed stderr=#{darwin_stderr.inspect}"
+end
+
+required = native.fetch("required_fields")
+if required.key?("warnings") && required.fetch("warnings").is_a?(Array)
+  pass "check-required warnings are present in doctor report"
+else
+  fail "check-required warnings missing from doctor report"
+end
+
+exit($failures.zero? ? 0 : 1)
