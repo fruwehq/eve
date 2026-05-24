@@ -1,6 +1,6 @@
 # Makefile
 .DEFAULT_GOAL := default
-.PHONY: bundle.select bundle.unselect catalog.list clean config.migrate default docker.build \
+.PHONY: bundle.select bundle.unselect catalog.list clean default docker.build \
 				docker.shell docker.test doctor down env eve generate help info init.all install-cli instance.create \
 				instance.delete instance.env instance.info instance.list instance.observe instance.paths instance.provision \
 				instance.recover instance.state instance.status instance.validate instance.view integration.packages \
@@ -9,7 +9,7 @@
 				plugins.list plugins.sync plugins.validate provider.action provider.status providers.status provision \
 				provision.clear-state provision.restart provision.wait reboot show-password ssh ssh.run \
 				ssh.wait start status stop test test.catalog test.core-boundary test.instances test.lifecycle test.lint test.plugins \
-				test.plugins-sync test.provision-runner test.python test.schemas test.shellcheck test.state-concurrency test.terraform test.tf-isolation test.tui \
+				test.plugins-sync test.provision-runner test.python test.config-save test.schemas test.secrets test.shellcheck test.state-concurrency test.terraform test.tf-isolation test.tui \
 				test.update-golden tui up update upload validate
 
 TM_PARALLEL ?= 8
@@ -106,9 +106,6 @@ clean: ## Remove terramate-generated terraform files and cache
 	rm -rf .terraform-cache-dir/data/*
 	rm -rf .terraform-cache-dir/plugins/*
 	rm -rf .terraform-cache-dir/state/*
-
-config.migrate: ## Move non-secret .env.local values to .eve/config.yaml (YES=1 to apply)
-	@if [ "$(YES)" = "1" ]; then ./scripts/config-migrate --apply; else ./scripts/config-migrate --dry-run; fi
 
 default: help  ## Show help
 
@@ -416,8 +413,14 @@ test.provision-runner: ## Run provision runner (Ubuntu bash + optional Windows p
 test.python: ## Run Python lint and type checks
 	@./scripts/test-python
 
+test.config-save: ## Run config-save concurrency tests
+	@./scripts/test-config-save
+
 test.schemas: ## Validate JSON schemas and their fixtures
 	@./scripts/test-schemas
+
+test.secrets: ## Run secret store concurrency and validation tests
+	@./scripts/test-secrets
 
 test.shellcheck: ## Run shellcheck over scripts/ and OS provisioning trees
 	@./scripts/test-shellcheck

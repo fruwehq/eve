@@ -1,6 +1,7 @@
 #!/usr/bin/env sh
-# Load the same runtime configuration stack that Make uses:
-# .env defaults, structured .eve/config.yaml, then .env.local overrides.
+# Load runtime configuration: structured config from config/defaults.yaml +
+# .eve/config.yaml via config-env, then optional .env.local overrides.
+# Secrets are loaded per-provider by profile-resolve at resolve time.
 
 eve_load_dotenv() {
   file="$1"
@@ -14,8 +15,6 @@ eve_load_dotenv() {
 
 if [ "${EVE_RUNTIME_ENV_LOADED:-0}" != "1" ]; then
   export EVE_RUNTIME_ENV_LOADED=1
-
-  eve_load_dotenv ".env"
 
   if [ -x "./scripts/config-env" ]; then
     eval "$(./scripts/config-env --shell)"

@@ -1,8 +1,7 @@
 # Non-secret structured defaults. Empty values are ignored.
 #
-# Personal overrides can go in .eve/config.yaml, which is git-ignored and safe
-# for UI-editable preferences. Keep secrets such as API keys and passwords in
-# .env.local.
+# Personal overrides go in .eve/config.yaml (git-ignored).
+# Secrets (API keys, passwords) go in .eve/secrets/<provider>.yaml.
 
 aws:
   config_file:
@@ -20,15 +19,23 @@ gcp:
 
 global:
   my_ip:
+  provision_user:
   ssh_public_key_file:
   timezone:
   vm_user_name:
+
+human_user:
+  password:
 
 moonlight:
   bitrate_kbps:
   display_mode:
   video_codec:
   video_decoder:
+
+rdp:
+  gate_password:
+  gate_user:
 
 raspberry_pi:
   hdmi_connector:
@@ -37,13 +44,16 @@ raspberry_pi:
   ip:
 
 rustdesk:
+  password:
   server:
 
 sunshine:
   max_bitrate_kbps:
+  password:
   version:
 
 thinlinc:
+  accept_eula:
   agent_hostname:
   server_bundle_path:
   server_bundle_url:
@@ -62,3 +72,6 @@ truenas:
 
 vagrant:
   show_console:
+
+windows:
+  password:

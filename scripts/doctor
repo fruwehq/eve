@@ -63,4 +63,12 @@ mkdir -p .eve/state/instances
 printf '  [OK] state directory: .eve/state/instances\n'
 printf '  [INFO] recover interrupted state with: make instance.recover INSTANCE=<name>\n'
 
+section "required fields"
+if ./scripts/check-required --json >/dev/null 2>&1; then
+  printf '  [OK] all required fields populated\n'
+else
+  printf '  [INFO] missing required fields:\n'
+  ./scripts/check-required --json 2>/dev/null | jq -r '.missing[] | "    \(.provider).\(.scope).\(.field) — \(.description)"' 2>/dev/null || ./scripts/check-required --missing 2>/dev/null | while read -r line; do printf '    %s\n' "$line"; done
+fi
+
 exit "$fail"

@@ -1,0 +1,45 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "shellwords"
+
+section = ARGV[0]
+field = ARGV[1]
+value = ARGV[2]
+
+if section.nil? || field.nil?
+  warn "usage: config-save [--unset] <section> <field> [value]"
+  exit 2
+end
+
+unset = false
+if section == "--unset"
+  unset = true
+  section = ARGV[1]
+  field = ARGV[2]
+  if section.nil? || field.nil?
+    warn "usage: config-save --unset <section> <field>"
+    exit 2
+  end
+end
+
+root = File.expand_path("..", __dir__)
+$LOAD_PATH.unshift(File.join(root, "core"))
+require "sdk"
+
+config_path = ENV.fetch("EVE_CONFIG_PATH", File.join(Eve::SDK::Workdir.root, ".eve", "config.yaml"))
+lock_path = "#{config_path}.lock"
+
+Eve::SDK::AtomicYaml.with_lock(lock_path) do
+  existing = Eve::SDK::AtomicYaml.load_yaml(config_path)
+
+  if unset
+    existing[section]&.delete(field) if existing[section].is_a?(Hash)
+    existing.delete(section) if existing[section].is_a?(Hash) && existing[section].empty?
+  else
+    existing[section] ||= {}
+    existing[section][field] = value.to_s.empty? ? nil : value.to_s
+  end
+
+  Eve::SDK::AtomicYaml.atomic_write(config_path, existing)
+end

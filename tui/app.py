@@ -58,6 +58,7 @@ from tui.render import (
     package_summary_label,
     plain_log_line,
 )
+from tui.settings import load_missing_fields
 from tui.state import (
     action_allowed_for_instance,
     aggregate_summary,
@@ -68,8 +69,11 @@ from tui.state import (
 from tui.widgets import (
     ChoiceScreen,
     ConfirmScreen,
+    FirstRunScreen,
     NewInstanceScreen,
+    ProviderConfigScreen,
     ProviderPane,
+    SettingsScreen,
     UploadScreen,
 )
 
@@ -357,6 +361,7 @@ class EveTui(App[None]):
         Binding("y", "copy_log", "Copy Log", priority=True),
         Binding("ctrl+y", "copy_log", "Copy Log", priority=True),
         Binding("q", "quit", "Quit"),
+        Binding("s", "open_settings", "Settings"),
     ]
 
     def __init__(self) -> None:
@@ -518,6 +523,7 @@ class EveTui(App[None]):
         self.start_task(self.load_initial_data())
         self.start_task(self.load_provider_health())
         self.park_terminal_cursor()
+        self.call_after_refresh(self._check_first_run)
 
     async def load_initial_data(self) -> None:
         await self.load_catalog_options()
@@ -813,6 +819,14 @@ class EveTui(App[None]):
     def focus_instance_list_if_empty(self) -> None:
         if self.current_instance is None:
             self.query_one("#instances", DataTable).focus()
+
+    def _check_first_run(self) -> None:
+        try:
+            missing = load_missing_fields()
+            if missing:
+                self.push_screen(FirstRunScreen(missing))
+        except Exception:
+            pass
 
     def render_instances(self, *, sync_cursor: bool = False, focus_empty: bool = False) -> None:
         table = self.query_one("#instances", DataTable)
@@ -1398,6 +1412,9 @@ class EveTui(App[None]):
     def action_queue_refresh(self) -> None:
         self.start_task(self.action_refresh())
 
+    def action_open_settings(self) -> None:
+        self.push_screen(SettingsScreen())
+
     async def action_cancel_command(self) -> None:
         proc = self.current_process
         if not self.command_running or proc is None or proc.returncode is not None:
@@ -1573,6 +1590,24 @@ class EveTui(App[None]):
             self.start_task(self._run_provider_interactive(label, args))
         else:
             self.start_task(self._run_provider_stream(label, args))
+
+    def on_provider_pane_configure_requested(self, event: ProviderPane.ConfigureRequested) -> None:
+        provider_id = event.provider_id
+        display_name = provider_id.replace("-", " ").title()
+        for provider in self._provider_pane_data:
+            if provider.get("id") == provider_id:
+                display_name = str(provider.get("display_name", display_name))
+                break
+        self.push_screen(ProviderConfigScreen(provider_id, display_name))
+
+    def on_provider_pane_test_connection_requested(self, event: ProviderPane.TestConnectionRequested) -> None:
+        provider_id = event.provider_id
+        args = provider_dispatch_provider_args(provider_id, "status")
+
+        async def _test() -> None:
+            await self.stream_command(f"Test {provider_id}", args)
+
+        self.start_task(_test())
 
     async def _run_provider_interactive(self, label: str, args: list[str]) -> None:
         self.log_line(f"[primary]Opening {label}. Exit the session to return to the TUI.[/]")

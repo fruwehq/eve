@@ -9,7 +9,7 @@ cd "$(git rev-parse --show-toplevel)"
 
 FAIL=0
 if [ "$#" -eq 0 ]; then
-  SUITES=(catalog core-boundary instances lifecycle plugins plugins-sync provision-runner state-concurrency terraform tf-isolation tui python schemas shellcheck lint)
+  SUITES=(catalog config-save core-boundary instances lifecycle plugins plugins-sync provision-runner schemas secrets state-concurrency terraform tf-isolation tui python shellcheck lint)
 else
   SUITES=("$@")
 fi
@@ -28,6 +28,7 @@ run() {
 for suite in "${SUITES[@]}"; do
   case "$suite" in
     catalog)   run "catalog"   ./scripts/test-catalog   ;;
+    config-save) run "config-save" ./scripts/test-config-save ;;
     core-boundary) run "core-boundary" ./scripts/test-core-boundary ;;
     instances)  run "instances"  ./scripts/test-instances  ;;
     lifecycle)  run "lifecycle"  ./scripts/test-lifecycle  ;;
@@ -36,6 +37,7 @@ for suite in "${SUITES[@]}"; do
     provision-runner) run "provision-runner" ./scripts/test-provision-runner ;;
     python) run "python" ./scripts/test-python ;;
     schemas) run "schemas" ./scripts/test-schemas ;;
+    secrets) run "secrets" ./scripts/test-secrets ;;
     shellcheck) run "shellcheck" ./scripts/test-shellcheck ;;
     state-concurrency) run "state-concurrency" ./scripts/test-state-concurrency ;;
     terraform)  run "terraform"  ./scripts/test-terraform  ;;

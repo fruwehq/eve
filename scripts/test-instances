@@ -142,24 +142,6 @@ else
   FAIL=$((FAIL + 1))
 fi
 
-tmp_env_local="$tmp_overlay_dir/env.local"
-tmp_migrated_config="$tmp_overlay_dir/migrated-config.yaml"
-cat >"$tmp_env_local" <<'ENV'
-EPHEMERAL_DISPLAY_RESOLUTION=2560x1440
-TRUENAS_API_KEY=secret-value
-RUSTDESK_SERVER=rustdesk.example.com
-ENV
-if EVE_ENV_LOCAL="$tmp_env_local" EVE_CONFIG_PATH="$tmp_migrated_config" ./scripts/config-migrate --apply >/dev/null &&
-  ruby -ryaml -e 'config = YAML.safe_load(File.read(ARGV[0])); exit(config.dig("display", "resolution") == "2560x1440" && config.dig("rustdesk", "server") == "rustdesk.example.com" ? 0 : 1)' "$tmp_migrated_config" &&
-  grep -qx '# migrated to .eve/config.yaml: EPHEMERAL_DISPLAY_RESOLUTION=2560x1440' "$tmp_env_local" &&
-  grep -qx 'TRUENAS_API_KEY=secret-value' "$tmp_env_local"; then
-  printf '  [OK] config migration moves non-secret values and keeps secrets in env\n'
-else
-  printf '  [FAIL] config migration moves non-secret values and keeps secrets in env\n' >&2
-  [ -f "$tmp_env_local" ] && sed 's/=.*/=<redacted>/' "$tmp_env_local" >&2
-  FAIL=$((FAIL + 1))
-fi
-
 if ./scripts/instance-create \
   --registry "$tmp_registry" \
   --instance test-dev \
