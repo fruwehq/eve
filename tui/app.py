@@ -58,6 +58,7 @@ from tui.render import (
     package_summary_label,
     plain_log_line,
 )
+from tui.settings import load_missing_fields
 from tui.state import (
     action_allowed_for_instance,
     aggregate_summary,
@@ -68,6 +69,7 @@ from tui.state import (
 from tui.widgets import (
     ChoiceScreen,
     ConfirmScreen,
+    FirstRunScreen,
     NewInstanceScreen,
     ProviderConfigScreen,
     ProviderPane,
@@ -521,6 +523,7 @@ class EveTui(App[None]):
         self.start_task(self.load_initial_data())
         self.start_task(self.load_provider_health())
         self.park_terminal_cursor()
+        self.call_after_refresh(self._check_first_run)
 
     async def load_initial_data(self) -> None:
         await self.load_catalog_options()
@@ -816,6 +819,14 @@ class EveTui(App[None]):
     def focus_instance_list_if_empty(self) -> None:
         if self.current_instance is None:
             self.query_one("#instances", DataTable).focus()
+
+    def _check_first_run(self) -> None:
+        try:
+            missing = load_missing_fields()
+            if missing:
+                self.push_screen(FirstRunScreen(missing))
+        except Exception:
+            pass
 
     def render_instances(self, *, sync_cursor: bool = False, focus_empty: bool = False) -> None:
         table = self.query_one("#instances", DataTable)

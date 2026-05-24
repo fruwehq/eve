@@ -127,6 +127,17 @@ def unset_value(section: str, field: str) -> None:
     _invalidate_cache()
 
 
+def load_missing_fields() -> list[dict[str, Any]]:
+    code, stdout, _ = _run(["./scripts/check-required", "--json"])
+    if not stdout.strip():
+        return []
+    try:
+        result: list[dict[str, Any]] = json.loads(stdout).get("missing", [])
+        return result
+    except (json.JSONDecodeError, ValueError):
+        return []
+
+
 CONFIG_SECTIONS: list[dict[str, str]] = [
     {"id": "global", "label": "Global"},
     {"id": "display", "label": "Display"},

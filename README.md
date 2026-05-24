@@ -238,13 +238,13 @@ Terraform provider versions are pinned exactly in the Terramate provider templat
 ### Fresh checkout expectations
 
 - Local instance choices (for example QEMU/Vagrant) should work without cloud API keys.
-- Cloud providers (AWS/Vultr/TrueNAS) only require their own env vars when used.
-- Keep secrets and credentials in `.env.local`.
-- Non-secret preferences can go in `.eve/config.yaml`, using the same shape
-  as [config/defaults.yaml](config/defaults.yaml). This is intended for
-  UI-editable settings such as display resolution and Moonlight preferences.
-  Run `make config.migrate` to preview moving existing non-secret `.env.local`
-  values into `.eve/config.yaml`; apply with `YES=1 make config.migrate`.
+- Cloud providers (AWS/Vultr/TrueNAS) only require their own credentials when used.
+- **Non-secret configuration lives in `.eve/config.yaml`** (structured, validated, TUI-editable).
+- **Secrets live in `.eve/secrets/<provider>.yaml`** (mode 0600, gitignored).
+- On first run, the TUI shows a `FirstRunScreen` listing missing required fields.
+- Press `S` in the TUI to open Settings; click `Configure` on any provider row to edit provider-specific settings.
+- `make doctor` checks which required fields are populated.
+- The old `.env` / `.env.local` approach was removed in v3.2 — no existing users.
 
 ```bash
 # List catalog choices and create a concrete instance
@@ -380,37 +380,45 @@ later SSH/provision/package commands use that identity.
 
 1. **AWS CLI** — [install](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html)
 2. **Authenticate** — run `aws login` (or `aws sso login`) to refresh credentials
-3. **Required env vars** (in `.env` or `.env.local`):
-   - `AWS_PROFILE` — e.g. `hekk-dev`
-   - `AWS_REGION` — e.g. `ap-northeast-1`
+3. **Configuration** (via TUI Configure screen, `.eve/config.yaml`, or env vars):
+   - `aws.profile` / `AWS_PROFILE` — e.g. `hekk-dev`
+   - `aws.region` / `AWS_REGION` — e.g. `ap-northeast-1`
+4. **Secrets** (via TUI Configure screen, or `.eve/secrets/aws.yaml`):
+   - `access_key_id` / `AWS_ACCESS_KEY_ID`
+   - `secret_access_key` / `AWS_SECRET_ACCESS_KEY`
 
 ### GCP
 
 1. **Google Cloud CLI** — [install](https://cloud.google.com/sdk/docs/install)
 2. **Authenticate** — run `gcloud auth application-default login`, or export `GOOGLE_OAUTH_ACCESS_TOKEN="$(gcloud auth print-access-token)"` when ADC has less access than your active user account.
-3. **Required env vars** (in `.env` or `.env.local`):
-   - `GOOGLE_CLOUD_PROJECT` — optional if `gcloud config get-value project` is correct
+3. **Configuration** (via TUI Configure screen, `.eve/config.yaml`, or env vars):
+   - `gcp.project` / `GOOGLE_CLOUD_PROJECT` — optional if `gcloud config get-value project` is correct
+4. **Secrets** (via TUI Configure screen, or `.eve/secrets/gcp.yaml`):
+   - `application_credentials` / `GOOGLE_APPLICATION_CREDENTIALS`
 
 ### Vultr
 
 1. **API key** — [generate one](https://my.vultr.com/settings/#settingsapi)
-2. **Required env vars** (in `.env` or `.env.local`):
-   - `VULTR_API_KEY`
+2. **Secrets** (via TUI Configure screen, or `.eve/secrets/vultr.yaml`):
+   - `api_key` / `VULTR_API_KEY` (required)
 
 ### TrueNAS
 
 1. **SSH key** — generate a keypair for Terraform to use
 2. **TrueNAS user** — create a Terraform user with SSH access and `terraform` group
 3. **API key** — generate one in TrueNAS → API Keys (used for cloud-init ISO upload)
-4. **Required env vars** (in `.env.local`) — runtime errors out clearly if any are unset:
-    - `TRUENAS_HOST` — e.g. `192.168.0.52` or `truenas.home.arpa`
-    - `TRUENAS_SSH_USER` — e.g. `terraform` (required; no built-in default)
-    - `TRUENAS_SSH_PRIVATE_KEY_FILE` — path to private key
-    - `TRUENAS_SSH_HOST_KEY_FINGERPRINT` — e.g. `SHA256:...`
-    - `TRUENAS_API_KEY` — REST API key for cloud-init ISO upload
-    - `TRUENAS_VM_BASE_DIR` — base directory for VM files (e.g. `/mnt/pool1/eve`)
-    - `TRUENAS_VM_POOL` — ZFS pool for zvols (e.g. `pool1`)
-    - `TRUENAS_VM_ZVOL_PREFIX` — dataset path prefix for zvols (e.g. `eve`)
+4. **Configuration** (via TUI Configure screen, `.eve/config.yaml`, or env vars):
+   - `truenas.host` / `TRUENAS_HOST` — e.g. `192.168.0.52` (required)
+   - `truenas.ssh_user` / `TRUENAS_SSH_USER` — e.g. `terraform`
+   - `truenas.ssh_port` / `TRUENAS_SSH_PORT` (default: `22`)
+   - `truenas.api_user` / `TRUENAS_API_USER`
+   - `truenas.ssh_host_key_fingerprint` / `TRUENAS_SSH_HOST_KEY_FINGERPRINT`
+   - `truenas.vm_base_dir` / `TRUENAS_VM_BASE_DIR` — e.g. `/mnt/pool1/eve`
+   - `truenas.vm_pool` / `TRUENAS_VM_POOL` — e.g. `pool1`
+   - `truenas.vm_zvol_prefix` / `TRUENAS_VM_ZVOL_PREFIX` — e.g. `eve`
+5. **Secrets** (via TUI Configure screen, or `.eve/secrets/truenas.yaml`):
+   - `ssh_private_key_file` / `TRUENAS_SSH_PRIVATE_KEY_FILE` (required)
+   - `api_key` / `TRUENAS_API_KEY`
  5. **Optional env vars** (defaults in `.env`, override in `.env.local`):
     - `TRUENAS_SSH_PORT` (default: `22`)
  6. **One-time ZFS setup** — create the parent dataset:
@@ -509,9 +517,10 @@ TRUENAS_SSH_PORT=22
 TRUENAS_SSH_USER=terraform
 ```
 
-Provider connectivity summary:
+Provider connectivity and configuration summary:
 
 ```bash
+make doctor
 make providers.status
 ```
 

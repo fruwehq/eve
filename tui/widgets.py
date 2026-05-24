@@ -1234,6 +1234,86 @@ class SettingsScreen(ModalScreen[None]):
             self.dismiss(None)
 
 
+class FirstRunScreen(ModalScreen[None]):
+    CSS = """
+    FirstRunScreen {
+        align: center middle;
+    }
+
+    #fr-dialog {
+        width: 72;
+        height: 30;
+        border: round $warning;
+        background: $surface;
+        padding: 1 2;
+    }
+
+    #fr-title {
+        text-align: center;
+        margin-bottom: 1;
+    }
+
+    #fr-message {
+        margin-bottom: 1;
+    }
+
+    #fr-missing {
+        height: 14;
+        margin-bottom: 1;
+    }
+
+    #fr-actions {
+        height: 3;
+        width: 60;
+        background: transparent;
+    }
+
+    #fr-actions Button {
+        width: 20;
+        min-width: 20;
+    }
+    """
+
+    def __init__(self, missing_fields: list[dict[str, Any]]) -> None:
+        super().__init__()
+        self.missing_fields = missing_fields
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="fr-dialog"):
+            yield Label("[b]Welcome to Eve[/b]", id="fr-title")
+            yield Static(
+                "Some required configuration is missing.\n"
+                "Set these fields before creating instances.",
+                id="fr-message",
+            )
+            table: DataTable[Any] = DataTable(id="fr-missing")
+            table.add_columns("Provider", "Field", "Description")
+            yield table
+            with Horizontal(id="fr-actions"):
+                yield Button("Open Settings", id="fr-settings", variant="primary")
+                yield Button("Skip for now", id="fr-skip")
+
+    def on_mount(self) -> None:
+        table = self.query_one("#fr-missing", DataTable)
+        table.clear()
+        for entry in self.missing_fields:
+            provider = str(entry.get("provider", ""))
+            field = str(entry.get("field", ""))
+            desc = str(entry.get("description", ""))
+            table.add_row(provider, field, desc)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "fr-skip":
+            self.dismiss(None)
+        elif event.button.id == "fr-settings":
+            self.dismiss(None)
+            self.app.push_screen(SettingsScreen())
+
+    def on_key(self, event: Any) -> None:
+        if event.key == "escape":
+            self.dismiss(None)
+
+
 class ProviderConfigScreen(ModalScreen[None]):
     CSS = """
     ProviderConfigScreen {

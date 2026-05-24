@@ -1,0 +1,61 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Check which required fields are missing. Outputs JSON.
+# Exit 0 if all required fields populated, 1 if missing.
+# --json: full report. --missing: just missing field names.
+
+require "json"
+require "yaml"
+
+ROOT = File.expand_path("..", __dir__)
+$LOAD_PATH.unshift(File.join(ROOT, "core"))
+require "sdk"
+
+format = ARGV.include?("--json") ? "json" : "missing"
+
+manifest_dir = File.join(ROOT, "plugins", "providers")
+defaults_path = File.join(ROOT, "config", "defaults.yaml")
+config_path = ENV.fetch("EVE_CONFIG_PATH", File.join(Eve::SDK::Workdir.root, ".eve", "config.yaml"))
+
+defaults = YAML.safe_load(File.read(defaults_path), aliases: false) || {}
+config = YAML.safe_load(File.read(config_path), aliases: false) if File.exist?(config_path)
+config ||= {}
+
+missing = []
+
+Dir.glob(File.join(manifest_dir, "*", "eve-plugin.yaml")).sort.each do |path|
+  data = YAML.safe_load(File.read(path), aliases: false)
+  next unless data.is_a?(Hash) && data["kind"] == "provider"
+
+  provider_id = data["id"]
+  schema = data["config_schema"] || {}
+
+  schema["config"]&.each do |field, spec|
+    next unless spec["required"]
+    config_val = config.dig(provider_id.tr("-", "_"), field)
+    default_val = defaults.dig(provider_id.tr("-", "_"), field)
+    env_name = spec["env"] # not standard; skip env check for now
+    has_value = !config_val.to_s.strip.empty? || !default_val.to_s.strip.empty?
+    missing << { "provider" => provider_id, "scope" => "config", "field" => field, "description" => spec["description"] } unless has_value
+  end
+
+  schema["secrets"]&.each do |field, spec|
+    next unless spec["required"]
+    keys = begin
+             Eve::SDK::Secrets.keys_set(provider_id)
+           rescue Eve::SDK::Secrets::SecretsError
+             []
+           end
+    missing << { "provider" => provider_id, "scope" => "secrets", "field" => field, "description" => spec["description"] } unless keys.include?(field)
+  end
+end
+
+case format
+when "json"
+  puts JSON.pretty_generate("missing" => missing, "ok" => missing.empty?)
+when "missing"
+  missing.each { |m| puts "#{m['provider']}.#{m['scope']}.#{m['field']}" }
+end
+
+exit(missing.empty? ? 0 : 1)
