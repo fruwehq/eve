@@ -8,7 +8,11 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -21,19 +25,40 @@ jobs:
           terraform_wrapper: false
 
       - name: Install Terramate
-        uses: terramate-io/terramate-action@v3
-        with:
-          version: "0.17.0"
+        env:
+          TERRAMATE_VERSION: "0.17.0"
+        run: |
+          set -euo pipefail
+          case "$(uname -s)" in
+            Darwin) tool_os=darwin ;;
+            Linux) tool_os=linux ;;
+            *) echo "unsupported OS for Terramate install: $(uname -s)" >&2; exit 2 ;;
+          esac
+          case "$(uname -m)" in
+            arm64|aarch64) tool_arch=arm64 ;;
+            x86_64|amd64) tool_arch=amd64 ;;
+            *) echo "unsupported architecture for Terramate install: $(uname -m)" >&2; exit 2 ;;
+          esac
+          curl -fsSLo "$RUNNER_TEMP/terramate.tar.gz" "https://github.com/terramate-io/terramate/releases/download/v${TERRAMATE_VERSION}/terramate_${TERRAMATE_VERSION}_${tool_os}_${tool_arch}.tar.gz"
+          mkdir -p "$RUNNER_TEMP/terramate"
+          tar -C "$RUNNER_TEMP/terramate" -xzf "$RUNNER_TEMP/terramate.tar.gz"
+          find "$RUNNER_TEMP/terramate" -type f -name terramate -exec sudo install -m 0755 {} /usr/local/bin/terramate \; -quit
+          terramate version
 
       - name: Install Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.13"
 
-      - name: Install shellcheck + jq + ripgrep
+      - name: Install Ubuntu packages
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y shellcheck jq ripgrep
+          sudo apt-get install -y --no-install-recommends ca-certificates curl gnupg jq openssh-client ripgrep shellcheck sshpass yq
+
+      - name: Install macOS packages
+        if: runner.os == 'macOS'
+        run: brew install jq ripgrep shellcheck yq
 
       - name: Install Ruby
         uses: ruby/setup-ruby@v1
@@ -43,7 +68,7 @@ jobs:
 
       - name: Install Python dependencies
         run: |
-          pipx install poetry
+          python -m pip install --upgrade poetry
           poetry install --no-interaction --no-root
 
       - name: Generate Terramate code
