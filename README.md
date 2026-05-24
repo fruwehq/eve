@@ -11,6 +11,104 @@
 > Remote desktop compatibility matrix:
 > [docs/remote-desktop-compatibility.md](docs/remote-desktop-compatibility.md)
 
+## Quickstart on macOS
+
+```bash
+brew install jq poetry python@3.13 ruby shellcheck sshpass yq
+brew tap hashicorp/tap
+brew install hashicorp/tap/terraform
+
+TERRAMATE_VERSION=0.17.0
+case "$(uname -m)" in
+  arm64|aarch64) TERRAMATE_ARCH=arm64 ;;
+  x86_64|amd64) TERRAMATE_ARCH=amd64 ;;
+  *) echo "unsupported architecture: $(uname -m)" >&2; exit 2 ;;
+esac
+curl -fsSLo /tmp/terramate.tar.gz "https://github.com/terramate-io/terramate/releases/download/v${TERRAMATE_VERSION}/terramate_${TERRAMATE_VERSION}_darwin_${TERRAMATE_ARCH}.tar.gz"
+mkdir -p /tmp/terramate
+tar -C /tmp/terramate -xzf /tmp/terramate.tar.gz
+sudo find /tmp/terramate -type f -name terramate -exec install -m 0755 {} /usr/local/bin/terramate \; -quit
+
+bundle install
+poetry env use python3.13
+poetry install
+make doctor
+make eve
+```
+
+On first launch, `FirstRunScreen` lists missing required provider fields.
+Settings are stored through v3.2's `.eve/config.yaml` and
+`.eve/secrets/<provider>.yaml` flow; see
+[Fresh checkout expectations](#fresh-checkout-expectations).
+
+## Quickstart on Ubuntu
+
+```bash
+sudo apt-get update
+sudo apt-get install -y --no-install-recommends ca-certificates curl gnupg jq make openssh-client ripgrep ruby ruby-dev shellcheck software-properties-common sshpass unzip yq
+
+sudo add-apt-repository -y ppa:deadsnakes/ppa
+sudo apt-get update
+sudo apt-get install -y --no-install-recommends python3.13 python3.13-dev python3.13-venv
+curl -sSL https://install.python-poetry.org | python3.13 -
+export PATH="$HOME/.local/bin:$PATH"
+
+. /etc/os-release
+curl -fsSL https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
+echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com ${VERSION_CODENAME} main" | sudo tee /etc/apt/sources.list.d/hashicorp.list >/dev/null
+sudo apt-get update
+sudo apt-get install -y --no-install-recommends terraform
+
+TERRAMATE_VERSION=0.17.0
+case "$(uname -m)" in
+  arm64|aarch64) TERRAMATE_ARCH=arm64 ;;
+  x86_64|amd64) TERRAMATE_ARCH=amd64 ;;
+  *) echo "unsupported architecture: $(uname -m)" >&2; exit 2 ;;
+esac
+curl -fsSLo /tmp/terramate.tar.gz "https://github.com/terramate-io/terramate/releases/download/v${TERRAMATE_VERSION}/terramate_${TERRAMATE_VERSION}_linux_${TERRAMATE_ARCH}.tar.gz"
+mkdir -p /tmp/terramate
+tar -C /tmp/terramate -xzf /tmp/terramate.tar.gz
+sudo find /tmp/terramate -type f -name terramate -exec install -m 0755 {} /usr/local/bin/terramate \; -quit
+
+bundle install
+poetry env use python3.13
+poetry install
+make doctor
+make eve
+```
+
+On first launch, `FirstRunScreen` lists missing required provider fields.
+Settings are stored through v3.2's `.eve/config.yaml` and
+`.eve/secrets/<provider>.yaml` flow; see
+[Fresh checkout expectations](#fresh-checkout-expectations).
+
+## Quickstart with Docker
+
+```bash
+docker run -it -v ~/.eve-data:/data eve/eve:slim make eve
+```
+
+```bash
+docker run -it \
+  -v "$HOME/.eve-data:/data" \
+  -v "$HOME/.ssh:/root/.ssh:ro" \
+  -v "$SSH_AUTH_SOCK:/ssh-agent" \
+  -e SSH_AUTH_SOCK=/ssh-agent \
+  eve/eve:slim make eve
+```
+
+```bash
+export SSH_AUTH_SOCK="${SSH_AUTH_SOCK:?start ssh-agent or export SSH_AUTH_SOCK first}"
+docker compose run --rm eve make eve
+```
+
+The runtime image has Eve baked into `/opt/eve` and defaults `EVE_HOME` to
+`/data`, so `.eve/` state and `.generated/` artifacts persist in the mounted
+host directory. The second command adds SSH keys and SSH agent forwarding for
+provider operations. On first launch, `FirstRunScreen` lists missing required
+provider fields; settings are stored through v3.2's `.eve/config.yaml` and
+`.eve/secrets/<provider>.yaml` flow.
+
 ## v3 instance workflow
 
 v3 introduces concrete local instances selected from provider/platform catalog
@@ -198,23 +296,19 @@ of the v3 command surface has no Python package dependency.
 
 ### Optional containerized toolchain
 
-The default Eve workflow is still native on macOS because remote-access clients
-such as Moonlight, RustDesk, VNC viewers, Cocoa-Way, XQuartz, and iTerm need
-host GUI and desktop integration. For contributors who only need the CLI
-toolchain, tests, Terraform/Terramate, and provider/package scripts, Eve also
-ships an optional Docker image.
-
 ```bash
+make docker.runtime.slim
+make docker.runtime.full
 make docker.build
 make docker.shell
 make docker.test
 ```
 
-The container mounts the repository at `/workspace`, reads `.env.local` if it
-exists, and mounts `~/.ssh` read-only for SSH-based provider operations. On
-Docker Desktop for macOS it also uses the host SSH agent socket when available.
-Use this for reproducible CLI work; use native `eve` / `make tui` for anything
-that launches a local GUI client.
+The v3.3 runtime images bake the repository into `/opt/eve` and default
+`EVE_HOME` to `/data`. `eve/eve:slim` is the cloud-provider runtime;
+`eve/eve:full` adds Vagrant and QEMU for local-qemu work. The older
+`docker.build` target remains as a contributor toolchain image for shelling
+into the checkout and running tests.
 
 Package plugins may provide host-side command hooks at
 `commands/<os_family>/<install|status|down>` or
@@ -286,10 +380,10 @@ make instance.create INSTANCE=truenas-dev-a MACHINE=truenas-scale-medium OS=ubun
 make validate INSTANCE=truenas-dev-a
 make info INSTANCE=truenas-dev-a
 
-# Required env vars for provider auth:
-# - TRUENAS_SSH_PRIVATE_KEY_FILE (path to private key)
-# - TRUENAS_SSH_HOST_KEY_FINGERPRINT (e.g., SHA256:...)
-# Optional: host/user/port from .env.local (TRUENAS_HOST/TRUENAS_SSH_USER/TRUENAS_SSH_PORT)
+# Required provider settings:
+# - secrets.truenas.ssh_private_key_file (path to private key)
+# - config.truenas.ssh_host_key_fingerprint (e.g., SHA256:...)
+# Optional: config.truenas.host/config.truenas.ssh_user/config.truenas.ssh_port
 
 # Example (macOS/Linux):
 # export TRUENAS_SSH_PRIVATE_KEY_FILE="$HOME/.ssh/truenas_ed25519"
@@ -371,10 +465,11 @@ The target starts an Xpra server on the VM, launches the requested app, and atta
 - [jq](https://jqlang.github.io/jq/download/) — JSON processing for profile resolution (`brew install jq` on macOS)
 - `make`
 
-For managed Linux guests, set `VM_USER_NAME` in `.env.local`. v3.1 no longer
-falls back to image-default users such as `ubuntu` on normal orchestration
-paths; provider init/cloud-init creates or enables the configured user, and
-later SSH/provision/package commands use that identity.
+For managed Linux guests, set `global.vm_user_name` in Settings or export
+`VM_USER_NAME` for the current shell. v3.1 no longer falls back to
+image-default users such as `ubuntu` on normal orchestration paths; provider
+init/cloud-init creates or enables the configured user, and later
+SSH/provision/package commands use that identity.
 
 ### AWS
 
@@ -419,20 +514,20 @@ later SSH/provision/package commands use that identity.
 5. **Secrets** (via TUI Configure screen, or `.eve/secrets/truenas.yaml`):
    - `ssh_private_key_file` / `TRUENAS_SSH_PRIVATE_KEY_FILE` (required)
    - `api_key` / `TRUENAS_API_KEY`
- 5. **Optional env vars** (defaults in `.env`, override in `.env.local`):
-    - `TRUENAS_SSH_PORT` (default: `22`)
- 6. **One-time ZFS setup** — create the parent dataset:
+6. **Optional SSH port**:
+   - `truenas.ssh_port` / `TRUENAS_SSH_PORT` (default: `22`)
+7. **One-time ZFS setup** — create the parent dataset:
     ```bash
     # On TrueNAS web UI: Storage > pool1 > Add Dataset (preset: Generic)
     #   Name: eve    →  creates pool1/eve
     ```
     The dataset (`pool1/eve`) must exist before `make up`. Subdirectories (`iso/`, `images/`) are created automatically.
- 7. **One-time sudoers setup** — the Terraform user needs `sudo dd` access to write cloud images to zvols. Add to sudoers (`visudo` on TrueNAS):
+8. **One-time sudoers setup** — the Terraform user needs `sudo dd` access to write cloud images to zvols. Add to sudoers (`visudo` on TrueNAS):
     ```
     terraform ALL=(ALL) NOPASSWD: /usr/bin/dd if=/mnt/pool1/eve/images/* of=/dev/zvol/pool1/eve/*
     ```
     Adjust path to `/bin/dd` if using TrueNAS CORE (FreeBSD).
- 8. **Disk image setup** — `make up` downloads the cloud image directly to the NAS, writes it to a zvol, and resizes the partition. No manual `dd` needed.
+9. **Disk image setup** — `make up` downloads the cloud image directly to the NAS, writes it to a zvol, and resizes the partition. No manual `dd` needed.
 
 ### QEMU (local, Apple Silicon ✅)
 
@@ -507,14 +602,13 @@ Recommended setup:
    - Add local DNS record: `truenas.home.arpa -> 192.168.0.52`
 2. **OpenVPN DNS push**
    - Ensure your VPN server pushes the same DNS server/domain so this hostname resolves when remote.
-3. **Repo env fallback (no root required)**
-   - If DNS is not available, set `TRUENAS_HOST=192.168.0.52` in `.env.local`.
+3. **Repo config fallback (no root required)**
+   - If DNS is not available, save the host in Eve config.
 
 ```bash
-# .env.local
-TRUENAS_HOST=truenas.home.arpa
-TRUENAS_SSH_PORT=22
-TRUENAS_SSH_USER=terraform
+./scripts/config-save truenas host truenas.home.arpa
+./scripts/config-save truenas ssh_port 22
+./scripts/config-save truenas ssh_user terraform
 ```
 
 Provider connectivity and configuration summary:
