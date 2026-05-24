@@ -11,7 +11,7 @@ ROOT = File.expand_path("..", __dir__)
 $LOAD_PATH.unshift(File.join(ROOT, "core"))
 require "sdk"
 
-DEFAULT_REGISTRY_PATH = File.join(ROOT, ".eve/instances.yaml")
+DEFAULT_REGISTRY_PATH = Eve::SDK::Workdir.instance_registry_path
 
 def usage
   warn <<~USAGE

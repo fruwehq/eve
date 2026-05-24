@@ -10,6 +10,8 @@ require "yaml"
 require "json_schemer"
 
 ROOT = File.expand_path("..", __dir__)
+$LOAD_PATH.unshift(File.join(ROOT, "core"))
+require "sdk"
 SCHEMA_DIR = File.join(ROOT, "core", "schema")
 FIXTURE_REGISTRY = File.join(ROOT, "tests", "fixtures", "instances.yaml")
 OBSERVED_DIR = File.join(ROOT, "tests", "fixtures", "observed-state")
@@ -195,7 +197,7 @@ end
 # ---------- observed-state: live state files ----------
 puts "\n== schemas: observed-state (live) =="
 
-state_dir = File.join(ROOT, ".eve", "state", "instances")
+state_dir = File.join(Eve::SDK::Workdir.state_base, "instances")
 if Dir.exist?(state_dir)
   found = 0
   Dir.glob(File.join(state_dir, "*.json")).sort.each do |path|

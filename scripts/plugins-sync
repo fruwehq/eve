@@ -5,8 +5,10 @@ require "fileutils"
 require "yaml"
 
 ROOT = File.expand_path("..", __dir__)
-DEFAULT_SOURCES = File.join(ROOT, ".eve/plugin-sources.yaml")
-DEFAULT_DEST = File.join(ROOT, ".eve/plugins")
+$LOAD_PATH.unshift(File.join(ROOT, "core"))
+require "sdk"
+DEFAULT_SOURCES = Eve::SDK::Workdir.plugin_sources_path
+DEFAULT_DEST = Eve::SDK::Workdir.plugins_dir
 
 def usage
   warn <<~USAGE

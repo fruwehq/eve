@@ -25,11 +25,11 @@ invalid input.
 
 ### Eve::SDK::Workdir
 
-Per-instance path helpers for state, Terraform data/state, logs, and
-uploads. Honors `EVE_STATE_DIR` and `EVE_INSTANCE_WORKDIR` env
-overrides. Infers project root from its own filesystem location
-(`core/sdk/` → two levels up). Produces the same paths as
-`scripts/instance-paths`.
+Per-instance path helpers for state, Terraform data/state, logs,
+uploads, config, registries, and plugin data. Honors `EVE_HOME`,
+`EVE_STATE_DIR`, and `EVE_INSTANCE_WORKDIR` env overrides. `repo_root`
+points at the source tree; `root` is the runtime data root and becomes
+`EVE_HOME` when set. Produces the same paths as `scripts/instance-paths`.
 
 ### Eve::SDK::State
 
@@ -67,6 +67,7 @@ environment variables set by `scripts/provider-dispatch`:
 - `EVE_RESOLVED_JSON` — full resolved instance JSON (or piped on stdin)
 - `EVE_PROVIDER_PLUGIN` — the dispatching provider id
 - `EVE_PLUGIN_DRY_RUN` — set to `"1"` for dry-run mode
+- `EVE_HOME` — parent directory for `.eve/` and `.generated/` (optional)
 - `EVE_STATE_DIR` — override state directory (optional)
 - `EVE_INSTANCE_WORKDIR` — override workdir base (optional)
 

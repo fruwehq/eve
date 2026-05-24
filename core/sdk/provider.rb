@@ -65,7 +65,7 @@ module Eve
         exit 0
       end
 
-      root = Eve::SDK::Workdir.root
+      root = Eve::SDK::Workdir.repo_root
 
       case command
       when "init"

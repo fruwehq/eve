@@ -27,7 +27,7 @@ root = File.expand_path("..", __dir__)
 $LOAD_PATH.unshift(File.join(root, "core"))
 require "sdk"
 
-config_path = ENV.fetch("EVE_CONFIG_PATH", File.join(Eve::SDK::Workdir.root, ".eve", "config.yaml"))
+config_path = Eve::SDK::Workdir.config_path
 lock_path = "#{config_path}.lock"
 
 Eve::SDK::AtomicYaml.with_lock(lock_path) do

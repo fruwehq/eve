@@ -7,7 +7,9 @@ require "time"
 require "yaml"
 
 ROOT = File.expand_path("..", __dir__)
-DEFAULT_REGISTRY_PATH = File.join(ROOT, ".eve/instances.yaml")
+$LOAD_PATH.unshift(File.join(ROOT, "core"))
+require "sdk"
+DEFAULT_REGISTRY_PATH = Eve::SDK::Workdir.instance_registry_path
 
 def with_registry_lock(registry_path)
   FileUtils.mkdir_p(File.dirname(registry_path))

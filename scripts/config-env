@@ -5,8 +5,11 @@ require "shellwords"
 require "yaml"
 
 ROOT = File.expand_path("..", __dir__)
-DEFAULT_CONFIG = File.join(ROOT, "config/defaults.yaml")
-LOCAL_CONFIG = ENV.fetch("EVE_CONFIG_PATH", File.join(ROOT, ".eve/config.yaml"))
+$LOAD_PATH.unshift(File.join(ROOT, "core"))
+require "sdk"
+
+DEFAULT_CONFIG = File.join(Eve::SDK::Workdir.repo_root, "config/defaults.yaml")
+LOCAL_CONFIG = Eve::SDK::Workdir.config_path
 
 MAPPINGS = [
   [%w[aws config_file], "AWS_CONFIG_FILE"],

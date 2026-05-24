@@ -23,7 +23,7 @@ unset TRUENAS_HOST TRUENAS_SSH_PORT TRUENAS_SSH_USER \
       GOOGLE_CLOUD_PROJECT GOOGLE_PROJECT MY_IP RASPBERRY_PI_HDMI_CONNECTOR \
       RASPBERRY_PI_HDMI_MODE RASPBERRY_PI_HOST RASPBERRY_PI_IP \
       RUSTDESK_SERVER SUNSHINE_MAX_BITRATE_KBPS SUNSHINE_VERSION \
-      TIMEZONE VAGRANT_SHOW_CONSOLE VM_USER_NAME EVE_CONFIG_PATH
+      TIMEZONE VAGRANT_SHOW_CONSOLE VM_USER_NAME EVE_CONFIG_PATH EVE_HOME
 
 FAIL=0
 INSTANCES=$(./scripts/instance-list --registry "$FIXTURE" --json | jq -r '.instances[].name')
@@ -202,6 +202,29 @@ if EVE_INSTANCE_REGISTRY="$tmp_registry" make --no-print-directory instance.vali
 else
   printf '  [FAIL] make instance targets honor EVE_INSTANCE_REGISTRY\n' >&2
   EVE_INSTANCE_REGISTRY="$tmp_registry" make --no-print-directory instance.validate INSTANCE=test-dev >&2 || true
+  FAIL=$((FAIL + 1))
+fi
+
+tmp_eve_home="$(mktemp -d)"
+tmp_eve_home_paths="$tmp_eve_home/paths.json"
+if EVE_HOME="$tmp_eve_home" make --no-print-directory instance.create \
+  INSTANCE=eve-home-dev MACHINE=local-qemu-medium OS=ubuntu-26.04-arm64 LOCATION=tokyo >/dev/null &&
+  EVE_HOME="$tmp_eve_home" make --no-print-directory env INSTANCE=eve-home-dev >/dev/null &&
+  EVE_HOME="$tmp_eve_home" make --no-print-directory instance.recover INSTANCE=eve-home-dev >/dev/null &&
+  EVE_HOME="$tmp_eve_home" make --no-print-directory instance.paths INSTANCE=eve-home-dev EMIT=json >"$tmp_eve_home_paths" &&
+  jq -e --arg home "$tmp_eve_home" '
+    .INSTANCE_WORKDIR == ($home + "/.generated/instances/eve-home-dev") and
+    .INSTANCE_OVERLAY_PATH == ($home + "/.generated/instances/eve-home-dev/catalog.local.yaml") and
+    .INSTANCE_STATE_PATH == ($home + "/.eve/state/instances/eve-home-dev.json")
+  ' "$tmp_eve_home_paths" >/dev/null &&
+  [ -f "$tmp_eve_home/.eve/instances.yaml" ] &&
+  [ -f "$tmp_eve_home/.eve/state/instances/eve-home-dev.json" ] &&
+  [ -f "$tmp_eve_home/.generated/instances/eve-home-dev/catalog.local.yaml" ]; then
+  printf '  [OK] EVE_HOME routes registry, state, and generated overlay paths\n'
+else
+  printf '  [FAIL] EVE_HOME did not route registry/state/generated paths\n' >&2
+  find "$tmp_eve_home" -maxdepth 4 -type f -print >&2 || true
+  cat "$tmp_eve_home_paths" >&2 || true
   FAIL=$((FAIL + 1))
 fi
 

@@ -17,7 +17,7 @@ format = ARGV.include?("--json") ? "json" : "missing"
 
 manifest_dir = File.join(ROOT, "plugins", "providers")
 defaults_path = File.join(ROOT, "config", "defaults.yaml")
-config_path = ENV.fetch("EVE_CONFIG_PATH", File.join(Eve::SDK::Workdir.root, ".eve", "config.yaml"))
+config_path = Eve::SDK::Workdir.config_path
 
 defaults = YAML.safe_load(File.read(defaults_path), aliases: false) || {}
 config = YAML.safe_load(File.read(config_path), aliases: false) if File.exist?(config_path)
