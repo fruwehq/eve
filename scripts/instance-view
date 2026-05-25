@@ -1,148 +1,120 @@
-#!/usr/bin/env ruby
-# Emit the shared view object for a concrete instance.
-# Both CLI status and TUI rendering consume this stable JSON shape.
-# State reads go through core/sdk/state.rb (sole state owner).
+#!/usr/bin/env python3
+from __future__ import annotations
 
-require "json"
-require "open3"
-require "yaml"
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
 
-ROOT = File.expand_path("..", __dir__)
-$LOAD_PATH.unshift(File.join(ROOT, "core"))
-require "sdk"
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
-DEFAULT_REGISTRY_PATH = Eve::SDK::Workdir.instance_registry_path
+from eve_sdk import state_machine  # noqa: E402
+from eve_sdk.dispatch import run_json  # noqa: E402
+from eve_sdk.resolve import default_registry_path, load_any  # noqa: E402
+from eve_sdk.state import State  # noqa: E402
 
-def usage
-  warn <<~USAGE
-    Usage:
-      scripts/instance-view --instance <name> [--registry <path>] [--emit json] [--observe]
-      scripts/instance-view --aggregate [--registry <path>]
-  USAGE
-end
 
-def run_json(*cmd)
-  out, status = Open3.capture2e(*cmd)
-  raise out unless status.success?
+def usage() -> None:
+    print(
+        """Usage:
+  scripts/instance-view --instance <name> [--registry <path>] [--emit json] [--observe]
+  scripts/instance-view --aggregate [--registry <path>]""",
+        file=sys.stderr,
+    )
 
-  JSON.parse(out)
-end
 
-def load_any(path)
-  return {} unless File.exist?(path)
-  YAML.safe_load(File.read(path), permitted_classes: [], aliases: true) || {}
-end
+def provider_actions(provider_id: str) -> list[dict[str, object]]:
+    plugin_doc = run_json(str(ROOT / "scripts/plugin-list"), "--kind", "provider", "--json")
+    plugin = next((entry for entry in plugin_doc["plugins"] if entry["id"] == provider_id), None)
+    if not plugin:
+        return []
+    actions = plugin.get("actions")
+    return actions if isinstance(actions, list) else []
 
-def provider_actions(provider_id)
-  plugin_doc = run_json(File.join(ROOT, "scripts/plugin-list"), "--kind", "provider", "--json")
-  plugin = plugin_doc.fetch("plugins").find { |entry| entry["id"] == provider_id }
-  return [] unless plugin
 
-  actions = plugin["actions"]
-  actions.is_a?(Array) ? actions : []
-end
+def main(argv: list[str]) -> int:
+    instance_name: str | None = None
+    registry_path = Path(os.environ.get("EVE_INSTANCE_REGISTRY") or default_registry_path()).resolve()
+    emit = "json"
+    aggregate = False
+    observe = False
+    args = list(argv)
+    while args:
+        arg = args.pop(0)
+        if arg == "--aggregate":
+            aggregate = True
+        elif arg == "--observe":
+            observe = True
+        elif arg == "--instance" and args:
+            instance_name = args.pop(0)
+        elif arg == "--registry" and args:
+            registry_path = Path(args.pop(0)).resolve()
+        elif arg == "--emit" and args:
+            emit = args.pop(0)
+        elif arg in {"-h", "--help"}:
+            usage()
+            return 0
+        else:
+            usage()
+            return 2
+    try:
+        if aggregate:
+            registry = load_any(registry_path)
+            statuses: dict[str, dict[str, object]] = {}
+            for instance in registry.get("instances", []):
+                if not isinstance(instance, dict) or not instance.get("name"):
+                    continue
+                name = str(instance["name"])
+                state = State.read(name)
+                observed = state.get("observed_state", {})
+                statuses[name] = state_machine.status_with_observed_state(
+                    {"state": state, "observed_state": observed},
+                    {"observed_state": observed},
+                )
+            print(json.dumps({"aggregate": state_machine.aggregate_summary(statuses)}, indent=2))
+            return 0
+        if not instance_name:
+            usage()
+            return 2
+        if emit != "json":
+            print(f"instance-view: unsupported emit format: {emit} (only json is supported)", file=sys.stderr)
+            usage()
+            return 2
+        if observe:
+            env: dict[str, str] = {}
+            if registry_path != default_registry_path():
+                env["EVE_INSTANCE_REGISTRY"] = str(registry_path)
+            result = subprocess.run(
+                [str(ROOT / "scripts/instance-observe"), "--instance", instance_name],
+                cwd=ROOT,
+                env=os.environ | env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            if result.returncode != 0:
+                details = result.stderr if result.stderr else result.stdout
+                raise RuntimeError(f"observe failed for {instance_name}: {details.strip()}")
+        resolve_cmd = [str(ROOT / "scripts/instance-resolve"), "--instance", instance_name, "--emit", "json"]
+        paths_cmd = [str(ROOT / "scripts/instance-paths"), "--instance", instance_name, "--emit", "json"]
+        package_cmd = [str(ROOT / "scripts/package-list"), "--instance", instance_name, "--json"]
+        if registry_path != default_registry_path():
+            resolve_cmd.extend(["--registry", str(registry_path)])
+            paths_cmd.extend(["--registry", str(registry_path)])
+            package_cmd.extend(["--registry", str(registry_path)])
+        resolved = run_json(*resolve_cmd)
+        paths = run_json(*paths_cmd)
+        packages = run_json(*package_cmd)["packages"]
+        view = State.build_view(instance_name=instance_name, resolved=resolved, packages=packages, paths=paths)
+        view["provider_actions"] = provider_actions(resolved["provider_plugin"])
+        print(json.dumps(view, indent=2))
+        return 0
+    except Exception as error:
+        print(f"instance-view: {error}", file=sys.stderr)
+        return 1
 
-instance_name = nil
-registry_path = ENV["EVE_INSTANCE_REGISTRY"] && !ENV["EVE_INSTANCE_REGISTRY"].empty? \
-                ? File.expand_path(ENV["EVE_INSTANCE_REGISTRY"], Dir.pwd) \
-                : DEFAULT_REGISTRY_PATH
-emit = "json"
-aggregate = false
-observe = false
 
-args = ARGV.dup
-until args.empty?
-  case args.shift
-  when "--aggregate"
-    aggregate = true
-  when "--observe"
-    observe = true
-  when "--instance"
-    instance_name = args.shift
-  when "--registry"
-    registry_path = File.expand_path(args.shift, Dir.pwd)
-  when "--emit"
-    emit = args.shift
-  when "-h", "--help"
-    usage
-    exit 0
-  else
-    usage
-    exit 2
-  end
-end
-
-if aggregate
-  begin
-    registry = load_any(registry_path)
-    instances = registry["instances"] || []
-    statuses = {}
-    instances.each do |inst|
-      name = inst.fetch("name", nil)
-      next unless name
-      state = Eve::SDK::State.read(name)
-      observed = state.fetch("observed_state", {})
-      reconciled = Eve::SDK::StateMachine.status_with_observed_state(
-        { "state" => state, "observed_state" => observed },
-        { "observed_state" => observed }
-      )
-      statuses[name] = reconciled
-    end
-    counts = Eve::SDK::StateMachine.aggregate_summary(statuses)
-    puts JSON.pretty_generate({ "aggregate" => counts })
-  rescue StandardError => e
-    warn "instance-view: #{e.message}"
-    exit 1
-  end
-  exit 0
-end
-
-unless instance_name
-  usage
-  exit 2
-end
-
-unless emit == "json"
-  warn "instance-view: unsupported emit format: #{emit} (only json is supported)"
-  usage
-  exit 2
-end
-
-begin
-  if observe
-    observe_cmd = [File.join(ROOT, "scripts/instance-observe"), "--instance", instance_name]
-    observe_env = {}
-    observe_env["EVE_INSTANCE_REGISTRY"] = registry_path if registry_path != DEFAULT_REGISTRY_PATH
-    observe_out, observe_err, observe_status = Open3.capture3(observe_env, *observe_cmd, chdir: ROOT)
-    unless observe_status.success?
-      raise "observe failed for #{instance_name}: #{observe_err.empty? ? observe_out : observe_err}".strip
-    end
-  end
-
-  resolve_cmd = [File.join(ROOT, "scripts/instance-resolve"), "--instance", instance_name, "--emit", "json"]
-  paths_cmd = [File.join(ROOT, "scripts/instance-paths"), "--instance", instance_name, "--emit", "json"]
-  package_cmd = [File.join(ROOT, "scripts/package-list"), "--instance", instance_name, "--json"]
-  if registry_path != DEFAULT_REGISTRY_PATH
-    resolve_cmd += ["--registry", registry_path]
-    paths_cmd += ["--registry", registry_path]
-    package_cmd += ["--registry", registry_path]
-  end
-
-  resolved = run_json(*resolve_cmd)
-  paths = run_json(*paths_cmd)
-  packages = run_json(*package_cmd).fetch("packages")
-  actions = provider_actions(resolved.fetch("provider_plugin"))
-
-  view = Eve::SDK::State.build_view(
-    instance_name: instance_name,
-    resolved: resolved,
-    packages: packages,
-    paths: paths
-  )
-  view["provider_actions"] = actions
-
-  puts JSON.pretty_generate(view)
-rescue StandardError => e
-  warn "instance-view: #{e.message}"
-  exit 1
-end
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

@@ -1,15 +1,22 @@
-#!/usr/bin/env ruby
-# frozen_string_literal: true
+#!/usr/bin/env python3
+from __future__ import annotations
 
-ROOT = File.expand_path("..", __dir__)
-instance = ARGV.shift || ENV["INSTANCE"]
+import os
+import sys
+from pathlib import Path
 
-unless instance && !instance.empty?
-  warn "Usage: scripts/instance-ssh <instance> [-- <cmd>] [--scp <local> <remote>]"
-  exit 2
-end
+ROOT = Path(__file__).resolve().parents[1]
 
-args = [File.join(ROOT, "scripts/provider-dispatch"), "--instance", instance, "--command", "ssh"]
-args << "--"
-args.concat(ARGV)
-exec(*args)
+
+def main(argv: list[str]) -> int:
+    instance = argv[0] if argv else os.environ.get("INSTANCE")
+    if not instance:
+        print("Usage: scripts/instance-ssh <instance> [-- <cmd>] [--scp <local> <remote>]", file=sys.stderr)
+        return 2
+    args = [str(ROOT / "scripts/provider-dispatch"), "--instance", instance, "--command", "ssh", "--", *argv[1:]]
+    os.execv(args[0], args)
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))
