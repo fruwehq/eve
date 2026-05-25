@@ -200,6 +200,10 @@ class ConfirmScreen(ModalScreen[bool]):
     }
     """
 
+    BINDINGS = [
+        Binding("escape", "dismiss_cancel", "Cancel"),
+    ]
+
     def __init__(self, title: str, message: str) -> None:
         super().__init__()
         self.dialog_title = title
@@ -215,6 +219,10 @@ class ConfirmScreen(ModalScreen[bool]):
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         self.dismiss(event.button.id == "confirm")
+
+    def action_dismiss_cancel(self) -> None:
+        self.dismiss(False)
+
 
 class ChoiceScreen(ModalScreen[str | None]):
     CSS = """
@@ -245,6 +253,10 @@ class ChoiceScreen(ModalScreen[str | None]):
     }
     """
 
+    BINDINGS = [
+        Binding("escape", "dismiss_cancel", "Cancel"),
+    ]
+
     def __init__(
         self,
         title: str,
@@ -268,6 +280,10 @@ class ChoiceScreen(ModalScreen[str | None]):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         button_id = event.button.id or ""
         self.dismiss(None if button_id == "cancel" else button_id)
+
+    def action_dismiss_cancel(self) -> None:
+        self.dismiss(None)
+
 
 class UploadScreen(ModalScreen[list[str] | None]):
     CSS = """
@@ -300,6 +316,10 @@ class UploadScreen(ModalScreen[list[str] | None]):
     }
     """
 
+    BINDINGS = [
+        Binding("escape", "dismiss_cancel", "Cancel"),
+    ]
+
     def __init__(self, folders: list[str]) -> None:
         super().__init__()
         self.folders = folders
@@ -318,6 +338,9 @@ class UploadScreen(ModalScreen[list[str] | None]):
 
     def on_mount(self) -> None:
         self.query_one("#upload-list", SelectionList).focus()
+
+    def action_dismiss_cancel(self) -> None:
+        self.dismiss(None)
 
     def on_key(self, event: Any) -> None:
         if event.key != "enter":
@@ -422,6 +445,10 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
     }
     """
 
+    BINDINGS = [
+        Binding("escape", "dismiss_cancel", "Cancel"),
+    ]
+
     def __init__(
         self,
         options: dict[str, Any],
@@ -455,6 +482,9 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
             for platform_choice in self.platforms
             if platform_choice.get("id")
         }
+
+    def action_dismiss_cancel(self) -> None:
+        self.dismiss(None)
 
     def compose(self) -> ComposeResult:
         with Vertical(id="new-dialog"):
@@ -1080,6 +1110,10 @@ class EditFieldScreen(ModalScreen[str | None]):
     }
     """
 
+    BINDINGS = [
+        Binding("escape", "dismiss_cancel", "Cancel"),
+    ]
+
     def __init__(self, label: str, current: str, *, password: bool = False) -> None:
         super().__init__()
         self.field_label_text = label
@@ -1100,9 +1134,8 @@ class EditFieldScreen(ModalScreen[str | None]):
         else:
             self.dismiss(None)
 
-    def on_key(self, event: Any) -> None:
-        if event.key == "escape":
-            self.dismiss(None)
+    def action_dismiss_cancel(self) -> None:
+        self.dismiss(None)
 
 
 class SettingsScreen(ModalScreen[None]):
@@ -1155,6 +1188,7 @@ class SettingsScreen(ModalScreen[None]):
 
     BINDINGS = [
         Binding("r", "reset_field", "Reset"),
+        Binding("escape", "dismiss_cancel", "Cancel"),
     ]
 
     def on_mount(self) -> None:
@@ -1232,9 +1266,8 @@ class SettingsScreen(ModalScreen[None]):
         else:
             self.notify("Field is not overridden in config.yaml")
 
-    def on_key(self, event: Any) -> None:
-        if event.key == "escape":
-            self.dismiss(None)
+    def action_dismiss_cancel(self) -> None:
+        self.dismiss(None)
 
 
 class FirstRunScreen(ModalScreen[None]):
@@ -1277,6 +1310,10 @@ class FirstRunScreen(ModalScreen[None]):
     }
     """
 
+    BINDINGS = [
+        Binding("escape", "dismiss_cancel", "Cancel"),
+    ]
+
     def __init__(self, missing_fields: list[dict[str, Any]]) -> None:
         super().__init__()
         self.missing_fields = missing_fields
@@ -1312,9 +1349,8 @@ class FirstRunScreen(ModalScreen[None]):
             self.dismiss(None)
             self.app.push_screen(SettingsScreen())
 
-    def on_key(self, event: Any) -> None:
-        if event.key == "escape":
-            self.dismiss(None)
+    def action_dismiss_cancel(self) -> None:
+        self.dismiss(None)
 
 
 class ProviderConfigScreen(ModalScreen[None]):
@@ -1353,6 +1389,10 @@ class ProviderConfigScreen(ModalScreen[None]):
         min-width: 16;
     }
     """
+
+    BINDINGS = [
+        Binding("escape", "dismiss_cancel", "Cancel"),
+    ]
 
     def __init__(self, provider_id: str, provider_name: str) -> None:
         super().__init__()
@@ -1454,6 +1494,5 @@ class ProviderConfigScreen(ModalScreen[None]):
             self.notify("Testing connection...")
             self.dismiss(None)
 
-    def on_key(self, event: Any) -> None:
-        if event.key == "escape":
-            self.dismiss(None)
+    def action_dismiss_cancel(self) -> None:
+        self.dismiss(None)
