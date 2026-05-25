@@ -157,6 +157,9 @@ def main() -> int:
         "test job writes timing summary to GITHUB_STEP_SUMMARY",
         "$GITHUB_STEP_SUMMARY" in run_text(find_step(test_steps, "Timing summary")),
     )
+    python_step = find_step(test_steps, "Install Python")
+    python_version = python_step.get("with", {}).get("python-version") if python_step else None
+    checks.assert_check("test job uses Python 3.14", python_version == "3.14")
     make_test_step = find_step(test_steps, "Run make test")
     make_test_env = make_test_step.get("env", {}) if make_test_step else {}
     checks.assert_check(
@@ -269,6 +272,10 @@ def main() -> int:
             f"{path} maps Terraform amd64 separately from Terramate x86_64",
             "terraform_arch=amd64" in content and "terramate_arch=x86_64" in content,
         )
+
+    runtime_dockerfile = (root / "docker/Dockerfile").read_text()
+    checks.assert_check("docker runtime uses official Python 3.14 slim base", "python:3.14-slim-trixie" in runtime_dockerfile)
+    checks.assert_check("docker runtime does not download Python source", "www.python.org/ftp/python" not in runtime_dockerfile)
 
     if checks.failures:
         print(f"\n{checks.failures} ci-pipeline check(s) failed.", file=sys.stderr)
