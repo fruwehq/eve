@@ -98,12 +98,6 @@ jobs:
           trap finish_timing EXIT
           brew install jq ripgrep shellcheck yq
 
-      - name: Install Ruby
-        uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: "3.3"
-          bundler-cache: true
-
       - name: Install Python dependencies
         run: |
           set -euo pipefail
@@ -184,7 +178,7 @@ jobs:
   docker-runtime-slim:
     runs-on: ubuntu-24.04
     env:
-      EVE_DOCKER_CACHE_SCOPE: slim-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('docker/Dockerfile', 'poetry.lock', 'Gemfile.lock') }}
+      EVE_DOCKER_CACHE_SCOPE: slim-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('docker/Dockerfile', 'poetry.lock') }}
       EVE_CI_TIMINGS: ${{ runner.temp }}/eve-ci-timings.tsv
     steps:
       - uses: actions/checkout@v4

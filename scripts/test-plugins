@@ -1006,9 +1006,9 @@ fi
 
 contract_grep="$(rg 'validate_(def|output)' eve_sdk scripts/package-dispatch scripts/provider-dispatch || true)"
 if [ -n "$contract_grep" ]; then
-  printf '  [OK] Contract.validate has real callers in provider and package dispatch\n'
+  printf '  [OK] schema validation has real callers in provider and package dispatch\n'
 else
-  printf '  [FAIL] Contract.validate has no callers outside contract.rb\n' >&2
+  printf '  [FAIL] schema validation has no callers in provider/package dispatch\n' >&2
   FAIL=$((FAIL + 1))
 fi
 
@@ -1023,9 +1023,9 @@ except SchemaValidationError as error:
     raise SystemExit(1)
 ' 2>&1 || true)"
 if printf '%s\n' "$invalid_status_err" | grep -q "failed schema validation"; then
-  printf '  [OK] Contract rejects invalid package command output\n'
+  printf '  [OK] schema validation rejects invalid package command output\n'
 else
-  printf '  [FAIL] Contract should reject invalid package command output\n' >&2
+  printf '  [FAIL] schema validation should reject invalid package command output\n' >&2
   printf '%s\n' "$invalid_status_err" >&2
   FAIL=$((FAIL + 1))
 fi
@@ -1055,9 +1055,9 @@ except SchemaValidationError as error:
     raise SystemExit(1)
 ' 2>&1 || true)"
 if printf '%s\n' "$invalid_provider_status_err" | grep -q "failed schema validation"; then
-  printf '  [OK] Contract rejects invalid provider command output status\n'
+  printf '  [OK] schema validation rejects invalid provider command output status\n'
 else
-  printf '  [FAIL] Contract should reject invalid provider command output status\n' >&2
+  printf '  [FAIL] schema validation should reject invalid provider command output status\n' >&2
   printf '%s\n' "$invalid_provider_status_err" >&2
   FAIL=$((FAIL + 1))
 fi
@@ -1073,9 +1073,9 @@ except SchemaValidationError as error:
     raise SystemExit(1)
 ' 2>&1 || true)"
 if printf '%s\n' "$empty_ip_err" | grep -q "failed schema validation"; then
-  printf '  [OK] Contract rejects empty provider command output ip\n'
+  printf '  [OK] schema validation rejects empty provider command output ip\n'
 else
-  printf '  [FAIL] Contract should reject empty provider command output ip\n' >&2
+  printf '  [FAIL] schema validation should reject empty provider command output ip\n' >&2
   printf '%s\n' "$empty_ip_err" >&2
   FAIL=$((FAIL + 1))
 fi
@@ -1091,9 +1091,9 @@ except SchemaValidationError as error:
     raise SystemExit(1)
 ' 2>&1 || true)"
 if [ -z "$valid_provider_output_err" ]; then
-  printf '  [OK] Contract accepts valid provider command output\n'
+  printf '  [OK] schema validation accepts valid provider command output\n'
 else
-  printf '  [FAIL] Contract should accept valid provider command output\n' >&2
+  printf '  [FAIL] schema validation should accept valid provider command output\n' >&2
   printf '%s\n' "$valid_provider_output_err" >&2
   FAIL=$((FAIL + 1))
 fi

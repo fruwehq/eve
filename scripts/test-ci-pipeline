@@ -208,11 +208,11 @@ def main() -> int:
     checks.assert_check("docker-runtime-slim reports cache misses explicitly", "Report Docker cache status" in docker_slim_step_names)
     cache_scope = docker_slim_job.get("env", {}).get("EVE_DOCKER_CACHE_SCOPE") if isinstance(docker_slim_job, dict) else None
     checks.assert_check(
-        "docker-runtime-slim cache scope includes runner OS, arch, Dockerfile, and lockfiles",
+        "docker-runtime-slim cache scope includes runner OS, arch, Dockerfile, and lockfile",
         isinstance(cache_scope, str)
         and "runner.os" in cache_scope
         and "runner.arch" in cache_scope
-        and "hashFiles('docker/Dockerfile', 'poetry.lock', 'Gemfile.lock')" in cache_scope,
+        and "hashFiles('docker/Dockerfile', 'poetry.lock')" in cache_scope,
     )
     checks.assert_check(
         "docker-runtime-slim cache status logs cache miss: rebuilding",

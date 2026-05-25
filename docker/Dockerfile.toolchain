@@ -17,7 +17,6 @@ RUN apt-get update \
     jq \
     make \
     openssh-client \
-    ruby \
     shellcheck \
     unzip \
   && rm -rf /var/lib/apt/lists/*

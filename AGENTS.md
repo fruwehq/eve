@@ -124,10 +124,10 @@ See [docs/raspberry-pi-provider.md](docs/raspberry-pi-provider.md) for the metal
 
 ## Language policy
 
-- **Core orchestration:** Ruby. All new orchestration scripts under `scripts/` must be Ruby (`#!/usr/bin/env ruby`).
+- **Core orchestration:** Python. All new orchestration scripts under `scripts/` must be Python (`#!/usr/bin/env python3`) unless they are narrowly scoped shell wrappers around external tools.
 - **Guest-side provisioning:** bash under `oses/<catalog-os-id>/provision/` for Linux, PowerShell under `oses/windows-server-2025/provision/` for Windows. These are the only places new bash is acceptable.
 - **TUI:** Python. The TUI (`scripts/eve-tui`) stays Python because Textual is Python.
-- **No new bash in `scripts/`.** The boundary lint (`make test.core-boundary`) enforces this; existing bash scripts are enumerated in `scripts/test-core-boundary.allowlist` and will be ported to Ruby over time.
+- **No new bash in `scripts/`.** The boundary lint (`make test.core-boundary`) enforces this; existing bash scripts are enumerated in `scripts/test-core-boundary.allowlist` and will be ported to Python or moved into provider/package plugins over time.
 
 ## Post-boot provisioning
 
@@ -163,8 +163,8 @@ Adding a new Linux step:
 - **terraform** (`test-terraform`) — `terramate generate` + `terraform init -backend=false` + `terraform validate` across `aws-services`, `gcp-services`, `vultr-services`, and `truenas-services`. Uses a fake `MY_IP` and a tempfile SSH key. No cloud credentials required.
 - **shellcheck** (`test-shellcheck`) — runs `shellcheck -x --source-path=SCRIPTDIR` over every shell script with a bash/sh shebang in `scripts/` and `oses/<catalog-os-id>/provision/`.
 - **python** (`test-python`) — runs ruff and strict mypy for Python TUI code.
-- **schemas** (`test-schemas`) — validates JSON Schemas (draft 2020-12) for resolved instance, observed state, plugin manifests, and command I/O. Checks all shipped manifests, fixture instances, and negative-test fixtures. Uses Ruby `json_schemer`.
-- **lint** (`test-lint`) — checks Ruby syntax, YAML syntax, Terraform formatting, and Terramate formatting.
+- **schemas** (`test-schemas`) — validates JSON Schemas (draft 2020-12) for resolved instance, observed state, plugin manifests, and command I/O. Checks all shipped manifests, fixture instances, and negative-test fixtures.
+- **lint** (`test-lint`) — checks Python syntax, YAML syntax, Terraform formatting, and Terramate formatting.
 
 CI runs the same target via [.github/workflows/test.yml](.github/workflows/test.yml) on push to `main` and every pull request.
 

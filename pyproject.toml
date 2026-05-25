@@ -37,6 +37,10 @@ strict = true
 warn_unreachable = true
 files = ["scripts/eve-tui"]
 
+[[tool.mypy.overrides]]
+module = ["jsonschema.*", "yaml"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 pythonpath = ["."]
 

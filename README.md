@@ -14,7 +14,7 @@
 ## Quickstart on macOS
 
 ```bash
-brew install jq poetry python@3.13 ruby shellcheck sshpass yq
+brew install jq poetry python@3.14 shellcheck sshpass yq
 brew tap hashicorp/tap
 brew install hashicorp/tap/terraform
 
@@ -29,8 +29,7 @@ mkdir -p /tmp/terramate
 tar -C /tmp/terramate -xzf /tmp/terramate.tar.gz
 sudo find /tmp/terramate -type f -name terramate -exec install -m 0755 {} /usr/local/bin/terramate \; -quit
 
-bundle install
-poetry env use python3.13
+poetry env use python3.14
 poetry install
 make doctor
 make eve
@@ -45,12 +44,12 @@ Settings are stored through v3.2's `.eve/config.yaml` and
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y --no-install-recommends ca-certificates curl gnupg jq make openssh-client ripgrep ruby ruby-dev shellcheck software-properties-common sshpass unzip yq
+sudo apt-get install -y --no-install-recommends ca-certificates curl gnupg jq make openssh-client ripgrep shellcheck software-properties-common sshpass unzip yq
 
 sudo add-apt-repository -y ppa:deadsnakes/ppa
 sudo apt-get update
-sudo apt-get install -y --no-install-recommends python3.13 python3.13-dev python3.13-venv
-curl -sSL https://install.python-poetry.org | python3.13 -
+sudo apt-get install -y --no-install-recommends python3.14 python3.14-dev python3.14-venv
+curl -sSL https://install.python-poetry.org | python3.14 -
 export PATH="$HOME/.local/bin:$PATH"
 
 . /etc/os-release
@@ -70,8 +69,7 @@ mkdir -p /tmp/terramate
 tar -C /tmp/terramate -xzf /tmp/terramate.tar.gz
 sudo find /tmp/terramate -type f -name terramate -exec install -m 0755 {} /usr/local/bin/terramate \; -quit
 
-bundle install
-poetry env use python3.13
+poetry env use python3.14
 poetry install
 make doctor
 make eve
@@ -306,8 +304,7 @@ compatibility alias.
 Run `make install-cli` once to install an `eve` command into `~/.local/bin`;
 after that, `eve` opens the same TUI from any directory as long as
 `~/.local/bin` is on your `PATH`.
-Use `poetry install` once to install the optional Python dependencies; the rest
-of the v3 command surface has no Python package dependency.
+Use `poetry install` once to install the Python command and TUI dependencies.
 
 ### Optional containerized toolchain
 
@@ -480,7 +477,6 @@ The target starts an Xpra server on the VM, launches the requested app, and atta
 
 - [Terramate](https://terramate.io/docs/cli/install) — code generation and stack management
 - [Terraform](https://developer.hashicorp.com/terraform/install) >= 1.4
-- [Ruby](https://www.ruby-lang.org/en/documentation/installation/) — catalog YAML parsing in `profile-resolve` (`brew install ruby` on macOS)
 - [jq](https://jqlang.github.io/jq/download/) — JSON processing for profile resolution (`brew install jq` on macOS)
 - `make`
 

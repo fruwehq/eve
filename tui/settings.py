@@ -7,6 +7,8 @@ import time
 from pathlib import Path
 from typing import Any, cast
 
+from eve_sdk.secrets import Secrets, SecretsError
+
 
 _CACHE_TTL = 5.0
 _cache: dict[tuple[str, tuple[str, ...]], tuple[float, Any]] = {}
@@ -79,37 +81,24 @@ def load_provider_schema(provider_id: str) -> dict[str, Any]:
 
 
 def load_provider_secrets(provider_id: str) -> dict[str, str]:
-    code, stdout, stderr = _run([
-        "ruby", "-I", "core", "-r", "sdk", "-e",
-        'require "sdk"; begin; puts JSON.generate(Eve::SDK::Secrets.read(ARGV[0])); rescue Eve::SDK::Secrets::SecretsError; puts "{}"; end',
-        provider_id,
-    ])
-    if code != 0:
+    try:
+        return Secrets.read(provider_id)
+    except SecretsError:
         return {}
-    return json.loads(stdout) if stdout.strip() else {}
 
 
 def load_provider_secret_keys(provider_id: str) -> list[str]:
-    code, stdout, _ = _run([
-        "ruby", "-I", "core", "-r", "sdk", "-e",
-        'require "sdk"; begin; puts Eve::SDK::Secrets.keys_set(ARGV[0]).join("\\n"); rescue Eve::SDK::Secrets::SecretsError; end',
-        provider_id,
-    ])
-    if code != 0 or not stdout.strip():
+    try:
+        return Secrets.keys_set(provider_id)
+    except SecretsError:
         return []
-    return stdout.strip().split("\n")
 
 
 def save_provider_secret(provider_id: str, key: str, value: str) -> None:
-    env_addition = {"_EVE_SECRET_VALUE": value}
-    code, _, stderr = _run_env([
-        "ruby", "-I", "core", "-r", "sdk", "-e",
-        'require "sdk"; Eve::SDK::Secrets.update(ARGV[0], {ARGV[1] => ENV["_EVE_SECRET_VALUE"]})',
-        provider_id,
-        key,
-    ], extra_env=env_addition)
-    if code != 0:
-        raise RuntimeError(stderr.strip() or "secret write failed")
+    try:
+        Secrets.update(provider_id, {key: value})
+    except SecretsError as error:
+        raise RuntimeError(str(error) or "secret write failed") from error
     _invalidate_cache()
 
 
