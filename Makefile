@@ -396,7 +396,7 @@ test.catalog: ## Validate catalog provider/platform/content choices
 	@./scripts/test-catalog
 
 test.ci-pipeline: ## Validate GitHub Actions workflow and release asset assumptions
-	@./scripts/test-ci-pipeline
+	@poetry run python scripts/test-ci-pipeline
 
 test.core-boundary: ## Fail if central scripts reference provider/OS IDs outside allowlist
 	@./scripts/test-core-boundary

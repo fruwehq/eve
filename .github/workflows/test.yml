@@ -15,10 +15,16 @@ jobs:
       matrix:
         os: [macos-latest, ubuntu-24.04]
     runs-on: ${{ matrix.os }}
+    env:
+      EVE_CI_TIMINGS: ${{ runner.temp }}/eve-ci-timings.tsv
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0 # only used in PRs; don't use in default branches. This is used to identify the delta
+
+      - name: Initialize timing summary
+        run: |
+          : > "$EVE_CI_TIMINGS"
 
       - name: Install Terraform
         uses: hashicorp/setup-terraform@v3
@@ -31,6 +37,15 @@ jobs:
           TERRAMATE_VERSION: "0.17.0"
         run: |
           set -euo pipefail
+          step_name="Install Terramate"
+          start="$(date +%s)"
+          finish_timing() {
+            status="$?"
+            end="$(date +%s)"
+            printf '%s\t%s\t%s\n' "$step_name" "$((end - start))" "$status" >> "$EVE_CI_TIMINGS"
+            exit "$status"
+          }
+          trap finish_timing EXIT
           case "$(uname -s)" in
             Darwin) tool_os=darwin ;;
             Linux) tool_os=linux ;;
@@ -55,12 +70,33 @@ jobs:
       - name: Install Ubuntu packages
         if: runner.os == 'Linux'
         run: |
+          set -euo pipefail
+          step_name="Install Ubuntu packages"
+          start="$(date +%s)"
+          finish_timing() {
+            status="$?"
+            end="$(date +%s)"
+            printf '%s\t%s\t%s\n' "$step_name" "$((end - start))" "$status" >> "$EVE_CI_TIMINGS"
+            exit "$status"
+          }
+          trap finish_timing EXIT
           sudo apt-get update -y
           sudo apt-get install -y --no-install-recommends ca-certificates curl gnupg jq openssh-client ripgrep shellcheck sshpass yq
 
       - name: Install macOS packages
         if: runner.os == 'macOS'
-        run: brew install jq ripgrep shellcheck yq
+        run: |
+          set -euo pipefail
+          step_name="Install macOS packages"
+          start="$(date +%s)"
+          finish_timing() {
+            status="$?"
+            end="$(date +%s)"
+            printf '%s\t%s\t%s\n' "$step_name" "$((end - start))" "$status" >> "$EVE_CI_TIMINGS"
+            exit "$status"
+          }
+          trap finish_timing EXIT
+          brew install jq ripgrep shellcheck yq
 
       - name: Install Ruby
         uses: ruby/setup-ruby@v1
@@ -70,32 +106,130 @@ jobs:
 
       - name: Install Python dependencies
         run: |
+          set -euo pipefail
+          step_name="Install Python dependencies"
+          start="$(date +%s)"
+          finish_timing() {
+            status="$?"
+            end="$(date +%s)"
+            printf '%s\t%s\t%s\n' "$step_name" "$((end - start))" "$status" >> "$EVE_CI_TIMINGS"
+            exit "$status"
+          }
+          trap finish_timing EXIT
           python -m pip install --upgrade poetry
           poetry install --no-interaction --no-root
 
       - name: Generate Terramate code
-        run: terramate generate
+        run: |
+          set -euo pipefail
+          step_name="Generate Terramate code"
+          start="$(date +%s)"
+          finish_timing() {
+            status="$?"
+            end="$(date +%s)"
+            printf '%s\t%s\t%s\n' "$step_name" "$((end - start))" "$status" >> "$EVE_CI_TIMINGS"
+            exit "$status"
+          }
+          trap finish_timing EXIT
+          terramate generate
 
       - name: Run provision runner smoke
-        run: make test.provision-runner
+        run: |
+          set -euo pipefail
+          step_name="Run provision runner smoke"
+          start="$(date +%s)"
+          finish_timing() {
+            status="$?"
+            end="$(date +%s)"
+            printf '%s\t%s\t%s\n' "$step_name" "$((end - start))" "$status" >> "$EVE_CI_TIMINGS"
+            exit "$status"
+          }
+          trap finish_timing EXIT
+          make test.provision-runner
 
       - name: Run make test
-        run: make test
+        run: |
+          set -euo pipefail
+          step_name="Run make test"
+          start="$(date +%s)"
+          finish_timing() {
+            status="$?"
+            end="$(date +%s)"
+            printf '%s\t%s\t%s\n' "$step_name" "$((end - start))" "$status" >> "$EVE_CI_TIMINGS"
+            exit "$status"
+          }
+          trap finish_timing EXIT
+          make test
+
+      - name: Timing summary
+        if: always()
+        run: |
+          set -euo pipefail
+          {
+            echo "### Timing summary"
+            echo
+            echo "| Step | Seconds | Exit |"
+            echo "| --- | ---: | ---: |"
+            if [ -s "$EVE_CI_TIMINGS" ]; then
+              while IFS="$(printf '\t')" read -r step seconds status; do
+                echo "| ${step} | ${seconds} | ${status} |"
+              done < "$EVE_CI_TIMINGS"
+            else
+              echo "| no timed shell steps completed | 0 | 0 |"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
   docker-runtime-slim:
     runs-on: ubuntu-24.04
+    env:
+      EVE_CI_TIMINGS: ${{ runner.temp }}/eve-ci-timings.tsv
     steps:
       - uses: actions/checkout@v4
 
+      - name: Initialize timing summary
+        run: |
+          : > "$EVE_CI_TIMINGS"
+
       - name: Build slim runtime image
-        run: docker build -f docker/Dockerfile --target runtime-slim -t eve/eve:slim -t eve/eve:latest .
+        run: |
+          set -euo pipefail
+          step_name="Build slim runtime image"
+          start="$(date +%s)"
+          finish_timing() {
+            status="$?"
+            end="$(date +%s)"
+            printf '%s\t%s\t%s\n' "$step_name" "$((end - start))" "$status" >> "$EVE_CI_TIMINGS"
+            exit "$status"
+          }
+          trap finish_timing EXIT
+          docker build -f docker/Dockerfile --target runtime-slim -t eve/eve:slim -t eve/eve:latest .
 
       - name: Smoke slim runtime image
-        run: docker run --rm eve/eve:slim make help
+        run: |
+          set -euo pipefail
+          step_name="Smoke slim runtime image"
+          start="$(date +%s)"
+          finish_timing() {
+            status="$?"
+            end="$(date +%s)"
+            printf '%s\t%s\t%s\n' "$step_name" "$((end - start))" "$status" >> "$EVE_CI_TIMINGS"
+            exit "$status"
+          }
+          trap finish_timing EXIT
+          docker run --rm eve/eve:slim make help
 
       - name: Report slim image size
         run: |
           set -euo pipefail
+          step_name="Report slim image size"
+          start="$(date +%s)"
+          finish_timing() {
+            status="$?"
+            end="$(date +%s)"
+            printf '%s\t%s\t%s\n' "$step_name" "$((end - start))" "$status" >> "$EVE_CI_TIMINGS"
+            exit "$status"
+          }
+          trap finish_timing EXIT
           inspect_size="$(docker image inspect eve/eve:slim --format '{{.Size}}')"
           compressed_size="$(docker save eve/eve:slim | gzip -c | wc -c | tr -d ' ')"
           echo "slim image: uncompressed=${inspect_size} compressed=${compressed_size}"
@@ -108,11 +242,64 @@ jobs:
             exit 1
           fi
 
+      - name: Timing summary
+        if: always()
+        run: |
+          set -euo pipefail
+          {
+            echo "### Timing summary"
+            echo
+            echo "| Step | Seconds | Exit |"
+            echo "| --- | ---: | ---: |"
+            if [ -s "$EVE_CI_TIMINGS" ]; then
+              while IFS="$(printf '\t')" read -r step seconds status; do
+                echo "| ${step} | ${seconds} | ${status} |"
+              done < "$EVE_CI_TIMINGS"
+            else
+              echo "| no timed shell steps completed | 0 | 0 |"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
   docker-runtime-full:
     if: github.event_name == 'schedule'
     runs-on: ubuntu-24.04
+    env:
+      EVE_CI_TIMINGS: ${{ runner.temp }}/eve-ci-timings.tsv
     steps:
       - uses: actions/checkout@v4
 
+      - name: Initialize timing summary
+        run: |
+          : > "$EVE_CI_TIMINGS"
+
       - name: Build full runtime image
-        run: docker build -f docker/Dockerfile --target runtime-full -t eve/eve:full .
+        run: |
+          set -euo pipefail
+          step_name="Build full runtime image"
+          start="$(date +%s)"
+          finish_timing() {
+            status="$?"
+            end="$(date +%s)"
+            printf '%s\t%s\t%s\n' "$step_name" "$((end - start))" "$status" >> "$EVE_CI_TIMINGS"
+            exit "$status"
+          }
+          trap finish_timing EXIT
+          docker build -f docker/Dockerfile --target runtime-full -t eve/eve:full .
+
+      - name: Timing summary
+        if: always()
+        run: |
+          set -euo pipefail
+          {
+            echo "### Timing summary"
+            echo
+            echo "| Step | Seconds | Exit |"
+            echo "| --- | ---: | ---: |"
+            if [ -s "$EVE_CI_TIMINGS" ]; then
+              while IFS="$(printf '\t')" read -r step seconds status; do
+                echo "| ${step} | ${seconds} | ${status} |"
+              done < "$EVE_CI_TIMINGS"
+            else
+              echo "| no timed shell steps completed | 0 | 0 |"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
