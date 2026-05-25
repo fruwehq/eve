@@ -93,6 +93,9 @@ jobs:
       - name: Smoke slim runtime image
         run: docker run --rm eve/eve:slim make help
 
+      - name: Report slim image size
+        run: docker image inspect eve/eve:slim --format 'slim image size bytes={{.Size}}'
+
   docker-runtime-full:
     if: github.event_name == 'schedule'
     runs-on: ubuntu-24.04

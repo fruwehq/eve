@@ -108,6 +108,9 @@ assert_check("docker-runtime-slim builds and smokes image") do
   docker_slim_step_names.include?("Build slim runtime image") &&
     docker_slim_step_names.include?("Smoke slim runtime image")
 end
+assert_check("docker-runtime-slim reports inspectable image size") do
+  docker_slim_step_names.include?("Report slim image size")
+end
 
 docker_full_job = jobs.fetch("docker-runtime-full")
 assert_check("docker-runtime-full is schedule-only") do
