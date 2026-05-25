@@ -15,8 +15,6 @@ jobs:
       matrix:
         os: [macos-latest, ubuntu-24.04]
     runs-on: ${{ matrix.os }}
-    env:
-      EVE_CI_TIMINGS: ${{ runner.temp }}/eve-ci-timings.tsv
     steps:
       - uses: actions/checkout@v4
         with:
@@ -24,7 +22,8 @@ jobs:
 
       - name: Initialize timing summary
         run: |
-          : > "$EVE_CI_TIMINGS"
+          printf 'EVE_CI_TIMINGS=%s/eve-ci-timings.tsv\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+          : > "$RUNNER_TEMP/eve-ci-timings.tsv"
 
       - name: Install Terraform
         uses: hashicorp/setup-terraform@v3
@@ -177,14 +176,13 @@ jobs:
 
   docker-runtime-slim:
     runs-on: ubuntu-24.04
-    env:
-      EVE_CI_TIMINGS: ${{ runner.temp }}/eve-ci-timings.tsv
     steps:
       - uses: actions/checkout@v4
 
       - name: Initialize timing summary
         run: |
-          : > "$EVE_CI_TIMINGS"
+          printf 'EVE_CI_TIMINGS=%s/eve-ci-timings.tsv\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+          : > "$RUNNER_TEMP/eve-ci-timings.tsv"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -311,14 +309,13 @@ jobs:
   docker-runtime-full:
     if: github.event_name == 'schedule'
     runs-on: ubuntu-24.04
-    env:
-      EVE_CI_TIMINGS: ${{ runner.temp }}/eve-ci-timings.tsv
     steps:
       - uses: actions/checkout@v4
 
       - name: Initialize timing summary
         run: |
-          : > "$EVE_CI_TIMINGS"
+          printf 'EVE_CI_TIMINGS=%s/eve-ci-timings.tsv\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+          : > "$RUNNER_TEMP/eve-ci-timings.tsv"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
