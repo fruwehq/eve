@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -210,7 +211,8 @@ else:
         )
 
 print("\n== provision-runner: windows (powershell) ==")
-if shutil.which("pwsh"):
+pwsh = shutil.which("pwsh")
+if pwsh:
     for name, body, expected_status in [
         ("ok", "Write-Host 'ok'; exit 0", "done"),
         ("fail", "Write-Error 'fail'; exit 42", "failed"),
@@ -228,8 +230,8 @@ if shutil.which("pwsh"):
             (state_dir / "state.json").write_text('{"currentStep":0}', encoding="utf-8")
             (state_dir / "steps.list").write_text(step_name + "\n", encoding="utf-8")
             subprocess.run(
-                ["pwsh", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(WINDOWS_RUNNER)],
-                env={"ProvisionPath": str(prov_dir)},
+                [pwsh, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(WINDOWS_RUNNER)],
+                env={**os.environ, "ProvisionPath": str(prov_dir)},
                 text=True,
                 capture_output=True,
                 check=False,
