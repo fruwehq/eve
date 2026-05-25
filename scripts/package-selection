@@ -1,124 +1,67 @@
-#!/usr/bin/env ruby
-# Add/remove direct package selections on a concrete instance registry entry.
+#!/usr/bin/env python3
+"""Add/remove direct package selections on a concrete instance registry entry."""
 
-require "fileutils"
-require "tempfile"
-require "time"
-require "yaml"
+from __future__ import annotations
 
-ROOT = File.expand_path("..", __dir__)
-$LOAD_PATH.unshift(File.join(ROOT, "core"))
-require "sdk"
-DEFAULT_REGISTRY_PATH = Eve::SDK::Workdir.instance_registry_path
+import argparse
+import sys
+from pathlib import Path
 
-def with_registry_lock(registry_path)
-  FileUtils.mkdir_p(File.dirname(registry_path))
-  File.open("#{registry_path}.lock", File::RDWR | File::CREAT, 0o600) do |lock|
-    lock.flock(File::LOCK_EX)
-    yield
-  end
-end
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
-def write_registry!(registry_path, registry)
-  Tempfile.create(["eve-registry-", ".yaml"], File.dirname(registry_path)) do |tmp|
-    tmp.write(registry.to_yaml)
-    tmp.close
-    FileUtils.mv(tmp.path, registry_path)
-  end
-end
+from eve_sdk.registry_selection import (  # noqa: E402
+    load_registry,
+    mutate_selection,
+    registry_lock,
+    registry_path,
+    validate_registry,
+    write_registry,
+)
 
-def usage
-  warn <<~USAGE
-    Usage:
-      scripts/package-selection --instance <name> --package <id> --add [--registry <path>]
-      scripts/package-selection --instance <name> --package <id> --remove [--registry <path>]
-  USAGE
-end
 
-instance_name = nil
-package_id = nil
-action = nil
-registry_path = ENV["EVE_INSTANCE_REGISTRY"] && !ENV["EVE_INSTANCE_REGISTRY"].empty? \
-                ? File.expand_path(ENV["EVE_INSTANCE_REGISTRY"], Dir.pwd) \
-                : DEFAULT_REGISTRY_PATH
-
-args = ARGV.dup
-until args.empty?
-  case args.shift
-  when "--instance"
-    instance_name = args.shift
-  when "--package"
-    package_id = args.shift
-  when "--add"
-    action = "add"
-  when "--remove"
-    action = "remove"
-  when "--registry"
-    registry_path = File.expand_path(args.shift, Dir.pwd)
-  when "-h", "--help"
-    usage
-    exit 0
-  else
-    usage
-    exit 2
-  end
-end
-
-unless instance_name && package_id && action
-  usage
-  exit 2
-end
-
-with_registry_lock(registry_path) do
-  unless File.exist?(registry_path)
-    warn "package-selection: registry not found: #{registry_path}"
-    exit 1
-  end
-
-  registry = YAML.safe_load(File.read(registry_path), permitted_classes: [], aliases: true) || {}
-  instances = registry["instances"] || []
-  instance = instances.find { |entry| entry.is_a?(Hash) && entry["name"] == instance_name }
-  unless instance
-    warn "package-selection: instance not found: #{instance_name}"
-    exit 1
-  end
-
-  packages = (instance["packages"] || []).dup
-  case action
-  when "add"
-    packages << package_id
-  when "remove"
-    packages.delete(package_id)
-  end
-  packages = packages.uniq.sort
-
-  if packages.empty?
-    instance.delete("packages")
-  else
-    instance["packages"] = packages
-  end
-  instance["updated_at"] = Time.now.utc.iso8601
-
-  Tempfile.create(["eve-package-selection-", ".yaml"]) do |tmp|
-    tmp.write(registry.to_yaml)
-    tmp.close
-
-    ok = system(
-      File.join(ROOT, "scripts/instance-resolve"),
-      "--registry", tmp.path,
-      "--instance", instance_name,
-      "--validate",
-      out: File::NULL
+def parser() -> argparse.ArgumentParser:
+    arg_parser = argparse.ArgumentParser(
+        prog="scripts/package-selection",
+        usage="scripts/package-selection --instance <name> --package <id> --add [--registry <path>]",
     )
-    unless ok
-      warn "package-selection: updated instance did not validate; registry was not changed"
-      exit 1
-    end
-  end
+    arg_parser.add_argument("--instance", required=True)
+    arg_parser.add_argument("--package", required=True, dest="package_id")
+    arg_parser.add_argument("--add", action="store_true")
+    arg_parser.add_argument("--remove", action="store_true")
+    arg_parser.add_argument("--registry")
+    return arg_parser
 
-  write_registry!(registry_path, registry)
-end
 
-puts "#{action == "add" ? "Selected" : "Unselected"} package: #{package_id}"
-puts "Instance: #{instance_name}"
-puts "Registry: #{registry_path}"
+def main() -> int:
+    args = parser().parse_args()
+    if args.add == args.remove:
+        parser().print_usage(sys.stderr)
+        return 2
+    action = "add" if args.add else "remove"
+    path = registry_path(args.registry)
+    try:
+        with registry_lock(path):
+            registry = load_registry(path, "package-selection")
+            mutate_selection(
+                command_name="package-selection",
+                instance_name=args.instance,
+                item_id=args.package_id,
+                action=action,
+                field="packages",
+                registry=registry,
+            )
+            validate_registry(ROOT, registry, args.instance, "package-selection")
+            write_registry(path, registry)
+    except RuntimeError as error:
+        print(error, file=sys.stderr)
+        return 1
+
+    print(f"{'Selected' if action == 'add' else 'Unselected'} package: {args.package_id}")
+    print(f"Instance: {args.instance}")
+    print(f"Registry: {path}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

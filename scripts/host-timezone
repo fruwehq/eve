@@ -1,19 +1,21 @@
-#!/usr/bin/env ruby
-# frozen_string_literal: true
+#!/usr/bin/env python3
+"""Print the host timezone when /etc/localtime points into zoneinfo."""
 
-# Print the host timezone name when /etc/localtime points into a zoneinfo tree.
-# Exits nonzero when the host does not expose timezone data in that shape.
+from __future__ import annotations
 
-begin
-  real_path = File.realpath("/etc/localtime")
-  marker = "/zoneinfo/"
-  index = real_path.index(marker)
-  exit 1 unless index
+from pathlib import Path
 
-  timezone = real_path[(index + marker.length)..]
-  exit 1 if timezone.nil? || timezone.empty?
+try:
+    real_path = str(Path("/etc/localtime").resolve(strict=True))
+except OSError:
+    raise SystemExit(1) from None
 
-  puts timezone
-rescue SystemCallError
-  exit 1
-end
+marker = "/zoneinfo/"
+if marker not in real_path:
+    raise SystemExit(1)
+
+timezone = real_path.split(marker, 1)[1]
+if not timezone:
+    raise SystemExit(1)
+
+print(timezone)

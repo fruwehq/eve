@@ -1,31 +1,40 @@
-#!/usr/bin/env ruby
-# frozen_string_literal: true
+#!/usr/bin/env python3
+from __future__ import annotations
 
-$LOAD_PATH.unshift(File.expand_path("../../_terraform-common/lib", __dir__))
-require "tf_env"
+import os
+import sys
+from pathlib import Path
 
-env = EveProviderTfEnv.env
+ROOT = Path(__file__).resolve().parents[4]
+sys.path.insert(0, str(ROOT))
 
-if ENV["TRUENAS_SSH_USER"].to_s.empty?
-  warn "Error: required environment variable(s) not set:\n  - TRUENAS_SSH_USER\n\nSet them in .env.local (or your shell environment) and retry."
-  exit 1
-end
+from eve_sdk.tf_env import load_env, normalize_path, print_kv  # noqa: E402
 
-EveProviderTfEnv.print_kv("TF_VAR_cloud_image_url", env["CLOUD_IMAGE_URL"].to_s)
-EveProviderTfEnv.print_kv("TF_VAR_provision_user_name", env["SSH_USER"].to_s)
-EveProviderTfEnv.print_kv("TF_VAR_truenas_host", env["TRUENAS_HOST"].to_s)
-EveProviderTfEnv.print_kv("TF_VAR_truenas_ssh_host_key_fingerprint", ENV["TRUENAS_SSH_HOST_KEY_FINGERPRINT"].to_s)
-EveProviderTfEnv.print_kv("TF_VAR_truenas_ssh_port", env["TRUENAS_SSH_PORT"].to_s)
-EveProviderTfEnv.print_kv("TF_VAR_truenas_ssh_private_key_file", EveProviderTfEnv.normalize_path(ENV["TRUENAS_SSH_PRIVATE_KEY_FILE"].to_s))
-EveProviderTfEnv.print_kv("TF_VAR_truenas_ssh_user", env["TRUENAS_SSH_USER"].to_s)
-EveProviderTfEnv.print_kv("TF_VAR_vm_autostart", env["VM_AUTOSTART"].to_s)
-EveProviderTfEnv.print_kv("TF_VAR_vm_base_dir", ENV["TRUENAS_VM_BASE_DIR"].to_s)
-EveProviderTfEnv.print_kv("TF_VAR_vm_cpu_cores", env["VM_CPU_CORES"].to_s)
-EveProviderTfEnv.print_kv("TF_VAR_vm_cpu_mode", env["VM_CPU_MODE"].to_s)
-EveProviderTfEnv.print_kv("TF_VAR_vm_disk_gb", env["VM_DISK_GB"].to_s)
-EveProviderTfEnv.print_kv("TF_VAR_vm_memory_mb", env["VM_MEMORY_MB"].to_s)
-EveProviderTfEnv.print_kv("TF_VAR_vm_nic_attach", env["VM_NIC_ATTACH"].to_s)
-EveProviderTfEnv.print_kv("TF_VAR_vm_pool", ENV["TRUENAS_VM_POOL"].to_s)
-EveProviderTfEnv.print_kv("TF_VAR_vm_state", env["VM_STATE"].to_s)
-EveProviderTfEnv.print_kv("TF_VAR_vm_vcpus", env["VM_VCPUS"].to_s)
-EveProviderTfEnv.print_kv("TF_VAR_vm_zvol_prefix", ENV["TRUENAS_VM_ZVOL_PREFIX"].to_s)
+env = load_env()
+if not os.environ.get("TRUENAS_SSH_USER", ""):
+    print(
+        "Error: required environment variable(s) not set:\n"
+        "  - TRUENAS_SSH_USER\n\n"
+        "Set them in .env.local (or your shell environment) and retry.",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+
+print_kv("TF_VAR_cloud_image_url", env.get("CLOUD_IMAGE_URL", ""))
+print_kv("TF_VAR_provision_user_name", env.get("SSH_USER", ""))
+print_kv("TF_VAR_truenas_host", env.get("TRUENAS_HOST", ""))
+print_kv("TF_VAR_truenas_ssh_host_key_fingerprint", os.environ.get("TRUENAS_SSH_HOST_KEY_FINGERPRINT", ""))
+print_kv("TF_VAR_truenas_ssh_port", env.get("TRUENAS_SSH_PORT", ""))
+print_kv("TF_VAR_truenas_ssh_private_key_file", normalize_path(os.environ.get("TRUENAS_SSH_PRIVATE_KEY_FILE", "")))
+print_kv("TF_VAR_truenas_ssh_user", env.get("TRUENAS_SSH_USER", ""))
+print_kv("TF_VAR_vm_autostart", env.get("VM_AUTOSTART", ""))
+print_kv("TF_VAR_vm_base_dir", os.environ.get("TRUENAS_VM_BASE_DIR", ""))
+print_kv("TF_VAR_vm_cpu_cores", env.get("VM_CPU_CORES", ""))
+print_kv("TF_VAR_vm_cpu_mode", env.get("VM_CPU_MODE", ""))
+print_kv("TF_VAR_vm_disk_gb", env.get("VM_DISK_GB", ""))
+print_kv("TF_VAR_vm_memory_mb", env.get("VM_MEMORY_MB", ""))
+print_kv("TF_VAR_vm_nic_attach", env.get("VM_NIC_ATTACH", ""))
+print_kv("TF_VAR_vm_pool", os.environ.get("TRUENAS_VM_POOL", ""))
+print_kv("TF_VAR_vm_state", env.get("VM_STATE", ""))
+print_kv("TF_VAR_vm_vcpus", env.get("VM_VCPUS", ""))
+print_kv("TF_VAR_vm_zvol_prefix", os.environ.get("TRUENAS_VM_ZVOL_PREFIX", ""))

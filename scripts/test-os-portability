@@ -1,82 +1,84 @@
-#!/usr/bin/env ruby
-# frozen_string_literal: true
+#!/usr/bin/env python3
+from __future__ import annotations
 
-require "fileutils"
-require "open3"
-require "shellwords"
-require "tmpdir"
+import os
+import shlex
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
 
-ROOT = File.expand_path("..", __dir__)
-RESOLVER_HELPER = File.join(ROOT, "plugins", "providers", "raspberry-pi", "lib", "host-resolver.sh")
+ROOT = Path(__file__).resolve().parents[1]
+RESOLVER_HELPER = ROOT / "plugins/providers/raspberry-pi/lib/host-resolver.sh"
+failures = 0
 
-$failures = 0
 
-def pass(message)
-  puts "  [OK] #{message}"
-end
+def pass_check(message: str) -> None:
+    print(f"  [OK] {message}")
 
-def fail(message)
-  warn "  [FAIL] #{message}"
-  $failures += 1
-end
 
-def write_executable(path, body)
-  File.write(path, body)
-  FileUtils.chmod("+x", path)
-end
+def fail_check(message: str) -> None:
+    global failures
+    print(f"  [FAIL] {message}", file=sys.stderr)
+    failures += 1
 
-def resolver_case(name, os_name:, expected_ip:, commands:)
-  Dir.mktmpdir("eve-os-portability.") do |dir|
-    bin = File.join(dir, "bin")
-    FileUtils.mkdir_p(bin)
-    write_executable(File.join(bin, "uname"), "#!/usr/bin/env sh\nprintf '%s\\n' #{os_name.shellescape}\n")
-    commands.each do |command_name, body|
-      write_executable(File.join(bin, command_name), body)
-    end
 
-    env = { "PATH" => "#{bin}:#{ENV.fetch("PATH")}" }
-    script = ". #{RESOLVER_HELPER.shellescape}; resolve_host_ip #{name.shellescape}"
-    stdout, stderr, status = Open3.capture3(env, "bash", "-c", script)
-    if status.success? && stdout.strip == expected_ip
-      pass "resolve_host_ip #{os_name} branch"
-    else
-      fail "resolve_host_ip #{os_name} branch expected #{expected_ip.inspect}, got stdout=#{stdout.inspect} stderr=#{stderr.inspect} status=#{status.exitstatus}"
-    end
-  end
-end
+def write_executable(path: Path, body: str) -> None:
+    path.write_text(body, encoding="utf-8")
+    path.chmod(0o755)
 
-resolver_case(
-  "raspberrypi.local",
-  os_name: "Linux",
-  expected_ip: "192.0.2.10",
-  commands: {
-    "getent" => "#!/usr/bin/env sh\nprintf '192.0.2.10 STREAM raspberrypi.local\\n'\n",
-    "dscacheutil" => "#!/usr/bin/env sh\necho 'dscacheutil should not run on Linux' >&2\nexit 99\n"
-  }
-)
+
+def resolver_case(name: str, os_name: str, expected_ip: str, commands: dict[str, str]) -> None:
+    with tempfile.TemporaryDirectory(prefix="eve-os-portability.") as tmp:
+        bin_dir = Path(tmp) / "bin"
+        bin_dir.mkdir()
+        write_executable(bin_dir / "uname", f"#!/usr/bin/env sh\nprintf '%s\\n' {shlex.quote(os_name)}\n")
+        for command_name, body in commands.items():
+            write_executable(bin_dir / command_name, body)
+        env = os.environ | {"PATH": f"{bin_dir}:{os.environ['PATH']}"}
+        script = f". {shlex.quote(str(RESOLVER_HELPER))}; resolve_host_ip {shlex.quote(name)}"
+        result = subprocess.run(["bash", "-c", script], env=env, text=True, capture_output=True, check=False)
+        if result.returncode == 0 and result.stdout.strip() == expected_ip:
+            pass_check(f"resolve_host_ip {os_name} branch")
+        else:
+            fail_check(
+                f"resolve_host_ip {os_name} branch expected {expected_ip!r}, "
+                f"got stdout={result.stdout!r} stderr={result.stderr!r} status={result.returncode}"
+            )
+
 
 resolver_case(
-  "raspberrypi.local",
-  os_name: "Darwin",
-  expected_ip: "192.0.2.20",
-  commands: {
-    "dscacheutil" => "#!/usr/bin/env sh\nprintf 'name: raspberrypi.local\\nip_address: 192.0.2.20\\n'\n",
-    "getent" => "#!/usr/bin/env sh\necho 'getent should not run on Darwin' >&2\nexit 99\n"
-  }
+    "raspberrypi.local",
+    "Linux",
+    "192.0.2.10",
+    {
+        "getent": "#!/usr/bin/env sh\nprintf '192.0.2.10 STREAM raspberrypi.local\\n'\n",
+        "dscacheutil": "#!/usr/bin/env sh\necho 'dscacheutil should not run on Linux' >&2\nexit 99\n",
+    },
+)
+resolver_case(
+    "raspberrypi.local",
+    "Darwin",
+    "192.0.2.20",
+    {
+        "dscacheutil": "#!/usr/bin/env sh\nprintf 'name: raspberrypi.local\\nip_address: 192.0.2.20\\n'\n",
+        "getent": "#!/usr/bin/env sh\necho 'getent should not run on Darwin' >&2\nexit 99\n",
+    },
 )
 
-Dir.mktmpdir("eve-os-portability.") do |dir|
-  bin = File.join(dir, "bin")
-  FileUtils.mkdir_p(bin)
-  write_executable(File.join(bin, "uname"), "#!/usr/bin/env sh\nprintf '%s\\n' FreeBSD\n")
-  env = { "PATH" => "#{bin}:#{ENV.fetch("PATH")}" }
-  script = ". #{RESOLVER_HELPER.shellescape}; resolve_host_ip raspberrypi.local"
-  _stdout, stderr, status = Open3.capture3(env, "bash", "-c", script)
-  if !status.success? && stderr.include?("unsupported host OS: FreeBSD")
-    pass "resolve_host_ip rejects unsupported host OS"
-  else
-    fail "resolve_host_ip unsupported OS expected clear failure, got stderr=#{stderr.inspect} status=#{status.exitstatus}"
-  end
-end
+with tempfile.TemporaryDirectory(prefix="eve-os-portability.") as tmp:
+    bin_dir = Path(tmp) / "bin"
+    bin_dir.mkdir()
+    write_executable(bin_dir / "uname", "#!/usr/bin/env sh\nprintf '%s\\n' FreeBSD\n")
+    env = os.environ | {"PATH": f"{bin_dir}:{os.environ['PATH']}"}
+    script = f". {shlex.quote(str(RESOLVER_HELPER))}; resolve_host_ip raspberrypi.local"
+    result = subprocess.run(["bash", "-c", script], env=env, text=True, capture_output=True, check=False)
+    if result.returncode != 0 and "unsupported host OS: FreeBSD" in result.stderr:
+        pass_check("resolve_host_ip rejects unsupported host OS")
+    else:
+        fail_check(
+            f"resolve_host_ip unsupported OS expected clear failure, "
+            f"got stderr={result.stderr!r} status={result.returncode}"
+        )
 
-exit($failures.zero? ? 0 : 1)
+raise SystemExit(0 if failures == 0 else 1)

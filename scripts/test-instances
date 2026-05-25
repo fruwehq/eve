@@ -36,7 +36,15 @@ else
 fi
 
 missing_os_dirs=0
-for os_id in $(yq -r '.oses[].id' config/catalog.yaml 2>/dev/null || ruby -ryaml -e 'YAML.load_file("config/catalog.yaml").fetch("oses").each { |os| puts os.fetch("id") }'); do
+for os_id in $(python3 - <<'PY'
+import yaml
+
+with open("config/catalog.yaml", encoding="utf-8") as handle:
+    catalog = yaml.safe_load(handle)
+for os_doc in catalog.get("oses", []):
+    print(os_doc["id"])
+PY
+); do
   if [ ! -d "oses/$os_id/provision" ]; then
     printf '  [FAIL] missing OS provisioning folder: oses/%s/provision\n' "$os_id" >&2
     missing_os_dirs=$((missing_os_dirs + 1))

@@ -1,35 +1,38 @@
-#!/usr/bin/env ruby
-# frozen_string_literal: true
+#!/usr/bin/env python3
+from __future__ import annotations
 
-require "open3"
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
 
-$LOAD_PATH.unshift(File.expand_path("../../_terraform-common/lib", __dir__))
-require "tf_env"
+ROOT = Path(__file__).resolve().parents[4]
+sys.path.insert(0, str(ROOT))
 
-env = EveProviderTfEnv.env
+from eve_sdk.tf_env import load_env, print_kv  # noqa: E402
 
-project_id = ENV["GOOGLE_CLOUD_PROJECT"] || ENV["GOOGLE_PROJECT"] || ""
-if project_id.empty? && system("command -v gcloud >/dev/null 2>&1")
-  out, _err, status = Open3.capture3("gcloud", "config", "get-value", "project")
-  project_id = out.strip if status.success?
-end
-if project_id.empty?
-  warn "tf-env: missing GOOGLE_CLOUD_PROJECT or GOOGLE_PROJECT for gcp provider"
-  exit 2
-end
+env = load_env()
+project_id = os.environ.get("GOOGLE_CLOUD_PROJECT") or os.environ.get("GOOGLE_PROJECT") or ""
+if not project_id and shutil.which("gcloud"):
+    result = subprocess.run(["gcloud", "config", "get-value", "project"], text=True, capture_output=True, check=False)
+    if result.returncode == 0:
+        project_id = result.stdout.strip()
+if not project_id:
+    print("tf-env: missing GOOGLE_CLOUD_PROJECT or GOOGLE_PROJECT for gcp provider", file=sys.stderr)
+    raise SystemExit(2)
 
-EveProviderTfEnv.print_kv("TF_VAR_disk_gb", env["VM_DISK_GB"].to_s)
-EveProviderTfEnv.print_kv("TF_VAR_disk_type", env["VM_DISK_TYPE"].to_s)
-EveProviderTfEnv.print_kv("TF_VAR_image_family", env["GCP_IMAGE_FAMILY"].to_s)
-EveProviderTfEnv.print_kv("TF_VAR_image_project", env["GCP_IMAGE_PROJECT"].to_s)
-EveProviderTfEnv.print_kv("TF_VAR_machine_type", env["VM_MACHINE_TYPE"].to_s)
-EveProviderTfEnv.print_kv("TF_VAR_project_id", project_id)
-EveProviderTfEnv.print_kv("TF_VAR_region", env["LOCATION_REGION"].to_s)
+print_kv("TF_VAR_disk_gb", env.get("VM_DISK_GB", ""))
+print_kv("TF_VAR_disk_type", env.get("VM_DISK_TYPE", ""))
+print_kv("TF_VAR_image_family", env.get("GCP_IMAGE_FAMILY", ""))
+print_kv("TF_VAR_image_project", env.get("GCP_IMAGE_PROJECT", ""))
+print_kv("TF_VAR_machine_type", env.get("VM_MACHINE_TYPE", ""))
+print_kv("TF_VAR_project_id", project_id)
+print_kv("TF_VAR_region", env.get("LOCATION_REGION", ""))
 
-my_ip = ENV["MY_IP"].to_s
-if my_ip.empty?
-  warn "tf-env: missing MY_IP for gcp provider"
-  exit 2
-end
-EveProviderTfEnv.print_kv("TF_VAR_ssh_allowed_cidr", "#{my_ip}/32")
-EveProviderTfEnv.print_kv("TF_VAR_zone", env["LOCATION_ZONE"].to_s)
+my_ip = os.environ.get("MY_IP", "")
+if not my_ip:
+    print("tf-env: missing MY_IP for gcp provider", file=sys.stderr)
+    raise SystemExit(2)
+print_kv("TF_VAR_ssh_allowed_cidr", f"{my_ip}/32")
+print_kv("TF_VAR_zone", env.get("LOCATION_ZONE", ""))

@@ -1,271 +1,307 @@
-#!/usr/bin/env ruby
-# Manual/AI-assisted live integration runner for concrete v3 instances.
+#!/usr/bin/env python3
+"""Manual/AI-assisted live integration runner for concrete v3 instances."""
 
-require "fileutils"
-require "json"
-require "open3"
-require "time"
+from __future__ import annotations
 
-ROOT = File.expand_path("..", __dir__)
+import argparse
+import json
+import os
+import subprocess
+import sys
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
 
-def usage
-  warn <<~USAGE
-    Usage:
-      scripts/integration-test --instance <name> [--instance <name> ...] [--registry <path>] [--json] [--all-packages]
-      scripts/integration-test --live --instance <name> [--instance <name> ...] [--report <path>] [--no-cleanup] [--delete-instances] [--all-packages]
+ROOT = Path(__file__).resolve().parents[1]
 
-    Dry-run mode prints the commands a human or LLM should run/review.
-    Live mode creates/starts, waits for SSH, provisions, checks selected packages,
-    and writes a JSON report. Live mode requires YES=1 and runs provider down
-    after each instance unless --no-cleanup or EVE_INTEGRATION_CLEANUP=0 is set.
-    Set EVE_INTEGRATION_DELETE_INSTANCES=1 for temporary smoke entries.
-    --all-packages additionally installs and status-checks every package plugin
-    supported by the selected instance OS/architecture.
-  USAGE
-end
 
-def run_capture(env, *cmd)
-  out, status = Open3.capture2e(env, *cmd, chdir: ROOT)
-  {
-    "command" => cmd.join(" "),
-    "status" => status.success? ? "passed" : "failed",
-    "exit_code" => status.exitstatus,
-    "output" => out.strip
-  }
-end
+def now_iso() -> str:
+    return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
-def run_stream(env, *cmd)
-  output = +""
-  status = nil
 
-  Open3.popen2e(env, *cmd, chdir: ROOT) do |_stdin, stdout_err, wait_thr|
-    stdout_err.each_line do |line|
-      output << line
-      print line
-      $stdout.flush
-    end
-    status = wait_thr.value
-  end
+def parser() -> argparse.ArgumentParser:
+    arg_parser = argparse.ArgumentParser(
+        prog="scripts/integration-test",
+        description="Build dry-run or live integration test plans for concrete instances.",
+    )
+    arg_parser.add_argument("--instance", action="append", default=[])
+    arg_parser.add_argument("--registry")
+    arg_parser.add_argument("--live", action="store_true")
+    arg_parser.add_argument("--json", action="store_true")
+    arg_parser.add_argument("--report")
+    arg_parser.add_argument("--no-cleanup", action="store_true")
+    arg_parser.add_argument("--delete-instances", action="store_true")
+    arg_parser.add_argument("--all-packages", action="store_true")
+    return arg_parser
 
-  {
-    "command" => cmd.join(" "),
-    "status" => status&.success? ? "passed" : "failed",
-    "exit_code" => status&.exitstatus,
-    "output" => output.strip
-  }
-end
 
-def validate_step_result!(result)
-  name = result.fetch("name")
-  return unless name.start_with?("package.status.")
-  return unless result.fetch("status") == "passed"
+def run_capture(env: dict[str, str], *cmd: str) -> dict[str, Any]:
+    result = subprocess.run(cmd, cwd=ROOT, env=env, text=True, capture_output=True, check=False)
+    return {
+        "command": " ".join(cmd),
+        "status": "passed" if result.returncode == 0 else "failed",
+        "exit_code": result.returncode,
+        "output": (result.stdout + result.stderr).strip(),
+    }
 
-  payload = JSON.parse(result.fetch("output"))
-  package_status = payload.fetch("status")
-  result["package_status"] = package_status
-  return if package_status == "installed"
 
-  result["status"] = "failed"
-  result["failure_reason"] = "expected package status installed, got #{package_status}"
-rescue JSON::ParserError, KeyError => e
-  result["status"] = "failed"
-  result["failure_reason"] = "invalid package status JSON: #{e.message}"
-end
+def run_stream(env: dict[str, str], *cmd: str) -> dict[str, Any]:
+    process = subprocess.Popen(cmd, cwd=ROOT, env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    output = ""
+    assert process.stdout is not None
+    for line in process.stdout:
+        output += line
+        print(line, end="")
+        sys.stdout.flush()
+    exit_code = process.wait()
+    return {
+        "command": " ".join(cmd),
+        "status": "passed" if exit_code == 0 else "failed",
+        "exit_code": exit_code,
+        "output": output.strip(),
+    }
 
-def run_json(env, *cmd)
-  result = run_capture(env, *cmd)
-  raise result["output"] unless result["status"] == "passed"
 
-  JSON.parse(result.fetch("output"))
-end
+def validate_step_result(result: dict[str, Any]) -> None:
+    name = str(result["name"])
+    if not name.startswith("package.status.") or result["status"] != "passed":
+        return
+    try:
+        payload = json.loads(str(result["output"]))
+        package_status = payload["status"]
+        result["package_status"] = package_status
+    except (json.JSONDecodeError, KeyError) as error:
+        result["status"] = "failed"
+        result["failure_reason"] = f"invalid package status JSON: {error}"
+        return
+    if package_status != "installed":
+        result["status"] = "failed"
+        result["failure_reason"] = f"expected package status installed, got {package_status}"
 
-instances = []
-registry_path = ENV["EVE_INSTANCE_REGISTRY"]
-live = false
-json = false
-report_path = nil
-cleanup = ENV.fetch("EVE_INTEGRATION_CLEANUP", "1") != "0"
-delete_instances = ENV["EVE_INTEGRATION_DELETE_INSTANCES"] == "1"
-all_packages = ENV["EVE_INTEGRATION_ALL_PACKAGES"] == "1"
 
-args = ARGV.dup
-until args.empty?
-  case args.shift
-  when "--instance"
-    instances << args.shift
-  when "--registry"
-    registry_path = File.expand_path(args.shift, Dir.pwd)
-  when "--live"
-    live = true
-  when "--json"
-    json = true
-  when "--report"
-    report_path = args.shift
-  when "--no-cleanup"
-    cleanup = false
-  when "--delete-instances"
-    delete_instances = true
-  when "--all-packages"
-    all_packages = true
-  when "-h", "--help"
-    usage
-    exit 0
-  else
-    usage
-    exit 2
-  end
-end
+def run_json(env: dict[str, str], *cmd: str) -> dict[str, Any]:
+    result = run_capture(env, *cmd)
+    if result["status"] != "passed":
+        raise RuntimeError(str(result["output"]))
+    parsed = json.loads(str(result["output"]))
+    if not isinstance(parsed, dict):
+        raise RuntimeError(f"{cmd[0]} did not emit a JSON object")
+    return parsed
 
-if instances.empty? && ENV["EVE_INTEGRATION_INSTANCES"]
-  instances = ENV.fetch("EVE_INTEGRATION_INSTANCES").split(",").map(&:strip).reject(&:empty?)
-end
 
-if instances.empty?
-  usage
-  exit 2
-end
+def selected_instances(args: argparse.Namespace) -> list[str]:
+    instances = list(args.instance)
+    if not instances and os.environ.get("EVE_INTEGRATION_INSTANCES"):
+        instances = [part.strip() for part in os.environ["EVE_INTEGRATION_INSTANCES"].split(",") if part.strip()]
+    return instances
 
-if live && ENV["YES"] != "1"
-  warn "integration-test: live mode can create billable or local VMs; rerun with YES=1"
-  exit 2
-end
 
-env = ENV.to_h
-env["EVE_INSTANCE_REGISTRY"] = registry_path if registry_path
+def build_plans(
+    instances: list[str],
+    registry_path: str | None,
+    env: dict[str, str],
+    all_packages: bool,
+) -> list[dict[str, Any]]:
+    plans = []
+    for instance in instances:
+        resolved_cmd = [str(ROOT / "scripts/instance-resolve"), "--instance", instance, "--emit", "json"]
+        if registry_path:
+            resolved_cmd += ["--registry", registry_path]
+        resolved = run_json(env, *resolved_cmd)
+        packages = resolved["bundle_packages"]
+        os_family = resolved["os"]["family"]
 
-plans = instances.map do |instance|
-  resolved_cmd = [File.join(ROOT, "scripts/instance-resolve"), "--instance", instance, "--emit", "json"]
-  resolved_cmd += ["--registry", registry_path] if registry_path
-  resolved = run_json(env, *resolved_cmd)
-  packages = resolved.fetch("bundle_packages")
-  os_family = resolved.fetch("os").fetch("family")
-  package_list_cmd = [File.join(ROOT, "scripts/package-list"), "--instance", instance, "--json"]
-  package_list_cmd += ["--registry", registry_path] if registry_path
-  package_doc = run_json(env, *package_list_cmd)
-  package_smoke_packages = if all_packages
-                             package_doc.fetch("packages")
-                                        .select { |package| package["supported"] && package["installable"] }
-                                        .map { |package| package.fetch("id") }
-                           else
-                             []
-                           end
-  status_packages = (packages + package_smoke_packages).uniq
+        package_list_cmd = [str(ROOT / "scripts/package-list"), "--instance", instance, "--json"]
+        if registry_path:
+            package_list_cmd += ["--registry", registry_path]
+        package_doc = run_json(env, *package_list_cmd)
+        package_smoke_packages = (
+            [
+                package["id"]
+                for package in package_doc["packages"]
+                if package.get("supported") and package.get("installable")
+            ]
+            if all_packages
+            else []
+        )
+        status_packages = sorted(set(packages + package_smoke_packages))
+        plans.append(
+            {
+                "instance": instance,
+                "os_family": os_family,
+                "provider": resolved["machine"]["provider"],
+                "machine": resolved["composition"]["machine"],
+                "os": resolved["os"]["id"],
+                "selected_packages": packages,
+                "package_smoke": "all-supported" if all_packages else "selected-only",
+                "package_smoke_packages": package_smoke_packages,
+                "commands": [
+                    f"make instance.validate INSTANCE={instance}",
+                    f"make up INSTANCE={instance}",
+                    f"make ssh.wait INSTANCE={instance}",
+                    f"make instance.provision INSTANCE={instance}",
+                    f"make instance.status INSTANCE={instance} EMIT=json",
+                    *[
+                        f"make package.install INSTANCE={instance} PACKAGE={package}"
+                        for package in package_smoke_packages
+                    ],
+                    *[f"make package.status INSTANCE={instance} PACKAGE={package}" for package in status_packages],
+                ],
+                "manual_checks": [
+                    "Confirm SSH command execution works.",
+                    f"Review make instance.status INSTANCE={instance} for provider/provision/package state.",
+                    "Package status confirms the package probe reports installed; GUI/remote-access packages "
+                    "still need their package action or manual connection smoke.",
+                    "Confirm Sunshine/RustDesk access and a smooth 3D app or game launch."
+                    if os_family == "windows"
+                    else "Confirm AI/dev package commands run inside the safer Linux environment.",
+                    "Destroy or stop the instance when testing is complete if it is billable.",
+                ],
+            }
+        )
+    return plans
 
-  {
-    "instance" => instance,
-    "os_family" => os_family,
-    "provider" => resolved.fetch("machine").fetch("provider"),
-    "machine" => resolved.fetch("composition").fetch("machine"),
-    "os" => resolved.fetch("os").fetch("id"),
-    "selected_packages" => packages,
-    "package_smoke" => all_packages ? "all-supported" : "selected-only",
-    "package_smoke_packages" => package_smoke_packages,
-    "commands" => [
-      "make instance.validate INSTANCE=#{instance}",
-      "make up INSTANCE=#{instance}",
-      "make ssh.wait INSTANCE=#{instance}",
-      "make instance.provision INSTANCE=#{instance}",
-      "make instance.status INSTANCE=#{instance} EMIT=json",
-      *package_smoke_packages.map { |package| "make package.install INSTANCE=#{instance} PACKAGE=#{package}" },
-      *status_packages.map { |package| "make package.status INSTANCE=#{instance} PACKAGE=#{package}" }
-    ],
-    "manual_checks" => [
-      "Confirm SSH command execution works.",
-      "Review make instance.status INSTANCE=#{instance} for provider/provision/package state.",
-      "Package status confirms the package probe reports installed; GUI/remote-access packages still need their package action or manual connection smoke.",
-      (os_family == "windows" ? "Confirm Sunshine/RustDesk access and a smooth 3D app or game launch." : "Confirm AI/dev package commands run inside the safer Linux environment."),
-      "Destroy or stop the instance when testing is complete if it is billable."
+
+def print_dry_run(plans: list[dict[str, Any]], emit_json: bool) -> None:
+    if emit_json:
+        print(json.dumps({"live": False, "plans": plans}, indent=2))
+        return
+    for plan in plans:
+        print(f"Instance: {plan['instance']} ({plan['os_family']}, {plan['provider']})")
+        print("Commands:")
+        for command in plan["commands"]:
+            print(f"  {command}")
+        print("Manual checks:")
+        for check in plan["manual_checks"]:
+            print(f"  - {check}")
+        print()
+
+
+def live_commands(plan: dict[str, Any]) -> list[list[str]]:
+    instance = plan["instance"]
+    commands = [
+        ["validate", "make", "--no-print-directory", "instance.validate", f"INSTANCE={instance}"],
+        ["up", "make", "--no-print-directory", "up", f"INSTANCE={instance}"],
+        ["ssh.wait", "make", "--no-print-directory", "ssh.wait", f"INSTANCE={instance}"],
+        ["provision", "make", "--no-print-directory", "instance.provision", f"INSTANCE={instance}"],
+        ["status", "make", "--no-print-directory", "instance.status", f"INSTANCE={instance}", "EMIT=json"],
     ]
-  }
-end
+    for package in plan["package_smoke_packages"]:
+        commands.append(
+            [
+                "package.install." + package,
+                "make",
+                "--no-print-directory",
+                "package.install",
+                f"INSTANCE={instance}",
+                f"PACKAGE={package}",
+            ]
+        )
+    for package in sorted(set(plan["selected_packages"] + plan["package_smoke_packages"])):
+        commands.append(
+            [
+                "package.status." + package,
+                "make",
+                "--no-print-directory",
+                "package.status",
+                f"INSTANCE={instance}",
+                f"PACKAGE={package}",
+            ]
+        )
+    return commands
 
-unless live
-  if json
-    puts JSON.pretty_generate({ "live" => false, "plans" => plans })
-  else
-    plans.each do |plan|
-      puts "Instance: #{plan.fetch("instance")} (#{plan.fetch("os_family")}, #{plan.fetch("provider")})"
-      puts "Commands:"
-      plan.fetch("commands").each { |command| puts "  #{command}" }
-      puts "Manual checks:"
-      plan.fetch("manual_checks").each { |check| puts "  - #{check}" }
-      puts
-    end
-  end
-  exit 0
-end
 
-report = {
-  "started_at" => Time.now.utc.iso8601,
-  "live" => true,
-  "instances" => []
-}
+def run_live(
+    plans: list[dict[str, Any]],
+    env: dict[str, str],
+    cleanup: bool,
+    delete_instances: bool,
+    report_path: str | None,
+) -> int:
+    report: dict[str, Any] = {"started_at": now_iso(), "live": True, "instances": []}
+    for plan in plans:
+        instance = plan["instance"]
+        entry = {key: value for key, value in plan.items() if key != "commands"}
+        entry["steps"] = []
+        entry["cleanup"] = []
 
-plans.each do |plan|
-  instance = plan.fetch("instance")
-  entry = plan.reject { |key, _| key == "commands" }
-  entry["steps"] = []
-  entry["cleanup"] = []
+        for name, *cmd in live_commands(plan):
+            print()
+            print(f"== {instance}: {name} ==")
+            print(f"$ {' '.join(cmd)}")
+            result = run_stream(env, *cmd)
+            result["name"] = name
+            validate_step_result(result)
+            entry["steps"].append(result)
+            if result["status"] != "passed":
+                break
 
-  commands = [
-    ["validate", "make", "--no-print-directory", "instance.validate", "INSTANCE=#{instance}"],
-    ["up", "make", "--no-print-directory", "up", "INSTANCE=#{instance}"],
-    ["ssh.wait", "make", "--no-print-directory", "ssh.wait", "INSTANCE=#{instance}"],
-    ["provision", "make", "--no-print-directory", "instance.provision", "INSTANCE=#{instance}"],
-    ["status", "make", "--no-print-directory", "instance.status", "INSTANCE=#{instance}", "EMIT=json"]
-  ]
-  plan.fetch("package_smoke_packages").each do |package|
-    commands << ["package.install.#{package}", "make", "--no-print-directory", "package.install", "INSTANCE=#{instance}", "PACKAGE=#{package}"]
-  end
-  (plan.fetch("selected_packages") + plan.fetch("package_smoke_packages")).uniq.each do |package|
-    commands << ["package.status.#{package}", "make", "--no-print-directory", "package.status", "INSTANCE=#{instance}", "PACKAGE=#{package}"]
-  end
+        if cleanup:
+            cleanup_commands = [["cleanup.down", "make", "--no-print-directory", "down", f"INSTANCE={instance}"]]
+            if delete_instances:
+                cleanup_commands.append(
+                    [
+                        "cleanup.delete",
+                        "make",
+                        "--no-print-directory",
+                        "instance.delete",
+                        f"INSTANCE={instance}",
+                        "PURGE=1",
+                    ]
+                )
+            for name, *cmd in cleanup_commands:
+                print()
+                print(f"== {instance}: {name} ==")
+                print(f"$ {' '.join(cmd)}")
+                result = run_stream(env, *cmd)
+                result["name"] = name
+                entry["cleanup"].append(result)
 
-  commands.each do |name, *cmd|
-    puts
-    puts "== #{instance}: #{name} =="
-    puts "$ #{cmd.join(" ")}"
-    result = run_stream(env, *cmd)
-    result["name"] = name
-    validate_step_result!(result)
-    entry.fetch("steps") << result
-    break if result["status"] != "passed"
-  end
+        steps_passed = all(step["status"] == "passed" for step in entry["steps"])
+        cleanup_passed = all(step["status"] == "passed" for step in entry["cleanup"])
+        entry["status"] = "passed" if steps_passed and cleanup_passed else "failed"
+        report["instances"].append(entry)
 
-  if cleanup
-    cleanup_commands = [
-      ["cleanup.down", "make", "--no-print-directory", "down", "INSTANCE=#{instance}"]
-    ]
-    if delete_instances
-      cleanup_commands << [
-        "cleanup.delete",
-        "make",
-        "--no-print-directory",
-        "instance.delete",
-        "INSTANCE=#{instance}",
-        "PURGE=1"
-      ]
-    end
+    report["finished_at"] = now_iso()
+    output_path = (
+        Path(report_path)
+        if report_path
+        else ROOT / "tmp" / f"integration-report-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}.json"
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    print(output_path)
+    return 0 if all(entry["status"] == "passed" for entry in report["instances"]) else 1
 
-    cleanup_commands.each do |name, *cmd|
-      puts
-      puts "== #{instance}: #{name} =="
-      puts "$ #{cmd.join(" ")}"
-      result = run_stream(env, *cmd)
-      result["name"] = name
-      entry.fetch("cleanup") << result
-    end
-  end
 
-  steps_passed = entry.fetch("steps").all? { |step| step["status"] == "passed" }
-  cleanup_passed = entry.fetch("cleanup").all? { |step| step["status"] == "passed" }
-  entry["status"] = steps_passed && cleanup_passed ? "passed" : "failed"
-  report.fetch("instances") << entry
-end
+def main() -> int:
+    args = parser().parse_args()
+    instances = selected_instances(args)
+    if not instances:
+        parser().print_usage(sys.stderr)
+        return 2
+    if args.live and os.environ.get("YES") != "1":
+        print("integration-test: live mode can create billable or local VMs; rerun with YES=1", file=sys.stderr)
+        return 2
 
-report["finished_at"] = Time.now.utc.iso8601
-report_path ||= File.join(ROOT, "tmp", "integration-report-#{Time.now.utc.strftime("%Y%m%dT%H%M%SZ")}.json")
-FileUtils.mkdir_p(File.dirname(report_path))
-File.write(report_path, JSON.pretty_generate(report) + "\n")
-puts report_path
-exit(report.fetch("instances").all? { |entry| entry["status"] == "passed" } ? 0 : 1)
+    registry_path = (
+        str(Path(args.registry).expanduser().resolve())
+        if args.registry
+        else os.environ.get("EVE_INSTANCE_REGISTRY")
+    )
+    env = os.environ.copy()
+    if registry_path:
+        env["EVE_INSTANCE_REGISTRY"] = registry_path
+    cleanup = os.environ.get("EVE_INTEGRATION_CLEANUP", "1") != "0" and not args.no_cleanup
+    delete_instances = os.environ.get("EVE_INTEGRATION_DELETE_INSTANCES") == "1" or args.delete_instances
+    all_packages = os.environ.get("EVE_INTEGRATION_ALL_PACKAGES") == "1" or args.all_packages
+
+    plans = build_plans(instances, registry_path, env, all_packages)
+    if not args.live:
+        print_dry_run(plans, args.json)
+        return 0
+    return run_live(plans, env, cleanup, delete_instances, args.report)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

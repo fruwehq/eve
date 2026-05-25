@@ -1,107 +1,103 @@
-#!/usr/bin/env ruby
-# Synchronize external plugin repositories into .eve/plugins.
+#!/usr/bin/env python3
+"""Synchronize external plugin repositories into .eve/plugins."""
 
-require "fileutils"
-require "yaml"
+from __future__ import annotations
 
-ROOT = File.expand_path("..", __dir__)
-$LOAD_PATH.unshift(File.join(ROOT, "core"))
-require "sdk"
-DEFAULT_SOURCES = Eve::SDK::Workdir.plugin_sources_path
-DEFAULT_DEST = Eve::SDK::Workdir.plugins_dir
+import argparse
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any
 
-def usage
-  warn <<~USAGE
-    Usage:
-      scripts/plugins-sync [--sources <path>] [--dest <path>]
+import yaml
 
-    Source file shape:
-      sources:
-        - id: example
-          url: https://github.com/org/eve-plugin-example.git
-          ref: <tag-or-sha>
-  USAGE
-end
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
-sources_path = DEFAULT_SOURCES
-dest_root = DEFAULT_DEST
+from eve_sdk.workdir import Workdir  # noqa: E402
 
-args = ARGV.dup
-until args.empty?
-  case args.shift
-  when "--sources"
-    sources_path = File.expand_path(args.shift, Dir.pwd)
-  when "--dest"
-    dest_root = File.expand_path(args.shift, Dir.pwd)
-  when "-h", "--help"
-    usage
-    exit 0
-  else
-    usage
-    exit 2
-  end
-end
 
-unless File.exist?(sources_path)
-  puts "No plugin sources configured: #{sources_path}"
-  exit 0
-end
+def parser() -> argparse.ArgumentParser:
+    arg_parser = argparse.ArgumentParser(
+        prog="scripts/plugins-sync",
+        description="Synchronize external plugin repositories into .eve/plugins.",
+    )
+    arg_parser.add_argument("--sources", default=str(Workdir.plugin_sources_path()))
+    arg_parser.add_argument("--dest", default=str(Workdir.plugins_dir()))
+    return arg_parser
 
-doc = YAML.safe_load(File.read(sources_path), permitted_classes: [], aliases: true) || {}
-unless doc.is_a?(Hash)
-  warn "plugins-sync: sources file must be a map"
-  exit 2
-end
 
-sources = doc["sources"] || []
-unless sources.is_a?(Array)
-  warn "plugins-sync: sources must be a list"
-  exit 2
-end
+def load_sources(path: Path) -> list[dict[str, str]]:
+    if not path.exists():
+        print(f"No plugin sources configured: {path}")
+        raise SystemExit(0)
+    doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(doc, dict):
+        print("plugins-sync: sources file must be a map", file=sys.stderr)
+        raise SystemExit(2)
+    sources = doc.get("sources") or []
+    if not isinstance(sources, list):
+        print("plugins-sync: sources must be a list", file=sys.stderr)
+        raise SystemExit(2)
 
-normalized_sources = sources.each_with_index.map do |source, index|
-  unless source.is_a?(Hash)
-    warn "plugins-sync: source #{index + 1} must be a map"
-    exit 2
-  end
+    normalized = []
+    for index, source in enumerate(sources, start=1):
+        if not isinstance(source, dict):
+            print(f"plugins-sync: source {index} must be a map", file=sys.stderr)
+            raise SystemExit(2)
+        normalized.append(validate_source(index, source))
+    return normalized
 
-  id = source["id"]
-  url = source["url"]
-  ref = source["ref"]
-  ref = "" if ref.nil?
 
-  unless id.is_a?(String) && url.is_a?(String) && ref.is_a?(String)
-    warn "plugins-sync: source #{index + 1} id, url, and ref must be strings"
-    exit 2
-  end
+def validate_source(index: int, source: dict[str, Any]) -> dict[str, str]:
+    plugin_id = source.get("id")
+    url = source.get("url")
+    ref = source.get("ref") or ""
+    if not all(isinstance(value, str) for value in [plugin_id, url, ref]):
+        print(f"plugins-sync: source {index} id, url, and ref must be strings", file=sys.stderr)
+        raise SystemExit(2)
+    if not re.fullmatch(r"[a-z][a-z0-9-]*", plugin_id) or not url:
+        print(
+            f"plugins-sync: source {index} needs id matching [a-z][a-z0-9-]* and non-empty url",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+    if not ref and os.environ.get("EVE_ALLOW_UNPINNED_PLUGINS") != "1":
+        print(
+            f"plugins-sync: source {plugin_id} is missing ref; set EVE_ALLOW_UNPINNED_PLUGINS=1 to allow this",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    return {"id": plugin_id, "url": url, "ref": ref}
 
-  unless id.match?(/\A[a-z][a-z0-9-]*\z/) && !url.empty?
-    warn "plugins-sync: source #{index + 1} needs id matching [a-z][a-z0-9-]* and non-empty url"
-    exit 2
-  end
 
-  if ref.empty? && ENV["EVE_ALLOW_UNPINNED_PLUGINS"] != "1"
-    warn "plugins-sync: source #{id} is missing ref; set EVE_ALLOW_UNPINNED_PLUGINS=1 to allow this"
-    exit 1
-  end
+def run_checked(*cmd: str) -> None:
+    result = subprocess.run(cmd, cwd=ROOT, check=False)
+    if result.returncode != 0:
+        raise SystemExit(result.returncode)
 
-  { "id" => id, "url" => url, "ref" => ref }
-end
 
-normalized_sources.each do |source|
-  id = source.fetch("id")
-  url = source.fetch("url")
-  ref = source.fetch("ref")
-  dest = File.join(dest_root, id)
-  FileUtils.mkdir_p(dest_root)
+def main() -> int:
+    args = parser().parse_args()
+    sources_path = Path(args.sources).expanduser().resolve()
+    dest_root = Path(args.dest).expanduser().resolve()
+    sources = load_sources(sources_path)
 
-  if Dir.exist?(File.join(dest, ".git"))
-    system("git", "-C", dest, "fetch", "--tags", "--prune") || exit(1)
-  else
-    system("git", "clone", url, dest) || exit(1)
-  end
+    for source in sources:
+        dest = dest_root / source["id"]
+        dest_root.mkdir(parents=True, exist_ok=True)
+        if (dest / ".git").is_dir():
+            run_checked("git", "-C", str(dest), "fetch", "--tags", "--prune")
+        else:
+            run_checked("git", "clone", source["url"], str(dest))
+        if source["ref"]:
+            run_checked("git", "-C", str(dest), "checkout", source["ref"])
 
-  system("git", "-C", dest, "checkout", ref) || exit(1) unless ref.empty?
-end
+    print(f"Plugin sources synchronized: {len(sources)}")
+    return 0
 
-puts "Plugin sources synchronized: #{normalized_sources.length}"
+
+if __name__ == "__main__":
+    raise SystemExit(main())

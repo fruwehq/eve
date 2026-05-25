@@ -6,31 +6,24 @@ cd "$(git rev-parse --show-toplevel)"
 
 FAIL=0
 
-printf '  -- ruby syntax --\n'
-while IFS= read -r file; do
-  if ! ruby -c "$file" >/dev/null; then
-    FAIL=$((FAIL + 1))
-  fi
-done < <(
-  find scripts -type f -print |
-    while IFS= read -r file; do
-      head -c 80 "$file" | grep -qE '^#!.*ruby' && printf '%s\n' "$file"
-    done
-)
-
 printf '  -- yaml syntax --\n'
 YAML_FILES=()
 while IFS= read -r file; do
   YAML_FILES+=("$file")
 done < <(find .github config plugins tests -type f \( -name '*.yaml' -o -name '*.yml' \) | sort)
-if ! ruby -ryaml -e '
-  ARGV.each do |path|
-    YAML.safe_load(File.read(path), permitted_classes: [], aliases: true)
-  rescue StandardError => e
-    warn "#{path}: #{e.class}: #{e.message}"
-    exit 1
-  end
-' "${YAML_FILES[@]}"; then
+if ! python3 - "${YAML_FILES[@]}" <<'PY'; then
+import sys
+
+import yaml
+
+for path in sys.argv[1:]:
+    try:
+        with open(path, encoding="utf-8") as handle:
+            yaml.safe_load(handle)
+    except Exception as error:
+        print(f"{path}: {error.__class__.__name__}: {error}", file=sys.stderr)
+        raise SystemExit(1) from error
+PY
   FAIL=$((FAIL + 1))
 fi
 
