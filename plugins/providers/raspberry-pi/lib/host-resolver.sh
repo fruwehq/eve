@@ -6,6 +6,8 @@ resolve_host_ip() {
   local ip=""
   local os_name
 
+  # If $host is already an IPv4 literal (digits and dots only), echo it back
+  # without invoking the resolver. Hostnames (containing letters) fall through.
   case "$host" in
     ''|*[!0-9.]*) ;;
     *.*) printf '%s\n' "$host"; return 0 ;;
