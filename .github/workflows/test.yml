@@ -138,7 +138,7 @@ jobs:
             exit "$status"
           }
           trap finish_timing EXIT
-          make test.provision-runner
+          poetry run make test.provision-runner
 
       - name: Run make test
         env:
@@ -154,7 +154,7 @@ jobs:
             exit "$status"
           }
           trap finish_timing EXIT
-          make test
+          poetry run make test
 
       - name: Timing summary
         if: always()
