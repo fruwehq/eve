@@ -8,7 +8,7 @@
 				package.reinstall package.select package.status package.uninstall package.unselect package.verify \
 				plugins.list plugins.sync plugins.validate provider.action provider.status providers.status provision \
 				provision.clear-state provision.restart provision.wait reboot show-password ssh ssh.run \
-				ssh.wait start status stop test test.catalog test.core-boundary test.docker test.doctor test.instances test.lifecycle test.lint test.os-portability test.plugins \
+				ssh.wait start status stop test test.catalog test.ci-pipeline test.core-boundary test.docker test.doctor test.instances test.lifecycle test.lint test.os-portability test.plugins \
 				test.plugins-sync test.provision-runner test.python test.config-save test.schemas test.secrets test.shellcheck test.state-concurrency test.terraform test.tf-isolation test.tui \
 				test.update-golden tui up update upload validate
 
@@ -394,6 +394,9 @@ test: ## Run all tests (catalog, instances, plugins, terraform, lint)
 
 test.catalog: ## Validate catalog provider/platform/content choices
 	@./scripts/test-catalog
+
+test.ci-pipeline: ## Validate GitHub Actions workflow and release asset assumptions
+	@./scripts/test-ci-pipeline
 
 test.core-boundary: ## Fail if central scripts reference provider/OS IDs outside allowlist
 	@./scripts/test-core-boundary

@@ -1,0 +1,154 @@
+#!/usr/bin/env ruby
+# Validate GitHub Actions pipeline assumptions that local unit tests do not cover.
+
+require "net/http"
+require "optparse"
+require "uri"
+require "yaml"
+
+ROOT = `git rev-parse --show-toplevel`.strip
+Dir.chdir(ROOT)
+
+options = { remote: true }
+OptionParser.new do |parser|
+  parser.banner = "Usage: scripts/test-ci-pipeline [--offline]"
+  parser.on("--offline", "Skip remote release-asset checks") { options[:remote] = false }
+end.parse!
+
+@failures = 0
+
+def pass(message)
+  puts "  [OK] #{message}"
+end
+
+def fail_check(message)
+  @failures += 1
+  warn "  [FAIL] #{message}"
+end
+
+def assert_check(message)
+  if yield
+    pass(message)
+  else
+    fail_check(message)
+  end
+end
+
+def http_head_ok?(url, redirects: 5)
+  return [false, "too many redirects"] if redirects.negative?
+
+  uri = URI(url)
+  response = Net::HTTP.start(
+    uri.hostname,
+    uri.port,
+    use_ssl: uri.scheme == "https",
+    open_timeout: 10,
+    read_timeout: 10,
+  ) do |http|
+    http.request(Net::HTTP::Head.new(uri))
+  end
+
+  case response
+  when Net::HTTPSuccess
+    [true, response.code]
+  when Net::HTTPRedirection
+    location = response["location"]
+    redirected = URI.join(url, location).to_s
+    http_head_ok?(redirected, redirects: redirects - 1)
+  else
+    [false, "#{response.code} #{response.message}"]
+  end
+rescue StandardError => e
+  [false, e.message]
+end
+
+workflow_path = ".github/workflows/test.yml"
+workflow = YAML.safe_load(File.read(workflow_path), permitted_classes: [], aliases: true)
+jobs = workflow.fetch("jobs")
+
+puts "\n== ci-pipeline workflow contract =="
+
+triggers = workflow["on"] || workflow[true]
+assert_check("workflow runs on pull_request") do
+  triggers.is_a?(Hash) && triggers.key?("pull_request")
+end
+
+test_job = jobs.fetch("test")
+matrix_os = test_job.dig("strategy", "matrix", "os")
+assert_check("test matrix includes macos-latest and ubuntu-24.04") do
+  matrix_os.is_a?(Array) && matrix_os.sort == ["macos-latest", "ubuntu-24.04"]
+end
+
+test_steps = test_job.fetch("steps")
+step_names = test_steps.filter_map { |step| step["name"] if step.is_a?(Hash) }
+assert_check("test job installs Terramate") { step_names.include?("Install Terramate") }
+assert_check("test job runs make test") { step_names.include?("Run make test") }
+
+terramate_step = test_steps.find { |step| step.is_a?(Hash) && step["name"] == "Install Terramate" }
+terramate_version = terramate_step&.dig("env", "TERRAMATE_VERSION")
+terramate_run = terramate_step&.fetch("run", "")
+
+assert_check("Terramate version is declared in workflow") do
+  terramate_version.is_a?(String) && !terramate_version.empty?
+end
+assert_check("Terramate x86_64 tarball mapping matches release asset names") do
+  terramate_run.include?("x86_64|amd64) tool_arch=x86_64 ;;")
+end
+assert_check("Terramate arm64 tarball mapping matches release asset names") do
+  terramate_run.include?("arm64|aarch64) tool_arch=arm64 ;;")
+end
+
+docker_slim_job = jobs.fetch("docker-runtime-slim")
+docker_slim_steps = docker_slim_job.fetch("steps")
+docker_slim_step_names = docker_slim_steps.filter_map { |step| step["name"] if step.is_a?(Hash) }
+assert_check("docker-runtime-slim runs on ubuntu-24.04") do
+  docker_slim_job["runs-on"] == "ubuntu-24.04"
+end
+assert_check("docker-runtime-slim builds and smokes image") do
+  docker_slim_step_names.include?("Build slim runtime image") &&
+    docker_slim_step_names.include?("Smoke slim runtime image")
+end
+
+docker_full_job = jobs.fetch("docker-runtime-full")
+assert_check("docker-runtime-full is schedule-only") do
+  docker_full_job["if"].to_s.include?("github.event_name == 'schedule'")
+end
+
+puts "\n== ci-pipeline Terramate asset checks =="
+
+if options[:remote]
+  if terramate_version.nil? || terramate_version.empty?
+    fail_check("Terramate release asset checks require TERRAMATE_VERSION")
+  else
+    {
+      "darwin" => ["arm64", "x86_64"],
+      "linux" => ["arm64", "x86_64"],
+    }.each do |os_name, arches|
+      arches.each do |arch|
+        asset = "terramate_#{terramate_version}_#{os_name}_#{arch}.tar.gz"
+        url = "https://github.com/terramate-io/terramate/releases/download/v#{terramate_version}/#{asset}"
+        ok, detail = http_head_ok?(url)
+        assert_check("#{asset} exists upstream") { ok }
+        warn "    #{url}: #{detail}" unless ok
+      end
+    end
+  end
+else
+  puts "  [SKIP] remote Terramate release-asset checks (--offline)"
+end
+
+puts "\n== ci-pipeline Docker installer contract =="
+
+["docker/Dockerfile", "docker/Dockerfile.toolchain"].each do |path|
+  content = File.read(path)
+  assert_check("#{path} maps Terraform amd64 separately from Terramate x86_64") do
+    content.include?("terraform_arch=amd64") && content.include?("terramate_arch=x86_64")
+  end
+end
+
+if @failures.positive?
+  warn "\n#{@failures} ci-pipeline check(s) failed."
+  exit 1
+end
+
+puts "\nAll ci-pipeline checks passed."

@@ -38,7 +38,7 @@ jobs:
           esac
           case "$(uname -m)" in
             arm64|aarch64) tool_arch=arm64 ;;
-            x86_64|amd64) tool_arch=amd64 ;;
+            x86_64|amd64) tool_arch=x86_64 ;;
             *) echo "unsupported architecture for Terramate install: $(uname -m)" >&2; exit 2 ;;
           esac
           curl -fsSLo "$RUNNER_TEMP/terramate.tar.gz" "https://github.com/terramate-io/terramate/releases/download/v${TERRAMATE_VERSION}/terramate_${TERRAMATE_VERSION}_${tool_os}_${tool_arch}.tar.gz"

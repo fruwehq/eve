@@ -21,7 +21,7 @@ brew install hashicorp/tap/terraform
 TERRAMATE_VERSION=0.17.0
 case "$(uname -m)" in
   arm64|aarch64) TERRAMATE_ARCH=arm64 ;;
-  x86_64|amd64) TERRAMATE_ARCH=amd64 ;;
+  x86_64|amd64) TERRAMATE_ARCH=x86_64 ;;
   *) echo "unsupported architecture: $(uname -m)" >&2; exit 2 ;;
 esac
 curl -fsSLo /tmp/terramate.tar.gz "https://github.com/terramate-io/terramate/releases/download/v${TERRAMATE_VERSION}/terramate_${TERRAMATE_VERSION}_darwin_${TERRAMATE_ARCH}.tar.gz"
@@ -62,7 +62,7 @@ sudo apt-get install -y --no-install-recommends terraform
 TERRAMATE_VERSION=0.17.0
 case "$(uname -m)" in
   arm64|aarch64) TERRAMATE_ARCH=arm64 ;;
-  x86_64|amd64) TERRAMATE_ARCH=amd64 ;;
+  x86_64|amd64) TERRAMATE_ARCH=x86_64 ;;
   *) echo "unsupported architecture: $(uname -m)" >&2; exit 2 ;;
 esac
 curl -fsSLo /tmp/terramate.tar.gz "https://github.com/terramate-io/terramate/releases/download/v${TERRAMATE_VERSION}/terramate_${TERRAMATE_VERSION}_linux_${TERRAMATE_ARCH}.tar.gz"
