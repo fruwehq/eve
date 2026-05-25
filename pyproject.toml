@@ -9,6 +9,7 @@ license = "MIT"
 readme = "README.md"
 requires-python = ">=3.12,<4.0"
 dependencies = [
+    "jsonschema (>=4.25.1,<5.0.0)",
     "pyyaml (>=6.0.3,<7.0.0)",
     "textual (>=8.2.5,<9.0.0)"
 ]
@@ -35,6 +36,9 @@ python_version = "3.12"
 strict = true
 warn_unreachable = true
 files = ["scripts/eve-tui"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
 
 [tool.poetry]
 package-mode = false
