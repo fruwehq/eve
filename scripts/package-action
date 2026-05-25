@@ -1,164 +1,155 @@
-#!/usr/bin/env ruby
-# Dispatch package-defined UI/remote actions for a concrete instance.
+#!/usr/bin/env python3
+from __future__ import annotations
 
-require "json"
-require "open3"
-require "English"
-require "fileutils"
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
 
-ROOT = File.expand_path("..", __dir__)
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
-def usage
-  warn <<~USAGE
-    Usage:
-      scripts/package-action --instance <name> --package <id> --action <id> [--dry-run]
-  USAGE
-end
+from eve_sdk.dispatch import DispatchError, exec_cmd, open_url, prepare_overlay, run_json  # noqa: E402
+from eve_sdk.workdir import Workdir  # noqa: E402
 
-def run_json(*cmd)
-  out, status = Open3.capture2e(*cmd)
-  raise out unless status.success?
 
-  JSON.parse(out)
-end
+def usage() -> None:
+    print(
+        "Usage:\n  scripts/package-action --instance <name> --package <id> --action <id> [--dry-run]",
+        file=sys.stderr,
+    )
 
-def prepare_instance_overlay(instance_name)
-  path_args = [File.join(ROOT, "scripts/instance-paths"), "--instance", instance_name, "--emit", "json"]
-  if ENV["EVE_INSTANCE_REGISTRY"] && !ENV["EVE_INSTANCE_REGISTRY"].empty?
-    path_args += ["--registry", ENV["EVE_INSTANCE_REGISTRY"]]
-  end
-  paths = run_json(*path_args)
-  overlay = paths.fetch("INSTANCE_OVERLAY_PATH")
-  FileUtils.mkdir_p(File.dirname(overlay))
-  overlay_args = [
-    File.join(ROOT, "scripts/instance-profile-overlay"),
-    "--instance", instance_name,
-    "--output", overlay
-  ]
-  if ENV["EVE_INSTANCE_REGISTRY"] && !ENV["EVE_INSTANCE_REGISTRY"].empty?
-    overlay_args += ["--registry", ENV["EVE_INSTANCE_REGISTRY"]]
-  end
-  out, status = Open3.capture2e(*overlay_args)
-  raise out unless status.success?
 
-  ENV["EVE_CATALOG_LOCAL"] = overlay
-  ENV["EVE_INSTANCE_NAME"] = instance_name
-end
+def parse_args(argv: list[str]) -> tuple[str, str, str, bool]:
+    instance_name: str | None = None
+    package_id: str | None = None
+    action_id: str | None = None
+    dry_run = False
+    args = list(argv)
+    while args:
+        arg = args.pop(0)
+        if arg == "--instance" and args:
+            instance_name = args.pop(0)
+        elif arg == "--package" and args:
+            package_id = args.pop(0)
+        elif arg == "--action" and args:
+            action_id = args.pop(0)
+        elif arg == "--dry-run":
+            dry_run = True
+        elif arg in {"-h", "--help"}:
+            usage()
+            raise SystemExit(0)
+        else:
+            usage()
+            raise SystemExit(2)
+    if not instance_name or not package_id or not action_id:
+        usage()
+        raise SystemExit(2)
+    return instance_name, package_id, action_id, dry_run
 
-def run_action_target(target, instance_name)
-  case target
-  when "console.open"
-    exec File.join(ROOT, "scripts/remote-console"), instance_name
-  when "moonlight.open"
-    system(File.join(ROOT, "scripts/remote-sunshine-wait"), instance_name) || exit($CHILD_STATUS.exitstatus || 1)
-    exec File.join(ROOT, "scripts/remote-moonlight"), instance_name
-  when "moonlight.pair"
-    system(File.join(ROOT, "scripts/remote-sunshine-wait"), instance_name) || exit($CHILD_STATUS.exitstatus || 1)
-    exec File.join(ROOT, "scripts/remote-moonlight-pair"), instance_name
-  when "rdp.open"
-    exec File.join(ROOT, "scripts/remote-rdp"), instance_name
-  when "rustdesk.connect"
-    exec File.join(ROOT, "scripts/remote-rustdesk"), instance_name, "connect"
-  when "rustdesk.info"
-    exec File.join(ROOT, "scripts/remote-rustdesk"), instance_name
-  when "sunshine.open"
-    ip, status = Open3.capture2e(File.join(ROOT, "scripts/instance-ip"), instance_name)
-    raise "could not resolve IP for #{instance_name}: #{ip.strip}" unless status.success?
-    ip = ip.strip
-    raise "could not resolve IP for #{instance_name}" if ip.empty?
 
-    url = "https://#{ip}:47990"
-    exec "open", url if RUBY_PLATFORM.include?("darwin")
-    exec "xdg-open", url
-  when "sunshine.wait"
-    exec File.join(ROOT, "scripts/remote-sunshine-wait"), instance_name
-  when "thinlinc.web"
-    exec File.join(ROOT, "scripts/remote-thinlinc"), instance_name
-  when "thinlinc.client"
-    exec File.join(ROOT, "scripts/remote-thinlinc-client"), instance_name
-  when "vnc.open"
-    exec File.join(ROOT, "scripts/remote-vnc"), instance_name
-  when "waypipe.open"
-    if ENV["APP"] && !ENV["APP"].empty?
-      exec File.join(ROOT, "scripts/remote-waypipe"), instance_name, ENV["APP"]
-    end
-    exec File.join(ROOT, "scripts/remote-waypipe"), instance_name
-  when "xpra.apps"
-    exec File.join(ROOT, "scripts/remote-xpra"), instance_name, "apps"
-  when "xpra.attach"
-    exec File.join(ROOT, "scripts/remote-xpra"), instance_name, "attach"
-  when "xpra.desktop"
-    exec File.join(ROOT, "scripts/remote-xpra"), instance_name, "desktop"
-  when "xpra.run"
-    app = ENV["APP"]
-    raise "APP is required for xpra.run" if app.nil? || app.empty?
+def wait_for_sunshine(instance_name: str) -> None:
+    status = subprocess.run(
+        [str(Workdir.repo_root() / "scripts/remote-sunshine-wait"), instance_name],
+        cwd=Workdir.repo_root(),
+        check=False,
+    ).returncode
+    if status != 0:
+        raise SystemExit(status)
 
-    exec File.join(ROOT, "scripts/remote-xpra"), instance_name, "run", app
-  when "xpra.start"
-    exec File.join(ROOT, "scripts/remote-xpra"), instance_name, "start"
-  when "xpra.status"
-    exec File.join(ROOT, "scripts/remote-xpra"), instance_name, "status"
-  when "xpra.stop"
-    exec File.join(ROOT, "scripts/remote-xpra"), instance_name, "stop"
-  else
-    raise "unsupported package action target: #{target}"
-  end
-end
 
-instance_name = nil
-package_id = nil
-action_id = nil
-dry_run = false
+def run_action_target(target: str, instance_name: str) -> None:
+    root = Workdir.repo_root()
+    mapping = {
+        "console.open": ["scripts/remote-console", instance_name],
+        "rdp.open": ["scripts/remote-rdp", instance_name],
+        "rustdesk.connect": ["scripts/remote-rustdesk", instance_name, "connect"],
+        "rustdesk.info": ["scripts/remote-rustdesk", instance_name],
+        "sunshine.wait": ["scripts/remote-sunshine-wait", instance_name],
+        "thinlinc.web": ["scripts/remote-thinlinc", instance_name],
+        "thinlinc.client": ["scripts/remote-thinlinc-client", instance_name],
+        "vnc.open": ["scripts/remote-vnc", instance_name],
+        "xpra.apps": ["scripts/remote-xpra", instance_name, "apps"],
+        "xpra.attach": ["scripts/remote-xpra", instance_name, "attach"],
+        "xpra.desktop": ["scripts/remote-xpra", instance_name, "desktop"],
+        "xpra.start": ["scripts/remote-xpra", instance_name, "start"],
+        "xpra.status": ["scripts/remote-xpra", instance_name, "status"],
+        "xpra.stop": ["scripts/remote-xpra", instance_name, "stop"],
+    }
+    if target in {"moonlight.open", "moonlight.pair"}:
+        wait_for_sunshine(instance_name)
+        script = "scripts/remote-moonlight" if target == "moonlight.open" else "scripts/remote-moonlight-pair"
+        exec_cmd([str(root / script), instance_name])
+    if target == "sunshine.open":
+        result = subprocess.run(
+            [str(root / "scripts/instance-ip"), instance_name],
+            cwd=root,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            details = f"{result.stdout.strip()}{result.stderr.strip()}"
+            raise DispatchError(f"could not resolve IP for {instance_name}: {details}")
+        ip = result.stdout.strip()
+        if not ip:
+            raise DispatchError(f"could not resolve IP for {instance_name}")
+        open_url(f"https://{ip}:47990")
+    if target == "waypipe.open":
+        app = os.environ.get("APP")
+        cmd = [str(root / "scripts/remote-waypipe"), instance_name]
+        if app:
+            cmd.append(app)
+        exec_cmd(cmd)
+    if target == "xpra.run":
+        app = os.environ.get("APP")
+        if not app:
+            raise DispatchError("APP is required for xpra.run")
+        exec_cmd([str(root / "scripts/remote-xpra"), instance_name, "run", app])
+    if target in mapping:
+        rel = mapping[target]
+        exec_cmd([str(root / rel[0]), *rel[1:]])
+    raise DispatchError(f"unsupported package action target: {target}")
 
-args = ARGV.dup
-until args.empty?
-  case args.shift
-  when "--instance"
-    instance_name = args.shift
-  when "--package"
-    package_id = args.shift
-  when "--action"
-    action_id = args.shift
-  when "--dry-run"
-    dry_run = true
-  when "-h", "--help"
-    usage
-    exit 0
-  else
-    usage
-    exit 2
-  end
-end
 
-unless instance_name && package_id && action_id
-  usage
-  exit 2
-end
+def main(argv: list[str]) -> int:
+    instance_name, package_id, action_id, dry_run = parse_args(argv)
+    try:
+        doc = run_json(str(Workdir.repo_root() / "scripts/package-list"), "--instance", instance_name, "--json")
+        package = next((entry for entry in doc["packages"] if entry["id"] == package_id), None)
+        if package is None:
+            raise DispatchError(f"unknown package: {package_id}")
+        action = next((entry for entry in package.get("actions", []) if entry["id"] == action_id), None)
+        if action is None:
+            raise DispatchError(f"unknown action {action_id} for package {package_id}")
+        if dry_run:
+            print(
+                json.dumps(
+                    {
+                        "kind": "package-action",
+                        "instance": instance_name,
+                        "package": package_id,
+                        "action": action_id,
+                        "label": action["label"],
+                        "target": action["target"],
+                        "dry_run": True,
+                    },
+                    indent=2,
+                )
+            )
+            return 0
+        overlay = prepare_overlay(instance_name, os.environ.get("EVE_INSTANCE_REGISTRY"))
+        os.environ["EVE_CATALOG_LOCAL"] = overlay
+        os.environ["EVE_INSTANCE_NAME"] = instance_name
+        run_action_target(action["target"], instance_name)
+        return 0
+    except SystemExit as error:
+        raise error
+    except Exception as error:
+        print(f"package-action: {error}", file=sys.stderr)
+        return 1
 
-begin
-  doc = run_json(File.join(ROOT, "scripts/package-list"), "--instance", instance_name, "--json")
-  package = doc.fetch("packages").find { |entry| entry["id"] == package_id }
-  raise "unknown package: #{package_id}" unless package
 
-  action = package.fetch("actions", []).find { |entry| entry["id"] == action_id }
-  raise "unknown action #{action_id} for package #{package_id}" unless action
-
-  if dry_run
-    puts JSON.pretty_generate({
-      "kind" => "package-action",
-      "instance" => instance_name,
-      "package" => package_id,
-      "action" => action_id,
-      "label" => action.fetch("label"),
-      "target" => action.fetch("target"),
-      "dry_run" => true
-    })
-    exit 0
-  end
-
-  prepare_instance_overlay(instance_name)
-  run_action_target(action.fetch("target"), instance_name)
-rescue StandardError => e
-  warn "package-action: #{e.message}"
-  exit 1
-end
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

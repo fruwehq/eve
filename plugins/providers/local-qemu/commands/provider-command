@@ -1,2 +1,11 @@
-#!/usr/bin/env ruby
-require_relative "../../../../core/sdk"; Eve::Provider.dispatch(ARGV)
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
+
+from eve_sdk.provider_command import dispatch
+
+raise SystemExit(dispatch(sys.argv[1:]))

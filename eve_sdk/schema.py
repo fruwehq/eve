@@ -45,6 +45,14 @@ def validate_schema(name: str, data: Any, label: str) -> None:
         raise SchemaValidationError(format_errors(label, errors))
 
 
+def validate_input(data: Any) -> None:
+    validate_schema("resolved-instance.schema.json", data, "Resolved instance")
+
+
+def validate_output(data: Any, def_name: str) -> None:
+    validate_def("command-io.schema.json", def_name, data, "Command output")
+
+
 def validate_def(schema_name: str, def_name: str, data: Any, label: str) -> None:
     raw = load_schema(schema_name)
     defs = raw.get("$defs") or raw.get("defs") or {}
