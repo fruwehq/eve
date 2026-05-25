@@ -122,29 +122,32 @@ RUN set -eux; \
 
 FROM base AS app-deps
 
-RUN apt-get update \
-  && apt-get install -y --no-install-recommends \
-    build-essential \
-  && rm -rf /var/lib/apt/lists/*
-
 WORKDIR /opt/eve
 COPY . /opt/eve
 
-RUN git init -q \
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends build-essential \
+  && git init -q \
   && git config user.email eve-container@example.invalid \
   && git config user.name "Eve Container" \
   && git add . \
   && git commit -q -m "docker image snapshot" \
   && bundle install \
-  && poetry install --no-interaction --no-root
+  && poetry install --only main --no-interaction --no-root \
+  && apt-get purge -y --auto-remove build-essential \
+  && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* \
+  && find /opt/python /opt/ruby -depth -name __pycache__ -prune -exec rm -rf {} + \
+  && find /opt/python /opt/ruby -type f -name '*.pyc' -delete \
+  && find /opt/python /opt/ruby -type f -name '*.a' -delete \
+  && rm -rf \
+    /opt/python/include \
+    /opt/python/lib/python3.13/idlelib \
+    /opt/python/lib/python3.13/test \
+    /opt/python/lib/python3.13/tkinter \
+    /opt/ruby/include
 
-FROM base AS runtime-base
+FROM app-deps AS runtime-base
 
-COPY --from=app-deps /opt/ruby /opt/ruby
-COPY --from=app-deps /opt/python /opt/python
-COPY --from=app-deps /opt/eve /opt/eve
-
-WORKDIR /opt/eve
 COPY docker/entrypoint.sh /usr/local/bin/eve-entrypoint
 ENTRYPOINT ["/usr/local/bin/eve-entrypoint"]
 CMD ["make", "eve"]
@@ -156,23 +159,31 @@ ARG VULTR_CLI_VERSION
 
 RUN set -eux; \
   case "${TARGETARCH}" in \
-    amd64|x86_64) tool_arch=amd64; aws_arch=x86_64 ;; \
-    arm64|aarch64) tool_arch=arm64; aws_arch=aarch64 ;; \
+    amd64|x86_64) tool_arch=amd64 ;; \
+    arm64|aarch64) tool_arch=arm64 ;; \
     *) echo "Unsupported architecture: ${TARGETARCH}" >&2; exit 1 ;; \
   esac; \
   curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg; \
   printf '%s\n' "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" > /etc/apt/sources.list.d/google-cloud-sdk.list; \
   apt-get update; \
   apt-get install -y --no-install-recommends google-cloud-cli; \
-  curl -fsSLo /tmp/awscliv2.zip "https://awscli.amazonaws.com/awscli-exe-linux-${aws_arch}.zip"; \
-  unzip -q /tmp/awscliv2.zip -d /tmp; \
-  /tmp/aws/install --bin-dir /usr/local/bin --install-dir /usr/local/aws-cli; \
+  python3 -m pip install --no-cache-dir awscli; \
   curl -fsSLo /tmp/vultr-cli.tar.gz "https://github.com/vultr/vultr-cli/releases/download/v${VULTR_CLI_VERSION}/vultr-cli_v${VULTR_CLI_VERSION}_linux_${tool_arch}.tar.gz"; \
   mkdir -p /tmp/vultr-cli; \
   tar -C /tmp/vultr-cli -xzf /tmp/vultr-cli.tar.gz; \
   find /tmp/vultr-cli -type f -name vultr-cli -exec install -m 0755 {} /usr/local/bin/vultr-cli \; -quit; \
   test -x /usr/local/bin/vultr-cli; \
-  rm -rf /var/lib/apt/lists/* /tmp/aws /tmp/awscliv2.zip /tmp/vultr-cli /tmp/vultr-cli.tar.gz
+  rm -rf \
+    /tmp/vultr-cli \
+    /tmp/vultr-cli.tar.gz \
+    /usr/lib/google-cloud-sdk/platform/bq \
+    /usr/lib/google-cloud-sdk/platform/gsutil \
+    /usr/share/doc/* \
+    /usr/share/man/* \
+    /var/cache/apt/archives/* \
+    /var/lib/apt/lists/*; \
+  find /usr/lib/google-cloud-sdk /opt/python -depth -name __pycache__ -prune -exec rm -rf {} +; \
+  find /usr/lib/google-cloud-sdk /opt/python -type f -name '*.pyc' -delete
 
 FROM runtime-slim AS runtime-full
 
