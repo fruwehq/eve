@@ -157,6 +157,12 @@ def main() -> int:
         "test job writes timing summary to GITHUB_STEP_SUMMARY",
         "$GITHUB_STEP_SUMMARY" in run_text(find_step(test_steps, "Timing summary")),
     )
+    make_test_step = find_step(test_steps, "Run make test")
+    make_test_env = make_test_step.get("env", {}) if make_test_step else {}
+    checks.assert_check(
+        "Ubuntu host job explicitly skips duplicate Docker smoke",
+        isinstance(make_test_env, dict) and make_test_env.get("EVE_SKIP_DOCKER_SMOKE") == "${{ runner.os == 'Linux' && '1' || '' }}",
+    )
 
     terramate_step = find_step(test_steps, "Install Terramate")
     terramate_version = terramate_step.get("env", {}).get("TERRAMATE_VERSION") if terramate_step else None

@@ -23,6 +23,11 @@ def run!(*cmd)
 end
 
 host_os = `uname -s`.strip
+if ENV["EVE_SKIP_DOCKER_SMOKE"] == "1"
+  skip "Docker runtime smoke skipped because docker-runtime-slim owns required CI Docker coverage"
+  exit 0
+end
+
 unless host_os == "Linux"
   skip "Docker runtime smoke test requires Linux host; host is #{host_os}"
   exit 0

@@ -325,6 +325,10 @@ The v3.3 runtime images bake the repository into `/opt/eve` and default
 `docker.build` target remains as a contributor toolchain image for shelling
 into the checkout and running tests.
 
+On Linux hosts, `make test` includes the slim runtime Docker smoke by default.
+CI sets `EVE_SKIP_DOCKER_SMOKE=1` in the Ubuntu host job because the required
+`docker-runtime-slim` job owns the build, smoke, and image-size checks there.
+
 Package plugins may provide host-side command hooks at
 `commands/<os_family>/<install|status|down>` or
 `commands/common/<install|status|down>`. The built-in compatibility wrapper

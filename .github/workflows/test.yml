@@ -148,6 +148,8 @@ jobs:
           make test.provision-runner
 
       - name: Run make test
+        env:
+          EVE_SKIP_DOCKER_SMOKE: ${{ runner.os == 'Linux' && '1' || '' }}
         run: |
           set -euo pipefail
           step_name="Run make test"
