@@ -204,15 +204,16 @@ def main() -> int:
         "$GITHUB_STEP_SUMMARY" in run_text(find_step(docker_slim_steps, "Timing summary")),
     )
     checks.assert_check("docker-runtime-slim sets up Docker Buildx", "Set up Docker Buildx" in docker_slim_step_names)
+    checks.assert_check("docker-runtime-slim computes explicit cache scope", "Compute slim runtime cache scope" in docker_slim_step_names)
     checks.assert_check("docker-runtime-slim probes explicit cache key", "Probe slim runtime cache key" in docker_slim_step_names)
     checks.assert_check("docker-runtime-slim reports cache misses explicitly", "Report Docker cache status" in docker_slim_step_names)
-    cache_scope = docker_slim_job.get("env", {}).get("EVE_DOCKER_CACHE_SCOPE") if isinstance(docker_slim_job, dict) else None
+    cache_scope_run = run_text(find_step(docker_slim_steps, "Compute slim runtime cache scope"))
     checks.assert_check(
         "docker-runtime-slim cache scope includes runner OS, arch, Dockerfile, and lockfile",
-        isinstance(cache_scope, str)
-        and "runner.os" in cache_scope
-        and "runner.arch" in cache_scope
-        and "hashFiles('docker/Dockerfile', 'poetry.lock')" in cache_scope,
+        "docker/Dockerfile poetry.lock" in cache_scope_run
+        and "RUNNER_OS" in cache_scope_run
+        and "RUNNER_ARCH" in cache_scope_run
+        and "EVE_DOCKER_CACHE_SCOPE=slim-" in cache_scope_run,
     )
     checks.assert_check(
         "docker-runtime-slim cache status logs cache miss: rebuilding",
@@ -249,17 +250,18 @@ def main() -> int:
     )
     checks.assert_check("docker-runtime-full publishes timing summary", "Timing summary" in docker_full_step_names)
     checks.assert_check("docker-runtime-full sets up Docker Buildx", "Set up Docker Buildx" in docker_full_step_names)
+    checks.assert_check("docker-runtime-full computes explicit cache scope", "Compute full runtime cache scope" in docker_full_step_names)
     checks.assert_check("docker-runtime-full probes explicit cache key", "Probe full runtime cache key" in docker_full_step_names)
     checks.assert_check("docker-runtime-full reports cache misses explicitly", "Report Docker cache status" in docker_full_step_names)
     checks.assert_check("docker-runtime-full smokes image", "Smoke full runtime image" in docker_full_step_names)
     checks.assert_check("docker-runtime-full reports image size", "Report full image size" in docker_full_step_names)
-    full_cache_scope = docker_full_job.get("env", {}).get("EVE_DOCKER_FULL_CACHE_SCOPE") if isinstance(docker_full_job, dict) else None
+    full_cache_scope_run = run_text(find_step(docker_full_steps, "Compute full runtime cache scope"))
     checks.assert_check(
         "docker-runtime-full cache scope includes runner OS, arch, Dockerfile, and lockfile",
-        isinstance(full_cache_scope, str)
-        and "runner.os" in full_cache_scope
-        and "runner.arch" in full_cache_scope
-        and "hashFiles('docker/Dockerfile', 'poetry.lock')" in full_cache_scope,
+        "docker/Dockerfile poetry.lock" in full_cache_scope_run
+        and "RUNNER_OS" in full_cache_scope_run
+        and "RUNNER_ARCH" in full_cache_scope_run
+        and "EVE_DOCKER_FULL_CACHE_SCOPE=full-" in full_cache_scope_run,
     )
     checks.assert_check(
         "docker-runtime-full cache status logs cache miss: rebuilding",

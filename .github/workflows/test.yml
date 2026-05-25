@@ -178,7 +178,6 @@ jobs:
   docker-runtime-slim:
     runs-on: ubuntu-24.04
     env:
-      EVE_DOCKER_CACHE_SCOPE: slim-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('docker/Dockerfile', 'poetry.lock') }}
       EVE_CI_TIMINGS: ${{ runner.temp }}/eve-ci-timings.tsv
     steps:
       - uses: actions/checkout@v4
@@ -190,11 +189,22 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Compute slim runtime cache scope
+        run: |
+          set -euo pipefail
+          case "$(uname -s)" in
+            Linux) checksum_tool="sha256sum" ;;
+            Darwin) checksum_tool="shasum -a 256" ;;
+            *) echo "unsupported OS for cache scope: $(uname -s)" >&2; exit 2 ;;
+          esac
+          lock_hash="$(cat docker/Dockerfile poetry.lock | ${checksum_tool} | awk '{print $1}')"
+          printf 'EVE_DOCKER_CACHE_SCOPE=slim-%s-%s-%s\n' "${RUNNER_OS}" "${RUNNER_ARCH}" "${lock_hash}" >> "$GITHUB_ENV"
+
       - name: Probe slim runtime cache key
         id: slim-cache-probe
         uses: actions/cache/restore@v4
         with:
-          key: buildkit-${{ env.EVE_DOCKER_CACHE_SCOPE }}
+          key: buildkit-slim-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('docker/Dockerfile', 'poetry.lock') }}
           lookup-only: true
           path: ${{ runner.temp }}/eve-buildkit-cache-marker
 
@@ -239,7 +249,7 @@ jobs:
         if: success() && steps.slim-cache-probe.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
-          key: buildkit-${{ env.EVE_DOCKER_CACHE_SCOPE }}
+          key: buildkit-slim-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('docker/Dockerfile', 'poetry.lock') }}
           path: ${{ runner.temp }}/eve-buildkit-cache-marker
 
       - name: Smoke slim runtime image
@@ -302,7 +312,6 @@ jobs:
     if: github.event_name == 'schedule'
     runs-on: ubuntu-24.04
     env:
-      EVE_DOCKER_FULL_CACHE_SCOPE: full-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('docker/Dockerfile', 'poetry.lock') }}
       EVE_CI_TIMINGS: ${{ runner.temp }}/eve-ci-timings.tsv
     steps:
       - uses: actions/checkout@v4
@@ -314,11 +323,22 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Compute full runtime cache scope
+        run: |
+          set -euo pipefail
+          case "$(uname -s)" in
+            Linux) checksum_tool="sha256sum" ;;
+            Darwin) checksum_tool="shasum -a 256" ;;
+            *) echo "unsupported OS for cache scope: $(uname -s)" >&2; exit 2 ;;
+          esac
+          lock_hash="$(cat docker/Dockerfile poetry.lock | ${checksum_tool} | awk '{print $1}')"
+          printf 'EVE_DOCKER_FULL_CACHE_SCOPE=full-%s-%s-%s\n' "${RUNNER_OS}" "${RUNNER_ARCH}" "${lock_hash}" >> "$GITHUB_ENV"
+
       - name: Probe full runtime cache key
         id: full-cache-probe
         uses: actions/cache/restore@v4
         with:
-          key: buildkit-${{ env.EVE_DOCKER_FULL_CACHE_SCOPE }}
+          key: buildkit-full-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('docker/Dockerfile', 'poetry.lock') }}
           lookup-only: true
           path: ${{ runner.temp }}/eve-full-buildkit-cache-marker
 
@@ -363,7 +383,7 @@ jobs:
         if: success() && steps.full-cache-probe.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
-          key: buildkit-${{ env.EVE_DOCKER_FULL_CACHE_SCOPE }}
+          key: buildkit-full-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('docker/Dockerfile', 'poetry.lock') }}
           path: ${{ runner.temp }}/eve-full-buildkit-cache-marker
 
       - name: Smoke full runtime image
