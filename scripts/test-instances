@@ -23,7 +23,7 @@ unset TRUENAS_HOST TRUENAS_SSH_PORT TRUENAS_SSH_USER \
       GOOGLE_CLOUD_PROJECT GOOGLE_PROJECT MY_IP RASPBERRY_PI_HDMI_CONNECTOR \
       RASPBERRY_PI_HDMI_MODE RASPBERRY_PI_HOST RASPBERRY_PI_IP \
       RUSTDESK_SERVER SUNSHINE_MAX_BITRATE_KBPS SUNSHINE_VERSION \
-      TIMEZONE VAGRANT_SHOW_CONSOLE VM_USER_NAME EVE_CONFIG_PATH
+      TIMEZONE VAGRANT_SHOW_CONSOLE VM_USER_NAME EVE_CONFIG_PATH EVE_HOME
 
 FAIL=0
 INSTANCES=$(./scripts/instance-list --registry "$FIXTURE" --json | jq -r '.instances[].name')
@@ -202,6 +202,29 @@ if EVE_INSTANCE_REGISTRY="$tmp_registry" make --no-print-directory instance.vali
 else
   printf '  [FAIL] make instance targets honor EVE_INSTANCE_REGISTRY\n' >&2
   EVE_INSTANCE_REGISTRY="$tmp_registry" make --no-print-directory instance.validate INSTANCE=test-dev >&2 || true
+  FAIL=$((FAIL + 1))
+fi
+
+tmp_eve_home="$(mktemp -d)"
+tmp_eve_home_paths="$tmp_eve_home/paths.json"
+if EVE_HOME="$tmp_eve_home" make --no-print-directory instance.create \
+  INSTANCE=eve-home-dev MACHINE=local-qemu-medium OS=ubuntu-26.04-arm64 LOCATION=tokyo >/dev/null &&
+  EVE_HOME="$tmp_eve_home" make --no-print-directory env INSTANCE=eve-home-dev >/dev/null &&
+  EVE_HOME="$tmp_eve_home" make --no-print-directory instance.recover INSTANCE=eve-home-dev >/dev/null &&
+  EVE_HOME="$tmp_eve_home" make --no-print-directory instance.paths INSTANCE=eve-home-dev EMIT=json >"$tmp_eve_home_paths" &&
+  jq -e --arg home "$tmp_eve_home" '
+    .INSTANCE_WORKDIR == ($home + "/.generated/instances/eve-home-dev") and
+    .INSTANCE_OVERLAY_PATH == ($home + "/.generated/instances/eve-home-dev/catalog.local.yaml") and
+    .INSTANCE_STATE_PATH == ($home + "/.eve/state/instances/eve-home-dev.json")
+  ' "$tmp_eve_home_paths" >/dev/null &&
+  [ -f "$tmp_eve_home/.eve/instances.yaml" ] &&
+  [ -f "$tmp_eve_home/.eve/state/instances/eve-home-dev.json" ] &&
+  [ -f "$tmp_eve_home/.generated/instances/eve-home-dev/catalog.local.yaml" ]; then
+  printf '  [OK] EVE_HOME routes registry, state, and generated overlay paths\n'
+else
+  printf '  [FAIL] EVE_HOME did not route registry/state/generated paths\n' >&2
+  find "$tmp_eve_home" -maxdepth 4 -type f -print >&2 || true
+  cat "$tmp_eve_home_paths" >&2 || true
   FAIL=$((FAIL + 1))
 fi
 
@@ -908,12 +931,13 @@ else
 fi
 SH
 chmod +x "$wait_probe"
+wait_for_provision_fixture_timeout=15
 wait_out="$(
   EVE_INSTANCE_REGISTRY="$FIXTURE" \
     EVE_CATALOG_LOCAL="$overlay" \
     EVE_WAIT_FOR_PROVISION_PROBE_SCRIPT="$wait_probe" \
     EVE_PROVISION_WAIT_POLL_INTERVAL=0 \
-    ./scripts/wait-for-provision dev-a 5
+    ./scripts/wait-for-provision dev-a "$wait_for_provision_fixture_timeout"
 )"
 if printf '%s\n' "$wait_out" | grep -q '^2026-05-09 10:00:01 apt is streaming$' &&
   printf '%s\n' "$wait_out" | grep -q '^2026-05-09 10:00:02 package output continues$' &&
@@ -944,7 +968,7 @@ status_done_out="$(
     EVE_CATALOG_LOCAL="$overlay" \
     EVE_WAIT_FOR_PROVISION_PROBE_SCRIPT="$status_done_probe" \
     EVE_PROVISION_WAIT_POLL_INTERVAL=0 \
-    ./scripts/wait-for-provision dev-a 5
+    ./scripts/wait-for-provision dev-a "$wait_for_provision_fixture_timeout"
 )"
 if printf '%s\n' "$status_done_out" | grep -q 'Provisioning complete for profile dev-a'; then
   printf '  [OK] wait-for-provision status file done\n'
@@ -973,7 +997,7 @@ status_failed_out="$(
     EVE_CATALOG_LOCAL="$overlay" \
     EVE_WAIT_FOR_PROVISION_PROBE_SCRIPT="$status_failed_probe" \
     EVE_PROVISION_WAIT_POLL_INTERVAL=0 \
-    ./scripts/wait-for-provision dev-a 5 2>&1
+    ./scripts/wait-for-provision dev-a "$wait_for_provision_fixture_timeout" 2>&1
 )" || true
 if printf '%s\n' "$status_failed_out" | grep -q 'Provisioning failed for profile dev-a'; then
   printf '  [OK] wait-for-provision status file failed\n'
@@ -1002,7 +1026,7 @@ status_malformed_out="$(
     EVE_CATALOG_LOCAL="$overlay" \
     EVE_WAIT_FOR_PROVISION_PROBE_SCRIPT="$status_malformed_probe" \
     EVE_PROVISION_WAIT_POLL_INTERVAL=0 \
-    ./scripts/wait-for-provision dev-a 5 2>&1
+    ./scripts/wait-for-provision dev-a "$wait_for_provision_fixture_timeout" 2>&1
 )" || true
 if printf '%s\n' "$status_malformed_out" | grep -q 'malformed'; then
   printf '  [OK] wait-for-provision malformed status rejected\n'
@@ -1031,7 +1055,7 @@ status_invalid_out="$(
     EVE_CATALOG_LOCAL="$overlay" \
     EVE_WAIT_FOR_PROVISION_PROBE_SCRIPT="$status_invalid_probe" \
     EVE_PROVISION_WAIT_POLL_INTERVAL=0 \
-    ./scripts/wait-for-provision dev-a 5 2>&1
+    ./scripts/wait-for-provision dev-a "$wait_for_provision_fixture_timeout" 2>&1
 )" || true
 if printf '%s\n' "$status_invalid_out" | grep -q 'malformed'; then
   printf '  [OK] wait-for-provision schema-invalid status rejected\n'
@@ -1060,7 +1084,7 @@ status_string_api_out="$(
     EVE_CATALOG_LOCAL="$overlay" \
     EVE_WAIT_FOR_PROVISION_PROBE_SCRIPT="$status_string_api_probe" \
     EVE_PROVISION_WAIT_POLL_INTERVAL=0 \
-    ./scripts/wait-for-provision dev-a 5 2>&1
+    ./scripts/wait-for-provision dev-a "$wait_for_provision_fixture_timeout" 2>&1
 )" || true
 if printf '%s\n' "$status_string_api_out" | grep -q 'malformed'; then
   printf '  [OK] wait-for-provision rejects string api_version\n'
@@ -1089,7 +1113,7 @@ status_nonobj_step_out="$(
     EVE_CATALOG_LOCAL="$overlay" \
     EVE_WAIT_FOR_PROVISION_PROBE_SCRIPT="$status_nonobj_step_probe" \
     EVE_PROVISION_WAIT_POLL_INTERVAL=0 \
-    ./scripts/wait-for-provision dev-a 5 2>&1
+    ./scripts/wait-for-provision dev-a "$wait_for_provision_fixture_timeout" 2>&1
 )" || true
 if printf '%s\n' "$status_nonobj_step_out" | grep -q 'malformed'; then
   printf '  [OK] wait-for-provision rejects non-object step entries\n'
@@ -1124,7 +1148,7 @@ status_raw_json_running_out="$(
     EVE_CATALOG_LOCAL="$overlay" \
     EVE_WAIT_FOR_PROVISION_PROBE_SCRIPT="$status_raw_json_running_probe" \
     EVE_PROVISION_WAIT_POLL_INTERVAL=0 \
-    ./scripts/wait-for-provision dev-a 5
+    ./scripts/wait-for-provision dev-a "$wait_for_provision_fixture_timeout"
 )"
 if printf '%s\n' "$status_raw_json_running_out" | grep -q 'Provisioning complete for profile dev-a'; then
   printf '  [OK] wait-for-provision raw JSON running then done (no STATUS_FILE header)\n'

@@ -5,10 +5,16 @@ on:
     branches:
       - main
   pull_request:
+  schedule:
+    - cron: "0 9 * * *"
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -21,19 +27,40 @@ jobs:
           terraform_wrapper: false
 
       - name: Install Terramate
-        uses: terramate-io/terramate-action@v3
-        with:
-          version: "0.17.0"
+        env:
+          TERRAMATE_VERSION: "0.17.0"
+        run: |
+          set -euo pipefail
+          case "$(uname -s)" in
+            Darwin) tool_os=darwin ;;
+            Linux) tool_os=linux ;;
+            *) echo "unsupported OS for Terramate install: $(uname -s)" >&2; exit 2 ;;
+          esac
+          case "$(uname -m)" in
+            arm64|aarch64) tool_arch=arm64 ;;
+            x86_64|amd64) tool_arch=x86_64 ;;
+            *) echo "unsupported architecture for Terramate install: $(uname -m)" >&2; exit 2 ;;
+          esac
+          curl -fsSLo "$RUNNER_TEMP/terramate.tar.gz" "https://github.com/terramate-io/terramate/releases/download/v${TERRAMATE_VERSION}/terramate_${TERRAMATE_VERSION}_${tool_os}_${tool_arch}.tar.gz"
+          mkdir -p "$RUNNER_TEMP/terramate"
+          tar -C "$RUNNER_TEMP/terramate" -xzf "$RUNNER_TEMP/terramate.tar.gz"
+          find "$RUNNER_TEMP/terramate" -type f -name terramate -exec sudo install -m 0755 {} /usr/local/bin/terramate \; -quit
+          terramate version
 
       - name: Install Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.13"
 
-      - name: Install shellcheck + jq + ripgrep
+      - name: Install Ubuntu packages
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y shellcheck jq ripgrep
+          sudo apt-get install -y --no-install-recommends ca-certificates curl gnupg jq openssh-client ripgrep shellcheck sshpass yq
+
+      - name: Install macOS packages
+        if: runner.os == 'macOS'
+        run: brew install jq ripgrep shellcheck yq
 
       - name: Install Ruby
         uses: ruby/setup-ruby@v1
@@ -43,7 +70,7 @@ jobs:
 
       - name: Install Python dependencies
         run: |
-          pipx install poetry
+          python -m pip install --upgrade poetry
           poetry install --no-interaction --no-root
 
       - name: Generate Terramate code
@@ -54,3 +81,38 @@ jobs:
 
       - name: Run make test
         run: make test
+
+  docker-runtime-slim:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build slim runtime image
+        run: docker build -f docker/Dockerfile --target runtime-slim -t eve/eve:slim -t eve/eve:latest .
+
+      - name: Smoke slim runtime image
+        run: docker run --rm eve/eve:slim make help
+
+      - name: Report slim image size
+        run: |
+          set -euo pipefail
+          inspect_size="$(docker image inspect eve/eve:slim --format '{{.Size}}')"
+          compressed_size="$(docker save eve/eve:slim | gzip -c | wc -c | tr -d ' ')"
+          echo "slim image: uncompressed=${inspect_size} compressed=${compressed_size}"
+          if [ "${inspect_size}" -ge 1600000000 ]; then
+            echo "slim uncompressed must stay < 1600 MB" >&2
+            exit 1
+          fi
+          if [ "${compressed_size}" -ge 500000000 ]; then
+            echo "slim compressed must stay < 500 MB" >&2
+            exit 1
+          fi
+
+  docker-runtime-full:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build full runtime image
+        run: docker build -f docker/Dockerfile --target runtime-full -t eve/eve:full .

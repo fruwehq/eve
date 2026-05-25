@@ -4,25 +4,69 @@ require "fileutils"
 
 module Eve
   module SDK
+    # Workdir is the single source of truth for Eve's local data paths.
+    #
+    # By default, Eve keeps runtime state under the repository root:
+    #   <repo>/.eve/
+    #   <repo>/.generated/
+    #
+    # When EVE_HOME is set, that directory becomes the data root instead:
+    #   <EVE_HOME>/.eve/
+    #   <EVE_HOME>/.generated/
+    #
+    # Source-tree paths still use repo_root. Callers that need instance
+    # registries, state files, generated overlays, plugins, config, or secrets
+    # should use the methods below instead of constructing .eve/.generated paths.
     module Workdir
+      def self.repo_root
+        @repo_root ||= File.expand_path("../..", File.dirname(__FILE__))
+      end
+
+      def self.repo_root=(path)
+        @repo_root = File.expand_path(path)
+      end
+
       def self.root
-        @root ||= File.expand_path("../..", File.dirname(__FILE__))
+        return @root_override if @root_override
+
+        home = ENV["EVE_HOME"]
+        home && !home.empty? ? File.expand_path(home) : repo_root
       end
 
       def self.root=(path)
-        @root = path
+        @root_override = File.expand_path(path)
+      end
+
+      def self.eve_dir
+        File.join(root, ".eve")
+      end
+
+      def self.generated_dir
+        File.join(root, ".generated")
+      end
+
+      def self.config_path
+        path_from_env("EVE_CONFIG_PATH", File.join(eve_dir, "config.yaml"))
+      end
+
+      def self.instance_registry_path
+        path_from_env("EVE_INSTANCE_REGISTRY", File.join(eve_dir, "instances.yaml"))
+      end
+
+      def self.plugin_sources_path
+        File.join(eve_dir, "plugin-sources.yaml")
+      end
+
+      def self.plugins_dir
+        File.join(eve_dir, "plugins")
       end
 
       def self.workdir_base
-        base = ENV["EVE_INSTANCE_WORKDIR"]
-        base && !base.empty? ? File.expand_path(base) : File.join(root, ".generated/instances")
+        path_from_env("EVE_INSTANCE_WORKDIR", File.join(generated_dir, "instances"))
       end
 
       def self.state_base
-        base = ENV["EVE_STATE_DIR"]
-        return File.expand_path(base) if base && !base.empty?
-
-        File.join(root, ".eve/state")
+        path_from_env("EVE_STATE_DIR", File.join(eve_dir, "state"))
       end
 
       def self.instance_workdir(instance_name)
@@ -64,6 +108,11 @@ module Eve
       def self.ensure_dir(path)
         FileUtils.mkdir_p(path)
         path
+      end
+
+      def self.path_from_env(name, default_path)
+        value = ENV[name]
+        value && !value.empty? ? File.expand_path(value, Dir.pwd) : default_path
       end
 
       def self.all_paths(instance_name)

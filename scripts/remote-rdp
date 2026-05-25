@@ -84,19 +84,49 @@ printf '%s\n' \
   "audiomode:i:0" \
   > ./tmp/windows.rdp
 
-if [ "$WINDOWS_APP_OK" = "0" ] && command -v xfreerdp >/dev/null 2>&1; then
-  exec xfreerdp /v:"$IP" /u:"$USERNAME" /p:"$PW" +clipboard /cert:ignore "${FREERDP_EXTRA[@]}"
-elif [ "$WINDOWS_APP_OK" = "0" ]; then
-  echo "remote-rdp: this KDE/krdp profile is not compatible with macOS Windows App; install xfreerdp." >&2
-  exit 2
-elif [ "$(uname -s)" = "Darwin" ]; then
-  printf '%s' "$PW" | pbcopy
-  open -a "Microsoft Remote Desktop" ./tmp/windows.rdp || open ./tmp/windows.rdp
-  sleep 3
-  osascript -e 'tell application "System Events" to keystroke "v" using command down' -e 'tell application "System Events" to key code 36'
-elif command -v xfreerdp >/dev/null 2>&1; then
-  exec xfreerdp /v:"$IP" /u:"$USERNAME" /p:"$PW" +clipboard /cert:ignore "${FREERDP_EXTRA[@]}"
-else
-  echo "remote-rdp: install Microsoft Remote Desktop on macOS or xfreerdp on Linux" >&2
+HOST_OS="$(uname -s)"
+
+if [ "$WINDOWS_APP_OK" = "0" ]; then
+  if command -v xfreerdp >/dev/null 2>&1; then
+    exec xfreerdp /v:"$IP" /u:"$USERNAME" /p:"$PW" +clipboard /cert:ignore "${FREERDP_EXTRA[@]}"
+  fi
+  case "$HOST_OS" in
+    Darwin)
+      echo "remote-rdp: this KDE/krdp profile is not compatible with macOS Windows App; install xfreerdp." >&2
+      ;;
+    Linux)
+      echo "remote-rdp: xfreerdp is required on Linux. Install with: apt install freerdp2-x11" >&2
+      ;;
+    *)
+      echo "remote-rdp: unsupported host OS: $HOST_OS" >&2
+      ;;
+  esac
   exit 2
 fi
+
+case "$HOST_OS" in
+  Darwin)
+    if ! command -v pbcopy >/dev/null 2>&1; then
+      echo "remote-rdp: pbcopy is required on macOS" >&2
+      exit 2
+    fi
+    printf '%s' "$PW" | pbcopy
+    if ! open -a "Microsoft Remote Desktop" ./tmp/windows.rdp; then
+      echo "remote-rdp: Microsoft Remote Desktop is required on macOS" >&2
+      exit 2
+    fi
+    sleep 3
+    osascript -e 'tell application "System Events" to keystroke "v" using command down' -e 'tell application "System Events" to key code 36'
+    ;;
+  Linux)
+    if command -v xfreerdp >/dev/null 2>&1; then
+      exec xfreerdp /v:"$IP" /u:"$USERNAME" /p:"$PW" +clipboard /cert:ignore "${FREERDP_EXTRA[@]}"
+    fi
+    echo "remote-rdp: xfreerdp is required on Linux. Install with: apt install freerdp2-x11" >&2
+    exit 2
+    ;;
+  *)
+    echo "remote-rdp: unsupported host OS: $HOST_OS" >&2
+    exit 2
+    ;;
+esac

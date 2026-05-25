@@ -12,9 +12,9 @@ require "json"
 require "yaml"
 
 ROOT = File.expand_path("..", __dir__)
-DEFAULT_REGISTRY_PATH = File.join(ROOT, ".eve/instances.yaml")
-DEFAULT_WORKDIR_BASE = File.join(ROOT, ".generated/instances")
-DEFAULT_STATE_BASE = File.join(ROOT, ".eve/state")
+$LOAD_PATH.unshift(File.join(ROOT, "core"))
+require "sdk"
+DEFAULT_REGISTRY_PATH = Eve::SDK::Workdir.instance_registry_path
 
 def usage
   warn <<~USAGE
@@ -31,16 +31,6 @@ end
 
 def absolute(path)
   File.expand_path(path, Dir.pwd)
-end
-
-def workdir_base
-  base = ENV["EVE_INSTANCE_WORKDIR"]
-  base && !base.empty? ? absolute(base) : DEFAULT_WORKDIR_BASE
-end
-
-def state_base
-  base = ENV["EVE_STATE_DIR"]
-  base && !base.empty? ? absolute(base) : DEFAULT_STATE_BASE
 end
 
 def emit_env(paths)
@@ -88,22 +78,7 @@ unless instance
   exit 1
 end
 
-workdir = File.join(workdir_base, instance_name)
-state_path = File.join(state_base, "instances", "#{instance_name}.json")
-tf_workdir = File.join(workdir, "tf")
-tf_state_base = File.join(tf_workdir, "state")
-tf_data_base = File.join(tf_workdir, "data")
-
-paths = {
-  "INSTANCE_NAME" => instance_name,
-  "INSTANCE_WORKDIR" => workdir,
-  "INSTANCE_OVERLAY_PATH" => File.join(workdir, "catalog.local.yaml"),
-  "INSTANCE_STATE_PATH" => state_path,
-  "INSTANCE_TF_WORKDIR" => tf_workdir,
-  "INSTANCE_TF_STATE_BASE" => tf_state_base,
-  "INSTANCE_TF_DATA_BASE" => tf_data_base,
-  "INSTANCE_TF_DATA_DIR" => File.join(tf_data_base, "default")
-}
+paths = Eve::SDK::Workdir.all_paths(instance_name)
 
 case emit
 when "env"

@@ -215,8 +215,7 @@ printf '%s\n' "$BUNDLE_PACKAGES" | tr ',' '\n' > "$STAGE/state/selected_packages
 
 _HOST_TZ="${TIMEZONE:-}"
 if [ -z "$_HOST_TZ" ]; then
-  _LINK=$(readlink /etc/localtime 2>/dev/null || true)
-  _HOST_TZ=$(echo "$_LINK" | sed -n 's|.*/zoneinfo/||p')
+  _HOST_TZ="$(./scripts/host-timezone 2>/dev/null || true)"
 fi
 THINLINC_AGENT_HOSTNAME_DEFAULT="${THINLINC_AGENT_HOSTNAME:-}"
 if [ "$PACKAGE" = "thinlinc" ] && [ -z "$THINLINC_AGENT_HOSTNAME_DEFAULT" ]; then
@@ -266,8 +265,9 @@ if [ "$PACKAGE" = "thinlinc" ] && [ -n "${THINLINC_SERVER_BUNDLE_PATH:-}" ]; the
   bundle_basename="$(basename "$THINLINC_SERVER_BUNDLE_PATH")"
   THINLINC_REMOTE_SERVER_BUNDLE_PATH="\$HOME/provision/downloads/thinlinc/$bundle_basename"
   # Regenerate env after resolving the remote upload path.
-  sed -i.bak "s|^export THINLINC_SERVER_BUNDLE_PATH=.*|export THINLINC_SERVER_BUNDLE_PATH=\"$THINLINC_REMOTE_SERVER_BUNDLE_PATH\"|" "$STAGE/state/env"
-  rm -f "$STAGE/state/env.bak"
+  tmp_env=$(mktemp "$STAGE/state/env.XXXXXX")
+  sed "s|^export THINLINC_SERVER_BUNDLE_PATH=.*|export THINLINC_SERVER_BUNDLE_PATH=\"$THINLINC_REMOTE_SERVER_BUNDLE_PATH\"|" "$STAGE/state/env" > "$tmp_env"
+  mv "$tmp_env" "$STAGE/state/env"
   ./scripts/ssh-retry "prepare ThinLinc bundle directory" ./scripts/instance-ssh "$INSTANCE_NAME" -- 'rm -rf ~/provision/downloads/thinlinc && mkdir -p ~/provision/downloads/thinlinc'
   ./scripts/ssh-retry "upload ThinLinc server bundle" ./scripts/instance-ssh "$INSTANCE_NAME" --scp "$THINLINC_SERVER_BUNDLE_PATH" 'provision/downloads/thinlinc'
 fi

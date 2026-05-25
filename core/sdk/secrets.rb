@@ -10,7 +10,7 @@ module Eve
 
       def self.secrets_dir
         dir = ENV["EVE_SECRETS_DIR"]
-        dir && !dir.empty? ? File.expand_path(dir) : File.join(Workdir.root, ".eve", "secrets")
+        dir && !dir.empty? ? File.expand_path(dir) : File.join(Workdir.eve_dir, "secrets")
       end
 
       def self.path_for(provider_id)

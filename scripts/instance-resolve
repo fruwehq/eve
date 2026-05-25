@@ -7,11 +7,13 @@ require "set"
 require "yaml"
 
 ROOT = File.expand_path("..", __dir__)
+$LOAD_PATH.unshift(File.join(ROOT, "core"))
+require "sdk"
 CATALOG_PATH = File.join(ROOT, "config/catalog.yaml")
 LOCAL_CATALOG_PATH = ENV["EVE_CATALOG_LOCAL"] && !ENV["EVE_CATALOG_LOCAL"].empty? \
                      ? File.expand_path(ENV["EVE_CATALOG_LOCAL"], Dir.pwd) \
                      : File.join(ROOT, "config/catalog.local.yaml")
-DEFAULT_REGISTRY_PATH = File.join(ROOT, ".eve/instances.yaml")
+DEFAULT_REGISTRY_PATH = Eve::SDK::Workdir.instance_registry_path
 
 def usage
   warn <<~USAGE

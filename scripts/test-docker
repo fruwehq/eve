@@ -1,0 +1,38 @@
+#!/usr/bin/env ruby
+# Smoke-test the slim Eve runtime image on Linux hosts with Docker.
+
+ROOT = File.expand_path("..", __dir__)
+
+def pass(message)
+  puts "  [OK] #{message}"
+end
+
+def skip(message)
+  puts "  [SKIP] #{message}"
+end
+
+def docker_available?
+  system("sh", "-c", "command -v docker >/dev/null 2>&1")
+end
+
+def run!(*cmd)
+  puts "  $ #{cmd.join(" ")}"
+  return if system(*cmd, chdir: ROOT)
+
+  abort "test-docker: command failed: #{cmd.join(" ")}"
+end
+
+host_os = `uname -s`.strip
+unless host_os == "Linux"
+  skip "Docker runtime smoke test requires Linux host; host is #{host_os}"
+  exit 0
+end
+
+unless docker_available?
+  skip "Docker runtime smoke test requires docker on PATH"
+  exit 0
+end
+
+run!("docker", "build", "-f", "docker/Dockerfile", "--target", "runtime-slim", "-t", "eve/eve:slim", ".")
+run!("docker", "run", "--rm", "eve/eve:slim", "make", "help")
+pass "slim Docker runtime builds and runs make help"

@@ -1,0 +1,19 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Print the host timezone name when /etc/localtime points into a zoneinfo tree.
+# Exits nonzero when the host does not expose timezone data in that shape.
+
+begin
+  real_path = File.realpath("/etc/localtime")
+  marker = "/zoneinfo/"
+  index = real_path.index(marker)
+  exit 1 unless index
+
+  timezone = real_path[(index + marker.length)..]
+  exit 1 if timezone.nil? || timezone.empty?
+
+  puts timezone
+rescue SystemCallError
+  exit 1
+end

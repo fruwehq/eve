@@ -5,7 +5,9 @@ require "json"
 require "yaml"
 
 ROOT = File.expand_path("..", __dir__)
-DEFAULT_REGISTRY_PATH = File.join(ROOT, ".eve/instances.yaml")
+$LOAD_PATH.unshift(File.join(ROOT, "core"))
+require "sdk"
+DEFAULT_REGISTRY_PATH = Eve::SDK::Workdir.instance_registry_path
 
 def usage
   warn "Usage: scripts/instance-list [--json] [--registry <path>]"

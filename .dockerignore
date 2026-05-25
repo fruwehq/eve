@@ -1,0 +1,17 @@
+.DS_Store
+.claude
+.devcontainer
+.env.local
+.eve
+.generated
+.git
+.mypy_cache
+.pytest_cache
+.ruff_cache
+.terraform-cache-dir
+.venv
+.vscode
+__pycache__
+config/catalog.local.yaml
+tmp
+upload

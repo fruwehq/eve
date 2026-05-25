@@ -5,8 +5,10 @@ require "json"
 require "yaml"
 
 ROOT = File.expand_path("..", __dir__)
-BUILTIN_ROOT = File.join(ROOT, "plugins")
-EXTERNAL_ROOT = File.join(ROOT, ".eve/plugins")
+$LOAD_PATH.unshift(File.join(ROOT, "core"))
+require "sdk"
+BUILTIN_ROOT = File.join(Eve::SDK::Workdir.repo_root, "plugins")
+EXTERNAL_ROOT = Eve::SDK::Workdir.plugins_dir
 API_VERSION = "eve.plugin/v1"
 PROVIDER_COMMANDS = %w[resolve init plan up down start stop status ip ssh validate].freeze
 PACKAGE_COMMANDS = %w[install status down].freeze

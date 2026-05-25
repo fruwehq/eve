@@ -15,6 +15,7 @@ if [ -z "${SSH_PUBLIC_KEY_FILE:-}" ] || [ ! -f "${SSH_PUBLIC_KEY_FILE:-}" ]; the
   export SSH_PUBLIC_KEY_FILE="$TMPKEY"
 fi
 
+mkdir -p .terraform-cache-dir/data .terraform-cache-dir/plugins .terraform-cache-dir/state
 terramate generate >/dev/null
 
 TM_FLAGS=("--disable-safeguards=git-untracked,git-uncommitted,git-out-of-sync,outdated-code")
