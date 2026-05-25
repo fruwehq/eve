@@ -1,114 +1,20 @@
-#!/usr/bin/env ruby
-# frozen_string_literal: true
+#!/usr/bin/env python3
+from __future__ import annotations
 
-require "tempfile"
-require "fileutils"
-require "yaml"
+import subprocess
+from pathlib import Path
 
-ROOT = File.expand_path("..", __dir__)
-$LOAD_PATH.unshift(File.join(ROOT, "core"))
-require "sdk"
+ROOT = Path(__file__).resolve().parents[1]
 
-WRITER_COUNT = 20
-failures = 0
-
-def pass(msg)
-  puts "[OK]   #{msg}"
-end
-
-def fail_test(msg)
-  puts "[FAIL] #{msg}"
-  1
-end
-
-begin
-  tmpdir = Dir.mktmpdir("eve-config-save-test-")
-  config_path = File.join(tmpdir, "config.yaml")
-  ENV["EVE_CONFIG_PATH"] = config_path
-
-  puts "\n== config-save concurrency: #{WRITER_COUNT} parallel writers =="
-
-  pids = []
-  WRITER_COUNT.times do |i|
-    pid = fork do
-      section = "test_section"
-      field = "key_#{i}"
-      value = "value_#{i}"
-
-      lock_path = "#{config_path}.lock"
-      Eve::SDK::AtomicYaml.with_lock(lock_path) do
-        existing = Eve::SDK::AtomicYaml.load_yaml(config_path)
-        existing[section] ||= {}
-        existing[section][field] = value
-        Eve::SDK::AtomicYaml.atomic_write(config_path, existing)
-      end
-    end
-    pids << pid
-  end
-
-  all_ok = true
-  pids.each do |pid|
-    _pid, status = Process.waitpid2(pid)
-    all_ok = false unless status.success?
-  end
-
-  if all_ok
-    pass "all #{WRITER_COUNT} writers completed"
-  else
-    failures += fail_test "not all writers completed successfully"
-  end
-
-  if File.exist?(config_path)
-    pass "config file exists"
-  else
-    failures += fail_test "config file missing after concurrent writes"
-  end
-
-  data = YAML.safe_load(File.read(config_path))
-  if data.is_a?(Hash) && data.key?("test_section")
-    pass "config file has correct top-level key"
-  else
-    failures += fail_test "config file has wrong structure"
-    data = {}
-  end
-
-  section = data["test_section"] || {}
-  if section.size >= WRITER_COUNT
-    pass "all #{WRITER_COUNT} entries recorded"
-  else
-    failures += fail_test "expected >= #{WRITER_COUNT} entries, got #{section.size}"
-  end
-
-  puts "\n== config-save: unset removes field =="
-
-  ENV["EVE_CONFIG_PATH"] = config_path
-  system("#{ROOT}/scripts/config-save", "test_section", "key_0", "new_value")
-  system("#{ROOT}/scripts/config-save", "--unset", "test_section", "key_0")
-
-  data_after = YAML.safe_load(File.read(config_path))
-  if !data_after["test_section"].key?("key_0")
-    pass "unset removes field"
-  else
-    failures += fail_test "unset did not remove field"
-  end
-
-  puts "\n== config-save: write and read back =="
-
-  system("#{ROOT}/scripts/config-save", "aws", "region", "us-west-2")
-  data_aws = YAML.safe_load(File.read(config_path))
-  if data_aws.dig("aws", "region") == "us-west-2"
-    pass "config-save writes correct value"
-  else
-    failures += fail_test "expected aws.region=us-west-2, got #{data_aws.dig("aws", "region").inspect}"
-  end
-
-ensure
-  FileUtils.rm_rf(tmpdir) if tmpdir
-  ENV.delete("EVE_CONFIG_PATH")
-end
-
-if failures.positive?
-  $stderr.puts "\n#{failures} check(s) failed."
-  exit 1
-end
-puts "\nAll config-save checks passed."
+result = subprocess.run(
+    [
+        "poetry",
+        "run",
+        "pytest",
+        "tests/python/commands/test_config_state_commands.py",
+        "tests/python/sdk/test_config.py",
+    ],
+    cwd=ROOT,
+    check=False,
+)
+raise SystemExit(result.returncode)

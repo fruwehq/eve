@@ -1,107 +1,143 @@
-#!/usr/bin/env ruby
-# frozen_string_literal: true
+#!/usr/bin/env python3
+from __future__ import annotations
 
-# Check which required fields are missing. Outputs JSON.
-# Exit 0 if all required fields populated, 1 if missing.
-# --json: full report. --missing: just missing field names.
+import json
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any
 
-require "json"
-require "open3"
-require "yaml"
+import yaml
 
-ROOT = File.expand_path("..", __dir__)
-$LOAD_PATH.unshift(File.join(ROOT, "core"))
-require "sdk"
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
-format = ARGV.include?("--json") ? "json" : "missing"
+from eve_sdk.secrets import Secrets, SecretsError  # noqa: E402
+from eve_sdk.workdir import Workdir  # noqa: E402
 
-manifest_dir = File.join(ROOT, "plugins", "providers")
-defaults_path = File.join(ROOT, "config", "defaults.yaml")
-config_path = Eve::SDK::Workdir.config_path
 
-defaults = YAML.safe_load(File.read(defaults_path), aliases: false) || {}
-config = YAML.safe_load(File.read(config_path), aliases: false) if File.exist?(config_path)
-config ||= {}
+def command_available(command: str) -> bool:
+    return subprocess.run(["sh", "-c", f"command -v {command} >/dev/null 2>&1"], check=False).returncode == 0
 
-missing = []
-warnings = []
 
-def command_available?(command)
-  system("command -v #{command} >/dev/null 2>&1")
-end
+def host_os() -> str:
+    try:
+        result = subprocess.run(["uname", "-s"], text=True, capture_output=True, check=False)
+    except FileNotFoundError:
+        return "unknown"
+    return result.stdout.strip() if result.returncode == 0 and result.stdout.strip() else "unknown"
 
-def host_os
-  stdout, status = Open3.capture2("uname", "-s")
-  return stdout.strip if status.success? && !stdout.strip.empty?
 
-  "unknown"
-rescue Errno::ENOENT
-  "unknown"
-end
+def load_yaml(path: Path) -> dict[str, Any]:
+    loaded = yaml.safe_load(path.read_text(encoding="utf-8")) if path.exists() else {}
+    return loaded if isinstance(loaded, dict) else {}
 
-case host_os
-when "Linux"
-  warnings << {
-    "id" => "linux-getent-missing",
-    "scope" => "os-portability",
-    "description" => "Raspberry Pi hostname resolution on Linux requires getent."
-  } unless command_available?("getent")
-  warnings << {
-    "id" => "linux-xfreerdp-missing",
-    "scope" => "os-portability",
-    "description" => "Opening RDP sessions on Linux requires xfreerdp."
-  } unless command_available?("xfreerdp")
-when "Darwin"
-  warnings << {
-    "id" => "darwin-dscacheutil-missing",
-    "scope" => "os-portability",
-    "description" => "Raspberry Pi hostname resolution on macOS requires dscacheutil."
-  } unless command_available?("dscacheutil")
-  warnings << {
-    "id" => "darwin-pbcopy-missing",
-    "scope" => "os-portability",
-    "description" => "Opening RDP sessions on macOS copies passwords with pbcopy."
-  } unless command_available?("pbcopy")
-else
-  warnings << {
-    "id" => "unsupported-host-os",
-    "scope" => "os-portability",
-    "description" => "This host OS is not supported by the v3.3 portability contract."
-  }
-end
 
-Dir.glob(File.join(manifest_dir, "*", "eve-plugin.yaml")).sort.each do |path|
-  data = YAML.safe_load(File.read(path), aliases: false)
-  next unless data.is_a?(Hash) && data["kind"] == "provider"
+def portability_warnings() -> list[dict[str, str]]:
+    warnings: list[dict[str, str]] = []
+    match host_os():
+        case "Linux":
+            if not command_available("getent"):
+                warnings.append(
+                    {
+                        "id": "linux-getent-missing",
+                        "scope": "os-portability",
+                        "description": "Raspberry Pi hostname resolution on Linux requires getent.",
+                    }
+                )
+            if not command_available("xfreerdp"):
+                warnings.append(
+                    {
+                        "id": "linux-xfreerdp-missing",
+                        "scope": "os-portability",
+                        "description": "Opening RDP sessions on Linux requires xfreerdp.",
+                    }
+                )
+        case "Darwin":
+            if not command_available("dscacheutil"):
+                warnings.append(
+                    {
+                        "id": "darwin-dscacheutil-missing",
+                        "scope": "os-portability",
+                        "description": "Raspberry Pi hostname resolution on macOS requires dscacheutil.",
+                    }
+                )
+            if not command_available("pbcopy"):
+                warnings.append(
+                    {
+                        "id": "darwin-pbcopy-missing",
+                        "scope": "os-portability",
+                        "description": "Opening RDP sessions on macOS copies passwords with pbcopy.",
+                    }
+                )
+        case _:
+            warnings.append(
+                {
+                    "id": "unsupported-host-os",
+                    "scope": "os-portability",
+                    "description": "This host OS is not supported by the v3.3 portability contract.",
+                }
+            )
+    return warnings
 
-  provider_id = data["id"]
-  schema = data["config_schema"] || {}
 
-  schema["config"]&.each do |field, spec|
-    next unless spec["required"]
-    config_val = config.dig(provider_id.tr("-", "_"), field)
-    default_val = defaults.dig(provider_id.tr("-", "_"), field)
-    env_name = spec["env"] # not standard; skip env check for now
-    has_value = !config_val.to_s.strip.empty? || !default_val.to_s.strip.empty?
-    missing << { "provider" => provider_id, "scope" => "config", "field" => field, "description" => spec["description"] } unless has_value
-  end
+def build_report() -> dict[str, Any]:
+    defaults = load_yaml(ROOT / "config/defaults.yaml")
+    config = load_yaml(Workdir.config_path())
+    missing: list[dict[str, str]] = []
 
-  schema["secrets"]&.each do |field, spec|
-    next unless spec["required"]
-    keys = begin
-             Eve::SDK::Secrets.keys_set(provider_id)
-           rescue Eve::SDK::Secrets::SecretsError
-             []
-           end
-    missing << { "provider" => provider_id, "scope" => "secrets", "field" => field, "description" => spec["description"] } unless keys.include?(field)
-  end
-end
+    for manifest in sorted((ROOT / "plugins/providers").glob("*/eve-plugin.yaml")):
+        data = load_yaml(manifest)
+        if data.get("kind") != "provider":
+            continue
+        provider_id = str(data["id"])
+        schema = data.get("config_schema") or {}
+        for field, spec in (schema.get("config") or {}).items():
+            if not isinstance(spec, dict) or not spec.get("required"):
+                continue
+            provider_key = provider_id.replace("-", "_")
+            config_section = config.get(provider_key) if isinstance(config.get(provider_key), dict) else {}
+            default_section = defaults.get(provider_key) if isinstance(defaults.get(provider_key), dict) else {}
+            config_val = config_section.get(field)
+            default_val = default_section.get(field)
+            if not str(config_val or "").strip() and not str(default_val or "").strip():
+                missing.append(
+                    {
+                        "provider": provider_id,
+                        "scope": "config",
+                        "field": str(field),
+                        "description": str(spec.get("description") or ""),
+                    }
+                )
+        for field, spec in (schema.get("secrets") or {}).items():
+            if not isinstance(spec, dict) or not spec.get("required"):
+                continue
+            try:
+                keys = Secrets.keys_set(provider_id)
+            except SecretsError:
+                keys = []
+            if field not in keys:
+                missing.append(
+                    {
+                        "provider": provider_id,
+                        "scope": "secrets",
+                        "field": str(field),
+                        "description": str(spec.get("description") or ""),
+                    }
+                )
+    return {"missing": missing, "warnings": portability_warnings(), "ok": not missing}
 
-case format
-when "json"
-  puts JSON.pretty_generate("missing" => missing, "warnings" => warnings, "ok" => missing.empty?)
-when "missing"
-  missing.each { |m| puts "#{m['provider']}.#{m['scope']}.#{m['field']}" }
-end
 
-exit(missing.empty? ? 0 : 1)
+def main(argv: list[str]) -> int:
+    fmt = "json" if "--json" in argv else "missing"
+    report = build_report()
+    if fmt == "json":
+        print(json.dumps(report, indent=2))
+    else:
+        for entry in report["missing"]:
+            print(f"{entry['provider']}.{entry['scope']}.{entry['field']}")
+    return 0 if report["ok"] else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

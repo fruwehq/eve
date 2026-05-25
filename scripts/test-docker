@@ -1,43 +1,45 @@
-#!/usr/bin/env ruby
-# Smoke-test the slim Eve runtime image on Linux hosts with Docker.
+#!/usr/bin/env python3
+from __future__ import annotations
 
-ROOT = File.expand_path("..", __dir__)
+import os
+import subprocess
+import sys
+from pathlib import Path
 
-def pass(message)
-  puts "  [OK] #{message}"
-end
+ROOT = Path(__file__).resolve().parents[1]
 
-def skip(message)
-  puts "  [SKIP] #{message}"
-end
 
-def docker_available?
-  system("sh", "-c", "command -v docker >/dev/null 2>&1")
-end
+def pass_check(message: str) -> None:
+    print(f"  [OK] {message}")
 
-def run!(*cmd)
-  puts "  $ #{cmd.join(" ")}"
-  return if system(*cmd, chdir: ROOT)
 
-  abort "test-docker: command failed: #{cmd.join(" ")}"
-end
+def skip(message: str) -> None:
+    print(f"  [SKIP] {message}")
 
-host_os = `uname -s`.strip
-if ENV["EVE_SKIP_DOCKER_SMOKE"] == "1"
-  skip "Docker runtime smoke skipped because docker-runtime-slim owns required CI Docker coverage"
-  exit 0
-end
 
-unless host_os == "Linux"
-  skip "Docker runtime smoke test requires Linux host; host is #{host_os}"
-  exit 0
-end
+def command_available(command: str) -> bool:
+    return subprocess.run(["sh", "-c", f"command -v {command} >/dev/null 2>&1"], check=False).returncode == 0
 
-unless docker_available?
-  skip "Docker runtime smoke test requires docker on PATH"
-  exit 0
-end
 
-run!("docker", "build", "-f", "docker/Dockerfile", "--target", "runtime-slim", "-t", "eve/eve:slim", ".")
-run!("docker", "run", "--rm", "eve/eve:slim", "make", "help")
-pass "slim Docker runtime builds and runs make help"
+def run_checked(*cmd: str) -> None:
+    print(f"  $ {' '.join(cmd)}")
+    result = subprocess.run(list(cmd), cwd=ROOT, check=False)
+    if result.returncode != 0:
+        print(f"test-docker: command failed: {' '.join(cmd)}", file=sys.stderr)
+        raise SystemExit(result.returncode)
+
+
+host = subprocess.run(["uname", "-s"], text=True, capture_output=True, check=False).stdout.strip()
+if os.environ.get("EVE_SKIP_DOCKER_SMOKE") == "1":
+    skip("Docker runtime smoke skipped because docker-runtime-slim owns required CI Docker coverage")
+    raise SystemExit(0)
+if host != "Linux":
+    skip(f"Docker runtime smoke test requires Linux host; host is {host}")
+    raise SystemExit(0)
+if not command_available("docker"):
+    skip("Docker runtime smoke test requires docker on PATH")
+    raise SystemExit(0)
+
+run_checked("docker", "build", "-f", "docker/Dockerfile", "--target", "runtime-slim", "-t", "eve/eve:slim", ".")
+run_checked("docker", "run", "--rm", "eve/eve:slim", "make", "help")
+pass_check("slim Docker runtime builds and runs make help")

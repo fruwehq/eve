@@ -5,6 +5,8 @@ import os
 import subprocess
 from pathlib import Path
 
+import yaml
+
 ROOT = Path(__file__).resolve().parents[3]
 
 
@@ -45,6 +47,28 @@ def test_config_save_write_and_unset(tmp_path: Path) -> None:
     assert write.returncode == 0, write.stderr
     assert unset.returncode == 0, unset.stderr
     assert config.read_text(encoding="utf-8") == "{}\n"
+
+
+def test_config_save_concurrent_writers(tmp_path: Path) -> None:
+    config = tmp_path / "config.yaml"
+    env = os.environ | {"EVE_CONFIG_PATH": str(config)}
+    writers = [
+        subprocess.Popen(
+            [str(ROOT / "scripts/config-save"), "test_section", f"key_{index}", f"value_{index}"],
+            cwd=ROOT,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        for index in range(20)
+    ]
+
+    results = [(*writer.communicate(timeout=30), writer.returncode) for writer in writers]
+
+    assert all(returncode == 0 for _stdout, _stderr, returncode in results), results
+    data = yaml.safe_load(config.read_text(encoding="utf-8"))
+    assert data["test_section"] == {f"key_{index}": f"value_{index}" for index in range(20)}
 
 
 def test_config_save_requires_section_and_field() -> None:

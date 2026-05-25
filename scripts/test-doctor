@@ -1,80 +1,87 @@
-#!/usr/bin/env ruby
-# frozen_string_literal: true
+#!/usr/bin/env python3
+from __future__ import annotations
 
-require "fileutils"
-require "json"
-require "open3"
-require "tmpdir"
+import json
+import os
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
 
-ROOT = File.expand_path("..", __dir__)
-DOCTOR = File.join(ROOT, "scripts", "doctor")
+ROOT = Path(__file__).resolve().parents[1]
+DOCTOR = ROOT / "scripts/doctor"
+failures = 0
 
-$failures = 0
 
-def pass(message)
-  puts "  [OK] #{message}"
-end
+def pass_check(message: str) -> None:
+    print(f"  [OK] {message}")
 
-def fail(message)
-  warn "  [FAIL] #{message}"
-  $failures += 1
-end
 
-def write_executable(path, body)
-  File.write(path, body)
-  FileUtils.chmod("+x", path)
-end
+def fail_check(message: str) -> None:
+    global failures
+    print(f"  [FAIL] {message}", file=sys.stderr)
+    failures += 1
 
-def run_doctor(fake_os: nil)
-  env = {}
-  Dir.mktmpdir("eve-doctor-test.") do |dir|
-    if fake_os
-      bin = File.join(dir, "bin")
-      FileUtils.mkdir_p(bin)
-      write_executable(File.join(bin, "uname"), "#!/usr/bin/env sh\nprintf '%s\\n' #{fake_os}\n")
-      env["PATH"] = "#{bin}:#{ENV.fetch("PATH")}"
-    end
-    stdout, stderr, status = Open3.capture3(env, DOCTOR, "--json")
-    return [JSON.parse(stdout), stderr, status]
-  end
-end
 
-native, native_stderr, native_status = run_doctor
-if native_status.success? && native["tools"].is_a?(Array) && native.dig("checks", 0, "name") == "catalog-options"
-  pass "doctor --json emits native report"
-else
-  fail "doctor --json native report failed status=#{native_status.exitstatus} stderr=#{native_stderr.inspect}"
-end
+def write_executable(path: Path, body: str) -> None:
+    path.write_text(body, encoding="utf-8")
+    path.chmod(0o755)
 
-linux, linux_stderr, linux_status = run_doctor(fake_os: "Linux")
-linux_getent = linux.fetch("tools").find { |tool| tool["tool"] == "getent" }
-linux_dscacheutil = linux.fetch("tools").find { |tool| tool["tool"] == "dscacheutil" }
-if linux_status.success? &&
-   linux.dig("os", "key") == "linux" &&
-   linux_getent&.fetch("install") == "apt install libc-bin" &&
-   linux_dscacheutil&.fetch("status") == "skipped"
-  pass "doctor --json emits Linux-specific tool hints"
-else
-  fail "doctor --json Linux report failed stderr=#{linux_stderr.inspect}"
-end
 
-darwin, darwin_stderr, darwin_status = run_doctor(fake_os: "Darwin")
-darwin_dscacheutil = darwin.fetch("tools").find { |tool| tool["tool"] == "dscacheutil" }
-darwin_getent = darwin.fetch("tools").find { |tool| tool["tool"] == "getent" }
-if darwin_status.success? &&
-   darwin.dig("os", "key") == "darwin" &&
-   darwin_dscacheutil&.fetch("install") == "bundled with macOS" &&
-   darwin_getent&.fetch("status") == "skipped"
-  pass "doctor --json emits macOS-specific tool hints"
-else
-  fail "doctor --json Darwin report failed stderr=#{darwin_stderr.inspect}"
-end
+def run_doctor(fake_os: str | None = None) -> tuple[dict[str, object], str, int]:
+    env = os.environ.copy()
+    with tempfile.TemporaryDirectory(prefix="eve-doctor-test.") as tmp:
+        if fake_os:
+            bin_dir = Path(tmp) / "bin"
+            bin_dir.mkdir()
+            write_executable(bin_dir / "uname", f"#!/usr/bin/env sh\nprintf '%s\\n' {fake_os}\n")
+            env["PATH"] = f"{bin_dir}:{env['PATH']}"
+        result = subprocess.run([str(DOCTOR), "--json"], cwd=ROOT, env=env, text=True, capture_output=True, check=False)
+    return json.loads(result.stdout), result.stderr, result.returncode
 
-required = native.fetch("required_fields")
-if required.key?("warnings") && required.fetch("warnings").is_a?(Array)
-  pass "check-required warnings are present in doctor report"
-else
-  fail "check-required warnings missing from doctor report"
-end
 
-exit($failures.zero? ? 0 : 1)
+native, native_stderr, native_status = run_doctor()
+native_checks = native.get("checks", [{}])
+native_check_name = native_checks[0].get("name") if isinstance(native_checks, list) else None
+if native_status == 0 and isinstance(native.get("tools"), list) and native_check_name == "catalog-options":
+    pass_check("doctor --json emits native report")
+else:
+    fail_check(f"doctor --json native report failed status={native_status} stderr={native_stderr!r}")
+
+linux, linux_stderr, linux_status = run_doctor(fake_os="Linux")
+linux_getent = next((tool for tool in linux["tools"] if tool["tool"] == "getent"), None)  # type: ignore[index]
+linux_dscacheutil = next((tool for tool in linux["tools"] if tool["tool"] == "dscacheutil"), None)  # type: ignore[index]
+if (
+    linux_status == 0
+    and linux.get("os", {}).get("key") == "linux"  # type: ignore[union-attr]
+    and linux_getent
+    and linux_getent["install"] == "apt install libc-bin"
+    and linux_dscacheutil
+    and linux_dscacheutil["status"] == "skipped"
+):
+    pass_check("doctor --json emits Linux-specific tool hints")
+else:
+    fail_check(f"doctor --json Linux report failed stderr={linux_stderr!r}")
+
+darwin, darwin_stderr, darwin_status = run_doctor(fake_os="Darwin")
+darwin_dscacheutil = next((tool for tool in darwin["tools"] if tool["tool"] == "dscacheutil"), None)  # type: ignore[index]
+darwin_getent = next((tool for tool in darwin["tools"] if tool["tool"] == "getent"), None)  # type: ignore[index]
+if (
+    darwin_status == 0
+    and darwin.get("os", {}).get("key") == "darwin"  # type: ignore[union-attr]
+    and darwin_dscacheutil
+    and darwin_dscacheutil["install"] == "bundled with macOS"
+    and darwin_getent
+    and darwin_getent["status"] == "skipped"
+):
+    pass_check("doctor --json emits macOS-specific tool hints")
+else:
+    fail_check(f"doctor --json Darwin report failed stderr={darwin_stderr!r}")
+
+required = native["required_fields"]  # type: ignore[index]
+if isinstance(required, dict) and isinstance(required.get("warnings"), list):
+    pass_check("check-required warnings are present in doctor report")
+else:
+    fail_check("check-required warnings missing from doctor report")
+
+raise SystemExit(0 if failures == 0 else 1)
