@@ -110,7 +110,8 @@ def count_docker_builds(workflow: dict[str, Any]) -> int:
         if not isinstance(steps, list):
             continue
         for step in steps:
-            if isinstance(step, dict) and "docker build -f docker/Dockerfile --target runtime-slim" in run_text(step):
+            text = run_text(step) if isinstance(step, dict) else ""
+            if "--target runtime-slim" in text and "--file docker/Dockerfile" in text:
                 count += 1
     return count
 
@@ -193,7 +194,26 @@ def main() -> int:
         "docker-runtime-slim writes timing summary to GITHUB_STEP_SUMMARY",
         "$GITHUB_STEP_SUMMARY" in run_text(find_step(docker_slim_steps, "Timing summary")),
     )
+    checks.assert_check("docker-runtime-slim sets up Docker Buildx", "Set up Docker Buildx" in docker_slim_step_names)
+    checks.assert_check("docker-runtime-slim probes explicit cache key", "Probe slim runtime cache key" in docker_slim_step_names)
+    checks.assert_check("docker-runtime-slim reports cache misses explicitly", "Report Docker cache status" in docker_slim_step_names)
+    cache_scope = docker_slim_job.get("env", {}).get("EVE_DOCKER_CACHE_SCOPE") if isinstance(docker_slim_job, dict) else None
+    checks.assert_check(
+        "docker-runtime-slim cache scope includes runner OS, arch, Dockerfile, and lockfiles",
+        isinstance(cache_scope, str)
+        and "runner.os" in cache_scope
+        and "runner.arch" in cache_scope
+        and "hashFiles('docker/Dockerfile', 'poetry.lock', 'Gemfile.lock')" in cache_scope,
+    )
+    checks.assert_check(
+        "docker-runtime-slim cache status logs cache miss: rebuilding",
+        "cache miss: rebuilding" in run_text(find_step(docker_slim_steps, "Report Docker cache status")),
+    )
     checks.assert_check("only one dedicated slim Docker build exists", count_docker_builds(workflow) == 1)
+
+    build_run = run_text(find_step(docker_slim_steps, "Build slim runtime image"))
+    checks.assert_check("docker-runtime-slim imports BuildKit GHA cache", '--cache-from "type=gha,scope=${EVE_DOCKER_CACHE_SCOPE}"' in build_run)
+    checks.assert_check("docker-runtime-slim exports BuildKit GHA cache", '--cache-to "type=gha,mode=max,scope=${EVE_DOCKER_CACHE_SCOPE}"' in build_run)
 
     size_run = run_text(find_step(docker_slim_steps, "Report slim image size"))
     checks.assert_check(
