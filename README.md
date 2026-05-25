@@ -97,6 +97,18 @@ docker run -it \
   eve/eve:slim make eve
 ```
 
+The container forwards your host's ssh-agent so SSH operations against
+provisioned instances use keys held on the host (the keys never enter the
+container image). Ensure your agent is running and has your keys loaded before
+launching:
+
+```bash
+ssh-add -l    # should list at least one key; if not, start an agent and ssh-add your key
+```
+
+If `SSH_AUTH_SOCK` is unset, `docker compose` will refuse to start with a clear
+error pointing here.
+
 ```bash
 export SSH_AUTH_SOCK="${SSH_AUTH_SOCK:?start ssh-agent or export SSH_AUTH_SOCK first}"
 docker compose run --rm eve make eve
