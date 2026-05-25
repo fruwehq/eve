@@ -94,7 +94,15 @@ jobs:
         run: docker run --rm eve/eve:slim make help
 
       - name: Report slim image size
-        run: docker image inspect eve/eve:slim --format 'slim image size bytes={{.Size}}'
+        run: |
+          set -euo pipefail
+          docker image inspect eve/eve:slim --format 'slim image inspect bytes={{.Size}}'
+          compressed_size="$(docker save eve/eve:slim | gzip -c | wc -c | tr -d ' ')"
+          echo "slim image compressed bytes=${compressed_size}"
+          if [ "${compressed_size}" -ge 700000000 ]; then
+            echo "slim image compressed size must stay below 700000000 bytes" >&2
+            exit 1
+          fi
 
   docker-runtime-full:
     if: github.event_name == 'schedule'
