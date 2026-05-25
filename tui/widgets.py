@@ -1112,8 +1112,10 @@ class SettingsScreen(ModalScreen[None]):
     }
 
     #settings-dialog {
-        width: 80;
-        height: 32;
+        width: 90%;
+        height: 90%;
+        max-width: 140;
+        max-height: 50;
         border: round $primary;
         background: $surface;
         padding: 1 2;
@@ -1125,7 +1127,7 @@ class SettingsScreen(ModalScreen[None]):
     }
 
     #settings-table {
-        height: 22;
+        height: 1fr;
     }
 
     #settings-actions {
@@ -1322,8 +1324,10 @@ class ProviderConfigScreen(ModalScreen[None]):
     }
 
     #pc-dialog {
-        width: 80;
-        height: 34;
+        width: 90%;
+        height: 90%;
+        max-width: 140;
+        max-height: 50;
         border: round $success;
         background: $surface;
         padding: 1 2;
@@ -1335,7 +1339,7 @@ class ProviderConfigScreen(ModalScreen[None]):
     }
 
     #pc-table {
-        height: 22;
+        height: 1fr;
     }
 
     #pc-actions {
