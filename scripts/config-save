@@ -1,45 +1,56 @@
-#!/usr/bin/env ruby
-# frozen_string_literal: true
+#!/usr/bin/env python3
+"""Persist a structured config field."""
 
-require "shellwords"
+from __future__ import annotations
 
-section = ARGV[0]
-field = ARGV[1]
-value = ARGV[2]
+import argparse
+import sys
+from pathlib import Path
 
-if section.nil? || field.nil?
-  warn "usage: config-save [--unset] <section> <field> [value]"
-  exit 2
-end
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
-unset = false
-if section == "--unset"
-  unset = true
-  section = ARGV[1]
-  field = ARGV[2]
-  if section.nil? || field.nil?
-    warn "usage: config-save --unset <section> <field>"
-    exit 2
-  end
-end
+from eve_sdk.atomic_yaml import AtomicYaml
+from eve_sdk.workdir import Workdir
 
-root = File.expand_path("..", __dir__)
-$LOAD_PATH.unshift(File.join(root, "core"))
-require "sdk"
 
-config_path = Eve::SDK::Workdir.config_path
-lock_path = "#{config_path}.lock"
+def parser() -> argparse.ArgumentParser:
+    arg_parser = argparse.ArgumentParser(prog="config-save", usage="config-save [--unset] <section> <field> [value]")
+    arg_parser.add_argument("--unset", action="store_true")
+    arg_parser.add_argument("section")
+    arg_parser.add_argument("field")
+    arg_parser.add_argument("value", nargs="?")
+    return arg_parser
 
-Eve::SDK::AtomicYaml.with_lock(lock_path) do
-  existing = Eve::SDK::AtomicYaml.load_yaml(config_path)
 
-  if unset
-    existing[section]&.delete(field) if existing[section].is_a?(Hash)
-    existing.delete(section) if existing[section].is_a?(Hash) && existing[section].empty?
-  else
-    existing[section] ||= {}
-    existing[section][field] = value.to_s.empty? ? nil : value.to_s
-  end
+def main() -> int:
+    args = parser().parse_args()
+    if not args.unset and args.value is None:
+        args.value = ""
 
-  Eve::SDK::AtomicYaml.atomic_write(config_path, existing)
-end
+    config_path = Workdir.config_path()
+    lock_path = Path(f"{config_path}.lock")
+
+    try:
+        with AtomicYaml.with_lock(lock_path):
+            existing = AtomicYaml.load_yaml(config_path)
+            section = existing.get(args.section)
+            if args.unset:
+                if isinstance(section, dict):
+                    section.pop(args.field, None)
+                    if not section:
+                        existing.pop(args.section, None)
+            else:
+                if not isinstance(section, dict):
+                    section = {}
+                    existing[args.section] = section
+                section[args.field] = None if str(args.value) == "" else str(args.value)
+            AtomicYaml.atomic_write(config_path, existing)
+        return 0
+    except Exception as error:
+        print(f"config-save: {error}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
