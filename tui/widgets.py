@@ -1145,6 +1145,7 @@ class SettingsScreen(ModalScreen[None]):
             yield Label("[b]Settings[/b]", id="settings-title")
             table: DataTable[Any] = DataTable(id="settings-table")
             table.add_columns("Section", "Field", "Value", "Source")
+            table.cursor_type = "row"
             yield table
             with Horizontal(id="settings-actions"):
                 yield Button("Reset", id="settings-reset", variant="warning")
@@ -1200,7 +1201,7 @@ class SettingsScreen(ModalScreen[None]):
                 except Exception as e:
                     self.notify(f"Save failed: {e}", severity="error")
 
-        self.push_screen(EditFieldScreen(label, current), handle_edit)  # type: ignore[attr-defined]
+        self.app.push_screen(EditFieldScreen(label, current), handle_edit)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "close":
@@ -1361,6 +1362,7 @@ class ProviderConfigScreen(ModalScreen[None]):
             yield Label(f"[b]Configure {self.provider_name}[/b]", id="pc-title")
             table: DataTable[Any] = DataTable(id="pc-table")
             table.add_columns("Field", "Value", "Type")
+            table.cursor_type = "row"
             yield table
             with Horizontal(id="pc-actions"):
                 yield Button("Test", id="pc-test", variant="primary")
@@ -1438,7 +1440,7 @@ class ProviderConfigScreen(ModalScreen[None]):
                 except Exception as e:
                     self.notify(f"Save failed: {e}", severity="error")
 
-        self.push_screen(EditFieldScreen(label, current, password=is_secret), handle_edit)  # type: ignore[attr-defined]
+        self.app.push_screen(EditFieldScreen(label, current, password=is_secret), handle_edit)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "pc-close":
