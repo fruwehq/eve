@@ -1,199 +1,214 @@
-#!/usr/bin/env ruby
-# Emit catalog-backed choices for direct instance creation.
+#!/usr/bin/env python3
+"""Emit catalog-backed choices for direct instance creation."""
 
-require "json"
-require "open3"
-require "yaml"
+from __future__ import annotations
 
-ROOT = File.expand_path("..", __dir__)
-CATALOG_PATHS = [
-  File.join(ROOT, "config/catalog.yaml"),
-  File.join(ROOT, "config/catalog.local.yaml")
-].freeze
+import argparse
+import json
+import sys
+from pathlib import Path
+from typing import Any
 
-def usage
-  warn "Usage: scripts/catalog-options [--json]"
-end
+import yaml
 
-json = false
-args = ARGV.dup
-until args.empty?
-  case args.shift
-  when "--json"
-    json = true
-  when "-h", "--help"
-    usage
-    exit 0
-  else
-    usage
-    exit 2
-  end
-end
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
-def load_any(path)
-  return {} unless File.exist?(path)
+from eve_sdk.plugin_manifest import PluginManifest
+from eve_sdk.workdir import Workdir
 
-  YAML.safe_load(File.read(path), permitted_classes: [], aliases: true) || {}
-end
-
-def run_json(*cmd)
-  out, status = Open3.capture2e(*cmd)
-  raise out unless status.success?
-
-  JSON.parse(out)
-end
-
-def merge_entries(target, entries, key)
-  return unless entries.is_a?(Array)
-
-  entries.each do |entry|
-    next unless entry.is_a?(Hash)
-
-    id = entry[key]
-    next if id.nil? || id.to_s.empty?
-
-    index = target.index { |candidate| candidate[key] == id }
-    if index
-      target[index] = entry
-    else
-      target << entry
-    end
-  end
-end
-
-def os_available_for_provider?(os, provider)
-  case provider
-  when "aws"
-    os.key?("aws_ami_name_pattern") || os.key?("aws_ami_id") || os.key?("aws_ssm_parameter")
-  when "gcp"
-    os.key?("gcp_image_project") && os.key?("gcp_image_family")
-  when "vultr"
-    os.key?("vultr_os_id")
-  when "local-qemu"
-    os.key?("vagrant_box")
-  when "truenas"
-    os.key?("cloud_image_url")
-  when "raspberry-pi"
-    os.key?("metal_image")
-  else
-    false
-  end
-end
-
-def init_available_for_provider?(init, provider)
-  providers = init["providers"].is_a?(Array) ? init["providers"] : []
-  return providers.include?(provider) unless providers.empty?
-
-  init["provider"].nil? || init["provider"] == provider
-end
-
-catalog = {
-  "machines" => [],
-  "oses" => [],
-  "inits" => [],
-  "bundles" => [],
-  "packages" => [],
-  "locations" => []
+CATALOG_SECTIONS = {
+    "machines": "name",
+    "oses": "id",
+    "inits": "id",
+    "bundles": "id",
+    "packages": "id",
+    "locations": "name",
 }
 
-CATALOG_PATHS.each do |path|
-  doc = load_any(path)
-  merge_entries(catalog["machines"], doc["machines"], "name")
-  merge_entries(catalog["oses"], doc["oses"], "id")
-  merge_entries(catalog["inits"], doc["inits"], "id")
-  merge_entries(catalog["bundles"], doc["bundles"], "id")
-  merge_entries(catalog["packages"], doc["packages"], "id")
-  merge_entries(catalog["locations"], doc["locations"], "name")
-end
 
-package_plugins = run_json(File.join(ROOT, "scripts/plugin-list"), "--kind", "package", "--json")
-package_plugin_by_id = package_plugins.fetch("plugins", []).to_h do |plugin|
-  [plugin.fetch("id"), plugin]
-end
+def load_any(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    loaded = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    if not isinstance(loaded, dict):
+        raise ValueError(f"{path}: expected a mapping")
+    return loaded
 
-providers = catalog["machines"].map { |machine| machine["provider"] }.compact.uniq.sort
-platforms = []
 
-catalog["machines"].each do |machine|
-  provider = machine["provider"]
-  next unless provider
+def merge_entries(target: list[dict[str, Any]], entries: Any, key: str) -> None:
+    if not isinstance(entries, list):
+        return
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        entry_id = entry.get(key)
+        if entry_id is None or str(entry_id) == "":
+            continue
+        for index, candidate in enumerate(target):
+            if candidate.get(key) == entry_id:
+                target[index] = entry
+                break
+        else:
+            target.append(entry)
 
-  catalog["oses"].each do |os|
-    supports = machine["supports"].is_a?(Hash) ? machine["supports"] : {}
-    arches = supports["arches"].is_a?(Array) ? supports["arches"] : []
-    os_ids = supports["os_ids"].is_a?(Array) ? supports["os_ids"] : []
-    next unless arches.empty? || arches.include?(os["arch"])
-    next unless os_ids.empty? || os_ids.include?(os["id"])
-    next unless os_available_for_provider?(os, provider)
 
-    catalog["inits"].each do |init|
-      next if init["os_family"] && init["os_family"] != os["family"]
-      next unless init_available_for_provider?(init, provider)
+def os_available_for_provider(os_entry: dict[str, Any], provider: str) -> bool:
+    match provider:
+        case "aws":
+            return any(key in os_entry for key in ("aws_ami_name_pattern", "aws_ami_id", "aws_ssm_parameter"))
+        case "gcp":
+            return "gcp_image_project" in os_entry and "gcp_image_family" in os_entry
+        case "vultr":
+            return "vultr_os_id" in os_entry
+        case "local-qemu":
+            return "vagrant_box" in os_entry
+        case "truenas":
+            return "cloud_image_url" in os_entry
+        case "raspberry-pi":
+            return "metal_image" in os_entry
+        case _:
+            return False
 
-      catalog["locations"].each do |location|
-        next unless location[provider]
 
-        defaults = machine["defaults"].is_a?(Hash) ? machine["defaults"] : {}
-        platforms << {
-          "id" => [provider, machine["name"], os["id"], init["id"], location["name"]].join(":"),
-          "provider" => provider,
-          "machine" => machine["name"],
-          "os" => os["id"],
-          "os_family" => os["family"],
-          "os_version" => os["version"],
-          "arch" => os["arch"],
-          "init" => init["id"],
-          "location" => location["name"],
-          "defaults" => defaults
-        }
-      end
-    end
-  end
-end
+def init_available_for_provider(init: dict[str, Any], provider: str) -> bool:
+    providers = init.get("providers") if isinstance(init.get("providers"), list) else []
+    if providers:
+        return provider in providers
+    return init.get("provider") is None or init.get("provider") == provider
 
-bundles = catalog["bundles"].map do |bundle|
-  {
-    "id" => bundle["id"],
-    "includes" => bundle["includes"].is_a?(Array) ? bundle["includes"] : []
-  }
-end
 
-packages = catalog["packages"].map do |package|
-  plugin = package_plugin_by_id[package["id"]] || {}
-  supports = plugin["supports"].is_a?(Hash) ? plugin["supports"] : {}
-  actions = plugin["actions"].is_a?(Array) ? plugin["actions"] : []
-  compatibility = plugin["compatibility"].is_a?(Array) ? plugin["compatibility"] : []
-  install = plugin["install"].is_a?(Hash) ? plugin["install"] : nil
-  installable_os_families = install ? install.keys : []
+def load_catalog() -> dict[str, list[dict[str, Any]]]:
+    catalog: dict[str, list[dict[str, Any]]] = {section: [] for section in CATALOG_SECTIONS}
+    for path in (Workdir.repo_root() / "config/catalog.yaml", Workdir.repo_root() / "config/catalog.local.yaml"):
+        doc = load_any(path)
+        for section, key in CATALOG_SECTIONS.items():
+            merge_entries(catalog[section], doc.get(section), key)
+    return catalog
 
-  {
-    "id" => package["id"],
-    "display_name" => plugin["display_name"] || package["id"],
-    "supports" => supports,
-    "conflicts_with" => plugin["conflicts_with"].is_a?(Array) ? plugin["conflicts_with"] : [],
-    "installable" => !install.nil?,
-    "installable_os_families" => installable_os_families,
-    "actions" => actions,
-    "compatibility_enforced" => plugin["compatibility_enforced"] == true,
-    "compatibility" => compatibility
-  }
-end
 
-doc = {
-  "providers" => providers,
-  "platforms" => platforms.sort_by { |platform| [platform["provider"], platform["machine"], platform["os"], platform["location"], platform["init"]] },
-  "bundles" => bundles.sort_by { |bundle| bundle["id"].to_s },
-  "packages" => packages.sort_by { |package| package["id"].to_s }
-}
+def build_doc() -> dict[str, Any]:
+    catalog = load_catalog()
+    package_plugins = PluginManifest.load_all("package")
+    package_plugin_by_id = {plugin["id"]: plugin for plugin in package_plugins}
+    providers = sorted({machine.get("provider") for machine in catalog["machines"] if machine.get("provider")})
+    platforms: list[dict[str, Any]] = []
 
-if json
-  puts JSON.pretty_generate(doc)
-else
-  puts "PROVIDERS"
-  providers.each { |provider| puts "  #{provider}" }
-  puts
-  puts "PLATFORMS"
-  doc["platforms"].each do |platform|
-    puts "  #{platform["provider"]} #{platform["machine"]} #{platform["os"]} #{platform["location"]} #{platform["init"]}"
-  end
-end
+    for machine in catalog["machines"]:
+        provider = machine.get("provider")
+        if not provider:
+            continue
+        for os_entry in catalog["oses"]:
+            supports = machine.get("supports") if isinstance(machine.get("supports"), dict) else {}
+            arches = supports.get("arches") if isinstance(supports.get("arches"), list) else []
+            os_ids = supports.get("os_ids") if isinstance(supports.get("os_ids"), list) else []
+            if arches and os_entry.get("arch") not in arches:
+                continue
+            if os_ids and os_entry.get("id") not in os_ids:
+                continue
+            if not os_available_for_provider(os_entry, provider):
+                continue
+            for init in catalog["inits"]:
+                if init.get("os_family") and init.get("os_family") != os_entry.get("family"):
+                    continue
+                if not init_available_for_provider(init, provider):
+                    continue
+                for location in catalog["locations"]:
+                    if not location.get(provider):
+                        continue
+                    defaults = machine.get("defaults") if isinstance(machine.get("defaults"), dict) else {}
+                    platforms.append(
+                        {
+                            "id": ":".join(
+                                [
+                                    str(provider),
+                                    str(machine.get("name")),
+                                    str(os_entry.get("id")),
+                                    str(init.get("id")),
+                                    str(location.get("name")),
+                                ]
+                            ),
+                            "provider": provider,
+                            "machine": machine.get("name"),
+                            "os": os_entry.get("id"),
+                            "os_family": os_entry.get("family"),
+                            "os_version": os_entry.get("version"),
+                            "arch": os_entry.get("arch"),
+                            "init": init.get("id"),
+                            "location": location.get("name"),
+                            "defaults": defaults,
+                        }
+                    )
+
+    bundles = [
+        {"id": bundle.get("id"), "includes": bundle.get("includes") if isinstance(bundle.get("includes"), list) else []}
+        for bundle in catalog["bundles"]
+    ]
+
+    packages = []
+    for package in catalog["packages"]:
+        plugin = package_plugin_by_id.get(package.get("id"), {})
+        supports = plugin.get("supports") if isinstance(plugin.get("supports"), dict) else {}
+        actions = plugin.get("actions") if isinstance(plugin.get("actions"), list) else []
+        compatibility = plugin.get("compatibility") if isinstance(plugin.get("compatibility"), list) else []
+        install = plugin.get("install") if isinstance(plugin.get("install"), dict) else None
+        packages.append(
+            {
+                "id": package.get("id"),
+                "display_name": plugin.get("display_name") or package.get("id"),
+                "supports": supports,
+                "conflicts_with": plugin.get("conflicts_with") if isinstance(plugin.get("conflicts_with"), list) else [],
+                "installable": install is not None,
+                "installable_os_families": list(install.keys()) if install else [],
+                "actions": actions,
+                "compatibility_enforced": plugin.get("compatibility_enforced") is True,
+                "compatibility": compatibility,
+            }
+        )
+
+    return {
+        "providers": providers,
+        "platforms": sorted(
+            platforms,
+            key=lambda platform: (
+                str(platform["provider"]),
+                str(platform["machine"]),
+                str(platform["os"]),
+                str(platform["location"]),
+                str(platform["init"]),
+            ),
+        ),
+        "bundles": sorted(bundles, key=lambda bundle: str(bundle.get("id"))),
+        "packages": sorted(packages, key=lambda package: str(package.get("id"))),
+    }
+
+
+def parser() -> argparse.ArgumentParser:
+    arg_parser = argparse.ArgumentParser(prog="scripts/catalog-options", usage="scripts/catalog-options [--json]")
+    arg_parser.add_argument("--json", action="store_true")
+    return arg_parser
+
+
+def main() -> int:
+    args = parser().parse_args()
+    try:
+        doc = build_doc()
+    except Exception as error:
+        print(f"catalog-options: {error}", file=sys.stderr)
+        return 1
+
+    if args.json:
+        print(json.dumps(doc, indent=2))
+    else:
+        print("PROVIDERS")
+        for provider in doc["providers"]:
+            print(f"  {provider}")
+        print()
+        print("PLATFORMS")
+        for platform in doc["platforms"]:
+            print(f"  {platform['provider']} {platform['machine']} {platform['os']} {platform['location']} {platform['init']}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

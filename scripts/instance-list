@@ -1,63 +1,79 @@
-#!/usr/bin/env ruby
-# List concrete local VM instances from the instance registry.
+#!/usr/bin/env python3
+"""List concrete local VM instances from the instance registry."""
 
-require "json"
-require "yaml"
+from __future__ import annotations
 
-ROOT = File.expand_path("..", __dir__)
-$LOAD_PATH.unshift(File.join(ROOT, "core"))
-require "sdk"
-DEFAULT_REGISTRY_PATH = Eve::SDK::Workdir.instance_registry_path
+import argparse
+import json
+import os
+import sys
+from pathlib import Path
+from typing import Any
 
-def usage
-  warn "Usage: scripts/instance-list [--json] [--registry <path>]"
-end
+import yaml
 
-def load_any(path)
-  return {} unless File.exist?(path)
-  YAML.safe_load(File.read(path), permitted_classes: [], aliases: true) || {}
-end
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
-json = false
-registry_path = ENV["EVE_INSTANCE_REGISTRY"] && !ENV["EVE_INSTANCE_REGISTRY"].empty? \
-                ? File.expand_path(ENV["EVE_INSTANCE_REGISTRY"], Dir.pwd) \
-                : DEFAULT_REGISTRY_PATH
+from eve_sdk.workdir import Workdir
 
-args = ARGV.dup
-until args.empty?
-  case args.shift
-  when "--json"
-    json = true
-  when "--registry"
-    registry_path = File.expand_path(args.shift, Dir.pwd)
-  when "-h", "--help"
-    usage
-    exit 0
-  else
-    usage
-    exit 2
-  end
-end
 
-registry = load_any(registry_path)
-instances = registry["instances"] || []
+def absolute(path: str) -> Path:
+    return Path(os.path.abspath(os.path.expanduser(path)))
 
-if json
-  puts JSON.pretty_generate({ "instances" => instances })
-  exit 0
-end
 
-if instances.empty?
-  puts "No instances found. Create one with: make instance.create INSTANCE=<name> MACHINE=<machine> OS=<os> LOCATION=<location>"
-  exit 0
-end
+def load_any(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    loaded = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    if not isinstance(loaded, dict):
+        raise ValueError(f"{path}: expected a mapping")
+    return loaded
 
-printf "%-28s %-32s %-24s %-24s\n", "INSTANCE", "MACHINE", "OS", "LOCATION"
-printf "%-28s %-32s %-24s %-24s\n", "--------", "-------", "--", "--------"
-instances.each do |instance|
-  printf "%-28s %-32s %-24s %-24s\n",
-         instance["name"],
-         instance["machine"] || "-",
-         instance["os"] || "-",
-         instance["location"] || "-"
-end
+
+def parser() -> argparse.ArgumentParser:
+    arg_parser = argparse.ArgumentParser(
+        prog="scripts/instance-list",
+        usage="scripts/instance-list [--json] [--registry <path>]",
+        add_help=True,
+    )
+    arg_parser.add_argument("--json", action="store_true")
+    arg_parser.add_argument("--registry")
+    return arg_parser
+
+
+def main() -> int:
+    args = parser().parse_args()
+    registry_path = absolute(args.registry) if args.registry else Workdir.instance_registry_path()
+    try:
+        registry = load_any(registry_path)
+    except Exception as error:
+        print(f"instance-list: {error}", file=sys.stderr)
+        return 1
+    raw_instances = registry.get("instances", [])
+    instances = raw_instances if isinstance(raw_instances, list) else []
+
+    if args.json:
+        print(json.dumps({"instances": instances}, indent=2))
+        return 0
+
+    if not instances:
+        print("No instances found. Create one with: make instance.create INSTANCE=<name> MACHINE=<machine> OS=<os> LOCATION=<location>")
+        return 0
+
+    print(f"{'INSTANCE':<28} {'MACHINE':<32} {'OS':<24} {'LOCATION':<24}")
+    print(f"{'--------':<28} {'-------':<32} {'--':<24} {'--------':<24}")
+    for instance in instances:
+        if not isinstance(instance, dict):
+            continue
+        print(
+            f"{str(instance.get('name', '')):<28} "
+            f"{str(instance.get('machine') or '-'):<32} "
+            f"{str(instance.get('os') or '-'):<24} "
+            f"{str(instance.get('location') or '-'):<24}"
+        )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

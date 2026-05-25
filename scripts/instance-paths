@@ -1,91 +1,80 @@
-#!/usr/bin/env ruby
-# Resolve instance-scoped filesystem paths (workdir, state, tf subdir).
-#
-# This is the single source of truth for where per-instance artifacts live.
-# It does not create any directories — that is the consumer's responsibility.
-# It honors the same env overrides the rest of the v3 scripts already use:
-#   EVE_INSTANCE_WORKDIR — base dir for generated per-instance workdirs
-#   EVE_STATE_DIR        — base dir for instance state JSON files
-#   EVE_INSTANCE_REGISTRY — alternative registry path
+#!/usr/bin/env python3
+"""Resolve instance-scoped filesystem paths."""
 
-require "json"
-require "yaml"
+from __future__ import annotations
 
-ROOT = File.expand_path("..", __dir__)
-$LOAD_PATH.unshift(File.join(ROOT, "core"))
-require "sdk"
-DEFAULT_REGISTRY_PATH = Eve::SDK::Workdir.instance_registry_path
+import argparse
+import json
+import os
+import re
+import sys
+from pathlib import Path
+from typing import Any
 
-def usage
-  warn <<~USAGE
-    Usage:
-      scripts/instance-paths --instance <name> [--emit env|json] [--registry <path>]
-  USAGE
-end
+import yaml
 
-def load_registry(path)
-  return {} unless File.exist?(path)
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
-  YAML.safe_load(File.read(path), permitted_classes: [], aliases: true) || {}
-end
+from eve_sdk.workdir import Workdir
 
-def absolute(path)
-  File.expand_path(path, Dir.pwd)
-end
 
-def emit_env(paths)
-  paths.each { |key, value| puts "#{key}=#{value}" }
-end
+def absolute(path: str) -> Path:
+    return Path(os.path.abspath(os.path.expanduser(path)))
 
-instance_name = nil
-emit = "env"
-registry_path = ENV["EVE_INSTANCE_REGISTRY"] && !ENV["EVE_INSTANCE_REGISTRY"].empty? \
-                ? absolute(ENV["EVE_INSTANCE_REGISTRY"]) \
-                : DEFAULT_REGISTRY_PATH
 
-args = ARGV.dup
-until args.empty?
-  case args.shift
-  when "--instance"
-    instance_name = args.shift
-  when "--emit"
-    emit = args.shift
-  when "--registry"
-    registry_path = absolute(args.shift)
-  when "-h", "--help"
-    usage
-    exit 0
-  else
-    usage
-    exit 2
-  end
-end
+def load_registry(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    loaded = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    if not isinstance(loaded, dict):
+        raise ValueError(f"{path}: expected a mapping")
+    return loaded
 
-unless instance_name && !instance_name.empty?
-  usage
-  exit 2
-end
 
-if instance_name !~ /\A[A-Za-z0-9][A-Za-z0-9._-]*\z/
-  warn "instance-paths: invalid instance name: #{instance_name.inspect}"
-  exit 1
-end
+def parser() -> argparse.ArgumentParser:
+    arg_parser = argparse.ArgumentParser(
+        prog="scripts/instance-paths",
+        usage="scripts/instance-paths --instance <name> [--emit env|json] [--registry <path>]",
+        add_help=True,
+    )
+    arg_parser.add_argument("--instance", required=True)
+    arg_parser.add_argument("--emit", choices=["env", "json"], default="env")
+    arg_parser.add_argument("--registry")
+    return arg_parser
 
-registry = load_registry(registry_path)
-instance = (registry["instances"] || []).find { |entry| entry.is_a?(Hash) && entry["name"] == instance_name }
-unless instance
-  warn "instance-paths: instance not found: #{instance_name} (registry: #{registry_path})"
-  exit 1
-end
 
-paths = Eve::SDK::Workdir.all_paths(instance_name)
+def main() -> int:
+    args = parser().parse_args()
+    instance_name = args.instance
+    if not re.match(r"^[A-Za-z0-9][A-Za-z0-9._-]*$", instance_name):
+        print(f"instance-paths: invalid instance name: {instance_name!r}", file=sys.stderr)
+        return 1
 
-case emit
-when "env"
-  emit_env(paths)
-when "json"
-  puts JSON.pretty_generate(paths)
-else
-  warn "instance-paths: unsupported --emit format: #{emit}"
-  exit 2
-end
+    registry_path = absolute(args.registry) if args.registry else Workdir.instance_registry_path()
+    try:
+        registry = load_registry(registry_path)
+    except Exception as error:
+        print(f"instance-paths: {error}", file=sys.stderr)
+        return 1
+
+    instances = registry.get("instances", [])
+    instance = next(
+        (entry for entry in instances if isinstance(entry, dict) and entry.get("name") == instance_name),
+        None,
+    )
+    if instance is None:
+        print(f"instance-paths: instance not found: {instance_name} (registry: {registry_path})", file=sys.stderr)
+        return 1
+
+    paths = Workdir.all_paths(instance_name)
+    if args.emit == "json":
+        print(json.dumps(paths, indent=2))
+    else:
+        for key, value in paths.items():
+            print(f"{key}={value}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

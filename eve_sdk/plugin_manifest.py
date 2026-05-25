@@ -7,7 +7,7 @@ from typing import Any, ClassVar
 
 import yaml
 
-from eve_sdk.schema import validate_json_schema_fragment, validate_schema
+from eve_sdk.schema import SchemaValidationError, validate_json_schema_fragment, validate_schema
 from eve_sdk.workdir import Workdir
 
 
@@ -81,8 +81,11 @@ class PluginManifest:
     @classmethod
     def validate(cls, plugin: dict[str, Any]) -> None:
         public_manifest = {key: value for key, value in plugin.items() if not key.startswith("_")}
-        validate_schema("plugin-manifest.schema.json", public_manifest, "Plugin manifest")
         path = str(plugin.get("_path", "<manifest>"))
+        try:
+            validate_schema("plugin-manifest.schema.json", public_manifest, "Plugin manifest")
+        except SchemaValidationError as error:
+            raise ValueError(cls._compat_schema_error(path, str(error))) from error
         if plugin.get("api_version") != cls.API_VERSION:
             raise ValueError(f"{path}: api_version must be {cls.API_VERSION}")
         kind = plugin.get("kind")
@@ -128,3 +131,17 @@ class PluginManifest:
                 candidate = plugin_exec if plugin_exec.exists() else root_exec
             if not candidate.is_file():
                 raise ValueError(f"{path}: command {name} exec not found: {exec_path}")
+
+    @staticmethod
+    def _compat_schema_error(path: str, message: str) -> str:
+        if "/install/ubuntu/steps" in message and "should be non-empty" in message:
+            return f"{path}: install.ubuntu.steps must be a non-empty list"
+        if "/install/windows/state_files" in message and "is not one of" in message:
+            return f"{path}: install.windows.state_files contains unsupported entries"
+        if "/install/ubuntu/steps" in message and "is not of type 'string'" in message:
+            return f"{path}: install.ubuntu.steps must be a list of strings"
+        if "/supports/engines" in message and "is not of type 'array'" in message:
+            return f"{path}: supports.engines must be a list"
+        if "/supports/os_families" in message and "is not of type 'array'" in message:
+            return f"{path}: supports.os_families must be a list"
+        return message

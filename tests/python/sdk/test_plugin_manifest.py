@@ -5,7 +5,6 @@ from pathlib import Path
 import pytest
 
 from eve_sdk.plugin_manifest import PluginManifest
-from eve_sdk.schema import SchemaValidationError
 
 
 def test_plugin_manifest_loads_and_validates_builtin_provider() -> None:
@@ -31,5 +30,5 @@ def test_plugin_manifest_rejects_missing_command(tmp_path: Path) -> None:
         "supports": {},
     }
 
-    with pytest.raises(SchemaValidationError, match="required property"):
+    with pytest.raises(ValueError, match="required property"):
         PluginManifest.validate(manifest)
