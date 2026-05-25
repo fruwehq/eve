@@ -115,6 +115,7 @@ RUN set -eux; \
 
 FROM runtime-slim AS runtime-full
 
+# qemu-system-arm provides qemu-system-aarch64; full is the local QEMU/Vagrant variant.
 RUN set -eux; \
   case "$(dpkg --print-architecture)" in \
     amd64) ;; \
@@ -128,4 +129,4 @@ RUN set -eux; \
     qemu-system-arm \
     qemu-system-x86 \
     vagrant \
-  && rm -rf /var/lib/apt/lists/*
+  && rm -rf /usr/share/doc/* /usr/share/man/* /var/cache/apt/archives/* /var/lib/apt/lists/*

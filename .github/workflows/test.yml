@@ -302,6 +302,7 @@ jobs:
     if: github.event_name == 'schedule'
     runs-on: ubuntu-24.04
     env:
+      EVE_DOCKER_FULL_CACHE_SCOPE: full-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('docker/Dockerfile', 'poetry.lock') }}
       EVE_CI_TIMINGS: ${{ runner.temp }}/eve-ci-timings.tsv
     steps:
       - uses: actions/checkout@v4
@@ -309,6 +310,26 @@ jobs:
       - name: Initialize timing summary
         run: |
           : > "$EVE_CI_TIMINGS"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Probe full runtime cache key
+        id: full-cache-probe
+        uses: actions/cache/restore@v4
+        with:
+          key: buildkit-${{ env.EVE_DOCKER_FULL_CACHE_SCOPE }}
+          lookup-only: true
+          path: ${{ runner.temp }}/eve-full-buildkit-cache-marker
+
+      - name: Report Docker cache status
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.full-cache-probe.outputs.cache-hit }}" = "true" ]; then
+            echo "cache hit: BuildKit cache key buildkit-${EVE_DOCKER_FULL_CACHE_SCOPE}"
+          else
+            echo "cache miss: rebuilding"
+          fi
 
       - name: Build full runtime image
         run: |
@@ -322,7 +343,58 @@ jobs:
             exit "$status"
           }
           trap finish_timing EXIT
-          docker build -f docker/Dockerfile --target runtime-full -t eve/eve:full .
+          docker buildx build \
+            --platform linux/amd64 \
+            --file docker/Dockerfile \
+            --target runtime-full \
+            --tag eve/eve:full \
+            --load \
+            --cache-from "type=gha,scope=${EVE_DOCKER_FULL_CACHE_SCOPE}" \
+            --cache-to "type=gha,mode=max,scope=${EVE_DOCKER_FULL_CACHE_SCOPE}" \
+            .
+
+      - name: Write Docker cache marker
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/eve-full-buildkit-cache-marker"
+          printf '%s\n' "$EVE_DOCKER_FULL_CACHE_SCOPE" > "$RUNNER_TEMP/eve-full-buildkit-cache-marker/scope"
+
+      - name: Save Docker cache marker
+        if: success() && steps.full-cache-probe.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          key: buildkit-${{ env.EVE_DOCKER_FULL_CACHE_SCOPE }}
+          path: ${{ runner.temp }}/eve-full-buildkit-cache-marker
+
+      - name: Smoke full runtime image
+        run: |
+          set -euo pipefail
+          step_name="Smoke full runtime image"
+          start="$(date +%s)"
+          finish_timing() {
+            status="$?"
+            end="$(date +%s)"
+            printf '%s\t%s\t%s\n' "$step_name" "$((end - start))" "$status" >> "$EVE_CI_TIMINGS"
+            exit "$status"
+          }
+          trap finish_timing EXIT
+          docker run --rm --platform linux/amd64 eve/eve:full make help
+
+      - name: Report full image size
+        run: |
+          set -euo pipefail
+          step_name="Report full image size"
+          start="$(date +%s)"
+          finish_timing() {
+            status="$?"
+            end="$(date +%s)"
+            printf '%s\t%s\t%s\n' "$step_name" "$((end - start))" "$status" >> "$EVE_CI_TIMINGS"
+            exit "$status"
+          }
+          trap finish_timing EXIT
+          inspect_size="$(docker image inspect eve/eve:full --format '{{.Size}}')"
+          compressed_size="$(docker save eve/eve:full | gzip -c | wc -c | tr -d ' ')"
+          echo "full image: uncompressed=${inspect_size} compressed=${compressed_size}"
 
       - name: Timing summary
         if: always()

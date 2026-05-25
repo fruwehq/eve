@@ -242,11 +242,37 @@ def main() -> int:
     docker_full_steps = docker_full_job.get("steps", []) if isinstance(docker_full_job, dict) else []
     if not isinstance(docker_full_steps, list):
         docker_full_steps = []
+    docker_full_step_names = step_names(docker_full_steps)
     checks.assert_check(
         "docker-runtime-full is schedule-only",
         isinstance(docker_full_job, dict) and "github.event_name == 'schedule'" in str(docker_full_job.get("if", "")),
     )
-    checks.assert_check("docker-runtime-full publishes timing summary", "Timing summary" in step_names(docker_full_steps))
+    checks.assert_check("docker-runtime-full publishes timing summary", "Timing summary" in docker_full_step_names)
+    checks.assert_check("docker-runtime-full sets up Docker Buildx", "Set up Docker Buildx" in docker_full_step_names)
+    checks.assert_check("docker-runtime-full probes explicit cache key", "Probe full runtime cache key" in docker_full_step_names)
+    checks.assert_check("docker-runtime-full reports cache misses explicitly", "Report Docker cache status" in docker_full_step_names)
+    checks.assert_check("docker-runtime-full smokes image", "Smoke full runtime image" in docker_full_step_names)
+    checks.assert_check("docker-runtime-full reports image size", "Report full image size" in docker_full_step_names)
+    full_cache_scope = docker_full_job.get("env", {}).get("EVE_DOCKER_FULL_CACHE_SCOPE") if isinstance(docker_full_job, dict) else None
+    checks.assert_check(
+        "docker-runtime-full cache scope includes runner OS, arch, Dockerfile, and lockfile",
+        isinstance(full_cache_scope, str)
+        and "runner.os" in full_cache_scope
+        and "runner.arch" in full_cache_scope
+        and "hashFiles('docker/Dockerfile', 'poetry.lock')" in full_cache_scope,
+    )
+    checks.assert_check(
+        "docker-runtime-full cache status logs cache miss: rebuilding",
+        "cache miss: rebuilding" in run_text(find_step(docker_full_steps, "Report Docker cache status")),
+    )
+    full_build_run = run_text(find_step(docker_full_steps, "Build full runtime image"))
+    checks.assert_check("docker-runtime-full pins linux/amd64 platform", "--platform linux/amd64" in full_build_run)
+    checks.assert_check("docker-runtime-full imports BuildKit GHA cache", '--cache-from "type=gha,scope=${EVE_DOCKER_FULL_CACHE_SCOPE}"' in full_build_run)
+    checks.assert_check("docker-runtime-full exports BuildKit GHA cache", '--cache-to "type=gha,mode=max,scope=${EVE_DOCKER_FULL_CACHE_SCOPE}"' in full_build_run)
+    checks.assert_check(
+        "docker-runtime-full reports compressed image size",
+        "full image: uncompressed=${inspect_size} compressed=${compressed_size}" in run_text(find_step(docker_full_steps, "Report full image size")),
+    )
 
     print("\n== ci-pipeline Terramate asset checks ==")
 
