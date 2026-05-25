@@ -96,11 +96,15 @@ jobs:
       - name: Report slim image size
         run: |
           set -euo pipefail
-          docker image inspect eve/eve:slim --format 'slim image inspect bytes={{.Size}}'
+          inspect_size="$(docker image inspect eve/eve:slim --format '{{.Size}}')"
           compressed_size="$(docker save eve/eve:slim | gzip -c | wc -c | tr -d ' ')"
-          echo "slim image compressed bytes=${compressed_size}"
-          if [ "${compressed_size}" -ge 700000000 ]; then
-            echo "slim image compressed size must stay below 700000000 bytes" >&2
+          echo "slim image: uncompressed=${inspect_size} compressed=${compressed_size}"
+          if [ "${inspect_size}" -ge 1600000000 ]; then
+            echo "slim uncompressed must stay < 1600 MB" >&2
+            exit 1
+          fi
+          if [ "${compressed_size}" -ge 500000000 ]; then
+            echo "slim compressed must stay < 500 MB" >&2
             exit 1
           fi
 

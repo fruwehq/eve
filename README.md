@@ -88,6 +88,9 @@ Settings are stored through v3.2's `.eve/config.yaml` and
 docker run -it -v ~/.eve-data:/data eve/eve:slim make eve
 ```
 
+The v3.3 slim image is capped at a 500 MB compressed pull/archive size; expect
+the download to be roughly in the mid-400 MB range.
+
 ```bash
 docker run -it \
   -v "$HOME/.eve-data:/data" \

@@ -114,10 +114,13 @@ end
 size_step = docker_slim_steps.find { |step| step.is_a?(Hash) && step["name"] == "Report slim image size" }
 size_run = size_step&.fetch("run", "")
 assert_check("docker-runtime-slim reports compressed image size") do
-  size_run.include?("slim image compressed bytes=")
+  size_run.include?("slim image: uncompressed=${inspect_size} compressed=${compressed_size}")
 end
-assert_check("docker-runtime-slim enforces compressed size under 700 MB") do
-  size_run.include?('"${compressed_size}" -ge 700000000')
+assert_check("docker-runtime-slim enforces uncompressed size under 1600 MB") do
+  size_run.include?('"${inspect_size}" -ge 1600000000')
+end
+assert_check("docker-runtime-slim enforces compressed size under 500 MB") do
+  size_run.include?('"${compressed_size}" -ge 500000000')
 end
 
 docker_full_job = jobs.fetch("docker-runtime-full")
