@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+set -eu
+
+exec ./scripts/package-down-command nomachine 'sudo /usr/NX/bin/nxserver --shutdown 2>/dev/null || true; sudo apt-get remove -y nomachine || true'

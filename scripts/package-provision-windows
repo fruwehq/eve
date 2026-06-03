@@ -220,7 +220,11 @@ if [ "$needs_env" -eq 1 ]; then
     --arg rp "${RUSTDESK_PASSWORD:-}" \
     --arg rs "${RUSTDESK_SERVER:-}" \
     --arg sv "${SUNSHINE_VERSION:-}" \
-    '{windows_password: $wp, sunshine_password: $sp, display_resolution: $dr, rustdesk_key: $rk, rustdesk_password: $rp, rustdesk_server: $rs, sunshine_version: $sv}' \
+    --arg nv "${NOMACHINE_VERSION:-}" \
+    --arg se "${SPLASHTOP_EMAIL:-}" \
+    --arg spw "${SPLASHTOP_PASSWORD:-}" \
+    --arg su "${SPLASHTOP_STREAMER_URL:-}" \
+    '{windows_password: $wp, sunshine_password: $sp, display_resolution: $dr, rustdesk_key: $rk, rustdesk_password: $rp, rustdesk_server: $rs, sunshine_version: $sv, nomachine_version: $nv, splashtop_email: $se, splashtop_password: $spw, splashtop_streamer_url: $su}' \
     > "$STAGE/state/env.json"
 fi
 

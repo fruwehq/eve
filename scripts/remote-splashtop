@@ -1,0 +1,61 @@
+#!/usr/bin/env python3
+"""Print how to reach an instance through the Splashtop client.
+
+Usage:
+  scripts/remote-splashtop <instance>
+
+Splashtop connections are brokered through the account rather than a direct
+address: the host appears in the Splashtop client once its Streamer logs in.
+This surfaces the account and host so the right machine can be picked.
+"""
+
+from __future__ import annotations
+
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from eve_sdk.dispatch import DispatchError  # noqa: E402
+
+
+def resolve_ip(instance: str) -> str:
+    result = subprocess.run(
+        [str(ROOT / "scripts/instance-ip"), instance],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    ip = result.stdout.strip()
+    if result.returncode != 0 or not ip:
+        details = f"{result.stdout.strip()}{result.stderr.strip()}"
+        raise DispatchError(f"could not resolve IP for {instance}: {details}".rstrip(": "))
+    return ip
+
+
+def main(argv: list[str]) -> int:
+    if not argv:
+        print(__doc__, file=sys.stderr)
+        return 2
+    instance = argv[0]
+    try:
+        ip = resolve_ip(instance)
+    except DispatchError as error:
+        print(f"remote-splashtop: {error}", file=sys.stderr)
+        return 1
+
+    email = os.environ.get("SPLASHTOP_EMAIL") or "(set SPLASHTOP_EMAIL)"
+    print(f"Splashtop account: {email}")
+    print(f"Instance host:     {ip}")
+    print()
+    print(f"Open the Splashtop Business app, sign in as {email}, and connect to this")
+    print("instance (free for same-LAN/VPN use).")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

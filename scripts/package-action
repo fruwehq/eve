@@ -63,9 +63,12 @@ def run_action_target(target: str, instance_name: str) -> None:
     root = Workdir.repo_root()
     mapping = {
         "console.open": ["scripts/remote-console", instance_name],
+        "nomachine.connect": ["scripts/remote-nomachine", instance_name, "connect"],
+        "nomachine.info": ["scripts/remote-nomachine", instance_name],
         "rdp.open": ["scripts/remote-rdp", instance_name],
         "rustdesk.connect": ["scripts/remote-rustdesk", instance_name, "connect"],
         "rustdesk.info": ["scripts/remote-rustdesk", instance_name],
+        "splashtop.info": ["scripts/remote-splashtop", instance_name],
         "sunshine.wait": ["scripts/remote-sunshine-wait", instance_name],
         "thinlinc.web": ["scripts/remote-thinlinc", instance_name],
         "thinlinc.client": ["scripts/remote-thinlinc-client", instance_name],

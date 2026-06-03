@@ -68,6 +68,14 @@
       }
     },
 
+    "nomachine": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "version": { "$ref": "#/$defs/nullable_string" }
+      }
+    },
+
     "raspberry_pi": {
       "type": "object",
       "additionalProperties": false,
@@ -94,6 +102,17 @@
       "properties": {
         "password": { "$ref": "#/$defs/nullable_string" },
         "server":   { "$ref": "#/$defs/nullable_host" }
+      }
+    },
+
+    "splashtop": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "email":         { "$ref": "#/$defs/nullable_string" },
+        "password":      { "$ref": "#/$defs/nullable_string" },
+        "streamer_path": { "$ref": "#/$defs/path" },
+        "streamer_url":  { "$ref": "#/$defs/nullable_url" }
       }
     },
 
