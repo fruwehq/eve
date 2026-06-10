@@ -157,7 +157,7 @@ class EveTui(App[None]):
         margin-bottom: 1;
     }
 
-    #providers {
+    #provider-pane {
         height: 7;
         margin-bottom: 1;
     }
@@ -356,7 +356,7 @@ class EveTui(App[None]):
         Binding("d", "delete_instance", "Delete Local Entry"),
         Binding("c", "queue_cancel_command", "Cancel", priority=True),
         Binding("ctrl+c", "queue_cancel_command", "Cancel", priority=True),
-        Binding("escape", "queue_cancel_command", "Cancel", priority=True),
+        Binding("escape", "queue_cancel_command", "Cancel"),
         Binding("l", "focus_log", "Log", priority=True),
         Binding("y", "copy_log", "Copy Log", priority=True),
         Binding("ctrl+y", "copy_log", "Copy Log", priority=True),
@@ -405,7 +405,6 @@ class EveTui(App[None]):
             with Horizontal(id="body"):
                 with Vertical(id="left"):
                     yield Static("Providers", classes="section-title")
-                    yield DataTable(id="providers")
                     yield ProviderPane([], id="provider-pane")
                     yield Static("Instances", classes="section-title")
                     yield Input(placeholder="Filter instances", id="filter")
@@ -498,11 +497,6 @@ class EveTui(App[None]):
         yield Footer()
 
     async def on_mount(self) -> None:
-        providers = self.query_one("#providers", DataTable)
-        providers.cursor_type = "row"
-        providers.add_columns("Provider", "Configured", "Reachable", "Notes")
-        providers.add_row("checking...", "-", "-", "-")
-
         instances = self.query_one("#instances", DataTable)
         instances.cursor_type = "row"
         instances.add_columns("", "Instance", "State", "OS")
@@ -532,12 +526,6 @@ class EveTui(App[None]):
         self.call_after_refresh(self.focus_instance_list_if_empty)
 
     async def load_provider_pane_data(self) -> None:
-        # Wrapped end-to-end so a failure here cannot strand
-        # load_initial_data before it reaches action_refresh() (which
-        # populates the instance list). Earlier regression: missing
-        # await on old_pane.remove() caused a duplicate-ID error from
-        # the subsequent mount, killing the whole load chain and
-        # leaving "Loading instances..." on screen.
         try:
             self._provider_pane_data = await asyncio.to_thread(provider_pane_data)
         except Exception as exc:
@@ -545,43 +533,33 @@ class EveTui(App[None]):
             self._provider_pane_data = []
 
         try:
-            old_pane = self.query_one("#provider-pane", ProviderPane)
-            await old_pane.remove()
-            new_pane = ProviderPane(
-                self._provider_pane_data,
-                self._provider_reachability,
-                id="provider-pane",
-            )
-            await self.mount(new_pane, after=self.query_one("#providers", DataTable))
+            pane = self.query_one("#provider-pane", ProviderPane)
+            pane.update_providers(self._provider_pane_data)
         except Exception as exc:
             self.log_line(f"[warning]provider-pane render failed:[/] {exc}")
 
     async def load_provider_health(self) -> None:
-        table = self.query_one("#providers", DataTable)
+        pane = self.query_one("#provider-pane", ProviderPane)
         try:
             text = await asyncio.to_thread(provider_status_table)
         except Exception as exc:
-            table.clear()
-            table.add_row("[error]error[/]", "-", "-", str(exc))
+            pane.update_status({}, {}, {"_error": str(exc)})
             return
         lines = text.splitlines()
-        table.clear()
-        reachability: dict[str, bool] = {}
+        configured: dict[str, bool] = {}
+        reachable: dict[str, bool] = {}
+        notes: dict[str, str] = {}
         for row in lines[2:]:
             parts = row.split(None, 3)
             if len(parts) < 3:
                 continue
-            name, configured, reachable = parts[:3]
-            notes = parts[3] if len(parts) > 3 else "-"
-            configured_text = "[success]yes[/]" if configured == "yes" else "[dim]no[/]"
-            reachable_text = "[success]yes[/]" if reachable == "yes" else "[warning]no[/]"
-            table.add_row(name, configured_text, reachable_text, notes)
-            reachability[name] = reachable == "yes"
-        if not table.row_count:
-            table.add_row("[dim]none[/]", "-", "-", "-")
-        self._provider_reachability = reachability
-        pane = self.query_one("#provider-pane", ProviderPane)
-        pane.update_reachability(reachability)
+            name, conf, reach = parts[:3]
+            note = parts[3] if len(parts) > 3 else "-"
+            configured[name] = conf == "yes"
+            reachable[name] = reach == "yes"
+            notes[name] = note
+        self._provider_reachability = reachable
+        pane.update_status(configured, reachable, notes)
 
     async def load_catalog_options(self) -> None:
         try:
@@ -1598,7 +1576,10 @@ class EveTui(App[None]):
             if provider.get("id") == provider_id:
                 display_name = str(provider.get("display_name", display_name))
                 break
-        self.push_screen(ProviderConfigScreen(provider_id, display_name))
+        pane = self.query_one("#provider-pane", ProviderPane)
+        actions = pane.get_actions(provider_id)
+        notes = pane.get_notes(provider_id)
+        self.push_screen(ProviderConfigScreen(provider_id, display_name, actions, notes))
 
     def on_provider_pane_test_connection_requested(self, event: ProviderPane.TestConnectionRequested) -> None:
         provider_id = event.provider_id

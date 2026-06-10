@@ -34,6 +34,7 @@ from tui.render import (
 from tui.settings import (
     CONFIG_SECTIONS,
     field_label,
+    load_missing_fields,
     load_provider_schema,
     load_provider_secret_keys,
     load_structured,
@@ -50,32 +51,8 @@ class ProviderPane(Static):
         margin-bottom: 1;
     }
 
-    .provider-row {
-        height: 3;
-        layout: horizontal;
-        margin-bottom: 0;
-    }
-
-    .provider-name {
-        width: 12;
-        height: 3;
-        content-align: left middle;
-        padding-left: 1;
-    }
-
-    .provider-reachability {
-        width: 4;
-        height: 3;
-        content-align: center middle;
-    }
-
-    .provider-actions-row {
-        height: 3;
-    }
-
-    .provider-actions-row Button {
-        height: 3;
-        min-width: 10;
+    #provider-table {
+        height: auto;
     }
     """
 
@@ -106,14 +83,38 @@ class ProviderPane(Static):
         self.providers = providers
         self.reachability = reachability or {}
         self._provider_ids: list[str] = []
+        self._actions: dict[str, list[dict[str, Any]]] = {}
+        self._configured: dict[str, bool] = {}
+        self._notes: dict[str, str] = {}
 
     def compose(self) -> ComposeResult:
+        table: DataTable[Any] = DataTable(id="provider-table")
+        table.add_columns("Provider", "Configured", "Reachable")
+        table.cursor_type = "row"
+        yield table
+
+    def on_mount(self) -> None:
+        self._populate()
+
+    def _populate(self) -> None:
+        table = self.query_one("#provider-table", DataTable)
+        table.clear()
         self._provider_ids = []
+        self._actions = {}
         for provider in self.providers:
             provider_id = str(provider.get("id", ""))
             self._provider_ids.append(provider_id)
             display_name = str(provider.get("display_name", provider_id))
-            actions = provider.get("actions", [])
+            self._actions[provider_id] = provider.get("actions", [])
+
+            configured = self._configured.get(provider_id)
+            if configured is True:
+                configured_text = "[success]yes[/]"
+            elif configured is False:
+                configured_text = "[dim]no[/]"
+            else:
+                configured_text = "[dim]?[/]"
+
             reachable = self.reachability.get(provider_id)
             if reachable is True:
                 reach_text = "[success]●[/]"
@@ -121,53 +122,38 @@ class ProviderPane(Static):
                 reach_text = "[warning]○[/]"
             else:
                 reach_text = "[dim]?[/]"
-            with Horizontal(classes="provider-row"):
-                yield Static(display_name, classes="provider-name")
-                yield Static(reach_text, classes="provider-reachability")
-                with Horizontal(classes="provider-actions-row"):
-                    for action in actions:
-                        label = str(action.get("label") or action.get("id", ""))
-                        button = Button(label, id=f"ppa-{provider_id}-{action.get('id', '')}")
-                        button.variant = "primary" if bool(action.get("interactive")) else "default"
-                        yield button
-                    yield Button("Configure", id=f"ppc-{provider_id}", variant="success")
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        button_id = event.button.id or ""
-        if button_id.startswith("ppc-"):
-            provider_id = button_id[4:]
-            event.stop()
-            self.post_message(self.ConfigureRequested(provider_id))
-            return
-        if not button_id.startswith("ppa-"):
-            return
-        rest = button_id[4:]
-        for provider in self.providers:
-            provider_id = str(provider.get("id", ""))
-            prefix = f"{provider_id}-"
-            if rest.startswith(prefix):
-                action_id = rest[len(prefix):]
-                for action in provider.get("actions", []):
-                    if str(action.get("id")) == action_id:
-                        event.stop()
-                        self.post_message(self.ActionRequested(provider_id, action))
-                        return
+            table.add_row(display_name, configured_text, reach_text, key=provider_id)
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        provider_id = str(event.row_key.value)
+        self.post_message(self.ConfigureRequested(provider_id))
+        event.stop()
+
+    def update_providers(self, providers: list[dict[str, Any]]) -> None:
+        self.providers = providers
+        self._populate()
+
+    def update_status(
+        self,
+        configured: dict[str, bool],
+        reachable: dict[str, bool],
+        notes: dict[str, str],
+    ) -> None:
+        self._configured = configured
+        self.reachability = reachable
+        self._notes = notes
+        self._populate()
 
     def update_reachability(self, reachability: dict[str, bool]) -> None:
         self.reachability = reachability
-        rows = self.query(".provider-row")
-        for idx, row in enumerate(rows):
-            if idx >= len(self._provider_ids):
-                break
-            provider_id = self._provider_ids[idx]
-            reach_widget = row.query_one(".provider-reachability", Static)
-            reachable = reachability.get(provider_id)
-            if reachable is True:
-                reach_widget.update("[success]●[/]")
-            elif reachable is False:
-                reach_widget.update("[warning]○[/]")
-            else:
-                reach_widget.update("[dim]?[/]")
+        self._populate()
+
+    def get_actions(self, provider_id: str) -> list[dict[str, Any]]:
+        return self._actions.get(provider_id, [])
+
+    def get_notes(self, provider_id: str) -> str:
+        return self._notes.get(provider_id, "-")
 
 
 class ConfirmScreen(ModalScreen[bool]):
@@ -1095,18 +1081,19 @@ class EditFieldScreen(ModalScreen[str | None]):
     }
 
     #edit-input {
+        width: 100%;
         margin-bottom: 1;
     }
 
     #edit-actions {
         height: 3;
-        width: 36;
+        width: 100%;
+        align-horizontal: center;
         background: transparent;
     }
 
     #edit-actions Button {
-        width: 14;
-        min-width: 14;
+        margin: 0 1;
     }
     """
 
@@ -1133,6 +1120,10 @@ class EditFieldScreen(ModalScreen[str | None]):
             self.dismiss(self.query_one("#edit-input", Input).value.strip())
         else:
             self.dismiss(None)
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        event.stop()
+        self.dismiss(self.query_one("#edit-input", Input).value.strip())
 
     def action_dismiss_cancel(self) -> None:
         self.dismiss(None)
@@ -1174,6 +1165,7 @@ class SettingsScreen(ModalScreen[None]):
         super().__init__()
         self._structured: dict[str, dict[str, dict[str, Any]]] = {}
         self._row_keys: list[str] = []
+        self._required_entries: dict[str, dict[str, Any]] = {}
 
     def compose(self) -> ComposeResult:
         with Vertical(id="settings-dialog"):
@@ -1203,6 +1195,26 @@ class SettingsScreen(ModalScreen[None]):
         table = self.query_one("#settings-table", DataTable)
         table.clear()
         self._row_keys = []
+        self._required_entries = {}
+
+        try:
+            for entry in load_missing_fields():
+                provider_id = entry.get("provider", "")
+                scope = entry.get("scope", "")
+                field = entry.get("field", "")
+                key = f"req:{provider_id}:{scope}:{field}"
+                self._required_entries[key] = entry
+                self._row_keys.append(key)
+                label = field_label(provider_id.replace("-", "_"), field)
+                table.add_row(
+                    f"[bold]{provider_id}[/bold]",
+                    f"[bold]{label}[/bold]",
+                    "[bold red]\u2014 required \u2014[/bold red]",
+                    f"[{scope}]",
+                    key=key,
+                )
+        except Exception:
+            pass
 
         for section_info in CONFIG_SECTIONS:
             section_id = section_info["id"]
@@ -1222,6 +1234,32 @@ class SettingsScreen(ModalScreen[None]):
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         row_key = str(event.row_key.value)
+
+        if row_key in self._required_entries:
+            entry = self._required_entries[row_key]
+            provider_id = entry.get("provider", "")
+            scope = entry.get("scope", "")
+            field = entry.get("field", "")
+            label = field_label(provider_id.replace("-", "_"), field)
+            password = scope == "secrets"
+
+            def handle_required_edit(result: str | None) -> None:
+                if result is not None:
+                    try:
+                        if scope == "secrets":
+                            save_provider_secret(provider_id, field, result)
+                        else:
+                            save_value(provider_id.replace("-", "_"), field, result)
+                        self._load_values()
+                        self.notify(f"Saved {label}")
+                    except Exception as e:
+                        self.notify(f"Save failed: {e}", severity="error")
+
+            self.app.push_screen(
+                EditFieldScreen(label, "", password=password), handle_required_edit
+            )
+            return
+
         section, field = row_key.split(".", 1)
         label = field_label(section, field)
         fields = self._structured.get(section, {})
@@ -1254,6 +1292,8 @@ class SettingsScreen(ModalScreen[None]):
         if row is None or row < 0 or row >= len(self._row_keys):
             return
         key = self._row_keys[row]
+        if key in self._required_entries:
+            return
         section, field = key.split(".", 1)
         info = self._structured.get(section, {}).get(field, {})
         if info.get("source") == "config.yaml":
@@ -1277,7 +1317,8 @@ class FirstRunScreen(ModalScreen[None]):
     }
 
     #fr-dialog {
-        width: 72;
+        width: 96;
+        max-width: 100;
         height: 30;
         border: round $warning;
         background: $surface;
@@ -1323,24 +1364,65 @@ class FirstRunScreen(ModalScreen[None]):
             yield Label("[b]Welcome to Eve[/b]", id="fr-title")
             yield Static(
                 "Some required configuration is missing.\n"
-                "Set these fields before creating instances.",
+                "Select a field below to set it, or press Enter on a row.",
                 id="fr-message",
             )
             table: DataTable[Any] = DataTable(id="fr-missing")
             table.add_columns("Provider", "Field", "Description")
+            table.cursor_type = "row"
             yield table
             with Horizontal(id="fr-actions"):
                 yield Button("Open Settings", id="fr-settings", variant="primary")
                 yield Button("Skip for now", id="fr-skip")
 
     def on_mount(self) -> None:
+        self._populate_table()
+
+    def _populate_table(self) -> None:
         table = self.query_one("#fr-missing", DataTable)
         table.clear()
-        for entry in self.missing_fields:
+        for i, entry in enumerate(self.missing_fields):
             provider = str(entry.get("provider", ""))
             field = str(entry.get("field", ""))
             desc = str(entry.get("description", ""))
-            table.add_row(provider, field, desc)
+            table.add_row(provider, field, desc, key=str(i))
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        try:
+            idx = int(str(event.row_key.value))
+        except (ValueError, IndexError):
+            return
+        if idx < 0 or idx >= len(self.missing_fields):
+            return
+        entry = self.missing_fields[idx]
+        provider_id = str(entry.get("provider", ""))
+        scope = str(entry.get("scope", ""))
+        field = str(entry.get("field", ""))
+        label = field_label(provider_id.replace("-", "_"), field)
+        password = scope == "secrets"
+
+        def handle_edit(result: str | None) -> None:
+            if result is not None:
+                try:
+                    if scope == "secrets":
+                        save_provider_secret(provider_id, field, result)
+                    else:
+                        save_value(provider_id.replace("-", "_"), field, result)
+                    self._refresh_missing()
+                    self.notify(f"Saved {label}")
+                except Exception as e:
+                    self.notify(f"Save failed: {e}", severity="error")
+
+        self.app.push_screen(EditFieldScreen(label, "", password=password), handle_edit)
+
+    def _refresh_missing(self) -> None:
+        try:
+            self.missing_fields = load_missing_fields()
+        except Exception:
+            return
+        self._populate_table()
+        if not self.missing_fields:
+            self.dismiss(None)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "fr-skip":
@@ -1378,6 +1460,22 @@ class ProviderConfigScreen(ModalScreen[None]):
         height: 1fr;
     }
 
+    #pc-notes {
+        margin-bottom: 1;
+        color: $text-muted;
+    }
+
+    #pc-provider-actions {
+        height: auto;
+        margin-bottom: 1;
+    }
+
+    #pc-provider-actions Button {
+        height: 3;
+        min-width: 10;
+        margin-right: 1;
+    }
+
     #pc-actions {
         height: 3;
         width: 48;
@@ -1394,16 +1492,33 @@ class ProviderConfigScreen(ModalScreen[None]):
         Binding("escape", "dismiss_cancel", "Cancel"),
     ]
 
-    def __init__(self, provider_id: str, provider_name: str) -> None:
+    def __init__(
+        self,
+        provider_id: str,
+        provider_name: str,
+        actions: list[dict[str, Any]] | None = None,
+        notes: str = "",
+    ) -> None:
         super().__init__()
         self.provider_id = provider_id
         self.provider_name = provider_name
         self._schema: dict[str, Any] = {}
         self._secret_keys_set: list[str] = []
+        self._actions = actions or []
+        self._notes = notes
 
     def compose(self) -> ComposeResult:
         with Vertical(id="pc-dialog"):
             yield Label(f"[b]Configure {self.provider_name}[/b]", id="pc-title")
+            if self._notes and self._notes != "-":
+                yield Static(self._notes, id="pc-notes")
+            if self._actions:
+                with Horizontal(id="pc-provider-actions"):
+                    for action in self._actions:
+                        label = str(action.get("label") or action.get("id", ""))
+                        btn = Button(label, id=f"pca-{action.get('id', '')}")
+                        btn.variant = "primary" if bool(action.get("interactive")) else "default"
+                        yield btn
             table: DataTable[Any] = DataTable(id="pc-table")
             table.add_columns("Field", "Value", "Type")
             table.cursor_type = "row"
@@ -1487,12 +1602,21 @@ class ProviderConfigScreen(ModalScreen[None]):
         self.app.push_screen(EditFieldScreen(label, current, password=is_secret), handle_edit)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "pc-close":
+        button_id = event.button.id or ""
+        if button_id == "pc-close":
             self.dismiss(None)
-        elif event.button.id == "pc-test":
+        elif button_id == "pc-test":
             self.post_message(ProviderPane.TestConnectionRequested(self.provider_id))
             self.notify("Testing connection...")
             self.dismiss(None)
+        elif button_id.startswith("pca-"):
+            action_id = button_id[4:]
+            for action in self._actions:
+                if str(action.get("id")) == action_id:
+                    event.stop()
+                    self.post_message(ProviderPane.ActionRequested(self.provider_id, action))
+                    self.dismiss(None)
+                    return
 
     def action_dismiss_cancel(self) -> None:
         self.dismiss(None)
