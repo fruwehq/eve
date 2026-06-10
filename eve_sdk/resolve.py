@@ -473,7 +473,7 @@ def emit_env(resolved: dict[str, Any]) -> str:
         "LOCATION_AVAILABILITY_ZONE": str(locp.get("availability_zone") or ""),
         "LOCATION_ZONE": str(locp.get("zone") or ""),
         "SSH_USER": access["bootstrap_user"],
-        "CLOUD_IMAGE_URL": str(os_doc.get("cloud_image_url") or ""),
+        "CLOUD_IMAGE_URL": str(os_doc.get("cloud_image_url") or "") if provider in ("local-qemu", "truenas") else "",
         "HUMAN_USER_NAME": access["human_user"],
         "PROVISION_USER_NAME": access["provision_user"],
         "RASPBERRY_PI_HOST": str(pi_host),

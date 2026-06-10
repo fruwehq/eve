@@ -20,6 +20,8 @@ from eve_sdk.dispatch import read_resolved_from_env_or_stdin  # noqa: E402
 from eve_sdk.schema import validate_input, validate_output  # noqa: E402
 from eve_sdk.workdir import Workdir  # noqa: E402
 
+PROVIDER = "local-qemu"
+
 
 def run(args: list[str], *, check: bool = True, input_text: str | None = None) -> subprocess.CompletedProcess[str]:
     result = subprocess.run(args, text=True, input=input_text, capture_output=True, check=False)
@@ -32,9 +34,19 @@ def run(args: list[str], *, check: bool = True, input_text: str | None = None) -
 def resolved() -> dict[str, Any]:
     data = read_resolved_from_env_or_stdin()
     validate_input(data)
-    if data["machine"]["provider"] != "local-qemu":
-        raise RuntimeError(f"local-qemu cannot handle provider {data['machine']['provider']}")
+    if data["machine"]["provider"] != PROVIDER:
+        raise RuntimeError(f"{PROVIDER} cannot handle provider {data['machine']['provider']}")
     return data
+
+
+def accel() -> str:
+    if sys.platform == "darwin":
+        return "hvf"
+    kvm = Path("/dev/kvm")
+    if kvm.exists() and os.access(str(kvm), os.R_OK | os.W_OK):
+        return "kvm"
+    print(f"[{PROVIDER}] WARNING: no hardware acceleration (/dev/kvm absent); VM will be slow", file=sys.stderr)
+    return "tcg"
 
 
 def qemu_dir(instance: str) -> Path:
@@ -71,9 +83,23 @@ def process_running(pid: int | None) -> bool:
     return True
 
 
+def monitor_reachable(instance: str) -> bool:
+    monitor = qemu_dir(instance) / "monitor.sock"
+    if not monitor.exists():
+        return False
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+            sock.settimeout(1)
+            sock.connect(str(monitor))
+            return True
+    except (OSError, TimeoutError):
+        return False
+
+
 def state_for(instance: str) -> str:
     metadata = load_metadata(instance)
-    if process_running(metadata.get("pid")):
+    pid = metadata.get("pid")
+    if process_running(pid) and monitor_reachable(instance):
         return "running"
     if (qemu_dir(instance) / "disk.qcow2").exists():
         return "stopped"
@@ -100,10 +126,12 @@ def ssh_port(instance: str) -> int:
 
 
 def qemu_binary(arch: str) -> str:
-    name = "qemu-system-aarch64" if arch == "arm64" else "qemu-system-x86_64"
+    if arch != "arm64":
+        raise RuntimeError(f"{PROVIDER} currently supports arm64 cloud images only (got {arch})")
+    name = "qemu-system-aarch64"
     path = shutil.which(name)
     if not path:
-        raise RuntimeError(f"missing {name}; install QEMU before using local-qemu")
+        raise RuntimeError(f"missing {name}; install QEMU before using {PROVIDER}")
     return path
 
 
@@ -195,6 +223,24 @@ def ensure_seed(instance: str, user: str) -> Path:
     return seed
 
 
+def sha256_of(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def verify_checksum(path: Path, expected: str) -> None:
+    actual = sha256_of(path)
+    if actual != expected:
+        path.unlink(missing_ok=True)
+        raise RuntimeError(
+            f"SHA-256 mismatch for {path.name}: expected {expected}, got {actual}\n"
+            f"Corrupt download deleted. Retry or update cloud_image_sha256 in the catalog."
+        )
+
+
 def ensure_disk(data: dict[str, Any]) -> Path:
     instance = data["instance"]["name"]
     workdir = qemu_dir(instance)
@@ -204,10 +250,23 @@ def ensure_disk(data: dict[str, Any]) -> Path:
     url = data["os"].get("cloud_image_url")
     if not url:
         raise RuntimeError(f"OS {data['os']['id']} has no cloud_image_url")
+    expected_sha256 = data["os"].get("cloud_image_sha256")
+    if not expected_sha256:
+        raise RuntimeError(
+            f"OS {data['os']['id']} has no cloud_image_sha256; "
+            f"add the SHA-256 hash to config/catalog.yaml before using {PROVIDER}"
+        )
     base = workdir / "base.qcow2"
     workdir.mkdir(parents=True, exist_ok=True)
     if not base.exists():
-        run(["curl", "-fL", "-o", str(base), str(url)])
+        partial = workdir / "base.qcow2.partial"
+        try:
+            run(["curl", "-fL", "-o", str(partial), str(url)])
+            verify_checksum(partial, expected_sha256)
+            os.replace(str(partial), str(base))
+        except BaseException:
+            partial.unlink(missing_ok=True)
+            raise
     shutil.copyfile(base, disk)
     disk_gb = int(data["machine"].get("defaults", {}).get("disk_gb") or 20)
     run(["qemu-img", "resize", str(disk), f"{disk_gb}G"])
@@ -222,18 +281,23 @@ def qemu_args(data: dict[str, Any], port: int) -> list[str]:
     memory_mb = int(defaults.get("memory_mb") or 4096)
     qemu = qemu_binary(arch)
     disk = ensure_disk(data)
-    seed = ensure_seed(instance, data["access"]["bootstrap_user"] or "vagrant")
+    seed = ensure_seed(instance, data["access"]["bootstrap_user"] or "ubuntu")
     pid = qemu_dir(instance) / "qemu.pid"
     monitor = qemu_dir(instance) / "monitor.sock"
     serial = qemu_dir(instance) / "serial.sock"
+    a = accel()
     args = [
         qemu,
+        "-machine",
+        f"virt,accel={a},highmem=on" if sys.platform == "darwin" else f"virt,accel={a}",
+        "-cpu",
+        "host" if a in ("hvf", "kvm") else "max",
         "-smp",
         str(cpus),
         "-m",
         str(memory_mb),
         "-device",
-        f"virtio-net-device,netdev=net0" if arch == "arm64" else "virtio-net-pci,netdev=net0",
+        "virtio-net-device,netdev=net0",
         "-netdev",
         f"user,id=net0,hostfwd=tcp::{port}-:22",
         "-drive",
@@ -256,32 +320,23 @@ def qemu_args(data: dict[str, Any], port: int) -> list[str]:
         "-parallel",
         "none",
     ]
-    if arch == "arm64":
-        share = qemu_share_dir(qemu)
-        code_src = share / "edk2-aarch64-code.fd"
-        vars_src = share / "edk2-arm-vars.fd"
-        code = qemu_dir(instance) / "edk2-aarch64-code.fd"
-        vars_file = qemu_dir(instance) / "edk2-arm-vars.fd"
-        if not code.exists():
-            shutil.copyfile(code_src, code)
-        if not vars_file.exists():
-            shutil.copyfile(vars_src, vars_file)
-        args[1:1] = [
-            "-machine",
-            "virt,accel=hvf,highmem=on" if sys.platform == "darwin" else "virt",
-            "-cpu",
-            "host" if sys.platform == "darwin" else "max",
+    share = qemu_share_dir(qemu)
+    code_src = share / "edk2-aarch64-code.fd"
+    vars_src = share / "edk2-arm-vars.fd"
+    code = qemu_dir(instance) / "edk2-aarch64-code.fd"
+    vars_file = qemu_dir(instance) / "edk2-arm-vars.fd"
+    if not code.exists():
+        shutil.copyfile(code_src, code)
+    if not vars_file.exists():
+        shutil.copyfile(vars_src, vars_file)
+    args.extend(
+        [
+            "-drive",
+            f"if=pflash,format=raw,file={code},readonly=on",
+            "-drive",
+            f"if=pflash,format=raw,file={vars_file}",
         ]
-        args.extend(
-            [
-                "-drive",
-                f"if=pflash,format=raw,file={code},readonly=on",
-                "-drive",
-                f"if=pflash,format=raw,file={vars_file}",
-            ]
-        )
-    else:
-        args[1:1] = ["-machine", "q35,accel=hvf" if sys.platform == "darwin" else "q35"]
+    )
     return args
 
 
@@ -291,23 +346,23 @@ def cmd_plan(data: dict[str, Any]) -> int:
     cpus = int(defaults.get("cpu_cores") or defaults.get("cpus") or 2)
     memory_mb = int(defaults.get("memory_mb") or 4096)
     disk_gb = int(defaults.get("disk_gb") or 20)
-    print(f"[local-qemu] instance={instance}")
-    print(f"[local-qemu] engine=qemu")
-    print(f"[local-qemu] cpus={cpus}")
-    print(f"[local-qemu] memory_mb={memory_mb}")
-    print(f"[local-qemu] disk_gb={disk_gb}")
-    print(f"[local-qemu] cloud_image_url={data['os'].get('cloud_image_url', '')}")
+    print(f"[{PROVIDER}] instance={instance}")
+    print(f"[{PROVIDER}] engine=qemu")
+    print(f"[{PROVIDER}] cpus={cpus}")
+    print(f"[{PROVIDER}] memory_mb={memory_mb}")
+    print(f"[{PROVIDER}] disk_gb={disk_gb}")
+    print(f"[{PROVIDER}] cloud_image_url={data['os'].get('cloud_image_url', '')}")
     return 0
 
 
 def cmd_up(data: dict[str, Any]) -> int:
     instance = data["instance"]["name"]
     if state_for(instance) == "running":
-        print(f"[local-qemu] instance already running: {instance}")
+        print(f"[{PROVIDER}] instance already running: {instance}")
         return 0
     port = ssh_port(instance)
     args = qemu_args(data, port)
-    print(f"[local-qemu] starting {instance} on SSH port {port}")
+    print(f"[{PROVIDER}] starting {instance} on SSH port {port}")
     run(args)
     pid_file = qemu_dir(instance) / "qemu.pid"
     deadline = time.time() + 10
@@ -320,7 +375,7 @@ def cmd_up(data: dict[str, Any]) -> int:
             "pid": pid,
             "ssh_host": "127.0.0.1",
             "ssh_port": port,
-            "ssh_user": data["access"]["bootstrap_user"] or "vagrant",
+            "ssh_user": data["access"]["bootstrap_user"] or "ubuntu",
             "identity_file": str(ensure_key(instance)),
         },
     )
@@ -339,7 +394,7 @@ def graceful_stop(instance: str, pid: int) -> None:
                 deadline = time.time() + 10
                 while time.time() < deadline and process_running(pid):
                     time.sleep(0.5)
-        except (OSError, socket.timeout):
+        except (OSError, TimeoutError):
             pass
 
 
@@ -347,8 +402,8 @@ def cmd_stop(data: dict[str, Any]) -> int:
     instance = data["instance"]["name"]
     metadata = load_metadata(instance)
     pid = metadata.get("pid")
-    if not process_running(pid):
-        print(f"[local-qemu] instance is not running: {instance}")
+    if not process_running(pid) or not monitor_reachable(instance):
+        print(f"[{PROVIDER}] instance is not running: {instance}")
         print(json.dumps({"status": state_for(instance)}, separators=(",", ":")))
         return 0
     graceful_stop(instance, int(pid))
@@ -379,7 +434,7 @@ def cmd_status(data: dict[str, Any]) -> int:
     status = state_for(instance)
     print(f"{'Profile:':<15} {instance}")
     print(f"{'Engine:':<15} qemu")
-    print(f"{'Provider:':<15} local-qemu")
+    print(f"{'Provider:':<15} {PROVIDER}")
     print(f"{'Status:':<15} {status}")
     print(json.dumps({"status": status}, separators=(",", ":")))
     return 0
@@ -389,7 +444,7 @@ def cmd_ip(data: dict[str, Any]) -> int:
     instance = data["instance"]["name"]
     metadata = load_metadata(instance)
     if not metadata:
-        raise RuntimeError(f"instance has no local-qemu metadata: {instance}")
+        raise RuntimeError(f"instance has no {PROVIDER} metadata: {instance}")
     print(metadata.get("ssh_host") or "127.0.0.1")
     return 0
 
@@ -397,7 +452,7 @@ def cmd_ip(data: dict[str, Any]) -> int:
 def ssh_base(data: dict[str, Any]) -> list[str]:
     instance = data["instance"]["name"]
     metadata = load_metadata(instance)
-    if not metadata or not process_running(metadata.get("pid")):
+    if not metadata or not (process_running(metadata.get("pid")) and monitor_reachable(instance)):
         raise RuntimeError(f"instance is not running: {instance}")
     return [
         "ssh",
@@ -426,7 +481,10 @@ def cmd_ssh(data: dict[str, Any], extra: list[str]) -> int:
                 ["tar", "--no-xattrs", "-C", str(local.parent), "-cf", "-", "--exclude=._*", local.name],
                 stdout=subprocess.PIPE,
             )
-            ssh = subprocess.Popen([*ssh_base(data), f"mkdir -p '{remote}' && cd '{remote}' && tar -xf -"], stdin=tar.stdout)
+            ssh = subprocess.Popen(
+                [*ssh_base(data), f"mkdir -p '{remote}' && cd '{remote}' && tar -xf -"],
+                stdin=tar.stdout,
+            )
             assert tar.stdout is not None
             tar.stdout.close()
             return ssh.wait()
@@ -442,7 +500,7 @@ def cmd_ssh(data: dict[str, Any], extra: list[str]) -> int:
 def dry_run(command: str, data: dict[str, Any]) -> int:
     payload = {
         "kind": "provider",
-        "provider": "local-qemu",
+        "provider": PROVIDER,
         "command": command,
         "instance": data["instance"]["name"],
         "profile": data["instance"]["name"],
@@ -456,7 +514,7 @@ def dry_run(command: str, data: dict[str, Any]) -> int:
 
 def main(argv: list[str]) -> int:
     if not argv:
-        print("Usage: local-qemu <resolve|plan|up|start|stop|down|status|ip|ssh>", file=sys.stderr)
+        print(f"Usage: {PROVIDER} <resolve|plan|up|start|stop|down|status|ip|ssh>", file=sys.stderr)
         return 2
     command = argv[0]
     extra = argv[1:]
@@ -478,9 +536,9 @@ def main(argv: list[str]) -> int:
             return cmd_ip(data)
         if command == "ssh":
             return cmd_ssh(data, extra)
-        raise RuntimeError(f"unsupported local-qemu command: {command}")
+        raise RuntimeError(f"unsupported {PROVIDER} command: {command}")
     except Exception as error:
-        print(f"local-qemu: {error}", file=sys.stderr)
+        print(f"{PROVIDER}: {error}", file=sys.stderr)
         return 1
 
 

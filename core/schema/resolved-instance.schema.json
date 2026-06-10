@@ -192,6 +192,7 @@
         "vagrant_box": { "type": "string" },
         "metal_image": { "type": "string" },
         "cloud_image_url": { "type": "string" },
+        "cloud_image_sha256": { "type": "string" },
         "aws_ami_name_pattern": { "type": "string" },
         "aws_ami_id": { "type": "string" },
         "aws_ssm_parameter": { "type": "string" },

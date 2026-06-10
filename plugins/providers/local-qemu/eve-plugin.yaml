@@ -26,8 +26,8 @@ actions:
     target: provider.init
 access:
   ubuntu:
-    bootstrap_user: {env: VM_USER_NAME, value: vagrant}
-    provision_user: {env: VM_USER_NAME, value: vagrant}
+    bootstrap_user: {env: VM_USER_NAME, value: ubuntu}
+    provision_user: {env: VM_USER_NAME, value: ubuntu}
     human_user: {env: VM_USER_NAME, fallback: provision_user}
 config_schema:
   config:

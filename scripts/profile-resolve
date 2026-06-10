@@ -297,7 +297,7 @@ emit_env() {
     "LOCATION_AVAILABILITY_ZONE=" + ($locp.availability_zone // ""),
     "LOCATION_ZONE=" + ($locp.zone // ""),
     "SSH_USER=" + provision_user($locp),
-    "CLOUD_IMAGE_URL=" + (.os.cloud_image_url // ""),
+    "CLOUD_IMAGE_URL=" + (.machine.provider as $p | if (["local-qemu","truenas"] | index($p)) then (.os.cloud_image_url // "") else "" end),
     "HUMAN_USER_NAME=" + human_user($locp),
     "PROVISION_USER_NAME=" + provision_user($locp),
     "RASPBERRY_PI_HOST=" + (
