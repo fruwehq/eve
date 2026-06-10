@@ -255,6 +255,8 @@ def engine_for(machine: dict[str, Any]) -> str:
     provider = machine["provider"]
     if machine.get("kind") == "metal":
         return "metal"
+    if provider == "local-qemu":
+        return "qemu"
     if str(provider).startswith("local-"):
         return "vagrant"
     return "terraform"

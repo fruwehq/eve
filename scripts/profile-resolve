@@ -217,6 +217,7 @@ else
     bundle_packages: $bundle_packages,
     engine: (
       if ($m.kind // "") == "metal" then "metal"
+      elif (($m.provider // "") == "local-qemu") then "qemu"
       elif (($m.provider // "") | startswith("local-")) then "vagrant"
       else "terraform"
       end
@@ -335,7 +336,7 @@ emit_vagrant() {
     ($r.os.arch // "amd64") as $arch |
     (if ($r.os.arch // "amd64") == "arm64" then "aarch64" else "x86_64" end) as $qemu_arch |
     $r.profile.name as $name |
-    (($r.machine.defaults.cpus // 2) | tostring) as $cpus |
+    (($r.machine.defaults.cpu_cores // $r.machine.defaults.cpus // 2) | tostring) as $cpus |
     (($r.machine.defaults.memory_mb // 4096)) as $memory_mb |
     ($memory_mb | tostring) as $memory |
     (((($memory_mb / 1024) | floor) | tostring) + "G") as $qemu_memory |

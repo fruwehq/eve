@@ -10,9 +10,9 @@ x-local-qemu-medium: &local_qemu_medium
   cpus: 2
   memory_mb: 4096
   # QEMU/cloud-image boxes start with a small root disk. The full local dev
-  # desktop smoke stack needs more room than the default image provides, but
-  # should stay modest enough not to starve the host.
-  disk_gb: 64
+  # desktop smoke stack may need more room via an explicit override, but the
+  # default should stay small enough that local experiments are cheap.
+  disk_gb: 20
 
 x-ttl-default: &ttl_default
   ttl_hours: 168
@@ -140,6 +140,7 @@ oses:
     version: "26.04"
     arch: arm64
     vagrant_box: cloud-image/ubuntu-26.04
+    cloud_image_url: https://cloud-images.ubuntu.com/releases/26.04/release/ubuntu-26.04-server-cloudimg-arm64.img
     metal_image: ubuntu-26.04-arm64
 
   - id: windows-server-2025

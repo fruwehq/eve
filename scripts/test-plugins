@@ -280,8 +280,8 @@ fi
 
 provider_matrix_failed=0
 for provider_case in \
-  "dev-a:local-qemu:vagrant" \
-  "qemu-a:local-qemu:vagrant" \
+  "dev-a:local-qemu:qemu" \
+  "qemu-a:local-qemu:qemu" \
   "aws-gpu-a:aws:terraform" \
   "truenas-all-a:truenas:terraform" \
   "rpi-all-a:raspberry-pi:metal"; do

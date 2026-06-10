@@ -62,7 +62,7 @@ def os_available_for_provider(os_entry: dict[str, Any], provider: str) -> bool:
         case "vultr":
             return "vultr_os_id" in os_entry
         case "local-qemu":
-            return "vagrant_box" in os_entry
+            return "cloud_image_url" in os_entry
         case "truenas":
             return "cloud_image_url" in os_entry
         case "raspberry-pi":

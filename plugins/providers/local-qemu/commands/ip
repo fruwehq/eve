@@ -1,15 +1,3 @@
-#!/usr/bin/env bash
-# Resolve the host/IP of a local QEMU instance via vagrant ssh-config.
-set -euo pipefail
-
-if [ -n "${EVE_INSTANCE_NAME:-}" ]; then
-  PROFILE="$EVE_INSTANCE_NAME"
-else
-  PROFILE="${1:?Usage: commands/ip <instance>}"
-fi
-cd "$(git rev-parse --show-toplevel)"
-# shellcheck source=scripts/lib/instance-workdir.sh
-. ./scripts/lib/instance-workdir.sh
-
-cd "$(eve_instance_workdir "$PROFILE")"
-vagrant ssh-config | awk '/HostName/ {print $2; exit}'
+#!/usr/bin/env sh
+set -eu
+exec "$(dirname "$0")/local-qemu" ip "$@"

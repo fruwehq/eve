@@ -276,7 +276,7 @@
     "engine": {
       "description": "The execution engine determined from the machine kind and provider.",
       "type": "string",
-      "enum": ["terraform", "vagrant", "metal"]
+      "enum": ["terraform", "vagrant", "qemu", "metal"]
     },
 
     "stack_tags": {

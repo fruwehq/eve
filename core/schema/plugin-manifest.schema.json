@@ -217,7 +217,7 @@
           "type": "array",
           "items": {
             "type": "string",
-            "enum": ["terraform", "vagrant", "metal"]
+            "enum": ["terraform", "vagrant", "qemu", "metal"]
           }
         },
         "kinds": {

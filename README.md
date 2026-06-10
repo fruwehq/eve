@@ -318,7 +318,7 @@ make docker.test
 
 The v3.3 runtime images bake the repository into `/opt/eve` and default
 `EVE_HOME` to `/data`. `eve/eve:slim` is the cloud-provider runtime;
-`eve/eve:full` adds Vagrant and QEMU for local-qemu work. The older
+`eve/eve:full` adds QEMU for local-qemu work. The older
 `docker.build` target remains as a contributor toolchain image for shelling
 into the checkout and running tests.
 
@@ -347,7 +347,7 @@ Terraform provider versions are pinned exactly in the Terramate provider templat
 
 ### Fresh checkout expectations
 
-- Local instance choices (for example QEMU/Vagrant) should work without cloud API keys.
+- Local instance choices (for example QEMU) should work without cloud API keys.
 - Cloud providers (AWS/Vultr/TrueNAS) only require their own credentials when used.
 - **Non-secret configuration lives in `.eve/config.yaml`** (structured, validated, TUI-editable).
 - **Secrets live in `.eve/secrets/<provider>.yaml`** (mode 0600, gitignored).
@@ -385,7 +385,7 @@ make provision INSTANCE=aws-dev-a
 make ssh INSTANCE=aws-dev-a
 make down INSTANCE=aws-dev-a
 
-# Local instance (vagrant engine)
+# Local instance (qemu engine)
 make instance.create INSTANCE=local-dev-a MACHINE=local-qemu-medium OS=ubuntu-26.04-arm64 LOCATION=tokyo BUNDLES=dev-ai
 make plan INSTANCE=local-dev-a
 make up INSTANCE=local-dev-a
@@ -546,13 +546,11 @@ SSH/provision/package commands use that identity.
 
 ### QEMU (local, Apple Silicon ✅)
 
-QEMU is the preferred local Linux provider on Apple Silicon. It uses the public
-`cloud-image/ubuntu-26.04` Vagrant box with the `qemu` provider artifact.
+QEMU is the preferred local Linux provider on Apple Silicon. It uses Ubuntu
+cloud images directly with native QEMU virtualization.
 
 1. **QEMU** — `brew install qemu`
-2. **Vagrant** — `brew install hashicorp/tap/vagrant`
-3. **Vagrant QEMU plugin** — `vagrant plugin install vagrant-qemu`
-4. No cloud credentials needed
+2. No cloud credentials needed
 
 ### Raspberry Pi / ARM metal
 
@@ -587,7 +585,7 @@ is present.
 
 #### Initial SD card image (first boot)
 
-Flash **Ubuntu Server 26.04 LTS (64-bit)** with the official [Raspberry Pi Imager](https://www.raspberrypi.com/software/). Use Server (not Desktop) so the install stays reproducible — provisioning installs the GUI / Sunshine / etc. afterward, matching the Vagrant flow.
+Flash **Ubuntu Server 26.04 LTS (64-bit)** with the official [Raspberry Pi Imager](https://www.raspberrypi.com/software/). Use Server (not Desktop) so the install stays reproducible — provisioning installs the GUI / Sunshine / etc. afterward, matching the local VM flow.
 
 In Imager's advanced options (gear icon), preseed:
 

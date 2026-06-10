@@ -29,16 +29,12 @@ check_aws() {
 }
 
 check_local_qemu() {
-  configured=no reachable=no notes="vagrant/qemu not found"
+  configured=no reachable=no notes="qemu not found"
 
-  if command -v vagrant >/dev/null 2>&1 || command -v qemu-system-aarch64 >/dev/null 2>&1 || command -v qemu-system-x86_64 >/dev/null 2>&1; then
+  if command -v qemu-system-aarch64 >/dev/null 2>&1 || command -v qemu-system-x86_64 >/dev/null 2>&1; then
     configured=yes
-    if command -v qemu-system-aarch64 >/dev/null 2>&1 || command -v qemu-system-x86_64 >/dev/null 2>&1; then
-      reachable=yes
-      notes="qemu available"
-    else
-      notes="vagrant present, qemu missing"
-    fi
+    reachable=yes
+    notes="qemu available"
   fi
 }
 

@@ -1,52 +1,7 @@
-#!/usr/bin/env bash
-set -euo pipefail
-
-# Run vagrant up for a profile.
-# Usage: scripts/vagrant-up [--plan] <instance>
-#   --plan: generate Vagrantfile only, do not start the VM.
-
-PLAN=0
-if [ "${1:-}" = "--plan" ]; then
-  PLAN=1
+#!/usr/bin/env sh
+set -eu
+if [ "$#" -gt 0 ] && [ "$1" = "--plan" ]; then
   shift
+  exec "$(dirname "$0")/local-qemu" plan "$@"
 fi
-
-if [ -n "${EVE_INSTANCE_NAME:-}" ]; then
-  PROFILE="$EVE_INSTANCE_NAME"
-else
-  PROFILE="${1:?Usage: commands/up [--plan] <instance>}"
-fi
-cd "$(git rev-parse --show-toplevel)"
-# shellcheck source=scripts/lib/instance-workdir.sh
-. ./scripts/lib/instance-workdir.sh
-
-RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
-ENGINE=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^ENGINE=/{print $2}')
-
-if [ "$ENGINE" != "vagrant" ]; then
-  echo "[vagrant-up] not supported for engine=$ENGINE"
-  exit 1
-fi
-
-VPROV=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^PROVIDER=/{print $2}')
-case "$VPROV" in
-  local-qemu) VAGRANT_PROVIDER=qemu ;;
-  *)
-    echo "[vagrant-up] unsupported local provider=$VPROV" >&2
-    exit 2
-    ;;
-esac
-echo "[vagrant-up] profile=$PROFILE provider=$VAGRANT_PROVIDER"
-
-WORKDIR="$(eve_instance_workdir "$PROFILE")"
-mkdir -p "$WORKDIR"
-./scripts/profile-resolve --profile "$PROFILE" --emit vagrant \
-  --output "$WORKDIR/Vagrantfile"
-
-if [ "$PLAN" -eq 1 ]; then
-  echo "[vagrant-up] Vagrantfile generated at $WORKDIR/Vagrantfile (dry run)"
-  exit 0
-fi
-
-cd "$WORKDIR"
-vagrant up "--provider=$VAGRANT_PROVIDER"
+exec "$(dirname "$0")/local-qemu" up "$@"
