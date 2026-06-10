@@ -22,19 +22,12 @@ export INSTANCE
 # Output format for small inspection helpers.
 EMIT ?= env
 
-# Load dotenv files
--include .env
-
-# Non-secret structured preferences. Values here override .env defaults, while
-# .env.local and command-line make variables remain the highest-precedence user
-# overrides.
+# Structured preferences from config/defaults.yaml + .eve/config.yaml.
+# All runtime settings flow through config-env; no dotenv files.
 EVE_CONFIG_EXPORTS := $(shell ./scripts/config-env --make 2>/dev/null)
 $(foreach assignment,$(EVE_CONFIG_EXPORTS),$(eval export $(assignment)))
 
--include .env.local
-
-# TIMEZONE is the only "documented in .env" variable that defaults instead of
-# erroring when unset: fall back to the host's configured timezone.
+# TIMEZONE defaults to the host's configured timezone when unset in config.
 ifeq ($(strip $(TIMEZONE)),)
 TIMEZONE := $(shell ./scripts/host-timezone 2>/dev/null)
 endif

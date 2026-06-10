@@ -2,10 +2,10 @@
 # env-require: error if any of the listed environment variables is unset or empty.
 # Usage: scripts/env-require VAR1 [VAR2 ...]
 #
-# Used to enforce that variables documented in .env (and meant to be supplied
-# from .env.local or the shell) are actually populated before a code path that
-# depends on them runs. Variables for unrelated providers are not checked —
-# only call this with the vars the current operation actually needs.
+# Used to enforce that variables documented in config/defaults.yaml (and
+# meant to be supplied via config-save or the shell) are actually populated
+# before a code path that depends on them runs. Variables for unrelated
+# providers are not checked — only call this with the vars the current operation actually needs.
 set -eu
 
 if [ "$#" -eq 0 ]; then
@@ -27,6 +27,6 @@ if [ -n "$missing" ]; then
     echo "  - $var" >&2
   done
   echo "" >&2
-  echo "Set them in .env.local (or your shell environment) and retry." >&2
+  echo "Set them via config-save or your shell environment and retry." >&2
   exit 1
 fi
