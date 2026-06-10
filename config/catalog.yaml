@@ -139,7 +139,6 @@ oses:
     family: ubuntu
     version: "26.04"
     arch: arm64
-    vagrant_box: cloud-image/ubuntu-26.04
     cloud_image_url: https://cloud-images.ubuntu.com/releases/26.04/release/ubuntu-26.04-server-cloudimg-arm64.img
     cloud_image_sha256: 5e091e27d60116efbb0c743b8dd5cb2d15618e414ef04db0817ed43c8e2d7c7b
     metal_image: ubuntu-26.04-arm64
