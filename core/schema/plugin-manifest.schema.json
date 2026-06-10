@@ -430,7 +430,11 @@
         },
         "default": {},
         "description": { "type": "string" },
-        "required": { "type": "boolean" }
+        "required": { "type": "boolean" },
+        "env_var": {
+          "type": "string",
+          "description": "Environment variable name to inject this secret as during provider dispatch."
+        }
       },
       "allOf": [
         {
