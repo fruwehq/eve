@@ -183,6 +183,8 @@ def ensure_seed(instance: str, user: str) -> Path:
     )
     (seed_dir / "user-data").write_text(user_data, encoding="utf-8")
     seed = qemu_dir(instance) / "seed.iso"
+    if seed.exists():
+        seed.unlink()
     if sys.platform == "darwin":
         run(
             [
