@@ -38,6 +38,7 @@ from tui.commands import (
     create_instance_args,
     instance_ip,
     instance_observe_view,
+    instance_statuses,
     instance_rows,
     make_args,
     package_make_args,
@@ -718,6 +719,7 @@ class EveTui(App[None]):
         preserve_selection: bool = False,
         quiet: bool = False,
         repaint_table: bool = True,
+        live_all: bool = False,
     ) -> None:
         if not quiet:
             self.log_line("[primary]Refreshing instances[/]")
@@ -749,10 +751,22 @@ class EveTui(App[None]):
             self.render_instances(sync_cursor=True)
         if self._list_status_task and not self._list_status_task.done():
             self._list_status_task.cancel()
-        self._status_refreshing = set(next_names)
+        # Fill the table with last-known state from one fast snapshot so it shows
+        # real state immediately, instead of "loading" every row while each
+        # instance is resolved + live-observed (seconds each).
+        try:
+            snapshot = await asyncio.to_thread(instance_statuses)
+            for name, status in snapshot.items():
+                if name in next_name_set:
+                    self.statuses[name] = status
+        except Exception as exc:
+            self.log_line(f"[warning]status snapshot failed:[/] {exc}")
+        # The snapshot gives real state for every row, so nothing shows as
+        # "loading"; the live observe updates the selected instance silently.
+        self._status_refreshing = set()
         if repaint_table or new_names:
             self.render_instances(sync_cursor=True)
-        self._list_status_task = asyncio.create_task(self.refresh_list_statuses(next_names))
+        self._list_status_task = asyncio.create_task(self.refresh_list_statuses(next_names, live_all=live_all))
         self.background_tasks.add(self._list_status_task)
         self._list_status_task.add_done_callback(self.background_tasks.discard)
         if self.current_instance and self.current_instance not in self.statuses:
@@ -767,21 +781,27 @@ class EveTui(App[None]):
             except Exception as exc:
                 self.log_line(f"[warning]aggregate refresh failed:[/] {exc}")
 
-    async def refresh_list_statuses(self, instance_names: list[str]) -> None:
-        # Observe the selected instance first so its detail pane fills right away,
-        # then the rest. Apply each result as it lands instead of batching at the
-        # end, so the table populates progressively rather than showing "loading"
-        # for every row until the whole (CPU-heavy) pass completes.
-        ordered = list(instance_names)
-        if self.current_instance in ordered:
-            ordered.remove(self.current_instance)
-            ordered.insert(0, self.current_instance)
+    async def refresh_list_statuses(self, instance_names: list[str], *, live_all: bool = False) -> None:
+        # The table already shows last-known state from the fast snapshot. Now
+        # live-observe (a provider/network call, seconds each) only the selected
+        # instance, so startup doesn't peg a core observing every instance - the
+        # cloud ones cost ~8s each. An explicit refresh passes live_all to
+        # observe everything. Selected first; applied as each result lands.
+        if live_all:
+            targets = list(instance_names)
+        elif self.current_instance in instance_names:
+            targets = [self.current_instance]
+        else:
+            targets = []
+        if self.current_instance in targets:
+            targets.remove(self.current_instance)
+            targets.insert(0, self.current_instance)
         try:
-            for name in ordered:
+            for name in targets:
                 try:
                     status = await asyncio.to_thread(instance_observe_view, name)
                 except Exception as exc:
-                    self.log_line(f"[warning]observe/view failed for {name}:[/] {exc}")
+                    self.log_line(f"[warning]status failed for {name}:[/] {exc}")
                     status = {"instance": {"name": name}, "state": {"last_error": str(exc)}}
                 self.statuses[name] = status
                 self._status_refreshing.discard(name)
@@ -1330,7 +1350,7 @@ class EveTui(App[None]):
         if button_id.startswith("tab-"):
             self.set_detail_tab(button_id.split("-", 1)[1])
         elif button_id == "refresh":
-            self.start_task(self.action_refresh())
+            self.start_task(self.action_refresh(live_all=True))
         elif button_id == "busy-cancel-command":
             self.start_task(self.action_cancel_command())
         elif button_id == "provider-up":
@@ -1378,7 +1398,7 @@ class EveTui(App[None]):
         elif button_id == "bundle-unselect":
             self.start_task(self.action_bundle("bundle.unselect"))
 
-    async def action_refresh(self) -> None:
+    async def action_refresh(self, *, live_all: bool = False) -> None:
         if self.command_running:
             self.notify("A command is already running", severity="warning")
             return
@@ -1387,7 +1407,7 @@ class EveTui(App[None]):
         self.update_action_state()
         self.log_line("[primary]Refreshing instances...[/]")
         try:
-            await self.refresh_instances(preserve_selection=True, quiet=True)
+            await self.refresh_instances(preserve_selection=True, quiet=True, live_all=live_all)
             self.log_line("[success]Refreshing instances finished.[/]")
         finally:
             self.command_running = False
