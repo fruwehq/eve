@@ -40,7 +40,9 @@ $PerResolutionRate = 60
 
 $resolutions = New-Object System.Collections.Generic.List[object]
 $seenRes = @{}
-foreach ($r in (@($BaselineResolutions) + @($DefaultDisplayResolution))) {
+# Configured resolution first so it becomes the VDD's default/active mode; the
+# full baseline set still follows (deduped) so no modes are narrowed away.
+foreach ($r in (@($DefaultDisplayResolution) + @($BaselineResolutions))) {
   if ($seenRes.ContainsKey($r)) { continue }
   $seenRes[$r] = $true
   $parts = $r -split 'x'
