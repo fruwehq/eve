@@ -107,6 +107,26 @@ unset_sunshine_config() {
 }
 
 set_sunshine_config origin_web_ui_allowed wan
+set_sunshine_config private_key_mandatory disabled
+
+pub_ip=$(curl -sf https://api.ipify.org 2>/dev/null || true)
+if [ -n "$pub_ip" ]; then
+  set_sunshine_config external_ip "$pub_ip"
+  log "### sunshine: external_ip set to $pub_ip"
+fi
+
+# Sunshine spans TCP 47984/47989/48010 and UDP 47998-48000/48002. Open the full
+# 47984-48010 span for both protocols so the video (47998) and control (47999)
+# ports are reachable, not just the HTTP and audio ports.
+if command -v ufw >/dev/null 2>&1; then
+  sudo ufw allow 47984:48010/tcp >/dev/null 2>&1 || true
+  sudo ufw allow 47984:48010/udp >/dev/null 2>&1 || true
+  log "### sunshine: ufw firewall rules configured"
+elif command -v iptables >/dev/null 2>&1; then
+  sudo iptables -C INPUT -p tcp -m multiport --dports 47984:48010 -j ACCEPT 2>/dev/null || sudo iptables -A INPUT -p tcp -m multiport --dports 47984:48010 -j ACCEPT 2>/dev/null || true
+  sudo iptables -C INPUT -p udp -m multiport --dports 47984:48010 -j ACCEPT 2>/dev/null || sudo iptables -A INPUT -p udp -m multiport --dports 47984:48010 -j ACCEPT 2>/dev/null || true
+  log "### sunshine: iptables firewall rules configured"
+fi
 unset_sunshine_config fps
 unset_sunshine_config resolutions
 

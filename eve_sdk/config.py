@@ -39,6 +39,7 @@ class ConfigEnv:
         (("rdp", "gate_user"), "RDP_GATE_USER"),
         (("rustdesk", "server"), "RUSTDESK_SERVER"),
         (("sunshine", "max_bitrate_kbps"), "SUNSHINE_MAX_BITRATE_KBPS"),
+        (("sunshine", "password"), "EPHEMERAL_SUNSHINE_PASSWORD"),
         (("sunshine", "version"), "SUNSHINE_VERSION"),
         (("thinlinc", "accept_eula"), "THINLINC_ACCEPT_EULA"),
         (("thinlinc", "agent_hostname"), "THINLINC_AGENT_HOSTNAME"),

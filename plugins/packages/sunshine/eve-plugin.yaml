@@ -10,7 +10,7 @@ supports: {os_families: [ubuntu, windows]}
 compatibility_enforced: true
 compatibility:
   - platform: windows
-    desktop: VDD
+    desktop: Windows
     session: Native
     status: supported
     notes: Uses Virtual Display Driver as the intended single Sunshine display.

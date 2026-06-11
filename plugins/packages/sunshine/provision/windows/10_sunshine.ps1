@@ -80,6 +80,22 @@ if (-not (Select-String -Path $configPath -Pattern "^\s*origin_web_ui_allowed\s*
   Add-Content -Path $configPath -Value "`norigin_web_ui_allowed = wan`n"
 }
 
+if (-not (Select-String -Path $configPath -Pattern "^\s*private_key_mandatory\s*=" -Quiet)) {
+  Add-Content -Path $configPath -Value "private_key_mandatory = disabled`n"
+}
+
+$pubIp = (Invoke-RestMethod -Uri "https://api.ipify.org" -ErrorAction SilentlyContinue)
+if ($pubIp -and -not (Select-String -Path $configPath -Pattern "^\s*external_ip\s*=" -Quiet)) {
+  Add-Content -Path $configPath -Value "external_ip = $pubIp`n"
+  Write-Host "Sunshine external_ip set to $pubIp"
+}
+
+# Sunshine spans TCP 47984/47989/48010 and UDP 47998-48000/48002. Open the full
+# 47984-48010 span so the video (47998) and control (47999) ports are reachable.
+New-NetFirewallRule -DisplayName "Sunshine TCP (47984-48010)" -Direction Inbound -Protocol TCP -LocalPort 47984-48010 -Action Allow -Profile Any -ErrorAction SilentlyContinue | Out-Null
+New-NetFirewallRule -DisplayName "Sunshine UDP (47984-48010)" -Direction Inbound -Protocol UDP -LocalPort 47984-48010 -Action Allow -Profile Any -ErrorAction SilentlyContinue | Out-Null
+Write-Host "Sunshine firewall rules configured."
+
 # Set Sunshine Web UI credentials from the environment or env.json.
 # Use a fixed username to keep provisioning simple and reproducible.
 if (-not $sunshinePassword -and (Test-Path $envFile)) {
