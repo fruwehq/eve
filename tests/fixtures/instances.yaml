@@ -28,6 +28,13 @@ instances:
       instance_type: g5.xlarge
       root_volume_type: gp3
 
+  - name: aws-windows-gaming-a
+    machine: aws-gpu-g4dn-spot
+    os: windows-server-2025
+    init: ssh-windows-powershell7
+    location: tokyo
+    bundles: [gaming-streaming]
+
   - name: gcp-cheap-a
     machine: gcp-cheap-x86
     os: ubuntu-26.04-amd64

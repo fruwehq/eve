@@ -160,6 +160,7 @@ oses:
     family: windows
     version: "2025"
     arch: amd64
+    aws_ami_name_pattern: Windows_Server-2025-English-Full-Base-*
     vultr_os_id: 2514 # Windows 2025 Standard x64
 
 # -----------------------------------------------------------------------------
@@ -176,7 +177,7 @@ inits:
 
   - id: ssh-windows-powershell7
     os_family: windows
-    providers: [vultr]
+    providers: [aws, vultr]
 
 # -----------------------------------------------------------------------------
 # Workload package catalog

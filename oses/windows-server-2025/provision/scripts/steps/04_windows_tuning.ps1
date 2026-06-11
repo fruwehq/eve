@@ -55,6 +55,12 @@ if (-not $Pass) {
   throw "Windows password not provided. Set EPHEMERAL_WINDOWS_PASSWORD or create $EnvFile with a windows_password field."
 }
 
+Write-Host "Ensuring Administrator password matches provisioning secret..."
+& net.exe user $User $Pass | Out-Null
+if ($LASTEXITCODE -ne 0) {
+  throw "Failed to update Administrator password."
+}
+
 # Prevent display sleep / system standby while on AC power
 $acMonitorTimeout = (powercfg /query SCHEME_CURRENT SUB_VIDEO VIDEOIDLE | Select-String "Current AC Power Setting Index:" | Select-Object -First 1) -replace '.*:\s*', ''
 $acStandbyTimeout = (powercfg /query SCHEME_CURRENT SUB_SLEEP STANDBYIDLE | Select-String "Current AC Power Setting Index:" | Select-Object -First 1) -replace '.*:\s*', ''

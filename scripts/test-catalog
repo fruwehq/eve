@@ -13,6 +13,7 @@ if printf '%s\n' "$catalog_options_json" |
     (.providers | index("truenas")) and
     (.providers | index("gcp")) and
     any(.platforms[]; .provider == "aws" and .machine == "aws-gpu-g4dn-spot" and .os == "ubuntu-26.04-amd64") and
+    any(.platforms[]; .provider == "aws" and .machine == "aws-gpu-g4dn-spot" and .os == "windows-server-2025") and
     any(.platforms[]; .provider == "vultr" and .machine == "vultr-vcg-a40-2c" and .os == "windows-server-2025") and
     any(.platforms[]; .provider == "truenas" and .machine == "truenas-scale-medium" and .os == "ubuntu-26.04-amd64") and
     any(.platforms[]; .provider == "gcp" and .machine == "gcp-cheap-x86" and .os == "ubuntu-26.04-amd64") and
@@ -35,11 +36,11 @@ fi
 if printf '%s\n' "$catalog_options_json" |
   jq -e '
     all(.platforms[]; .provider != "vultr" or .os != "ubuntu-26.04-amd64") and
-    all(.platforms[]; .provider != "aws" or .os != "windows-server-2025")
+    any(.platforms[]; .provider == "aws" and .os == "windows-server-2025")
   ' >/dev/null; then
-  printf '  [OK] catalog-options hides provider/OS pairs without provider image metadata\n'
+  printf '  [OK] catalog-options hides invalid provider/OS pairs and exposes AWS Windows with image metadata\n'
 else
-  printf '  [FAIL] catalog-options exposes provider/OS pairs without provider image metadata\n' >&2
+  printf '  [FAIL] catalog-options provider/OS image metadata gating regressed\n' >&2
   printf '%s\n' "$catalog_options_json" | jq '.platforms[] | select((.provider == "vultr" and .os == "ubuntu-26.04-amd64") or (.provider == "aws" and .os == "windows-server-2025"))' >&2
   FAIL=$((FAIL + 1))
 fi
