@@ -4,8 +4,11 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import os
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +16,59 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from eve_sdk.plugin_manifest import PluginManifest
+
+CACHE_FILE = ROOT / ".generated" / "cache" / "plugin-list.json"
+
+
+def _fingerprint() -> str:
+    """Hash everything that affects the manifest list so any edit invalidates.
+
+    Loading + jsonschema-validating ~32 manifests costs ~0.9s and is called
+    many times per instance resolve/observe. Stat-ing the inputs is ~ms, so a
+    fingerprint-keyed cache turns repeat calls (the TUI startup hot path) from
+    seconds into milliseconds.
+    """
+    h = hashlib.sha256()
+    inputs: list[Path] = list(PluginManifest.plugin_paths())
+    inputs += sorted((ROOT / "core" / "schema").glob("*.json"))
+    inputs += [ROOT / "eve_sdk" / "plugin_manifest.py", ROOT / "eve_sdk" / "schema.py"]
+    for path in inputs:
+        try:
+            st = path.stat()
+            h.update(f"{path}|{st.st_mtime_ns}|{st.st_size}\n".encode())
+        except OSError:
+            h.update(f"{path}|missing\n".encode())
+    h.update(("roots=" + os.environ.get("EVE_PLUGIN_ROOTS", "")).encode())
+    h.update(("override=" + os.environ.get("EVE_PLUGIN_ALLOW_OVERRIDE", "")).encode())
+    return h.hexdigest()
+
+
+def _cached_plugins(kind: str | None, fingerprint: str) -> list[dict[str, Any]] | None:
+    try:
+        cached = json.loads(CACHE_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if cached.get("fingerprint") != fingerprint:
+        return None
+    return cached.get("kinds", {}).get(kind or "__all__")
+
+
+def _store_plugins(kind: str | None, fingerprint: str, plugins: list[dict[str, Any]]) -> None:
+    try:
+        existing = json.loads(CACHE_FILE.read_text(encoding="utf-8"))
+        if existing.get("fingerprint") != fingerprint:
+            existing = {"fingerprint": fingerprint, "kinds": {}}
+    except (OSError, ValueError):
+        existing = {"fingerprint": fingerprint, "kinds": {}}
+    existing["kinds"][kind or "__all__"] = plugins
+    try:
+        CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=str(CACHE_FILE.parent), suffix=".tmp")
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(existing, handle)
+        os.replace(tmp, CACHE_FILE)  # atomic; tolerates concurrent writers
+    except OSError:
+        pass
 
 
 def parser() -> argparse.ArgumentParser:
@@ -28,7 +84,13 @@ def parser() -> argparse.ArgumentParser:
 
 
 def load_plugins(kind: str | None) -> list[dict[str, Any]]:
-    return [PluginManifest.public(plugin) for plugin in PluginManifest.load_all(kind)]
+    fingerprint = _fingerprint()
+    cached = _cached_plugins(kind, fingerprint)
+    if cached is not None:
+        return cached
+    plugins = [PluginManifest.public(plugin) for plugin in PluginManifest.load_all(kind)]
+    _store_plugins(kind, fingerprint, plugins)
+    return plugins
 
 
 def main() -> int:

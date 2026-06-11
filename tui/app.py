@@ -768,18 +768,28 @@ class EveTui(App[None]):
                 self.log_line(f"[warning]aggregate refresh failed:[/] {exc}")
 
     async def refresh_list_statuses(self, instance_names: list[str]) -> None:
-        updated: dict[str, dict[str, Any]] = {}
+        # Observe the selected instance first so its detail pane fills right away,
+        # then the rest. Apply each result as it lands instead of batching at the
+        # end, so the table populates progressively rather than showing "loading"
+        # for every row until the whole (CPU-heavy) pass completes.
+        ordered = list(instance_names)
+        if self.current_instance in ordered:
+            ordered.remove(self.current_instance)
+            ordered.insert(0, self.current_instance)
         try:
-            for name in instance_names:
+            for name in ordered:
                 try:
                     status = await asyncio.to_thread(instance_observe_view, name)
-                    updated[name] = status
                 except Exception as exc:
                     self.log_line(f"[warning]observe/view failed for {name}:[/] {exc}")
-                    updated[name] = {"instance": {"name": name}, "state": {"last_error": str(exc)}}
-            self.statuses.update(updated)
-            self._status_refreshing.difference_update(instance_names)
-            self.render_instances(sync_cursor=True)
+                    status = {"instance": {"name": name}, "state": {"last_error": str(exc)}}
+                self.statuses[name] = status
+                self._status_refreshing.discard(name)
+                self.render_instances()
+                if self.current_instance == name:
+                    self.current_status = status
+                    self.render_detail()
+                    self.update_action_state()
             if not self.command_running:
                 try:
                     counts = await asyncio.to_thread(aggregate_summary)
@@ -787,10 +797,6 @@ class EveTui(App[None]):
                     self.query_one("#summary", Static).update(format_aggregate(counts))
                 except Exception as exc:
                     self.log_line(f"[warning]aggregate refresh failed:[/] {exc}")
-            if self.current_instance and self.current_instance in updated:
-                self.current_status = updated[self.current_instance]
-                self.render_detail()
-                self.update_action_state()
         except asyncio.CancelledError:
             self._status_refreshing.difference_update(instance_names)
             raise
