@@ -12,6 +12,7 @@ if printf '%s\n' "$catalog_options_json" |
     (.providers | index("vultr")) and
     (.providers | index("truenas")) and
     (.providers | index("gcp")) and
+    any(.platforms[]; .provider == "aws" and .machine == "aws-gpu-g4dn-spot" and .os == "ubuntu-26.04-amd64") and
     any(.platforms[]; .provider == "vultr" and .machine == "vultr-vcg-a40-2c" and .os == "windows-server-2025") and
     any(.platforms[]; .provider == "truenas" and .machine == "truenas-scale-medium" and .os == "ubuntu-26.04-amd64") and
     any(.platforms[]; .provider == "gcp" and .machine == "gcp-cheap-x86" and .os == "ubuntu-26.04-amd64") and

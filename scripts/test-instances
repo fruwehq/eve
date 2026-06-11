@@ -225,7 +225,6 @@ else
   FAIL=$((FAIL + 1))
 fi
 
-kvm_test_dir="$(mktemp -d "${TMPDIR:-/tmp}/eve-kvm-test.XXXXXX")"
 kvm_accel_result="$(python3 <<'PYEOF' 2>/dev/null
 import os
 from pathlib import Path
@@ -281,9 +280,14 @@ python3 "$atomic_dl_dir/serve-bad" 18923 &
 bad_http_pid=$!
 sleep 0.3
 atomic_json="$(./scripts/instance-resolve --registry "$FIXTURE" --instance dev-a --emit json | python3 "$atomic_dl_dir/rewrite.py")"
-EVE_INSTANCE_WORKDIR="$atomic_dl_dir" EVE_RESOLVED_JSON="$atomic_json" \
-  python3 plugins/providers/local-qemu/commands/local-qemu up >/dev/null 2>&1; rc=$?
-kill $bad_http_pid 2>/dev/null; wait $bad_http_pid 2>/dev/null
+if EVE_INSTANCE_WORKDIR="$atomic_dl_dir" EVE_RESOLVED_JSON="$atomic_json" \
+  python3 plugins/providers/local-qemu/commands/local-qemu up >/dev/null 2>&1; then
+  rc=0
+else
+  rc=$?
+fi
+kill $bad_http_pid 2>/dev/null || true
+wait $bad_http_pid 2>/dev/null || true
 base_file="$atomic_dl_dir/instances/dev-a/qemu/base.qcow2"
 partial_file="$atomic_dl_dir/instances/dev-a/qemu/base.qcow2.partial"
 if [ -f "$base_file" ]; then
@@ -291,6 +295,9 @@ if [ -f "$base_file" ]; then
   FAIL=$((FAIL + 1))
 elif [ -f "$partial_file" ]; then
   printf '  [FAIL] atomic download left .partial file after failure\n' >&2
+  FAIL=$((FAIL + 1))
+elif [ "$rc" -eq 0 ]; then
+  printf '  [FAIL] atomic download unexpectedly succeeded\n' >&2
   FAIL=$((FAIL + 1))
 else
   printf '  [OK] failed download leaves no base.qcow2 or .partial artifact\n'

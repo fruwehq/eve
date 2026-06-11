@@ -290,6 +290,7 @@ emit_env() {
     "VM_DISK_TYPE=" + (.machine.defaults.disk_type // ""),
     "VM_INSTANCE_TYPE=" + (.machine.defaults.instance_type // ""),
     "VM_ROOT_VOLUME_TYPE=" + (.machine.defaults.root_volume_type // ""),
+    "VM_USE_SPOT=" + (if (.machine.defaults | has("use_spot")) then (.machine.defaults.use_spot | tostring) else "" end),
     "GCP_IMAGE_FAMILY=" + (.os.gcp_image_family // ""),
     "GCP_IMAGE_PROJECT=" + (.os.gcp_image_project // ""),
     "VULTR_OS_ID=" + ((.os.vultr_os_id // 0) | tostring),

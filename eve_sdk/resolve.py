@@ -466,6 +466,7 @@ def emit_env(resolved: dict[str, Any]) -> str:
         "VM_DISK_TYPE": str(machine_defaults.get("disk_type") or ""),
         "VM_INSTANCE_TYPE": str(machine_defaults.get("instance_type") or ""),
         "VM_ROOT_VOLUME_TYPE": str(machine_defaults.get("root_volume_type") or ""),
+        "VM_USE_SPOT": str(machine_defaults["use_spot"]).lower() if "use_spot" in machine_defaults else "",
         "GCP_IMAGE_FAMILY": str(os_doc.get("gcp_image_family") or ""),
         "GCP_IMAGE_PROJECT": str(os_doc.get("gcp_image_project") or ""),
         "VULTR_OS_ID": str(os_doc.get("vultr_os_id") or 0),
