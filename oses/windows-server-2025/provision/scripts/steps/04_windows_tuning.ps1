@@ -72,6 +72,22 @@ if ($acMonitorTimeout -ne '0x00000000' -or $acStandbyTimeout -ne '0x00000000') {
   $needsReboot = $true
 }
 
+# Disable Windows Defender real-time monitoring. On the low-core gaming VMs,
+# MsMpEng real-time scanning competes with the capture/encode pipeline during
+# gameplay, spiking the CPU and causing NVENC encode-wait timeouts and audio
+# buffer underruns (crackle). This is an ephemeral gaming VM: the AV engine
+# stays installed, only the hot-path real-time scan is turned off.
+try {
+  if ((Get-MpComputerStatus -ErrorAction Stop).RealTimeProtectionEnabled) {
+    Set-MpPreference -DisableRealtimeMonitoring $true -ErrorAction Stop
+    Write-Host "Disabled Windows Defender real-time monitoring."
+  } else {
+    Write-Host "Windows Defender real-time monitoring already disabled."
+  }
+} catch {
+  Write-Warning "Could not disable Defender real-time monitoring: $($_.Exception.Message)"
+}
+
 # Disable hibernation
 Set-RegistryValueIfNeeded `
   -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Power" `
