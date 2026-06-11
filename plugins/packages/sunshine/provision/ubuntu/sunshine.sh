@@ -54,7 +54,19 @@ install_sunshine_compat_libs() {
   sudo ldconfig
 }
 
-if ! command -v sunshine >/dev/null 2>&1; then
+: "${SUNSHINE_VERSION:?SUNSHINE_VERSION must be set via config-save sunshine version}"
+
+installed_sunshine_version=""
+if command -v sunshine >/dev/null 2>&1; then
+  installed_sunshine_version=$(dpkg-query -W -f='${Version}' sunshine 2>/dev/null || true)
+fi
+
+if [ "$installed_sunshine_version" = "$SUNSHINE_VERSION" ]; then
+  log "sunshine ${SUNSHINE_VERSION} already installed (matches pinned version) — skipping install"
+else
+  if [ -n "$installed_sunshine_version" ]; then
+    log "sunshine ${installed_sunshine_version} installed but ${SUNSHINE_VERSION} pinned — replacing"
+  fi
   arch=$(dpkg --print-architecture)
   # shellcheck disable=SC1091
   codename=$(. /etc/os-release && echo "$VERSION_CODENAME")
@@ -68,14 +80,12 @@ if ! command -v sunshine >/dev/null 2>&1; then
     *) log "no known Sunshine package for $arch/$codename"; exit 1 ;;
   esac
 
-  : "${SUNSHINE_VERSION:?SUNSHINE_VERSION must be set in .env}"
   url="https://github.com/LizardByte/Sunshine/releases/download/v${SUNSHINE_VERSION}/${asset}"
-
-  deb="$DOWNLOADS_DIR/$asset"
+  # Version-stamped local name so a cached deb from a different version is never reused.
+  deb="$DOWNLOADS_DIR/${SUNSHINE_VERSION}-${asset}"
   download "$url" "$deb"
-  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "$deb"
-else
-  log "sunshine already installed — skipping install"
+  # --allow-downgrades so a pinned older version can replace a newer install.
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-downgrades "$deb"
 fi
 
 install_sunshine_compat_libs

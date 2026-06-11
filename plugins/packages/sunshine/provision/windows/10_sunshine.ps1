@@ -14,26 +14,46 @@ $configPath = Join-Path $sunshineDir "config\sunshine.conf"
 $envFile = "C:\Users\Administrator\provision\state\env.json"
 $sunshinePassword = $env:EPHEMERAL_SUNSHINE_PASSWORD
 
-$alreadyInstalled = Test-Path $sunshineDir
-if ($alreadyInstalled) {
-  Write-Host "Sunshine already installed at $sunshineDir. Skipping installer."
+# Resolve the desired Sunshine version (pinned via SUNSHINE_VERSION or env.json;
+# otherwise the latest GitHub release is used).
+$sunshineVersion = $null
+if ($env:SUNSHINE_VERSION) {
+  $sunshineVersion = $env:SUNSHINE_VERSION
+} elseif ((Test-Path $envFile)) {
+  try {
+    $envData = Get-Content $envFile | ConvertFrom-Json
+    $sunshineVersion = $envData.sunshine_version
+  } catch {}
 }
 
-if (-not $alreadyInstalled) {
-  $sunshineVersion = $null
-  if ($env:SUNSHINE_VERSION) {
-    $sunshineVersion = $env:SUNSHINE_VERSION
-  } elseif ((Test-Path $envFile)) {
-    try {
-      $envData = Get-Content $envFile | ConvertFrom-Json
-      $sunshineVersion = $envData.sunshine_version
-    } catch {}
-  }
+# Determine the currently installed version so re-provisioning can converge on
+# the pinned version (uninstall + reinstall) instead of blindly skipping.
+$installedVersion = $null
+if (Test-Path $sunshineExe) {
+  $installedVersion = (Get-Item $sunshineExe).VersionInfo.ProductVersion
+}
 
+$needInstall = $true
+if ($installedVersion) {
+  if (-not $sunshineVersion) {
+    Write-Host "Sunshine v$installedVersion already installed and no version pinned. Skipping installer."
+    $needInstall = $false
+  } elseif ($installedVersion -eq $sunshineVersion) {
+    Write-Host "Sunshine v$installedVersion already installed (matches pinned version). Skipping installer."
+    $needInstall = $false
+  } else {
+    Write-Host "Sunshine v$installedVersion installed but v$sunshineVersion is pinned. Reinstalling."
+  }
+}
+
+if ($needInstall) {
   $asset = "Sunshine-Windows-AMD64-installer.exe"
 
   if ($sunshineVersion) {
     $url = "https://github.com/LizardByte/Sunshine/releases/download/v$sunshineVersion/$asset"
+    # Version-stamped local name so a cached installer from a different version
+    # is never reused (the upstream asset name is identical across releases).
+    $localName = "Sunshine-$sunshineVersion-installer.exe"
     Write-Host "Downloading: $asset (v$sunshineVersion)"
   } else {
     Write-Host "SUNSHINE_VERSION not set - resolving latest release via GitHub API..."
@@ -55,10 +75,36 @@ if (-not $alreadyInstalled) {
       throw "Could not find Windows installer in latest Sunshine release. Assets: $($release.assets.name -join ', ')"
     }
     $url = $releaseAsset.browser_download_url
+    $localName = $releaseAsset.name
     Write-Host "Downloading: $($releaseAsset.name) (latest)"
   }
 
-  $file = "C:\Users\Administrator\provision\downloads\sunshine\$asset"
+  # Uninstall any existing version first so a different (pinned) version can take
+  # its place; preserve paired-client state across the reinstall.
+  $pairingBackup = $null
+  if ($installedVersion) {
+    $stateFile = Join-Path $sunshineDir "config\sunshine_state.json"
+    if (Test-Path $stateFile) {
+      $pairingBackup = Join-Path $env:TEMP "sunshine_state.json.bak"
+      Copy-Item $stateFile $pairingBackup -Force
+    }
+    Get-Service SunshineService -ErrorAction SilentlyContinue | Stop-Service -Force -ErrorAction SilentlyContinue
+    $uninstaller = Join-Path $sunshineDir "Uninstall.exe"
+    if (-not (Test-Path $uninstaller)) {
+      throw "Cannot replace Sunshine: uninstaller not found at $uninstaller"
+    }
+    Write-Host "Uninstalling Sunshine v$installedVersion (silent)..."
+    Start-Process -FilePath $uninstaller -ArgumentList "/S" -PassThru | Out-Null
+    # The NSIS uninstaller forks, so poll for sunshine.exe removal instead of -Wait.
+    $deadline = (Get-Date).AddSeconds(90)
+    while ((Test-Path $sunshineExe) -and (Get-Date) -lt $deadline) { Start-Sleep -Seconds 2 }
+    if (Test-Path $sunshineExe) {
+      throw "Sunshine uninstall did not complete (sunshine.exe still present)"
+    }
+    Write-Host "Sunshine uninstalled."
+  }
+
+  $file = "C:\Users\Administrator\provision\downloads\sunshine\$localName"
   Download-File -Url $url -OutFile $file -SkipIfExists
   Unblock-File $file -ErrorAction SilentlyContinue
 
@@ -67,7 +113,15 @@ if (-not $alreadyInstalled) {
   if ($proc.ExitCode -ne 0) {
     throw "Sunshine installer failed with exit code $($proc.ExitCode)"
   }
-Write-Host "Sunshine installer exit code: $($proc.ExitCode)"
+  Write-Host "Sunshine installer exit code: $($proc.ExitCode)"
+
+  # Restore paired-client state so existing Moonlight clients stay paired.
+  if ($pairingBackup -and (Test-Path $pairingBackup)) {
+    $stateDir = Join-Path $sunshineDir "config"
+    if (-not (Test-Path $stateDir)) { New-Item -ItemType Directory -Path $stateDir -Force | Out-Null }
+    Copy-Item $pairingBackup (Join-Path $stateDir "sunshine_state.json") -Force
+    Write-Host "Restored paired-client state."
+  }
 }
 
 # Ensure the config file exists and allows remote access for this ephemeral instance.
