@@ -1139,7 +1139,7 @@ class EditFieldScreen(ModalScreen[str | None]):
 
     #edit-dialog {
         width: 64;
-        height: 11;
+        height: 13;
         border: round $primary;
         background: $surface;
         padding: 1 2;
@@ -1235,12 +1235,45 @@ class SettingsScreen(ModalScreen[None]):
         self._structured: dict[str, dict[str, dict[str, Any]]] = {}
         self._row_keys: list[str] = []
         self._required_entries: dict[str, dict[str, Any]] = {}
+        self._schema_descriptions: dict[str, str] = {}
+        self._schema_defaults: dict[str, str] = {}
+
+    def _load_schema_for_provider(self, provider_id: str) -> None:
+        try:
+            schema = load_provider_schema(provider_id)
+        except Exception:
+            return
+        for scope in ("config", "secrets"):
+            fields = schema.get(scope, {})
+            if not isinstance(fields, dict):
+                continue
+            for field_id, field_def in fields.items():
+                if not isinstance(field_def, dict):
+                    continue
+                key = f"{provider_id}:{field_id}"
+                desc = str(field_def.get("description") or "")
+                default = str(field_def.get("default") or "")
+                if desc:
+                    self._schema_descriptions[key] = desc
+                if default:
+                    self._schema_defaults[key] = default
+
+    def _field_description(self, section_id: str, field_id: str) -> str:
+        key = f"{section_id}:{field_id}"
+        desc = self._schema_descriptions.get(key, "")
+        default = self._schema_defaults.get(key, "")
+        parts = []
+        if desc:
+            parts.append(desc)
+        if default:
+            parts.append(f"[dim]default: {default}[/]")
+        return "  ".join(parts) if parts else "-"
 
     def compose(self) -> ComposeResult:
         with Vertical(id="settings-dialog"):
             yield Label("[b]Settings[/b]", id="settings-title")
             table: DataTable[Any] = DataTable(id="settings-table")
-            table.add_columns("Section", "Field", "Value", "Source")
+            table.add_columns("Section", "Field", "Value", "Source", "Description")
             table.cursor_type = "row"
             yield table
             with Horizontal(id="settings-actions"):
@@ -1261,6 +1294,12 @@ class SettingsScreen(ModalScreen[None]):
         except Exception:
             self._structured = {}
 
+        self._schema_descriptions = {}
+        self._schema_defaults = {}
+        provider_sections = {"aws", "gcp", "truenas"}
+        for provider_id in provider_sections:
+            self._load_schema_for_provider(provider_id)
+
         table = self.query_one("#settings-table", DataTable)
         table.clear()
         self._row_keys = []
@@ -1275,11 +1314,13 @@ class SettingsScreen(ModalScreen[None]):
                 self._required_entries[key] = entry
                 self._row_keys.append(key)
                 label = field_label(provider_id.replace("-", "_"), field)
+                desc = self._field_description(provider_id, field)
                 table.add_row(
                     f"[bold]{provider_id}[/bold]",
                     f"[bold]{label}[/bold]",
                     "[bold red]\u2014 required \u2014[/bold red]",
                     f"[{scope}]",
+                    desc,
                     key=key,
                 )
         except Exception:
@@ -1297,9 +1338,10 @@ class SettingsScreen(ModalScreen[None]):
                 source = info.get("source") or "unset"
                 label = field_label(section_id, field_id)
                 source_display = f"[{source}]"
+                desc = self._field_description(section_id, field_id)
                 key = f"{section_id}.{field_id}"
                 self._row_keys.append(key)
-                table.add_row(section_label, label, value or "\u2014", source_display, key=key)
+                table.add_row(section_label, label, value or "\u2014", source_display, desc, key=key)
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         row_key = str(event.row_key.value)

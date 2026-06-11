@@ -73,7 +73,7 @@ def main(argv: list[str]) -> int:
                 state = State.read(name)
                 observed = state.get("observed_state", {})
                 status = state_machine.status_with_observed_state(
-                    {"state": state, "observed_state": observed},
+                    {"instance": instance, "state": state, "observed_state": observed},
                     {"observed_state": observed},
                 )
                 inner = status.get("state")

@@ -18,6 +18,7 @@ from typing import Any, ClassVar, Literal, cast
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Grid, Horizontal, Vertical
+from textual.css.query import NoMatches
 from textual.screen import ModalScreen
 from textual.widgets import (
     Button,
@@ -84,6 +85,7 @@ ROOT = Path(__file__).resolve().parents[1]
 NEW_INSTANCE_KEY = "__new_instance__"
 PACKAGE_ACTION_BUTTONS = 9
 PROVIDER_ACTION_BUTTONS = 5
+PROVIDER_PANE_ACTION_BUTTONS = 6
 APP_NAME = "Eve"
 APP_EXPANSION = "Ephemeral VM Environment"
 APP_TAGLINE = "create -> provision -> connect"
@@ -151,8 +153,18 @@ class EveTui(App[None]):
         padding: 1;
     }
 
-    #filter {
+    #provider-pane-actions {
+        height: auto;
+        margin-top: 1;
+    }
+
+    #provider-pane-actions Button {
+        width: 100%;
         margin-bottom: 1;
+    }
+
+    #provider-actions-title {
+        margin-top: 1;
     }
 
     #refresh {
@@ -183,7 +195,7 @@ class EveTui(App[None]):
     }
 
     #state-strip {
-        height: 3;
+        height: 4;
         margin-bottom: 1;
     }
 
@@ -347,7 +359,6 @@ class EveTui(App[None]):
     """
 
     BINDINGS: ClassVar[list[Binding | tuple[str, str] | tuple[str, str, str]]] = [
-        Binding("/", "focus_filter", "Filter", show=True),
         Binding("?", "help", "Help", show=True),
         Binding("h", "toggle_hidden", "Hidden"),
         Binding("r", "queue_refresh", "Refresh"),
@@ -380,6 +391,8 @@ class EveTui(App[None]):
         self.current_process: asyncio.subprocess.Process | None = None
         self.current_provider_actions: list[dict[str, Any]] = []
         self.current_remote_actions: list[dict[str, Any]] = []
+        self.current_provider_pane_id: str | None = None
+        self.current_provider_pane_actions: list[dict[str, Any]] = []
         self.instance_ips: dict[str, str] = {}
         self.background_tasks: set[asyncio.Task[None]] = set()
         self.hero_frame = 0
@@ -409,9 +422,12 @@ class EveTui(App[None]):
                     yield Static("Providers", classes="section-title")
                     yield ProviderPane([], id="provider-pane")
                     yield Static("Instances", classes="section-title")
-                    yield Input(placeholder="Filter instances", id="filter")
-                    yield Button("Refresh", id="refresh", variant="primary")
                     yield DataTable(id="instances")
+                    yield Button("Refresh", id="refresh", variant="primary")
+                    yield Static("", id="provider-actions-title", classes="action-title")
+                    with Vertical(id="provider-pane-actions"):
+                        for index in range(PROVIDER_PANE_ACTION_BUTTONS):
+                            yield Button("", id=f"provider-pane-action-{index}")
                 with Vertical(id="right"):
                     yield Static(
                         "\n".join(
@@ -429,6 +445,7 @@ class EveTui(App[None]):
                         yield Static("Select an instance.", id="title", classes="section-title")
                         with Horizontal(id="state-strip"):
                             yield Static("Provider\nunknown", id="provider-pill", classes="pill")
+                            yield Static("State\nunknown", id="state-pill", classes="pill")
                             yield Static("IP\n-", id="ip-pill", classes="pill")
                             yield Static("Provision\nunknown", id="provision-pill", classes="pill")
                             yield Static("Packages\nunknown", id="packages-pill", classes="pill")
@@ -512,6 +529,7 @@ class EveTui(App[None]):
         bundles.add_columns("Bundle", "Selection", "Includes")
 
         self.update_detail_tabs()
+        self.update_provider_pane_actions(None)
         self.animate_hero()
         self.set_interval(1.2, self.animate_hero)
         self.set_interval(15, self.trigger_blink)
@@ -838,7 +856,7 @@ class EveTui(App[None]):
         self._rendering_instances = True
         table.clear()
         table.add_row("+", "<< New Instance >>", "", "", key=NEW_INSTANCE_KEY)
-        filter_text = self.query_one("#filter", Input).value.strip().lower()
+        filter_text = ""  # instance filter removed; keep loop logic inert
         current_row = 0
         current_visible = self.current_instance is None
         row_index = 1
@@ -992,6 +1010,7 @@ class EveTui(App[None]):
         self.query_one("#instance-detail", Vertical).display = False
         self.render_empty_state()
         self.query_one("#provider-pill", Static).update("Provider\nunknown")
+        self.query_one("#state-pill", Static).update("State\nunknown")
         self.query_one("#ip-pill", Static).update("IP\n-")
         self.query_one("#provision-pill", Static).update("Provision\nunknown")
         self.query_one("#packages-pill", Static).update("Packages\nunknown")
@@ -1004,6 +1023,7 @@ class EveTui(App[None]):
         self.query_one("#instance-detail", Vertical).display = True
         self.query_one("#title", Static).update(f"{instance_name}  loading status...")
         self.query_one("#provider-pill", Static).update("Provider\nloading")
+        self.query_one("#state-pill", Static).update("State\nloading")
         self.query_one("#ip-pill", Static).update("IP\nloading")
         self.query_one("#provision-pill", Static).update("Provision\nloading")
         self.query_one("#packages-pill", Static).update("Packages\nloading")
@@ -1030,11 +1050,15 @@ class EveTui(App[None]):
         )
         provision_state = str(state.get("provision_state", "unknown"))
         provider_name = str(instance.get("provider") or "-")
+        provider_state = str(state.get("effective_provider_state", "unknown"))
         ip_text = self.instance_ips.get(str(instance.get("name") or ""), "-")
         if not provider_actions_available(cast(dict[str, Any], state)):
             ip_text = "-"
         package_text = package_summary_label(cast(dict[str, Any], summary))
         self.query_one("#provider-pill", Static).update(f"Provider\n{provider_name}")
+        self.query_one("#state-pill", Static).update(
+            f"State\n{markup_for_status(display_state(provider_state))}"
+        )
         self.query_one("#ip-pill", Static).update(f"IP\n{ip_text or '-'}")
         self.query_one("#provision-pill", Static).update(
             f"Provision\n{markup_for_status(display_state(provision_state))}"
@@ -1290,10 +1314,6 @@ class EveTui(App[None]):
             lines.append(f"[error]{last_error}[/]")
         self.query_one("#ops", Static).update("\n".join(lines))
 
-    async def on_input_changed(self, event: Input.Changed) -> None:
-        if event.input.id == "filter":
-            self.render_instances()
-
     async def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
         if event.data_table.id == "instances":
             if self._rendering_instances or self.focused is not event.data_table:
@@ -1314,6 +1334,9 @@ class EveTui(App[None]):
                     self.render_loading_detail(next_instance)
                     self.update_action_state()
                 self.start_task(self.refresh_current_status())
+        elif event.data_table.id == "provider-table":
+            if event.row_key is not None and event.row_key.value is not None:
+                self.update_provider_pane_actions(str(event.row_key.value))
         elif event.data_table.id == "packages":
             self.current_package = str(event.row_key.value)
             self.update_action_state()
@@ -1359,6 +1382,8 @@ class EveTui(App[None]):
             self.start_task(self.action_provider("stop"))
         elif button_id == "provider-down":
             self.action_down_instance()
+        elif button_id.startswith("provider-pane-action-"):
+            self.trigger_provider_pane_action(int(button_id.rsplit("-", 1)[1]))
         elif button_id.startswith("provider-action-"):
             self.start_task(self.action_provider_manifest(int(button_id.rsplit("-", 1)[1])))
         elif button_id == "reboot":
@@ -1475,7 +1500,7 @@ class EveTui(App[None]):
     def select_instance_row(self, instance_name: str) -> None:
         table = self.query_one("#instances", DataTable)
         row_index = 1
-        filter_text = self.query_one("#filter", Input).value.strip().lower()
+        filter_text = ""  # instance filter removed; keep loop logic inert
         for row in self.instances:
             name = str(row.get("name", ""))
             os_id = str(row.get("os", ""))
@@ -1588,6 +1613,54 @@ class EveTui(App[None]):
 
     def action_queue_provider(self, command: str) -> None:
         self.start_task(self.action_provider(command))
+
+    def update_provider_pane_actions(self, provider_id: str | None) -> None:
+        """Populate the left-pane provider action buttons for the highlighted provider."""
+        try:
+            pane = self.query_one("#provider-pane", ProviderPane)
+            title = self.query_one("#provider-actions-title", Static)
+            buttons = [self.query_one(f"#provider-pane-action-{i}", Button) for i in range(PROVIDER_PANE_ACTION_BUTTONS)]
+        except NoMatches:
+            # Widgets not on the active screen (e.g. a modal is open); skip.
+            return
+        self.current_provider_pane_id = provider_id
+        self.current_provider_pane_actions = list(pane.get_actions(provider_id)) if provider_id else []
+        if provider_id:
+            display = provider_id.replace("-", " ").title()
+            for provider in self._provider_pane_data:
+                if provider.get("id") == provider_id:
+                    display = str(provider.get("display_name", display))
+                    break
+            title.update(f"[dim]{display} actions[/]")
+        else:
+            title.update("")
+        # Button 0 = Configure (opens the settings modal); 1.. = provider actions.
+        labels = (
+            ["Configure…", *[str(a.get("label") or "") for a in self.current_provider_pane_actions]]
+            if provider_id
+            else []
+        )
+        for index, button in enumerate(buttons):
+            if index < len(labels):
+                button.label = labels[index]
+                button.display = True
+                button.disabled = self.command_running
+            else:
+                button.label = ""
+                button.display = False
+                button.disabled = True
+
+    def trigger_provider_pane_action(self, index: int) -> None:
+        provider_id = self.current_provider_pane_id
+        if not provider_id:
+            return
+        if index == 0:
+            self.on_provider_pane_configure_requested(ProviderPane.ConfigureRequested(provider_id))
+            return
+        action_index = index - 1
+        if 0 <= action_index < len(self.current_provider_pane_actions):
+            action = self.current_provider_pane_actions[action_index]
+            self.on_provider_pane_action_requested(ProviderPane.ActionRequested(provider_id, action))
 
     def on_provider_pane_action_requested(self, event: ProviderPane.ActionRequested) -> None:
         provider_id = event.provider_id
@@ -2099,6 +2172,7 @@ class EveTui(App[None]):
             "bundle-unselect",
             disabled=busy or not has_instance or not has_bundle or not bundle_selected,
             )
+        self.update_provider_pane_actions(self.current_provider_pane_id)
         self.restore_focus(focused_id)
 
     def action_toggle_hidden(self) -> None:
@@ -2128,9 +2202,6 @@ class EveTui(App[None]):
                 "Output  |  press l to focus, arrows/PageUp/PageDown to scroll, y to copy selected/all log text"
             )
 
-    def action_focus_filter(self) -> None:
-        self.query_one("#filter", Input).focus()
-
     def action_focus_log(self) -> None:
         output = self.query_one("#output", TextArea)
         output.focus()
@@ -2145,6 +2216,16 @@ class EveTui(App[None]):
         if sys.platform == "darwin" and shutil.which("pbcopy"):
             subprocess.run(["pbcopy"], input=text, text=True, check=False)
         self.notify(f"Copied {label}")
+
+    def on_text_area_selection_changed(self, event: TextArea.SelectionChanged) -> None:
+        if event.text_area.id != "output":
+            return
+        selected_text = getattr(event.text_area, "selected_text", "") or ""
+        if not selected_text:
+            return
+        self.copy_to_clipboard(selected_text)
+        if sys.platform == "darwin" and shutil.which("pbcopy"):
+            subprocess.run(["pbcopy"], input=selected_text, text=True, check=False)
 
     def focus_button_relative(self, key: str) -> bool:
         if not isinstance(self.focused, Button):
