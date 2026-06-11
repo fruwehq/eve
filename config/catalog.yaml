@@ -235,6 +235,15 @@ bundles:
 # Location mapping (provider-specific region/AZ translation)
 # -----------------------------------------------------------------------------
 locations:
+  - name: frankfurt
+    aws:
+      region: eu-central-1
+      availability_zone: eu-central-1b
+    gcp:
+      region: europe-west3
+      zone: europe-west3-b
+    vultr:
+      region: fra
   - name: tokyo
     aws:
       region: ap-northeast-1

@@ -11,6 +11,7 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import (
     Button,
+    Checkbox,
     DataTable,
     Input,
     Label,
@@ -208,6 +209,74 @@ class ConfirmScreen(ModalScreen[bool]):
 
     def action_dismiss_cancel(self) -> None:
         self.dismiss(False)
+
+
+class DeleteConfirmScreen(ModalScreen[dict[str, Any] | None]):
+    CSS = """
+    DeleteConfirmScreen {
+        align: center middle;
+    }
+
+    #delete-dialog {
+        width: 72;
+        height: 14;
+        border: round $error;
+        background: $surface;
+        padding: 1 2;
+    }
+
+    #delete-message {
+        margin-bottom: 1;
+    }
+
+    #delete-options {
+        margin-bottom: 1;
+    }
+
+    #delete-actions {
+        height: 3;
+        width: 28;
+        background: transparent;
+    }
+
+    #delete-actions Button {
+        width: 12;
+        min-width: 12;
+    }
+    """
+
+    BINDINGS = [
+        Binding("escape", "dismiss_cancel", "Cancel"),
+    ]
+
+    def __init__(self, instance: str) -> None:
+        super().__init__()
+        self.instance_name = instance
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="delete-dialog"):
+            yield Label("[b]Delete instance?[/b]")
+            yield Static(
+                f"Remove {self.instance_name} from the local registry.",
+                id="delete-message",
+            )
+            with Vertical(id="delete-options"):
+                yield Checkbox("Purge local workdir and state", id="delete-purge", value=True)
+                yield Checkbox("Force (skip provider state check)", id="delete-force", value=False)
+            with Horizontal(id="delete-actions"):
+                yield Button("Cancel", id="cancel")
+                yield Button("Delete", id="confirm", variant="error")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "confirm":
+            purge = self.query_one("#delete-purge", Checkbox).value
+            force = self.query_one("#delete-force", Checkbox).value
+            self.dismiss({"confirmed": True, "purge": purge, "force": force})
+        else:
+            self.dismiss(None)
+
+    def action_dismiss_cancel(self) -> None:
+        self.dismiss(None)
 
 
 class ChoiceScreen(ModalScreen[str | None]):

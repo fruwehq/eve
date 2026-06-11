@@ -69,6 +69,7 @@ from tui.state import (
 from tui.widgets import (
     ChoiceScreen,
     ConfirmScreen,
+    DeleteConfirmScreen,
     FirstRunScreen,
     NewInstanceScreen,
     ProviderConfigScreen,
@@ -1469,17 +1470,21 @@ class EveTui(App[None]):
         if not self.current_instance:
             return
         instance = self.current_instance
-        self.push_screen(
-            ConfirmScreen(
-                "Delete local instance entry?",
-                f"This removes {instance} from the local registry and purges local generated state. "
-                "Run Down first to destroy cloud/local resources.",
-            ),
-            lambda confirmed: self.start_task(self.perform_delete_instance(instance)) if confirmed else None,
-        )
+        def on_delete_result(
+            result: dict[str, Any] | None,
+        ) -> None:
+            if result and result.get("confirmed"):
+                self.start_task(self.perform_delete_instance(instance, result))
 
-    async def perform_delete_instance(self, instance: str) -> None:
-        args = make_args("instance.delete", instance, "PURGE=1")
+        self.push_screen(DeleteConfirmScreen(instance), on_delete_result)
+
+    async def perform_delete_instance(self, instance: str, options: dict[str, Any] | None = None) -> None:
+        opts = options or {}
+        args = make_args("instance.delete", instance)
+        if opts.get("purge", True):
+            args.append("PURGE=1")
+        if opts.get("force", False):
+            args.append("FORCE=1")
         await self.stream_command("instance.delete", args)
         if self.current_instance == instance:
             self.current_instance = None
