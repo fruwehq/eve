@@ -32,10 +32,18 @@ ifeq ($(strip $(TIMEZONE)),)
 TIMEZONE := $(shell ./scripts/host-timezone 2>/dev/null)
 endif
 
+ifneq ($(strip $(AWS_CONFIG_FILE)),)
 export AWS_CONFIG_FILE
+endif
+ifneq ($(strip $(AWS_PROFILE)),)
 export AWS_PROFILE
+endif
+ifneq ($(strip $(AWS_REGION)),)
 export AWS_REGION
+endif
+ifneq ($(strip $(AWS_SHARED_CREDENTIALS_FILE)),)
 export AWS_SHARED_CREDENTIALS_FILE
+endif
 export EVE_PROVISION_USER
 export EPHEMERAL_DISPLAY_RESOLUTION
 export EPHEMERAL_DISPLAY_FPS

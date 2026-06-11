@@ -19,11 +19,16 @@ check_aws() {
     configured=yes
     if ! command -v aws >/dev/null 2>&1; then
       notes="configured, but aws cli not found"
-    elif aws sts get-caller-identity >/dev/null 2>&1; then
-      reachable=yes
-      notes="aws sts ok"
     else
-      notes="configured, but aws sts failed - use the AWS Login provider action"
+      AWS_STS_ARGS=(sts get-caller-identity)
+      [ -n "${AWS_PROFILE:-}" ] && AWS_STS_ARGS=(--profile "${AWS_PROFILE}" "${AWS_STS_ARGS[@]}")
+      [ -n "${AWS_REGION:-}" ] && AWS_STS_ARGS=(--region "${AWS_REGION}" "${AWS_STS_ARGS[@]}")
+      if aws "${AWS_STS_ARGS[@]}" >/dev/null 2>&1; then
+        reachable=yes
+        notes="aws sts ok"
+      else
+        notes="configured, but aws sts failed - use the AWS Login provider action"
+      fi
     fi
   fi
 }

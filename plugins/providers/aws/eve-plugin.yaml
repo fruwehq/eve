@@ -45,24 +45,25 @@ config_schema:
     config_file:
       type: path
       default: "~/.aws/config"
-      description: "AWS CLI config file used by Terraform/Terramate."
+      description: "Path to the AWS CLI config file (profiles/SSO) used by Terraform. Default: ~/.aws/config. Leave unset to use that default."
     profile:
       type: string
-      description: "AWS CLI profile name used by Terraform/Terramate."
+      description: "AWS CLI/SSO profile name used by Terraform and the AWS Login action. If unset, the default profile / ambient AWS environment is used. Example: my-sso-profile."
     region:
       type: string
-      description: "AWS region for AWS provider resources."
+      default: "us-east-1"
+      description: "AWS region for all AWS resources. Required. Example: ap-northeast-1 (Tokyo), eu-central-1 (Frankfurt), us-east-1 (default). An instance's location may map to its own region."
     shared_credentials_file:
       type: path
       default: "~/.aws/credentials"
-      description: "AWS CLI credentials file used by Terraform/Terramate."
+      description: "Path to the AWS CLI credentials file used by Terraform. Default: ~/.aws/credentials. Leave unset to use that default."
   secrets:
     access_key_id:
       type: string
-      description: "AWS_ACCESS_KEY_ID"
+      description: "Static AWS access key ID (AWS_ACCESS_KEY_ID). OPTIONAL — leave unset to authenticate via your profile / SSO / environment / instance role (recommended). Set only for static-key auth; if set it overrides the profile. Example: AKIA..."
     secret_access_key:
       type: string
-      description: "AWS_SECRET_ACCESS_KEY"
+      description: "Static AWS secret access key (AWS_SECRET_ACCESS_KEY). OPTIONAL — required only if access_key_id is set; otherwise leave unset to use your profile / SSO. Treat as a secret."
 supports:
   engines: [terraform]
   kinds: [vm]
