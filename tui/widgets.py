@@ -1139,7 +1139,8 @@ class EditFieldScreen(ModalScreen[str | None]):
 
     #edit-dialog {
         width: 64;
-        height: 13;
+        height: auto;
+        max-height: 28;
         border: round $primary;
         background: $surface;
         padding: 1 2;
@@ -1147,6 +1148,11 @@ class EditFieldScreen(ModalScreen[str | None]):
 
     #edit-label {
         margin-bottom: 1;
+    }
+
+    #edit-detail {
+        margin-bottom: 1;
+        color: $text-muted;
     }
 
     #edit-input {
@@ -1170,15 +1176,50 @@ class EditFieldScreen(ModalScreen[str | None]):
         Binding("escape", "dismiss_cancel", "Cancel"),
     ]
 
-    def __init__(self, label: str, current: str, *, password: bool = False) -> None:
+    def __init__(
+        self,
+        label: str,
+        current: str,
+        *,
+        password: bool = False,
+        description: str = "",
+        default: str = "",
+        field_type: str = "",
+        user_value: str = "",
+        is_default_in_use: bool = False,
+        is_unset: bool = False,
+    ) -> None:
         super().__init__()
         self.field_label_text = label
         self.current_value = current
         self.password_mode = password
+        self.field_description = description
+        self.field_default = default
+        self.field_type = field_type
+        self.user_value = user_value
+        self.is_default_in_use = is_default_in_use
+        self.is_unset = is_unset
 
     def compose(self) -> ComposeResult:
         with Vertical(id="edit-dialog"):
             yield Label(f"[b]{self.field_label_text}[/b]", id="edit-label")
+            detail_lines: list[str] = []
+            if self.is_unset:
+                detail_lines.append("[warning]Unset (no value available)[/]")
+            elif self.is_default_in_use:
+                detail_lines.append("[dim]Using default value[/]")
+            else:
+                detail_lines.append("[success]Using a custom value[/]")
+            if self.password_mode:
+                detail_lines.append(f"Your value: {'set' if self.user_value else '\u2014'}")
+            else:
+                detail_lines.append(f"Your value: {self.user_value or '\u2014'}")
+            detail_lines.append(f"Default: {self.field_default or '\u2014'}")
+            if self.field_type:
+                detail_lines.append(f"Type: {self.field_type}")
+            if self.field_description:
+                detail_lines.append(self.field_description)
+            yield Static("\n".join(detail_lines), id="edit-detail")
             yield Input(value=self.current_value, id="edit-input", password=self.password_mode)
             with Horizontal(id="edit-actions"):
                 yield Button("Cancel", id="cancel")
@@ -1623,6 +1664,10 @@ class ProviderConfigScreen(ModalScreen[None]):
             yield Label(f"[b]Configure {self.provider_name}[/b]", id="pc-title")
             if self._notes and self._notes != "-":
                 yield Static(self._notes, id="pc-notes")
+            table: DataTable[Any] = DataTable(id="pc-table")
+            table.add_columns("Setting", "Source", "Value")
+            table.cursor_type = "row"
+            yield table
             if self._actions:
                 with Horizontal(id="pc-provider-actions"):
                     for action in self._actions:
@@ -1630,10 +1675,6 @@ class ProviderConfigScreen(ModalScreen[None]):
                         btn = Button(label, id=f"pca-{action.get('id', '')}")
                         btn.variant = "primary" if bool(action.get("interactive")) else "default"
                         yield btn
-            table: DataTable[Any] = DataTable(id="pc-table")
-            table.add_columns("Field", "Value", "Type")
-            table.cursor_type = "row"
-            yield table
             with Horizontal(id="pc-actions"):
                 yield Button("Test", id="pc-test", variant="primary")
                 yield Button("Close", id="pc-close")
@@ -1654,44 +1695,94 @@ class ProviderConfigScreen(ModalScreen[None]):
         table = self.query_one("#pc-table", DataTable)
         table.clear()
 
+        section_key = self.provider_id.replace("-", "_")
+        section_data = structured.get(section_key, {})
+
         config_fields = self._schema.get("config", {})
         for field_id in sorted(config_fields.keys()):
             spec = config_fields[field_id]
-            label = spec.get("description") or field_label(self.provider_id, field_id)
-            section_data = structured.get(self.provider_id.replace("-", "_"), {})
-            value = section_data.get(field_id, {}).get("value") or ""
-            ftype = spec.get("type", "string")
-            if spec.get("required"):
-                ftype += " *"
-            table.add_row(label, value or "\u2014", ftype, key=f"config.{field_id}")
+            if not isinstance(spec, dict):
+                continue
+            label = field_label(self.provider_id, field_id)
+            setting_text = label[:30]
+            schema_default = str(spec.get("default") or "")
+            field_info = section_data.get(field_id, {})
+            user_value = str(field_info.get("value") or "") if field_info.get("value") else ""
+            source_raw = str(field_info.get("source") or "unset")
+
+            if source_raw == "config":
+                source_text = "[success]custom[/]"
+                value_text = user_value or "\u2014"
+            elif source_raw == "default":
+                source_text = "[dim]default[/]"
+                value_text = user_value or schema_default or "\u2014"
+            else:
+                if schema_default:
+                    source_text = "[dim]default[/]"
+                    value_text = schema_default
+                else:
+                    source_text = "[warning]unset[/]"
+                    value_text = "\u2014"
+
+            table.add_row(setting_text, source_text, value_text, key=f"config.{field_id}")
 
         secret_fields = self._schema.get("secrets", {})
         for field_id in sorted(secret_fields.keys()):
             spec = secret_fields[field_id]
-            label = spec.get("description") or field_label(self.provider_id, field_id)
+            if not isinstance(spec, dict):
+                continue
+            label = field_label(self.provider_id, field_id)
+            setting_text = label[:30]
             is_set = field_id in self._secret_keys_set
-            display = "\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf" if is_set else "\u2014"
-            ftype = "secret"
-            if spec.get("required"):
-                ftype += " *"
-            table.add_row(label, display, ftype, key=f"secret.{field_id}")
+
+            if is_set:
+                source_text = "[success]custom[/]"
+                value_text = "[dim]set[/]"
+            else:
+                source_text = "[warning]unset[/]"
+                value_text = "\u2014"
+
+            table.add_row(setting_text, source_text, value_text, key=f"secret.{field_id}")
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         row_key = str(event.row_key.value)
         scope, field = row_key.split(".", 1)
         fields = self._schema.get(scope, {})
         spec = fields.get(field, {})
-        label = spec.get("description") or field_label(self.provider_id, field)
+        if not isinstance(spec, dict):
+            spec = {}
+        label = field_label(self.provider_id, field)
+        description = str(spec.get("description") or "")
+        schema_default = str(spec.get("default") or "")
+        field_type = str(spec.get("type") or "")
 
         is_secret = scope == "secret"
         current = ""
+        user_value = ""
+        is_default_in_use = False
+        is_unset = False
+
         if not is_secret:
             try:
                 structured = load_structured()
                 section_data = structured.get(self.provider_id.replace("-", "_"), {})
-                current = section_data.get(field, {}).get("value") or ""
+                field_info = section_data.get(field, {})
+                current = str(field_info.get("value") or "") if field_info.get("value") else ""
+                user_value = current
+                source = str(field_info.get("source") or "unset")
+                if source == "config":
+                    is_default_in_use = False
+                elif source == "default":
+                    is_default_in_use = True
+                else:
+                    is_unset = not schema_default
+                    is_default_in_use = bool(schema_default)
             except Exception:
-                pass
+                is_unset = not schema_default
+        else:
+            is_set = field in self._secret_keys_set
+            user_value = "set" if is_set else ""
+            is_unset = not is_set
 
         def handle_edit(result: str | None) -> None:
             if result is not None:
@@ -1710,7 +1801,20 @@ class ProviderConfigScreen(ModalScreen[None]):
                 except Exception as e:
                     self.notify(f"Save failed: {e}", severity="error")
 
-        self.app.push_screen(EditFieldScreen(label, current, password=is_secret), handle_edit)
+        self.app.push_screen(
+            EditFieldScreen(
+                label,
+                current,
+                password=is_secret,
+                description=description,
+                default=schema_default,
+                field_type=field_type,
+                user_value=user_value if not is_secret else "",
+                is_default_in_use=is_default_in_use,
+                is_unset=is_unset,
+            ),
+            handle_edit,
+        )
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         button_id = event.button.id or ""
