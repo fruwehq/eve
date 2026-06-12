@@ -395,6 +395,7 @@ class EveTui(App[None]):
         self.current_provider_pane_actions: list[dict[str, Any]] = []
         self.instance_ips: dict[str, str] = {}
         self.background_tasks: set[asyncio.Task[None]] = set()
+        self._copy_selection_timer: Any = None
         self.hero_frame = 0
         self._eye_blinking = False
         self._rendering_instances = False
@@ -2207,25 +2208,37 @@ class EveTui(App[None]):
         output.focus()
         output.scroll_end(animate=False, force=True)
 
+    def _write_clipboard(self, text: str) -> None:
+        self.copy_to_clipboard(text)
+        if sys.platform == "darwin" and shutil.which("pbcopy"):
+            subprocess.run(["pbcopy"], input=text, text=True, check=False)
+
     def action_copy_log(self) -> None:
         output = self.query_one("#output", TextArea)
         selected_text = getattr(output, "selected_text", "") or ""
         text = selected_text if selected_text else output.text
         label = "selected log text" if selected_text else "log output"
-        self.copy_to_clipboard(text)
-        if sys.platform == "darwin" and shutil.which("pbcopy"):
-            subprocess.run(["pbcopy"], input=text, text=True, check=False)
+        self._write_clipboard(text)
         self.notify(f"Copied {label}")
 
     def on_text_area_selection_changed(self, event: TextArea.SelectionChanged) -> None:
         if event.text_area.id != "output":
             return
-        selected_text = getattr(event.text_area, "selected_text", "") or ""
+        if getattr(event.text_area, "selected_text", ""):
+            # Debounce: copy + notify once the selection settles (i.e. the mouse
+            # is released), not on every intermediate drag step.
+            if self._copy_selection_timer is not None:
+                self._copy_selection_timer.stop()
+            self._copy_selection_timer = self.set_timer(0.3, self._copy_selected_output)
+
+    def _copy_selected_output(self) -> None:
+        self._copy_selection_timer = None
+        output = self.query_one("#output", TextArea)
+        selected_text = getattr(output, "selected_text", "") or ""
         if not selected_text:
             return
-        self.copy_to_clipboard(selected_text)
-        if sys.platform == "darwin" and shutil.which("pbcopy"):
-            subprocess.run(["pbcopy"], input=selected_text, text=True, check=False)
+        self._write_clipboard(selected_text)
+        self.notify("Copied selected log text")
 
     def focus_button_relative(self, key: str) -> bool:
         if not isinstance(self.focused, Button):
