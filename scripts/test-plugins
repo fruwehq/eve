@@ -280,8 +280,8 @@ fi
 
 provider_matrix_failed=0
 for provider_case in \
-  "dev-a:local-qemu:vagrant" \
-  "qemu-a:local-qemu:vagrant" \
+  "dev-a:local-qemu:qemu" \
+  "qemu-a:local-qemu:qemu" \
   "aws-gpu-a:aws:terraform" \
   "truenas-all-a:truenas:terraform" \
   "rpi-all-a:raspberry-pi:metal"; do
@@ -333,25 +333,24 @@ else
 fi
 
 if provider_command_exec_err="$(
-  ruby <<'RUBY' 2>&1
-require "yaml"
+  python3 <<'PY' 2>&1
+from pathlib import Path
 
-commands = %w[init plan up down start stop status ip ssh]
-Dir.glob("plugins/providers/*/eve-plugin.yaml").sort.each do |manifest|
-  provider_dir = File.dirname(manifest)
-  manifest_commands = YAML.load_file(manifest).fetch("commands")
-  commands.each do |command|
-    spec = manifest_commands[command]
-    raise "#{manifest}: missing command #{command}" unless spec
+import yaml
 
-    exec_path = spec.fetch("exec")
-    path = exec_path.start_with?("/") ? exec_path : File.expand_path(exec_path, provider_dir)
-    next if File.file?(path) && File.executable?(path)
-
-    raise "#{manifest}: #{command} exec is not executable: #{exec_path}"
-  end
-end
-RUBY
+commands = ["init", "plan", "up", "down", "start", "stop", "status", "ip", "ssh"]
+for manifest in sorted(Path("plugins/providers").glob("*/eve-plugin.yaml")):
+    provider_dir = manifest.parent
+    manifest_commands = yaml.safe_load(manifest.read_text(encoding="utf-8"))["commands"]
+    for command in commands:
+        spec = manifest_commands.get(command)
+        if not spec:
+            raise RuntimeError(f"{manifest}: missing command {command}")
+        exec_path = spec["exec"]
+        path = Path(exec_path) if exec_path.startswith("/") else provider_dir / exec_path
+        if not (path.is_file() and path.stat().st_mode & 0o111):
+            raise RuntimeError(f"{manifest}: {command} exec is not executable: {exec_path}")
+PY
 )"; then
   printf '  [OK] provider lifecycle command exec paths are executable\n'
 else
@@ -361,29 +360,30 @@ else
 fi
 
 if provider_action_err="$(
-  ruby <<'RUBY' 2>&1
-require "yaml"
+  python3 <<'PY' 2>&1
+from pathlib import Path
 
-Dir.glob("plugins/providers/*/eve-plugin.yaml").sort.each do |manifest|
-  provider_dir = File.dirname(manifest)
-  plugin = YAML.load_file(manifest)
-  actions = plugin["actions"]
-  raise "#{manifest}: provider actions must be declared" unless actions.is_a?(Array) && !actions.empty?
+import yaml
 
-  actions.each do |action|
-    target = action.fetch("target")
-    next unless target.start_with?("provider.")
-
-    command = target.split(".", 2).fetch(1)
-    spec = plugin.fetch("commands")[command]
-    raise "#{manifest}: action #{action.fetch("id")} targets missing provider command #{command}" unless spec
-
-    exec_path = spec.fetch("exec")
-    path = exec_path.start_with?("/") ? exec_path : File.expand_path(exec_path, provider_dir)
-    raise "#{manifest}: action #{action.fetch("id")} command is not executable: #{exec_path}" unless File.file?(path) && File.executable?(path)
-  end
-end
-RUBY
+for manifest in sorted(Path("plugins/providers").glob("*/eve-plugin.yaml")):
+    provider_dir = manifest.parent
+    plugin = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+    actions = plugin.get("actions")
+    if not isinstance(actions, list) or not actions:
+        raise RuntimeError(f"{manifest}: provider actions must be declared")
+    for action in actions:
+        target = action["target"]
+        if not target.startswith("provider."):
+            continue
+        command = target.split(".", 1)[1]
+        spec = plugin["commands"].get(command)
+        if not spec:
+            raise RuntimeError(f"{manifest}: action {action['id']} targets missing provider command {command}")
+        exec_path = spec["exec"]
+        path = Path(exec_path) if exec_path.startswith("/") else provider_dir / exec_path
+        if not (path.is_file() and path.stat().st_mode & 0o111):
+            raise RuntimeError(f"{manifest}: action {action['id']} command is not executable: {exec_path}")
+PY
 )"; then
   printf '  [OK] provider action metadata targets executable provider commands\n'
 else
@@ -1004,30 +1004,28 @@ else
   FAIL=$((FAIL + 1))
 fi
 
-contract_grep="$(rg 'Contract\.validate' core/sdk/provider.rb scripts/package-dispatch scripts/provider-dispatch || true)"
+contract_grep="$(rg 'validate_(def|output)' eve_sdk scripts/package-dispatch scripts/provider-dispatch || true)"
 if [ -n "$contract_grep" ]; then
-  printf '  [OK] Contract.validate has real callers in provider and package dispatch\n'
+  printf '  [OK] schema validation has real callers in provider and package dispatch\n'
 else
-  printf '  [FAIL] Contract.validate has no callers outside contract.rb\n' >&2
+  printf '  [FAIL] schema validation has no callers in provider/package dispatch\n' >&2
   FAIL=$((FAIL + 1))
 fi
 
-# shellcheck disable=SC2016
-invalid_status_err="$(printf '{"status":"not-a-valid-status"}' | ruby -rjson -e '
-  $LOAD_PATH.unshift(File.join(ENV["PWD"] || ".", "core"))
-  require "sdk"
-  begin
-    Eve::SDK::Contract.validate_output!(JSON.parse(STDIN.read), def_name: "package_command_output")
-    exit 0
-  rescue Eve::SDK::ContractError => e
-    warn e.message
-    exit 1
-  end
+invalid_status_err="$(printf '{"status":"not-a-valid-status"}' | python3 -c '
+import json
+import sys
+from eve_sdk.schema import SchemaValidationError, validate_def
+try:
+    validate_def("command-io.schema.json", "package_command_output", json.load(sys.stdin), "Command output")
+except SchemaValidationError as error:
+    print(error, file=sys.stderr)
+    raise SystemExit(1)
 ' 2>&1 || true)"
 if printf '%s\n' "$invalid_status_err" | grep -q "failed schema validation"; then
-  printf '  [OK] Contract rejects invalid package command output\n'
+  printf '  [OK] schema validation rejects invalid package command output\n'
 else
-  printf '  [FAIL] Contract should reject invalid package command output\n' >&2
+  printf '  [FAIL] schema validation should reject invalid package command output\n' >&2
   printf '%s\n' "$invalid_status_err" >&2
   FAIL=$((FAIL + 1))
 fi
@@ -1046,62 +1044,56 @@ else
   FAIL=$((FAIL + 1))
 fi
 
-# shellcheck disable=SC2016
-invalid_provider_status_err="$(printf '{"status":"not-a-valid-status"}' | ruby -rjson -e '
-  $LOAD_PATH.unshift(File.join(ENV["PWD"] || ".", "core"))
-  require "sdk"
-  begin
-    Eve::SDK::Contract.validate_output!(JSON.parse(STDIN.read), def_name: "provider_command_output")
-    exit 0
-  rescue Eve::SDK::ContractError => e
-    warn e.message
-    exit 1
-  end
+invalid_provider_status_err="$(printf '{"status":"not-a-valid-status"}' | python3 -c '
+import json
+import sys
+from eve_sdk.schema import SchemaValidationError, validate_def
+try:
+    validate_def("command-io.schema.json", "provider_command_output", json.load(sys.stdin), "Command output")
+except SchemaValidationError as error:
+    print(error, file=sys.stderr)
+    raise SystemExit(1)
 ' 2>&1 || true)"
 if printf '%s\n' "$invalid_provider_status_err" | grep -q "failed schema validation"; then
-  printf '  [OK] Contract rejects invalid provider command output status\n'
+  printf '  [OK] schema validation rejects invalid provider command output status\n'
 else
-  printf '  [FAIL] Contract should reject invalid provider command output status\n' >&2
+  printf '  [FAIL] schema validation should reject invalid provider command output status\n' >&2
   printf '%s\n' "$invalid_provider_status_err" >&2
   FAIL=$((FAIL + 1))
 fi
 
-# shellcheck disable=SC2016
-empty_ip_err="$(printf '{"ip":""}' | ruby -rjson -e '
-  $LOAD_PATH.unshift(File.join(ENV["PWD"] || ".", "core"))
-  require "sdk"
-  begin
-    Eve::SDK::Contract.validate_output!(JSON.parse(STDIN.read), def_name: "provider_command_output")
-    exit 0
-  rescue Eve::SDK::ContractError => e
-    warn e.message
-    exit 1
-  end
+empty_ip_err="$(printf '{"ip":""}' | python3 -c '
+import json
+import sys
+from eve_sdk.schema import SchemaValidationError, validate_def
+try:
+    validate_def("command-io.schema.json", "provider_command_output", json.load(sys.stdin), "Command output")
+except SchemaValidationError as error:
+    print(error, file=sys.stderr)
+    raise SystemExit(1)
 ' 2>&1 || true)"
 if printf '%s\n' "$empty_ip_err" | grep -q "failed schema validation"; then
-  printf '  [OK] Contract rejects empty provider command output ip\n'
+  printf '  [OK] schema validation rejects empty provider command output ip\n'
 else
-  printf '  [FAIL] Contract should reject empty provider command output ip\n' >&2
+  printf '  [FAIL] schema validation should reject empty provider command output ip\n' >&2
   printf '%s\n' "$empty_ip_err" >&2
   FAIL=$((FAIL + 1))
 fi
 
-# shellcheck disable=SC2016
-valid_provider_output_err="$(printf '{"status":"running"}' | ruby -rjson -e '
-  $LOAD_PATH.unshift(File.join(ENV["PWD"] || ".", "core"))
-  require "sdk"
-  begin
-    Eve::SDK::Contract.validate_output!(JSON.parse(STDIN.read), def_name: "provider_command_output")
-    exit 0
-  rescue Eve::SDK::ContractError => e
-    warn e.message
-    exit 1
-  end
+valid_provider_output_err="$(printf '{"status":"running"}' | python3 -c '
+import json
+import sys
+from eve_sdk.schema import SchemaValidationError, validate_def
+try:
+    validate_def("command-io.schema.json", "provider_command_output", json.load(sys.stdin), "Command output")
+except SchemaValidationError as error:
+    print(error, file=sys.stderr)
+    raise SystemExit(1)
 ' 2>&1 || true)"
 if [ -z "$valid_provider_output_err" ]; then
-  printf '  [OK] Contract accepts valid provider command output\n'
+  printf '  [OK] schema validation accepts valid provider command output\n'
 else
-  printf '  [FAIL] Contract should accept valid provider command output\n' >&2
+  printf '  [FAIL] schema validation should accept valid provider command output\n' >&2
   printf '%s\n' "$valid_provider_output_err" >&2
   FAIL=$((FAIL + 1))
 fi

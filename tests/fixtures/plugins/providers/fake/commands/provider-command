@@ -1,117 +1,107 @@
-#!/usr/bin/env ruby
-# frozen_string_literal: true
+#!/usr/bin/env python3
+from __future__ import annotations
 
-require "json"
-require "fileutils"
-require "tmpdir"
+import json
+import os
+import sys
+import tempfile
+from pathlib import Path
 
-command = ARGV.shift
-unless command
-  warn "Usage: #{File.basename($PROGRAM_NAME)} <command>"
-  exit 2
-end
+command = sys.argv[1] if len(sys.argv) > 1 else None
+if not command:
+    print(f"Usage: {Path(sys.argv[0]).name} <command>", file=sys.stderr)
+    raise SystemExit(2)
 
-def load_resolved
-  json_source = ENV["EVE_RESOLVED_JSON"]
-  raw = if json_source
-          JSON.parse(json_source)
-        else
-          JSON.parse($stdin.read)
-        end
-  {
-    "instance" => raw.dig("instance", "name") || "unknown",
-    "provider" => raw.dig("machine", "provider") || "fake",
-    "engine" => raw["engine"] || "terraform",
-    "os_family" => raw.dig("os", "family") || "ubuntu"
-  }
-rescue StandardError => e
-  warn "fake-provider: failed to parse resolved JSON: #{e.message}"
-  exit 1
-end
 
-def state_dir
-  workdir = ENV["EVE_INSTANCE_WORKDIR"]
-  dir = workdir && !workdir.empty? ? File.join(workdir, ".fake-provider") : File.join(Dir.tmpdir, "eve-fake-provider")
-  FileUtils.mkdir_p(dir)
-  dir
-end
+def load_resolved() -> dict[str, str]:
+    try:
+        raw = json.loads(os.environ.get("EVE_RESOLVED_JSON") or sys.stdin.read())
+        return {
+            "instance": raw.get("instance", {}).get("name") or "unknown",
+            "provider": raw.get("machine", {}).get("provider") or "fake",
+            "engine": raw.get("engine") or "terraform",
+            "os_family": raw.get("os", {}).get("family") or "ubuntu",
+        }
+    except Exception as error:
+        print(f"fake-provider: failed to parse resolved JSON: {error}", file=sys.stderr)
+        raise SystemExit(1) from error
 
-def state_file
-  File.join(state_dir, "lifecycle.json")
-end
 
-def read_state
-  return {} unless File.exist?(state_file)
-  JSON.parse(File.read(state_file))
-rescue JSON::ParserError
-  {}
-end
+def state_file() -> Path:
+    workdir = os.environ.get("EVE_INSTANCE_WORKDIR")
+    state_dir = Path(workdir) / ".fake-provider" if workdir else Path(tempfile.gettempdir()) / "eve-fake-provider"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    return state_dir / "lifecycle.json"
 
-def write_state(state)
-  File.write(state_file, JSON.pretty_generate(state) + "\n")
-end
 
-if ENV["EVE_PLUGIN_DRY_RUN"] == "1" || command == "resolve"
-  resolved = load_resolved
-  payload = {
-    "kind" => "provider",
-    "provider" => "fake",
-    "command" => command,
-    "instance" => resolved["instance"],
-    "profile" => resolved["instance"],
-    "engine" => resolved["engine"],
-    "dry_run" => ENV["EVE_PLUGIN_DRY_RUN"] == "1"
-  }
-  puts JSON.generate(payload)
-  exit 0
-end
+def read_state() -> dict[str, object]:
+    path = state_file()
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
 
-resolved = load_resolved
-instance = resolved["instance"]
-state = read_state
 
-case command
-when "init", "plan"
-  puts JSON.generate({ "status" => "ok", "command" => command })
-when "up"
-  write_state(state.merge("running" => true, "ip" => "127.0.0.1"))
-  puts JSON.generate({ "status" => "running" })
-when "start"
-  write_state(state.merge("running" => true))
-  puts JSON.generate({ "status" => "running" })
-when "stop"
-  write_state(state.merge("running" => false))
-  puts JSON.generate({ "status" => "stopped" })
-when "down"
-  write_state(state.merge("running" => false, "ip" => nil))
-  puts JSON.generate({ "status" => "absent" })
-when "status"
-  running = state["running"]
-  status = case running
-           when true then "running"
-           when false then "stopped"
-           else "absent"
-           end
-  puts JSON.generate({ "status" => status })
-when "ip"
-  ip = state["ip"]
-  if ip
-    puts JSON.generate({ "ip" => ip })
-  else
-    warn "fake-provider: no IP (instance not up)"
-    exit 1
-  end
-when "ssh"
-  unless state["running"]
-    warn "fake-provider: ssh unavailable (instance not running)"
-    exit 1
-  end
+def write_state(state: dict[str, object]) -> None:
+    state_file().write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
 
-  state["ssh_commands"] ||= []
-  state["ssh_commands"] << ARGV.join(" ")
-  write_state(state)
-  exit 0
-else
-  warn "fake-provider: unsupported command: #{command}"
-  exit 2
-end
+
+if os.environ.get("EVE_PLUGIN_DRY_RUN") == "1" or command == "resolve":
+    resolved = load_resolved()
+    print(
+        json.dumps(
+            {
+                "kind": "provider",
+                "provider": "fake",
+                "command": command,
+                "instance": resolved["instance"],
+                "profile": resolved["instance"],
+                "engine": resolved["engine"],
+                "dry_run": os.environ.get("EVE_PLUGIN_DRY_RUN") == "1",
+            },
+            separators=(",", ":"),
+        )
+    )
+    raise SystemExit(0)
+
+resolved = load_resolved()
+state = read_state()
+
+if command in {"init", "plan"}:
+    print(json.dumps({"status": "ok", "command": command}, separators=(",", ":")))
+elif command == "up":
+    write_state(state | {"running": True, "ip": "127.0.0.1"})
+    print(json.dumps({"status": "running"}))
+elif command == "start":
+    write_state(state | {"running": True})
+    print(json.dumps({"status": "running"}))
+elif command == "stop":
+    write_state(state | {"running": False})
+    print(json.dumps({"status": "stopped"}))
+elif command == "down":
+    write_state(state | {"running": False, "ip": None})
+    print(json.dumps({"status": "absent"}))
+elif command == "status":
+    running = state.get("running")
+    status = "running" if running is True else "stopped" if running is False else "absent"
+    print(json.dumps({"status": status}))
+elif command == "ip":
+    ip = state.get("ip")
+    if ip:
+        print(json.dumps({"ip": ip}))
+    else:
+        print("fake-provider: no IP (instance not up)", file=sys.stderr)
+        raise SystemExit(1)
+elif command == "ssh":
+    if not state.get("running"):
+        print("fake-provider: ssh unavailable (instance not running)", file=sys.stderr)
+        raise SystemExit(1)
+    ssh_commands = state.setdefault("ssh_commands", [])
+    if isinstance(ssh_commands, list):
+        ssh_commands.append(" ".join(sys.argv[2:]))
+    write_state(state)
+else:
+    print(f"fake-provider: unsupported command: {command}", file=sys.stderr)
+    raise SystemExit(2)

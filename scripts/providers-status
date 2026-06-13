@@ -13,32 +13,39 @@ FIELD="${2:-}"
 cd "$(git rev-parse --show-toplevel)"
 
 check_aws() {
-  configured=no reachable=no notes="missing AWS_PROFILE/AWS credentials"
+  configured=no reachable=no notes="no working AWS credentials; run the AWS Login provider action or set aws.profile"
 
-  if [ -n "${AWS_PROFILE:-}" ] || [ -n "${AWS_ACCESS_KEY_ID:-}" ]; then
+  if ! command -v aws >/dev/null 2>&1; then
+    notes="aws cli not found"
+    return
+  fi
+
+  # Always probe the AWS credential chain - a logged-in default profile (SSO),
+  # ambient env vars, or an instance role are all valid even when AWS_PROFILE
+  # is unset. Gating the probe on AWS_PROFILE hid working SSO sessions.
+  AWS_STS_ARGS=(sts get-caller-identity)
+  [ -n "${AWS_PROFILE:-}" ] && AWS_STS_ARGS=(--profile "${AWS_PROFILE}" "${AWS_STS_ARGS[@]}")
+  [ -n "${AWS_REGION:-}" ] && AWS_STS_ARGS=(--region "${AWS_REGION}" "${AWS_STS_ARGS[@]}")
+
+  if aws "${AWS_STS_ARGS[@]}" >/dev/null 2>&1; then
     configured=yes
-    if ! command -v aws >/dev/null 2>&1; then
-      notes="configured, but aws cli not found"
-    elif aws sts get-caller-identity >/dev/null 2>&1; then
-      reachable=yes
-      notes="aws sts ok"
-    else
-      notes="configured, but aws sts failed - use the AWS Login provider action"
-    fi
+    reachable=yes
+    notes="aws sts ok${AWS_PROFILE:+ (profile ${AWS_PROFILE})}"
+  elif [ -n "${AWS_PROFILE:-}" ] || [ -n "${AWS_ACCESS_KEY_ID:-}" ]; then
+    configured=yes
+    notes="configured but aws sts failed - run the AWS Login provider action (SSO session may be expired)"
+  else
+    notes="no working AWS credentials; run AWS Login (SSO) or set aws.profile in settings"
   fi
 }
 
 check_local_qemu() {
-  configured=no reachable=no notes="vagrant/qemu not found"
+  configured=no reachable=no notes="qemu not found"
 
-  if command -v vagrant >/dev/null 2>&1 || command -v qemu-system-aarch64 >/dev/null 2>&1 || command -v qemu-system-x86_64 >/dev/null 2>&1; then
+  if command -v qemu-system-aarch64 >/dev/null 2>&1 || command -v qemu-system-x86_64 >/dev/null 2>&1; then
     configured=yes
-    if command -v qemu-system-aarch64 >/dev/null 2>&1 || command -v qemu-system-x86_64 >/dev/null 2>&1; then
-      reachable=yes
-      notes="qemu available"
-    else
-      notes="vagrant present, qemu missing"
-    fi
+    reachable=yes
+    notes="qemu available"
   fi
 }
 

@@ -14,7 +14,7 @@
 ## Quickstart on macOS
 
 ```bash
-brew install jq poetry python@3.13 ruby shellcheck sshpass yq
+brew install jq poetry python@3.14 shellcheck sshpass yq
 brew tap hashicorp/tap
 brew install hashicorp/tap/terraform
 
@@ -29,8 +29,7 @@ mkdir -p /tmp/terramate
 tar -C /tmp/terramate -xzf /tmp/terramate.tar.gz
 sudo find /tmp/terramate -type f -name terramate -exec install -m 0755 {} /usr/local/bin/terramate \; -quit
 
-bundle install
-poetry env use python3.13
+poetry env use python3.14
 poetry install
 make doctor
 make eve
@@ -45,12 +44,12 @@ Settings are stored through v3.2's `.eve/config.yaml` and
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y --no-install-recommends ca-certificates curl gnupg jq make openssh-client ripgrep ruby ruby-dev shellcheck software-properties-common sshpass unzip yq
+sudo apt-get install -y --no-install-recommends ca-certificates curl gnupg jq make openssh-client ripgrep shellcheck software-properties-common sshpass unzip yq
 
 sudo add-apt-repository -y ppa:deadsnakes/ppa
 sudo apt-get update
-sudo apt-get install -y --no-install-recommends python3.13 python3.13-dev python3.13-venv
-curl -sSL https://install.python-poetry.org | python3.13 -
+sudo apt-get install -y --no-install-recommends python3.14 python3.14-dev python3.14-venv
+curl -sSL https://install.python-poetry.org | python3.14 -
 export PATH="$HOME/.local/bin:$PATH"
 
 . /etc/os-release
@@ -70,8 +69,7 @@ mkdir -p /tmp/terramate
 tar -C /tmp/terramate -xzf /tmp/terramate.tar.gz
 sudo find /tmp/terramate -type f -name terramate -exec install -m 0755 {} /usr/local/bin/terramate \; -quit
 
-bundle install
-poetry env use python3.13
+poetry env use python3.14
 poetry install
 make doctor
 make eve
@@ -306,8 +304,7 @@ compatibility alias.
 Run `make install-cli` once to install an `eve` command into `~/.local/bin`;
 after that, `eve` opens the same TUI from any directory as long as
 `~/.local/bin` is on your `PATH`.
-Use `poetry install` once to install the optional Python dependencies; the rest
-of the v3 command surface has no Python package dependency.
+Use `poetry install` once to install the Python command and TUI dependencies.
 
 ### Optional containerized toolchain
 
@@ -321,9 +318,13 @@ make docker.test
 
 The v3.3 runtime images bake the repository into `/opt/eve` and default
 `EVE_HOME` to `/data`. `eve/eve:slim` is the cloud-provider runtime;
-`eve/eve:full` adds Vagrant and QEMU for local-qemu work. The older
+`eve/eve:full` adds QEMU for local-qemu work. The older
 `docker.build` target remains as a contributor toolchain image for shelling
 into the checkout and running tests.
+
+On Linux hosts, `make test` includes the slim runtime Docker smoke by default.
+CI sets `EVE_SKIP_DOCKER_SMOKE=1` in the Ubuntu host job because the required
+`docker-runtime-slim` job owns the build, smoke, and image-size checks there.
 
 Package plugins may provide host-side command hooks at
 `commands/<os_family>/<install|status|down>` or
@@ -346,7 +347,7 @@ Terraform provider versions are pinned exactly in the Terramate provider templat
 
 ### Fresh checkout expectations
 
-- Local instance choices (for example QEMU/Vagrant) should work without cloud API keys.
+- Local instance choices (for example QEMU) should work without cloud API keys.
 - Cloud providers (AWS/Vultr/TrueNAS) only require their own credentials when used.
 - **Non-secret configuration lives in `.eve/config.yaml`** (structured, validated, TUI-editable).
 - **Secrets live in `.eve/secrets/<provider>.yaml`** (mode 0600, gitignored).
@@ -384,7 +385,7 @@ make provision INSTANCE=aws-dev-a
 make ssh INSTANCE=aws-dev-a
 make down INSTANCE=aws-dev-a
 
-# Local instance (vagrant engine)
+# Local instance (qemu engine)
 make instance.create INSTANCE=local-dev-a MACHINE=local-qemu-medium OS=ubuntu-26.04-arm64 LOCATION=tokyo BUNDLES=dev-ai
 make plan INSTANCE=local-dev-a
 make up INSTANCE=local-dev-a
@@ -476,7 +477,6 @@ The target starts an Xpra server on the VM, launches the requested app, and atta
 
 - [Terramate](https://terramate.io/docs/cli/install) — code generation and stack management
 - [Terraform](https://developer.hashicorp.com/terraform/install) >= 1.4
-- [Ruby](https://www.ruby-lang.org/en/documentation/installation/) — catalog YAML parsing in `profile-resolve` (`brew install ruby` on macOS)
 - [jq](https://jqlang.github.io/jq/download/) — JSON processing for profile resolution (`brew install jq` on macOS)
 - `make`
 
@@ -546,13 +546,11 @@ SSH/provision/package commands use that identity.
 
 ### QEMU (local, Apple Silicon ✅)
 
-QEMU is the preferred local Linux provider on Apple Silicon. It uses the public
-`cloud-image/ubuntu-26.04` Vagrant box with the `qemu` provider artifact.
+QEMU is the preferred local Linux provider on Apple Silicon. It uses Ubuntu
+cloud images directly with native QEMU virtualization.
 
 1. **QEMU** — `brew install qemu`
-2. **Vagrant** — `brew install hashicorp/tap/vagrant`
-3. **Vagrant QEMU plugin** — `vagrant plugin install vagrant-qemu`
-4. No cloud credentials needed
+2. No cloud credentials needed
 
 ### Raspberry Pi / ARM metal
 
@@ -587,7 +585,7 @@ is present.
 
 #### Initial SD card image (first boot)
 
-Flash **Ubuntu Server 26.04 LTS (64-bit)** with the official [Raspberry Pi Imager](https://www.raspberrypi.com/software/). Use Server (not Desktop) so the install stays reproducible — provisioning installs the GUI / Sunshine / etc. afterward, matching the Vagrant flow.
+Flash **Ubuntu Server 26.04 LTS (64-bit)** with the official [Raspberry Pi Imager](https://www.raspberrypi.com/software/). Use Server (not Desktop) so the install stays reproducible — provisioning installs the GUI / Sunshine / etc. afterward, matching the local VM flow.
 
 In Imager's advanced options (gear icon), preseed:
 

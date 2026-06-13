@@ -1,336 +1,227 @@
-#!/usr/bin/env ruby
-# Dispatch an instance provider command through the configured provider plugin.
-# State writes go through core/sdk/state.rb (sole state owner).
+#!/usr/bin/env python3
+from __future__ import annotations
 
-require "json"
-require "open3"
+import json
+import os
+import sys
+from pathlib import Path
+from typing import Any
 
-ROOT = File.expand_path("..", __dir__)
-$LOAD_PATH.unshift(File.join(ROOT, "core"))
-require "sdk"
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
-def usage
-  warn <<~USAGE
-    Usage:
-      scripts/provider-dispatch --instance <name>   --command <command> [--registry <path>] [--dry-run] [-- <args...>]
-      scripts/provider-dispatch --provider <id>     --command <command> [--dry-run] [-- <args...>]
+from eve_sdk.dispatch import (  # noqa: E402
+    DispatchError,
+    command_vector,
+    desired_state_for,
+    exec_cmd,
+    interactive_provider_command,
+    load_plugin,
+    prepare_overlay,
+    provider_state_for,
+    record_provider_state,
+    resolve_instance,
+    stream_command,
+    validate_provider_output,
+)
+from eve_sdk.schema import validate_output  # noqa: E402
+from eve_sdk.secrets import Secrets  # noqa: E402
 
-    Provider-level mode (--provider) skips instance resolution and dispatches
-    the named command directly to the provider plugin. Use it for bootstrap
-    actions like `login` that must run before any instance can be created.
-  USAGE
-end
 
-def run_json(*cmd)
-  out, status = Open3.capture2e(*cmd)
-  raise out unless status.success?
+def usage() -> None:
+    print(
+        """Usage:
+  scripts/provider-dispatch --instance <name>   --command <command> [--registry <path>] [--dry-run] [-- <args...>]
+  scripts/provider-dispatch --provider <id>     --command <command> [--dry-run] [-- <args...>]
 
-  JSON.parse(out)
-end
+Provider-level mode (--provider) skips instance resolution and dispatches
+the named command directly to the provider plugin. Use it for bootstrap
+actions like `login` that must run before any instance can be created.""",
+        file=sys.stderr,
+    )
 
-def command_vector(plugin, spec)
-  exec_path = spec.fetch("exec")
-  unless exec_path.start_with?("/")
-    plugin_exec = File.join(File.dirname(plugin.fetch("path")), exec_path)
-    root_exec = File.join(ROOT, exec_path)
-    exec_path = File.exist?(plugin_exec) ? plugin_exec : root_exec
-  end
-  unless File.file?(exec_path) && File.executable?(exec_path)
-    raise "provider plugin #{plugin.fetch("id")} command is not executable: #{spec.fetch("exec")}"
-  end
-  [exec_path, *(spec["args"] || [])]
-end
 
-def desired_state_for(command)
-  {
-    "up" => "running",
-    "start" => "running",
-    "stop" => "stopped",
-    "down" => "absent"
-  }[command]
-end
+def parse_args(argv: list[str]) -> tuple[str | None, str | None, str | None, str | None, bool, list[str]]:
+    instance_name: str | None = None
+    provider_name: str | None = None
+    command: str | None = None
+    registry_path = os.environ.get("EVE_INSTANCE_REGISTRY")
+    registry_path = str(Path(registry_path).resolve()) if registry_path else None
+    dry_run = os.environ.get("EVE_PROVIDER_DRY_RUN") == "1"
+    extra_args: list[str] = []
 
-def provider_state_for(command, status)
-  return "changing" if status == "running" && %w[up down start stop].include?(command)
-  if status == "failed"
-    return nil if %w[resolve status ip ssh].include?(command)
+    args = list(argv)
+    while args:
+        arg = args.pop(0)
+        if arg == "--instance" and args:
+            instance_name = args.pop(0)
+        elif arg == "--provider" and args:
+            provider_name = args.pop(0)
+        elif arg == "--command" and args:
+            command = args.pop(0)
+        elif arg == "--registry" and args:
+            registry_path = str(Path(args.pop(0)).resolve())
+        elif arg == "--dry-run":
+            dry_run = True
+        elif arg == "--":
+            extra_args = args
+            break
+        elif arg in {"-h", "--help"}:
+            usage()
+            raise SystemExit(0)
+        else:
+            usage()
+            raise SystemExit(2)
 
-    return "error"
-  end
-  return nil unless status == "succeeded"
+    if instance_name and provider_name:
+        print("provider-dispatch: --instance and --provider are mutually exclusive", file=sys.stderr)
+        raise SystemExit(2)
+    if not (instance_name or provider_name) or not command:
+        usage()
+        raise SystemExit(2)
+    return instance_name, provider_name, command, registry_path, dry_run, extra_args
 
-  {
-    "init" => "initialized",
-    "plan" => "planned",
-    "up" => "running",
-    "start" => "running",
-    "stop" => "stopped",
-    "down" => "absent"
-  }[command]
-end
 
-def record_state(instance_name, operation, status, error = nil, desired_state = nil, provider_state = nil)
-  return if ENV["EVE_DISABLE_STATE"] == "1"
+def inject_secrets(provider_name: str, plugin: dict[str, Any], env: dict[str, str]) -> dict[str, str]:
+    secrets = Secrets.read(provider_name)
+    if not secrets:
+        return env
+    schema_secrets = (plugin.get("config_schema") or {}).get("secrets") or {}
+    for secret_key, value in secrets.items():
+        env[secret_key] = value
+        schema_entry = schema_secrets.get(secret_key)
+        if isinstance(schema_entry, dict):
+            mapped = schema_entry.get("env_var")
+            if mapped:
+                env[mapped] = value
+    return env
 
-  Eve::SDK::State.record_operation(
-    instance_name, operation, status,
-    error: error,
-    desired_state: desired_state,
-    provider_state: provider_state
-  )
-end
 
-instance_name = nil
-provider_name = nil
-command = nil
-registry_path = ENV["EVE_INSTANCE_REGISTRY"] ? File.expand_path(ENV["EVE_INSTANCE_REGISTRY"], Dir.pwd) : nil
-dry_run = ENV["EVE_PROVIDER_DRY_RUN"] == "1"
-extra_args = []
+def provider_level(provider_name: str, command: str, dry_run: bool, extra_args: list[str]) -> None:
+    plugin = load_plugin("provider", provider_name)
+    spec = plugin.get("commands", {}).get(command)
+    if not isinstance(spec, dict):
+        raise DispatchError(f"provider plugin {provider_name} has no command: {command}")
+    cmd = command_vector(plugin, spec) + extra_args
+    env = inject_secrets(provider_name, plugin, dict(os.environ) | {"EVE_PROVIDER_PLUGIN": provider_name})
+    if dry_run:
+        env["EVE_PLUGIN_DRY_RUN"] = "1"
+        print(json.dumps({"kind": "provider", "provider": provider_name, "command": command, "dry_run": True}))
+        return
+    exec_cmd(cmd, env)
 
-args = ARGV.dup
-until args.empty?
-  arg = args.shift
-  case arg
-  when "--instance"
-    instance_name = args.shift
-  when "--provider"
-    provider_name = args.shift
-  when "--command"
-    command = args.shift
-  when "--registry"
-    registry_path = File.expand_path(args.shift, Dir.pwd)
-  when "--dry-run"
-    dry_run = true
-  when "--"
-    extra_args = args
-    args = []
-  when "-h", "--help"
-    usage
-    exit 0
-  else
-    usage
-    exit 2
-  end
-end
 
-if instance_name && provider_name
-  warn "provider-dispatch: --instance and --provider are mutually exclusive"
-  exit 2
-end
-
-unless (instance_name || provider_name) && command
-  usage
-  exit 2
-end
-
-  INTERACTIVE_COMMANDS = %w[ssh].freeze
-
-def interactive_command?(plugin, command)
-  return true if INTERACTIVE_COMMANDS.include?(command)
-
-  plugin.fetch("actions", []).any? do |action|
-    action.is_a?(Hash) &&
-      action["interactive"] == true &&
-      action["target"] == "provider.#{command}"
-  end
-end
-
-def validate_provider_output(output)
-  return if output.nil? || output.empty?
-
-  (output.length - 1).downto(0) do |index|
-    next unless output[index] == "{"
-
-    begin
-      parsed = JSON.parse(output[index..].strip)
-    rescue JSON::ParserError
-      next
-    end
-    next unless parsed.key?("status") || parsed.key?("ip")
-
-    Eve::SDK::Contract.validate_output!(parsed, def_name: "provider_command_output")
-    return
-  end
-
-  output.each_line.reverse_each do |line|
-    line = line.strip
-    next if line.empty?
-
-    begin
-      parsed = JSON.parse(line)
-    rescue JSON::ParserError
-      next
-    end
-    next unless parsed.key?("status") || parsed.key?("ip")
-
-    Eve::SDK::Contract.validate_output!(parsed, def_name: "provider_command_output")
-    return
-  end
-end
-
-begin
-  if provider_name
-    # Provider-level mode: no instance, no resolve. For bootstrap actions
-    # like `login` that must run before any instance can be created. Skip
-    # state recording and JSON output validation; these commands have no
-    # instance state to record and may produce free-form output.
-    plugin_doc = run_json(File.join(ROOT, "scripts/plugin-list"), "--kind", "provider", "--json")
-    plugin = plugin_doc.fetch("plugins").find { |entry| entry["id"] == provider_name }
-    raise "provider plugin not found: #{provider_name}" unless plugin
-
-    spec = plugin.fetch("commands")[command]
-    raise "provider plugin #{provider_name} has no command: #{command}" unless spec
+def instance_level(
+    instance_name: str,
+    command: str,
+    registry_path: str | None,
+    dry_run: bool,
+    extra_args: list[str],
+) -> int:
+    resolved = resolve_instance(instance_name, registry_path)
+    provider = resolved["machine"]["provider"]
+    plugin = load_plugin("provider", provider)
+    spec = plugin.get("commands", {}).get(command)
+    if not isinstance(spec, dict):
+        raise DispatchError(f"provider plugin {provider} has no command: {command}")
     cmd = command_vector(plugin, spec) + extra_args
 
-    env = ENV.to_h.merge("EVE_PROVIDER_PLUGIN" => provider_name)
-    env["EVE_PLUGIN_DRY_RUN"] = "1" if dry_run
+    if dry_run:
+        payload = {
+            "kind": "provider",
+            "provider": provider,
+            "command": command,
+            "instance": instance_name,
+            "profile": instance_name,
+            "engine": resolved["engine"],
+            "dry_run": True,
+        }
+        validate_output(payload, "provider_command_output")
+        print(json.dumps(payload, separators=(",", ":")))
+        return 0
 
-    if dry_run
-      payload = {
-        "kind" => "provider",
-        "provider" => provider_name,
-        "command" => command,
-        "dry_run" => true
-      }
-      puts JSON.generate(payload)
-      exit 0
-    end
+    overlay = prepare_overlay(instance_name, registry_path)
+    env = inject_secrets(provider, plugin, dict(os.environ) | {
+        "EVE_CATALOG_LOCAL": overlay,
+        "EVE_INSTANCE_NAME": instance_name,
+        "EVE_PROVIDER_PLUGIN": provider,
+        "EVE_RESOLVED_JSON": json.dumps(resolved, separators=(",", ":")),
+    })
+    if registry_path:
+        env["EVE_INSTANCE_REGISTRY"] = registry_path
 
-    exec(env, *cmd, chdir: ROOT)
-  end
+    if interactive_provider_command(plugin, command):
+        exec_cmd(cmd, env)
 
-  resolve_cmd = [File.join(ROOT, "scripts/instance-resolve"), "--instance", instance_name, "--emit", "json"]
-  resolve_cmd += ["--registry", registry_path] if registry_path
-  resolved = run_json(*resolve_cmd)
-
-  provider = resolved.fetch("machine").fetch("provider")
-  plugin_doc = run_json(File.join(ROOT, "scripts/plugin-list"), "--kind", "provider", "--json")
-  plugin = plugin_doc.fetch("plugins").find { |entry| entry["id"] == provider }
-  raise "provider plugin not found: #{provider}" unless plugin
-
-  spec = plugin.fetch("commands")[command]
-  raise "provider plugin #{provider} has no command: #{command}" unless spec
-  cmd = command_vector(plugin, spec)
-
-  if dry_run
-    payload = {
-      "kind" => "provider",
-      "provider" => provider,
-      "command" => command,
-      "instance" => instance_name,
-      "profile" => instance_name,
-      "engine" => resolved.fetch("engine"),
-      "dry_run" => true
-    }
-    Eve::SDK::Contract.validate_output!(payload, def_name: "provider_command_output")
-    puts JSON.generate(payload)
-    exit 0
-  end
-
-  paths_cmd = [File.join(ROOT, "scripts/instance-paths"), "--instance", instance_name, "--emit", "json"]
-  paths_cmd += ["--registry", registry_path] if registry_path
-  paths = run_json(*paths_cmd)
-  overlay = paths.fetch("INSTANCE_OVERLAY_PATH")
-  overlay_cmd = [File.join(ROOT, "scripts/instance-profile-overlay"), "--instance", instance_name, "--output", overlay]
-  overlay_cmd += ["--registry", registry_path] if registry_path
-  overlay_out, overlay_status = Open3.capture2e(*overlay_cmd)
-  raise overlay_out unless overlay_status.success?
-
-  env = ENV.to_h.merge(
-    "EVE_CATALOG_LOCAL" => overlay,
-    "EVE_INSTANCE_NAME" => instance_name,
-    "EVE_PROVIDER_PLUGIN" => provider,
-    "EVE_RESOLVED_JSON" => JSON.generate(resolved)
-  )
-  env["EVE_INSTANCE_REGISTRY"] = registry_path if registry_path
-  env["EVE_PLUGIN_DRY_RUN"] = "1" if dry_run
-
-  cmd += extra_args
-  desired_state = desired_state_for(command)
-
-  if interactive_command?(plugin, command) && !dry_run
-    exec(env, *cmd, chdir: ROOT)
-  end
-
-  record_state(
-    instance_name,
-    "provider.#{command}",
-    "running",
-    nil,
-    desired_state,
-    provider_state_for(command, "running")
-  ) unless dry_run
-
-  captured_out = +""
-  exit_status = 0
-  Open3.popen3(env, *cmd, chdir: ROOT) do |stdin, stdout, stderr, wait_thr|
-    stdin.write(JSON.generate(resolved))
-    stdin.close
-    out_t = Thread.new do
-      stdout.each_line do |line|
-        captured_out << line
-        print line
-      end
-    end
-    err_t = Thread.new { IO.copy_stream(stderr, $stderr) }
-    out_t.join
-    err_t.join
-    exit_status = wait_thr.value.exitstatus || 1
-  end
-
-  if exit_status.zero?
-    begin
-      validate_provider_output(captured_out)
-    rescue Eve::SDK::ContractError => e
-      record_state(
+    desired_state = desired_state_for(command)
+    record_provider_state(
         instance_name,
-        "provider.#{command}",
-        "failed",
-        "invalid provider output: #{e.message}",
-        desired_state,
-        provider_state_for(command, "failed")
-      ) unless dry_run
-      warn "provider-dispatch: #{e.message}"
-      exit 1
-    end
-    record_state(
-      instance_name,
-      "provider.#{command}",
-      "succeeded",
-      nil,
-      desired_state,
-      provider_state_for(command, "succeeded")
-    ) unless dry_run
-  else
-    begin
-      record_state(
-        instance_name,
-        "provider.#{command}",
-        "failed",
-        "exit #{exit_status}",
-        desired_state,
-        provider_state_for(command, "failed")
-      ) unless dry_run
-    rescue StandardError => se
-      warn "provider-dispatch: failed to record failure state: #{se.message}"
-    end
-  end
-  exit(exit_status)
-rescue StandardError => e
-  if instance_name && !dry_run
-    begin
-      record_state(
-        instance_name,
-        "provider.#{command || "unknown"}",
-        "failed",
-        e.message,
-        desired_state_for(command),
-        provider_state_for(command, "failed")
-      )
-    rescue StandardError => se
-      warn "provider-dispatch: failed to record failure state: #{se.message}"
-    end
-  end
-  warn "provider-dispatch: #{e.message}"
-  exit 1
-end
+        command,
+        "running",
+        desired_state=desired_state,
+        provider_state=provider_state_for(command, "running"),
+    )
+
+    exit_status, output = stream_command(cmd, env=env, stdin_text=json.dumps(resolved, separators=(",", ":")))
+    if exit_status == 0:
+        try:
+            validate_provider_output(output)
+        except Exception as error:
+            record_provider_state(
+                instance_name,
+                command,
+                "failed",
+                error=f"invalid provider output: {error}",
+                desired_state=desired_state,
+                provider_state=provider_state_for(command, "failed"),
+            )
+            print(f"provider-dispatch: {error}", file=sys.stderr)
+            return 1
+        record_provider_state(
+            instance_name,
+            command,
+            "succeeded",
+            desired_state=desired_state,
+            provider_state=provider_state_for(command, "succeeded"),
+        )
+    else:
+        try:
+            record_provider_state(
+                instance_name,
+                command,
+                "failed",
+                error=f"exit {exit_status}",
+                desired_state=desired_state,
+                provider_state=provider_state_for(command, "failed"),
+            )
+        except Exception as error:
+            print(f"provider-dispatch: failed to record failure state: {error}", file=sys.stderr)
+    return exit_status
+
+
+def main(argv: list[str]) -> int:
+    instance_name, provider_name, command, registry_path, dry_run, extra_args = parse_args(argv)
+    try:
+        if provider_name:
+            provider_level(provider_name, command or "", dry_run, extra_args)
+            return 0
+        return instance_level(instance_name or "", command or "", registry_path, dry_run, extra_args)
+    except Exception as error:
+        if instance_name and not dry_run:
+            try:
+                record_provider_state(
+                    instance_name,
+                    command or "unknown",
+                    "failed",
+                    error=str(error),
+                    desired_state=desired_state_for(command),
+                    provider_state=provider_state_for(command, "failed"),
+                )
+            except Exception as state_error:
+                print(f"provider-dispatch: failed to record failure state: {state_error}", file=sys.stderr)
+        print(f"provider-dispatch: {error}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

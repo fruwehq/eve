@@ -32,4 +32,14 @@ TM_RUN_FLAGS=(
 terramate generate
 
 eval "$(./scripts/tf-env "$PROFILE")"
+
+# Initialize the backend before destroy, mirroring `up`. Without this, a stack
+# whose .terraform backend isn't initialized (fresh checkout, cleaned cache,
+# regenerated backend config) fails destroy with "Backend initialization
+# required" instead of tearing the instance down.
+if [ -n "${EVE_INSTANCE_NAME:-}" ]; then
+  echo "[tf-destroy] instance=$EVE_INSTANCE_NAME initializing backend before destroy"
+  "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/init" "$PROFILE"
+fi
+
 terramate run "${TM_RUN_FLAGS[@]}" --tags="$TAGS" --reverse -- terraform destroy -auto-approve

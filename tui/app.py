@@ -38,6 +38,7 @@ from tui.commands import (
     create_instance_args,
     instance_ip,
     instance_observe_view,
+    instance_statuses,
     instance_rows,
     make_args,
     package_make_args,
@@ -69,6 +70,7 @@ from tui.state import (
 from tui.widgets import (
     ChoiceScreen,
     ConfirmScreen,
+    DeleteConfirmScreen,
     FirstRunScreen,
     NewInstanceScreen,
     ProviderConfigScreen,
@@ -149,15 +151,11 @@ class EveTui(App[None]):
         padding: 1;
     }
 
-    #filter {
-        margin-bottom: 1;
-    }
-
     #refresh {
         margin-bottom: 1;
     }
 
-    #providers {
+    #provider-pane {
         height: 7;
         margin-bottom: 1;
     }
@@ -181,7 +179,7 @@ class EveTui(App[None]):
     }
 
     #state-strip {
-        height: 3;
+        height: 4;
         margin-bottom: 1;
     }
 
@@ -345,7 +343,6 @@ class EveTui(App[None]):
     """
 
     BINDINGS: ClassVar[list[Binding | tuple[str, str] | tuple[str, str, str]]] = [
-        Binding("/", "focus_filter", "Filter", show=True),
         Binding("?", "help", "Help", show=True),
         Binding("h", "toggle_hidden", "Hidden"),
         Binding("r", "queue_refresh", "Refresh"),
@@ -356,7 +353,7 @@ class EveTui(App[None]):
         Binding("d", "delete_instance", "Delete Local Entry"),
         Binding("c", "queue_cancel_command", "Cancel", priority=True),
         Binding("ctrl+c", "queue_cancel_command", "Cancel", priority=True),
-        Binding("escape", "queue_cancel_command", "Cancel", priority=True),
+        Binding("escape", "queue_cancel_command", "Cancel"),
         Binding("l", "focus_log", "Log", priority=True),
         Binding("y", "copy_log", "Copy Log", priority=True),
         Binding("ctrl+y", "copy_log", "Copy Log", priority=True),
@@ -380,6 +377,7 @@ class EveTui(App[None]):
         self.current_remote_actions: list[dict[str, Any]] = []
         self.instance_ips: dict[str, str] = {}
         self.background_tasks: set[asyncio.Task[None]] = set()
+        self._copy_selection_timer: Any = None
         self.hero_frame = 0
         self._eye_blinking = False
         self._rendering_instances = False
@@ -405,12 +403,10 @@ class EveTui(App[None]):
             with Horizontal(id="body"):
                 with Vertical(id="left"):
                     yield Static("Providers", classes="section-title")
-                    yield DataTable(id="providers")
                     yield ProviderPane([], id="provider-pane")
                     yield Static("Instances", classes="section-title")
-                    yield Input(placeholder="Filter instances", id="filter")
-                    yield Button("Refresh", id="refresh", variant="primary")
                     yield DataTable(id="instances")
+                    yield Button("Refresh", id="refresh", variant="primary")
                 with Vertical(id="right"):
                     yield Static(
                         "\n".join(
@@ -428,6 +424,7 @@ class EveTui(App[None]):
                         yield Static("Select an instance.", id="title", classes="section-title")
                         with Horizontal(id="state-strip"):
                             yield Static("Provider\nunknown", id="provider-pill", classes="pill")
+                            yield Static("State\nunknown", id="state-pill", classes="pill")
                             yield Static("IP\n-", id="ip-pill", classes="pill")
                             yield Static("Provision\nunknown", id="provision-pill", classes="pill")
                             yield Static("Packages\nunknown", id="packages-pill", classes="pill")
@@ -498,11 +495,6 @@ class EveTui(App[None]):
         yield Footer()
 
     async def on_mount(self) -> None:
-        providers = self.query_one("#providers", DataTable)
-        providers.cursor_type = "row"
-        providers.add_columns("Provider", "Configured", "Reachable", "Notes")
-        providers.add_row("checking...", "-", "-", "-")
-
         instances = self.query_one("#instances", DataTable)
         instances.cursor_type = "row"
         instances.add_columns("", "Instance", "State", "OS")
@@ -532,12 +524,6 @@ class EveTui(App[None]):
         self.call_after_refresh(self.focus_instance_list_if_empty)
 
     async def load_provider_pane_data(self) -> None:
-        # Wrapped end-to-end so a failure here cannot strand
-        # load_initial_data before it reaches action_refresh() (which
-        # populates the instance list). Earlier regression: missing
-        # await on old_pane.remove() caused a duplicate-ID error from
-        # the subsequent mount, killing the whole load chain and
-        # leaving "Loading instances..." on screen.
         try:
             self._provider_pane_data = await asyncio.to_thread(provider_pane_data)
         except Exception as exc:
@@ -545,43 +531,33 @@ class EveTui(App[None]):
             self._provider_pane_data = []
 
         try:
-            old_pane = self.query_one("#provider-pane", ProviderPane)
-            await old_pane.remove()
-            new_pane = ProviderPane(
-                self._provider_pane_data,
-                self._provider_reachability,
-                id="provider-pane",
-            )
-            await self.mount(new_pane, after=self.query_one("#providers", DataTable))
+            pane = self.query_one("#provider-pane", ProviderPane)
+            pane.update_providers(self._provider_pane_data)
         except Exception as exc:
             self.log_line(f"[warning]provider-pane render failed:[/] {exc}")
 
     async def load_provider_health(self) -> None:
-        table = self.query_one("#providers", DataTable)
+        pane = self.query_one("#provider-pane", ProviderPane)
         try:
             text = await asyncio.to_thread(provider_status_table)
         except Exception as exc:
-            table.clear()
-            table.add_row("[error]error[/]", "-", "-", str(exc))
+            pane.update_status({}, {}, {"_error": str(exc)})
             return
         lines = text.splitlines()
-        table.clear()
-        reachability: dict[str, bool] = {}
+        configured: dict[str, bool] = {}
+        reachable: dict[str, bool] = {}
+        notes: dict[str, str] = {}
         for row in lines[2:]:
             parts = row.split(None, 3)
             if len(parts) < 3:
                 continue
-            name, configured, reachable = parts[:3]
-            notes = parts[3] if len(parts) > 3 else "-"
-            configured_text = "[success]yes[/]" if configured == "yes" else "[dim]no[/]"
-            reachable_text = "[success]yes[/]" if reachable == "yes" else "[warning]no[/]"
-            table.add_row(name, configured_text, reachable_text, notes)
-            reachability[name] = reachable == "yes"
-        if not table.row_count:
-            table.add_row("[dim]none[/]", "-", "-", "-")
-        self._provider_reachability = reachability
-        pane = self.query_one("#provider-pane", ProviderPane)
-        pane.update_reachability(reachability)
+            name, conf, reach = parts[:3]
+            note = parts[3] if len(parts) > 3 else "-"
+            configured[name] = conf == "yes"
+            reachable[name] = reach == "yes"
+            notes[name] = note
+        self._provider_reachability = reachable
+        pane.update_status(configured, reachable, notes)
 
     async def load_catalog_options(self) -> None:
         try:
@@ -739,6 +715,7 @@ class EveTui(App[None]):
         preserve_selection: bool = False,
         quiet: bool = False,
         repaint_table: bool = True,
+        live_all: bool = False,
     ) -> None:
         if not quiet:
             self.log_line("[primary]Refreshing instances[/]")
@@ -770,10 +747,22 @@ class EveTui(App[None]):
             self.render_instances(sync_cursor=True)
         if self._list_status_task and not self._list_status_task.done():
             self._list_status_task.cancel()
-        self._status_refreshing = set(next_names)
+        # Fill the table with last-known state from one fast snapshot so it shows
+        # real state immediately, instead of "loading" every row while each
+        # instance is resolved + live-observed (seconds each).
+        try:
+            snapshot = await asyncio.to_thread(instance_statuses)
+            for name, status in snapshot.items():
+                if name in next_name_set:
+                    self.statuses[name] = status
+        except Exception as exc:
+            self.log_line(f"[warning]status snapshot failed:[/] {exc}")
+        # The snapshot gives real state for every row, so nothing shows as
+        # "loading"; the live observe updates the selected instance silently.
+        self._status_refreshing = set()
         if repaint_table or new_names:
             self.render_instances(sync_cursor=True)
-        self._list_status_task = asyncio.create_task(self.refresh_list_statuses(next_names))
+        self._list_status_task = asyncio.create_task(self.refresh_list_statuses(next_names, live_all=live_all))
         self.background_tasks.add(self._list_status_task)
         self._list_status_task.add_done_callback(self.background_tasks.discard)
         if self.current_instance and self.current_instance not in self.statuses:
@@ -788,19 +777,35 @@ class EveTui(App[None]):
             except Exception as exc:
                 self.log_line(f"[warning]aggregate refresh failed:[/] {exc}")
 
-    async def refresh_list_statuses(self, instance_names: list[str]) -> None:
-        updated: dict[str, dict[str, Any]] = {}
+    async def refresh_list_statuses(self, instance_names: list[str], *, live_all: bool = False) -> None:
+        # The table already shows last-known state from the fast snapshot. Now
+        # live-observe (a provider/network call, seconds each) only the selected
+        # instance, so startup doesn't peg a core observing every instance - the
+        # cloud ones cost ~8s each. An explicit refresh passes live_all to
+        # observe everything. Selected first; applied as each result lands.
+        if live_all:
+            targets = list(instance_names)
+        elif self.current_instance in instance_names:
+            targets = [self.current_instance]
+        else:
+            targets = []
+        if self.current_instance in targets:
+            targets.remove(self.current_instance)
+            targets.insert(0, self.current_instance)
         try:
-            for name in instance_names:
+            for name in targets:
                 try:
                     status = await asyncio.to_thread(instance_observe_view, name)
-                    updated[name] = status
                 except Exception as exc:
-                    self.log_line(f"[warning]observe/view failed for {name}:[/] {exc}")
-                    updated[name] = {"instance": {"name": name}, "state": {"last_error": str(exc)}}
-            self.statuses.update(updated)
-            self._status_refreshing.difference_update(instance_names)
-            self.render_instances(sync_cursor=True)
+                    self.log_line(f"[warning]status failed for {name}:[/] {exc}")
+                    status = {"instance": {"name": name}, "state": {"last_error": str(exc)}}
+                self.statuses[name] = status
+                self._status_refreshing.discard(name)
+                self.render_instances()
+                if self.current_instance == name:
+                    self.current_status = status
+                    self.render_detail()
+                    self.update_action_state()
             if not self.command_running:
                 try:
                     counts = await asyncio.to_thread(aggregate_summary)
@@ -808,10 +813,6 @@ class EveTui(App[None]):
                     self.query_one("#summary", Static).update(format_aggregate(counts))
                 except Exception as exc:
                     self.log_line(f"[warning]aggregate refresh failed:[/] {exc}")
-            if self.current_instance and self.current_instance in updated:
-                self.current_status = updated[self.current_instance]
-                self.render_detail()
-                self.update_action_state()
         except asyncio.CancelledError:
             self._status_refreshing.difference_update(instance_names)
             raise
@@ -833,7 +834,7 @@ class EveTui(App[None]):
         self._rendering_instances = True
         table.clear()
         table.add_row("+", "<< New Instance >>", "", "", key=NEW_INSTANCE_KEY)
-        filter_text = self.query_one("#filter", Input).value.strip().lower()
+        filter_text = ""  # instance filter removed; keep loop logic inert
         current_row = 0
         current_visible = self.current_instance is None
         row_index = 1
@@ -987,6 +988,7 @@ class EveTui(App[None]):
         self.query_one("#instance-detail", Vertical).display = False
         self.render_empty_state()
         self.query_one("#provider-pill", Static).update("Provider\nunknown")
+        self.query_one("#state-pill", Static).update("State\nunknown")
         self.query_one("#ip-pill", Static).update("IP\n-")
         self.query_one("#provision-pill", Static).update("Provision\nunknown")
         self.query_one("#packages-pill", Static).update("Packages\nunknown")
@@ -999,6 +1001,7 @@ class EveTui(App[None]):
         self.query_one("#instance-detail", Vertical).display = True
         self.query_one("#title", Static).update(f"{instance_name}  loading status...")
         self.query_one("#provider-pill", Static).update("Provider\nloading")
+        self.query_one("#state-pill", Static).update("State\nloading")
         self.query_one("#ip-pill", Static).update("IP\nloading")
         self.query_one("#provision-pill", Static).update("Provision\nloading")
         self.query_one("#packages-pill", Static).update("Packages\nloading")
@@ -1025,11 +1028,15 @@ class EveTui(App[None]):
         )
         provision_state = str(state.get("provision_state", "unknown"))
         provider_name = str(instance.get("provider") or "-")
+        provider_state = str(state.get("effective_provider_state", "unknown"))
         ip_text = self.instance_ips.get(str(instance.get("name") or ""), "-")
         if not provider_actions_available(cast(dict[str, Any], state)):
             ip_text = "-"
         package_text = package_summary_label(cast(dict[str, Any], summary))
         self.query_one("#provider-pill", Static).update(f"Provider\n{provider_name}")
+        self.query_one("#state-pill", Static).update(
+            f"State\n{markup_for_status(display_state(provider_state))}"
+        )
         self.query_one("#ip-pill", Static).update(f"IP\n{ip_text or '-'}")
         self.query_one("#provision-pill", Static).update(
             f"Provision\n{markup_for_status(display_state(provision_state))}"
@@ -1285,10 +1292,6 @@ class EveTui(App[None]):
             lines.append(f"[error]{last_error}[/]")
         self.query_one("#ops", Static).update("\n".join(lines))
 
-    async def on_input_changed(self, event: Input.Changed) -> None:
-        if event.input.id == "filter":
-            self.render_instances()
-
     async def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
         if event.data_table.id == "instances":
             if self._rendering_instances or self.focused is not event.data_table:
@@ -1345,7 +1348,7 @@ class EveTui(App[None]):
         if button_id.startswith("tab-"):
             self.set_detail_tab(button_id.split("-", 1)[1])
         elif button_id == "refresh":
-            self.start_task(self.action_refresh())
+            self.start_task(self.action_refresh(live_all=True))
         elif button_id == "busy-cancel-command":
             self.start_task(self.action_cancel_command())
         elif button_id == "provider-up":
@@ -1393,7 +1396,7 @@ class EveTui(App[None]):
         elif button_id == "bundle-unselect":
             self.start_task(self.action_bundle("bundle.unselect"))
 
-    async def action_refresh(self) -> None:
+    async def action_refresh(self, *, live_all: bool = False) -> None:
         if self.command_running:
             self.notify("A command is already running", severity="warning")
             return
@@ -1402,7 +1405,7 @@ class EveTui(App[None]):
         self.update_action_state()
         self.log_line("[primary]Refreshing instances...[/]")
         try:
-            await self.refresh_instances(preserve_selection=True, quiet=True)
+            await self.refresh_instances(preserve_selection=True, quiet=True, live_all=live_all)
             self.log_line("[success]Refreshing instances finished.[/]")
         finally:
             self.command_running = False
@@ -1470,7 +1473,7 @@ class EveTui(App[None]):
     def select_instance_row(self, instance_name: str) -> None:
         table = self.query_one("#instances", DataTable)
         row_index = 1
-        filter_text = self.query_one("#filter", Input).value.strip().lower()
+        filter_text = ""  # instance filter removed; keep loop logic inert
         for row in self.instances:
             name = str(row.get("name", ""))
             os_id = str(row.get("os", ""))
@@ -1491,17 +1494,21 @@ class EveTui(App[None]):
         if not self.current_instance:
             return
         instance = self.current_instance
-        self.push_screen(
-            ConfirmScreen(
-                "Delete local instance entry?",
-                f"This removes {instance} from the local registry and purges local generated state. "
-                "Run Down first to destroy cloud/local resources.",
-            ),
-            lambda confirmed: self.start_task(self.perform_delete_instance(instance)) if confirmed else None,
-        )
+        def on_delete_result(
+            result: dict[str, Any] | None,
+        ) -> None:
+            if result and result.get("confirmed"):
+                self.start_task(self.perform_delete_instance(instance, result))
 
-    async def perform_delete_instance(self, instance: str) -> None:
-        args = make_args("instance.delete", instance, "PURGE=1")
+        self.push_screen(DeleteConfirmScreen(instance), on_delete_result)
+
+    async def perform_delete_instance(self, instance: str, options: dict[str, Any] | None = None) -> None:
+        opts = options or {}
+        args = make_args("instance.delete", instance)
+        if opts.get("purge", True):
+            args.append("PURGE=1")
+        if opts.get("force", False):
+            args.append("FORCE=1")
         await self.stream_command("instance.delete", args)
         if self.current_instance == instance:
             self.current_instance = None
@@ -1598,7 +1605,10 @@ class EveTui(App[None]):
             if provider.get("id") == provider_id:
                 display_name = str(provider.get("display_name", display_name))
                 break
-        self.push_screen(ProviderConfigScreen(provider_id, display_name))
+        pane = self.query_one("#provider-pane", ProviderPane)
+        actions = pane.get_actions(provider_id)
+        notes = pane.get_notes(provider_id)
+        self.push_screen(ProviderConfigScreen(provider_id, display_name, actions, notes))
 
     def on_provider_pane_test_connection_requested(self, event: ProviderPane.TestConnectionRequested) -> None:
         provider_id = event.provider_id
@@ -2116,23 +2126,42 @@ class EveTui(App[None]):
                 "Output  |  press l to focus, arrows/PageUp/PageDown to scroll, y to copy selected/all log text"
             )
 
-    def action_focus_filter(self) -> None:
-        self.query_one("#filter", Input).focus()
-
     def action_focus_log(self) -> None:
         output = self.query_one("#output", TextArea)
         output.focus()
         output.scroll_end(animate=False, force=True)
+
+    def _write_clipboard(self, text: str) -> None:
+        self.copy_to_clipboard(text)
+        if sys.platform == "darwin" and shutil.which("pbcopy"):
+            subprocess.run(["pbcopy"], input=text, text=True, check=False)
 
     def action_copy_log(self) -> None:
         output = self.query_one("#output", TextArea)
         selected_text = getattr(output, "selected_text", "") or ""
         text = selected_text if selected_text else output.text
         label = "selected log text" if selected_text else "log output"
-        self.copy_to_clipboard(text)
-        if sys.platform == "darwin" and shutil.which("pbcopy"):
-            subprocess.run(["pbcopy"], input=text, text=True, check=False)
+        self._write_clipboard(text)
         self.notify(f"Copied {label}")
+
+    def on_text_area_selection_changed(self, event: TextArea.SelectionChanged) -> None:
+        if event.text_area.id != "output":
+            return
+        if getattr(event.text_area, "selected_text", ""):
+            # Debounce: copy + notify once the selection settles (i.e. the mouse
+            # is released), not on every intermediate drag step.
+            if self._copy_selection_timer is not None:
+                self._copy_selection_timer.stop()
+            self._copy_selection_timer = self.set_timer(0.3, self._copy_selected_output)
+
+    def _copy_selected_output(self) -> None:
+        self._copy_selection_timer = None
+        output = self.query_one("#output", TextArea)
+        selected_text = getattr(output, "selected_text", "") or ""
+        if not selected_text:
+            return
+        self._write_clipboard(selected_text)
+        self.notify("Copied selected log text")
 
     def focus_button_relative(self, key: str) -> bool:
         if not isinstance(self.focused, Button):

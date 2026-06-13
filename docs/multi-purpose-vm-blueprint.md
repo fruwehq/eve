@@ -140,7 +140,7 @@ machines:
     defaults:
       cpus: 2
       memory_mb: 4096
-      disk_gb: 64
+      disk_gb: 20
 
 oses:
   - id: ubuntu-26.04-server-amd64
@@ -286,23 +286,23 @@ Given the current Terramate/Terraform layout:
 
 For the local provider, prefer existing ecosystem tooling first.
 
-### Primary: Vagrant + QEMU orchestration
+### Primary: Native QEMU orchestration
 
-Use Vagrant as the local runtime abstraction for:
+Use QEMU directly as the local runtime for:
 
 - `local-qemu` (QEMU provider)
 
 Benefits:
 
-- standard `up/halt/destroy/provision` lifecycle
-- mature box/template workflows
-- easier SSH metadata discovery and provisioning handoff
-- less custom lifecycle scripting in this repo
+- standard `up/start/stop/down` lifecycle managed by the native provider command
+- direct Ubuntu cloud image usage — no intermediate box format
+- native QEMU monitor for graceful shutdown
+- less dependency surface (no Vagrant, no plugins)
 
 ### Suggested mapping
 
-- `machine.provider = local-qemu` → Vagrant + QEMU provider
-- resolver emits provider-specific Vagrantfile fragments from the same manifest model
+- `machine.provider = local-qemu` → native QEMU orchestration
+- resolver emits QEMU configuration from the same manifest model
 
 This keeps the layered machine/OS/init/workload architecture intact while avoiding unnecessary reinvention.
 

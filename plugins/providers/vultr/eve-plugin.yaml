@@ -41,6 +41,7 @@ config_schema:
       type: string
       required: true
       description: "Vultr API key used by Terraform/Terramate."
+      env_var: VULTR_API_KEY
 supports:
   engines: [terraform]
   kinds: [vm]

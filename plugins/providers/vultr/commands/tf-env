@@ -1,11 +1,15 @@
-#!/usr/bin/env ruby
-# frozen_string_literal: true
+#!/usr/bin/env python3
+from __future__ import annotations
 
-$LOAD_PATH.unshift(File.expand_path("../../_terraform-common/lib", __dir__))
-require "tf_env"
+import sys
+from pathlib import Path
 
-env = EveProviderTfEnv.env
+ROOT = Path(__file__).resolve().parents[4]
+sys.path.insert(0, str(ROOT))
 
-EveProviderTfEnv.print_kv("TF_VAR_plan", env["VM_PLAN"].to_s)
-EveProviderTfEnv.print_kv("TF_VAR_region", env["LOCATION_REGION"].to_s)
-EveProviderTfEnv.print_kv("TF_VAR_vultr_os_id", env["VULTR_OS_ID"].to_s)
+from eve_sdk.tf_env import load_env, print_kv  # noqa: E402
+
+env = load_env()
+print_kv("TF_VAR_plan", env.get("VM_PLAN", ""))
+print_kv("TF_VAR_region", env.get("LOCATION_REGION", ""))
+print_kv("TF_VAR_vultr_os_id", env.get("VULTR_OS_ID", ""))

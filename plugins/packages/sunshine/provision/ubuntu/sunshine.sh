@@ -54,7 +54,19 @@ install_sunshine_compat_libs() {
   sudo ldconfig
 }
 
-if ! command -v sunshine >/dev/null 2>&1; then
+: "${SUNSHINE_VERSION:?SUNSHINE_VERSION must be set via config-save sunshine version}"
+
+installed_sunshine_version=""
+if command -v sunshine >/dev/null 2>&1; then
+  installed_sunshine_version=$(dpkg-query -W -f='${Version}' sunshine 2>/dev/null || true)
+fi
+
+if [ "$installed_sunshine_version" = "$SUNSHINE_VERSION" ]; then
+  log "sunshine ${SUNSHINE_VERSION} already installed (matches pinned version) — skipping install"
+else
+  if [ -n "$installed_sunshine_version" ]; then
+    log "sunshine ${installed_sunshine_version} installed but ${SUNSHINE_VERSION} pinned — replacing"
+  fi
   arch=$(dpkg --print-architecture)
   # shellcheck disable=SC1091
   codename=$(. /etc/os-release && echo "$VERSION_CODENAME")
@@ -68,14 +80,12 @@ if ! command -v sunshine >/dev/null 2>&1; then
     *) log "no known Sunshine package for $arch/$codename"; exit 1 ;;
   esac
 
-  : "${SUNSHINE_VERSION:?SUNSHINE_VERSION must be set in .env}"
   url="https://github.com/LizardByte/Sunshine/releases/download/v${SUNSHINE_VERSION}/${asset}"
-
-  deb="$DOWNLOADS_DIR/$asset"
+  # Version-stamped local name so a cached deb from a different version is never reused.
+  deb="$DOWNLOADS_DIR/${SUNSHINE_VERSION}-${asset}"
   download "$url" "$deb"
-  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "$deb"
-else
-  log "sunshine already installed — skipping install"
+  # --allow-downgrades so a pinned older version can replace a newer install.
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-downgrades "$deb"
 fi
 
 install_sunshine_compat_libs
@@ -107,6 +117,26 @@ unset_sunshine_config() {
 }
 
 set_sunshine_config origin_web_ui_allowed wan
+set_sunshine_config private_key_mandatory disabled
+
+pub_ip=$(curl -sf https://api.ipify.org 2>/dev/null || true)
+if [ -n "$pub_ip" ]; then
+  set_sunshine_config external_ip "$pub_ip"
+  log "### sunshine: external_ip set to $pub_ip"
+fi
+
+# Sunshine spans TCP 47984/47989/48010 and UDP 47998-48000/48002. Open the full
+# 47984-48010 span for both protocols so the video (47998) and control (47999)
+# ports are reachable, not just the HTTP and audio ports.
+if command -v ufw >/dev/null 2>&1; then
+  sudo ufw allow 47984:48010/tcp >/dev/null 2>&1 || true
+  sudo ufw allow 47984:48010/udp >/dev/null 2>&1 || true
+  log "### sunshine: ufw firewall rules configured"
+elif command -v iptables >/dev/null 2>&1; then
+  sudo iptables -C INPUT -p tcp -m multiport --dports 47984:48010 -j ACCEPT 2>/dev/null || sudo iptables -A INPUT -p tcp -m multiport --dports 47984:48010 -j ACCEPT 2>/dev/null || true
+  sudo iptables -C INPUT -p udp -m multiport --dports 47984:48010 -j ACCEPT 2>/dev/null || sudo iptables -A INPUT -p udp -m multiport --dports 47984:48010 -j ACCEPT 2>/dev/null || true
+  log "### sunshine: iptables firewall rules configured"
+fi
 unset_sunshine_config fps
 unset_sunshine_config resolutions
 

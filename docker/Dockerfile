@@ -1,62 +1,11 @@
 # syntax=docker/dockerfile:1.7
 
-ARG PYTHON_VERSION=3.13.13
-ARG RUBY_VERSION=3.4.7
+ARG PYTHON_BASE_IMAGE=python:3.14-slim-trixie
 ARG TERRAFORM_VERSION=1.14.9
 ARG TERRAMATE_VERSION=0.17.0
 ARG VULTR_CLI_VERSION=3.10.0
 
-FROM ubuntu:24.04 AS language-build
-
-ARG PYTHON_VERSION
-ARG RUBY_VERSION
-
-ENV DEBIAN_FRONTEND=noninteractive
-
-RUN apt-get update \
-  && apt-get install -y --no-install-recommends \
-    autoconf \
-    bison \
-    build-essential \
-    ca-certificates \
-    curl \
-    libdb-dev \
-    libffi-dev \
-    libgdbm-dev \
-    libgmp-dev \
-    libncurses-dev \
-    libreadline-dev \
-    libsqlite3-dev \
-    libssl-dev \
-    libyaml-dev \
-    make \
-    tk-dev \
-    uuid-dev \
-    xz-utils \
-    zlib1g-dev \
-  && rm -rf /var/lib/apt/lists/*
-
-RUN set -eux; \
-  curl -fsSLo /tmp/ruby.tar.gz "https://cache.ruby-lang.org/pub/ruby/3.4/ruby-${RUBY_VERSION}.tar.gz"; \
-  mkdir -p /tmp/ruby; \
-  tar -C /tmp/ruby --strip-components=1 -xzf /tmp/ruby.tar.gz; \
-  cd /tmp/ruby; \
-  ./configure --prefix=/opt/ruby --disable-install-doc; \
-  make -j"$(nproc)"; \
-  make install; \
-  rm -rf /tmp/ruby /tmp/ruby.tar.gz
-
-RUN set -eux; \
-  curl -fsSLo /tmp/python.tgz "https://www.python.org/ftp/python/${PYTHON_VERSION}/Python-${PYTHON_VERSION}.tgz"; \
-  mkdir -p /tmp/python; \
-  tar -C /tmp/python --strip-components=1 -xzf /tmp/python.tgz; \
-  cd /tmp/python; \
-  ./configure --prefix=/opt/python --enable-shared --with-ensurepip=install; \
-  make -j"$(nproc)"; \
-  make install; \
-  rm -rf /tmp/python /tmp/python.tgz
-
-FROM ubuntu:24.04 AS base
+FROM ${PYTHON_BASE_IMAGE} AS base
 
 ARG TARGETARCH
 ARG TERRAFORM_VERSION
@@ -64,13 +13,9 @@ ARG TERRAMATE_VERSION
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV EVE_HOME=/data
-ENV LD_LIBRARY_PATH="/opt/python/lib"
-ENV PATH="/opt/ruby/bin:/opt/python/bin:/root/.local/bin:/usr/local/bin:${PATH}"
+ENV PATH="/root/.local/bin:/usr/local/bin:${PATH}"
 ENV POETRY_NO_INTERACTION=1
 ENV POETRY_VIRTUALENVS_CREATE=false
-
-COPY --from=language-build /opt/ruby /opt/ruby
-COPY --from=language-build /opt/python /opt/python
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
@@ -80,15 +25,6 @@ RUN apt-get update \
     git \
     gnupg \
     jq \
-    libdb-dev \
-    libffi-dev \
-    libgdbm-dev \
-    libgmp-dev \
-    libncurses-dev \
-    libreadline-dev \
-    libsqlite3-dev \
-    libssl-dev \
-    libyaml-dev \
     make \
     openssh-client \
     shellcheck \
@@ -96,12 +32,6 @@ RUN apt-get update \
     unzip \
     xz-utils \
     yq \
-    zlib1g-dev \
-  && ln -sf /opt/python/bin/python3.13 /usr/local/bin/python3 \
-  && ln -sf /opt/python/bin/pip3.13 /usr/local/bin/pip3 \
-  && ln -sf /opt/python/bin/python3.13 /usr/local/bin/python \
-  && ln -sf /opt/python/bin/pip3.13 /usr/local/bin/pip \
-  && gem install bundler -v 4.0.11 \
   && python3 -m pip install --no-cache-dir poetry \
   && rm -rf /var/lib/apt/lists/*
 
@@ -132,19 +62,17 @@ RUN apt-get update \
   && git config user.name "Eve Container" \
   && git add . \
   && git commit -q -m "docker image snapshot" \
-  && bundle install \
   && poetry install --only main --no-interaction --no-root \
   && apt-get purge -y --auto-remove build-essential \
   && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* \
-  && find /opt/python /opt/ruby -depth -name __pycache__ -prune -exec rm -rf {} + \
-  && find /opt/python /opt/ruby -type f -name '*.pyc' -delete \
-  && find /opt/python /opt/ruby -type f -name '*.a' -delete \
+  && find /usr/local/lib/python3.14 -depth -name __pycache__ -prune -exec rm -rf {} + \
+  && find /usr/local/lib/python3.14 -type f -name '*.pyc' -delete \
+  && find /usr/local/lib/python3.14 -type f -name '*.a' -delete \
   && rm -rf \
-    /opt/python/include \
-    /opt/python/lib/python3.13/idlelib \
-    /opt/python/lib/python3.13/test \
-    /opt/python/lib/python3.13/tkinter \
-    /opt/ruby/include
+    /usr/local/include/python3.14 \
+    /usr/local/lib/python3.14/idlelib \
+    /usr/local/lib/python3.14/test \
+    /usr/local/lib/python3.14/tkinter
 
 FROM app-deps AS runtime-base
 
@@ -182,11 +110,12 @@ RUN set -eux; \
     /usr/share/man/* \
     /var/cache/apt/archives/* \
     /var/lib/apt/lists/*; \
-  find /usr/lib/google-cloud-sdk /opt/python -depth -name __pycache__ -prune -exec rm -rf {} +; \
-  find /usr/lib/google-cloud-sdk /opt/python -type f -name '*.pyc' -delete
+  find /usr/lib/google-cloud-sdk /usr/local/lib/python3.14 -depth -name __pycache__ -prune -exec rm -rf {} +; \
+  find /usr/lib/google-cloud-sdk /usr/local/lib/python3.14 -type f -name '*.pyc' -delete
 
 FROM runtime-slim AS runtime-full
 
+# qemu-system-arm provides qemu-system-aarch64; full is the local QEMU/Vagrant variant.
 RUN set -eux; \
   case "$(dpkg --print-architecture)" in \
     amd64) ;; \
@@ -200,4 +129,4 @@ RUN set -eux; \
     qemu-system-arm \
     qemu-system-x86 \
     vagrant \
-  && rm -rf /var/lib/apt/lists/*
+  && rm -rf /usr/share/doc/* /usr/share/man/* /var/cache/apt/archives/* /var/lib/apt/lists/*

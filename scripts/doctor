@@ -1,219 +1,244 @@
-#!/usr/bin/env ruby
-# frozen_string_literal: true
+#!/usr/bin/env python3
+from __future__ import annotations
 
-# Run local readiness checks for v3 orchestration.
+import json
+import os
+import shlex
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any
 
-require "json"
-require "open3"
-require "shellwords"
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
-ROOT = File.expand_path("..", __dir__)
-$LOAD_PATH.unshift(File.join(ROOT, "core"))
-require "sdk"
+from eve_sdk.workdir import Workdir  # noqa: E402
 
-Dir.chdir(ROOT)
+FORMAT = "json" if "--json" in sys.argv else "table"
 
-FORMAT = ARGV.include?("--json") ? "json" : "table"
+def tool(group: str, name: str, check: str, darwin: str, linux: str, only: list[str] | None = None) -> dict[str, Any]:
+    entry = {"group": group, "tool": name, "check": check, "install": {"darwin": darwin, "linux": linux}}
+    if only:
+        entry["only"] = only
+    return entry
 
-def host_os
-  stdout, status = Open3.capture2("uname", "-s")
-  return stdout.strip if status.success? && !stdout.strip.empty?
-
-  "unknown"
-rescue Errno::ENOENT
-  "unknown"
-end
-
-def os_key(os_name)
-  case os_name
-  when "Darwin" then :darwin
-  when "Linux" then :linux
-  else :unsupported
-  end
-end
-
-def shell_ok?(command)
-  system("sh", "-c", command, out: File::NULL, err: File::NULL)
-end
-
-def command_output(command)
-  stdout, stderr, status = Open3.capture3("sh", "-c", command)
-  { "ok" => status.success?, "stdout" => stdout, "stderr" => stderr, "status" => status.exitstatus }
-end
 
 TOOL_CHECKS = [
-  { group: "core", tool: "bash", check: "command -v bash", install: { darwin: "brew install bash", linux: "apt install bash" } },
-  { group: "core", tool: "jq", check: "command -v jq", install: { darwin: "brew install jq", linux: "apt install jq" } },
-  { group: "core", tool: "ruby", check: "command -v ruby", install: { darwin: "brew install ruby", linux: "apt install ruby ruby-dev" } },
-  { group: "core", tool: "scp", check: "command -v scp", install: { darwin: "xcode-select --install", linux: "apt install openssh-client" } },
-  { group: "core", tool: "shellcheck", check: "command -v shellcheck", install: { darwin: "brew install shellcheck", linux: "apt install shellcheck" } },
-  { group: "core", tool: "ssh", check: "command -v ssh", install: { darwin: "xcode-select --install", linux: "apt install openssh-client" } },
-  { group: "core", tool: "yq", check: "command -v yq", install: { darwin: "brew install yq", linux: "apt install yq" } },
-  { group: "provider", tool: "aws", check: "command -v aws", install: { darwin: "brew install awscli", linux: "apt install awscli" } },
-  { group: "provider", tool: "curl", check: "command -v curl", install: { darwin: "brew install curl", linux: "apt install curl" } },
-  { group: "provider", tool: "docker", check: "docker --version", install: { darwin: "install Docker Desktop", linux: "apt install docker.io" } },
-  { group: "provider", tool: "gcloud", check: "command -v gcloud", install: { darwin: "brew install --cask google-cloud-sdk", linux: "install google-cloud-cli" } },
-  { group: "provider", tool: "nc", check: "command -v nc", install: { darwin: "xcode-select --install", linux: "apt install netcat-openbsd" } },
-  { group: "provider", tool: "qemu-system-aarch64", check: "command -v qemu-system-aarch64", install: { darwin: "brew install qemu", linux: "apt install qemu-system-arm" } },
-  { group: "provider", tool: "qemu-system-x86_64", check: "command -v qemu-system-x86_64", install: { darwin: "brew install qemu", linux: "apt install qemu-system-x86" } },
-  { group: "provider", tool: "terraform", check: "terraform -version", install: { darwin: "brew tap hashicorp/tap && brew install hashicorp/tap/terraform", linux: "apt install terraform" } },
-  { group: "provider", tool: "terramate", check: "terramate version", install: { darwin: "install Terramate release tarball", linux: "install Terramate release tarball" } },
-  { group: "provider", tool: "vagrant", check: "command -v vagrant", install: { darwin: "brew install hashicorp/tap/vagrant", linux: "apt install vagrant" } },
-  { group: "os", tool: "dscacheutil", check: "command -v dscacheutil", only: [:darwin], install: { darwin: "bundled with macOS" } },
-  { group: "os", tool: "getent", check: "command -v getent", only: [:linux], install: { linux: "apt install libc-bin" } },
-  { group: "os", tool: "pbcopy", check: "command -v pbcopy", only: [:darwin], install: { darwin: "bundled with macOS" } },
-  { group: "os", tool: "xfreerdp", check: "command -v xfreerdp", only: [:linux], install: { linux: "apt install freerdp2-x11" } }
-].freeze
+    tool("core", "bash", "command -v bash", "brew install bash", "apt install bash"),
+    tool("core", "jq", "command -v jq", "brew install jq", "apt install jq"),
+    tool("core", "poetry", "command -v poetry", "brew install poetry", "pipx install poetry"),
+    tool("core", "python3", "command -v python3", "brew install python", "apt install python3"),
+    tool("core", "scp", "command -v scp", "xcode-select --install", "apt install openssh-client"),
+    tool("core", "shellcheck", "command -v shellcheck", "brew install shellcheck", "apt install shellcheck"),
+    tool("core", "ssh", "command -v ssh", "xcode-select --install", "apt install openssh-client"),
+    tool("core", "yq", "command -v yq", "brew install yq", "apt install yq"),
+    tool("provider", "aws", "command -v aws", "brew install awscli", "apt install awscli"),
+    tool("provider", "curl", "command -v curl", "brew install curl", "apt install curl"),
+    tool("provider", "docker", "docker --version", "install Docker Desktop", "apt install docker.io"),
+    tool("provider", "gcloud", "command -v gcloud", "brew install --cask google-cloud-sdk", "install google-cloud-cli"),
+    tool("provider", "nc", "command -v nc", "xcode-select --install", "apt install netcat-openbsd"),
+    tool(
+        "provider",
+        "qemu-system-aarch64",
+        "command -v qemu-system-aarch64",
+        "brew install qemu",
+        "apt install qemu-system-arm",
+    ),
+    tool(
+        "provider",
+        "qemu-system-x86_64",
+        "command -v qemu-system-x86_64",
+        "brew install qemu",
+        "apt install qemu-system-x86",
+    ),
+    tool(
+        "provider",
+        "terraform",
+        "terraform -version",
+        "brew tap hashicorp/tap && brew install hashicorp/tap/terraform",
+        "apt install terraform",
+    ),
+    tool(
+        "provider",
+        "terramate",
+        "terramate version",
+        "install Terramate release tarball",
+        "install Terramate release tarball",
+    ),
 
-def tool_report(os)
-  key = os_key(os)
-  TOOL_CHECKS.map do |entry|
-    applies = entry.fetch(:only, [:darwin, :linux]).include?(key)
-    install = entry.fetch(:install).fetch(key, "not available on #{os}")
-    status =
-      if applies
-        shell_ok?(entry.fetch(:check)) ? "ok" : "missing"
-      else
-        "skipped"
-      end
-    {
-      "group" => entry.fetch(:group),
-      "tool" => entry.fetch(:tool),
-      "check" => entry.fetch(:check),
-      "status" => status,
-      "install" => install
+    tool("os", "dscacheutil", "command -v dscacheutil", "bundled with macOS", "", ["darwin"]),
+    tool("os", "getent", "command -v getent", "", "apt install libc-bin", ["linux"]),
+    tool("os", "pbcopy", "command -v pbcopy", "bundled with macOS", "", ["darwin"]),
+    tool("os", "xfreerdp", "command -v xfreerdp", "", "apt install freerdp2-x11", ["linux"]),
+]
+
+
+def host_os() -> str:
+    try:
+        result = subprocess.run(["uname", "-s"], text=True, capture_output=True, check=False)
+    except FileNotFoundError:
+        return "unknown"
+    return result.stdout.strip() if result.returncode == 0 and result.stdout.strip() else "unknown"
+
+
+def os_key(os_name: str) -> str:
+    return {"Darwin": "darwin", "Linux": "linux"}.get(os_name, "unsupported")
+
+
+def shell_ok(command: str) -> bool:
+    return (
+        subprocess.run(
+            ["sh", "-c", command],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        ).returncode
+        == 0
+    )
+
+
+def command_output(command: str) -> dict[str, Any]:
+    result = subprocess.run(["sh", "-c", command], text=True, capture_output=True, check=False)
+    return {"ok": result.returncode == 0, "stdout": result.stdout, "stderr": result.stderr, "status": result.returncode}
+
+
+def tool_report(os_name: str) -> list[dict[str, str]]:
+    key = os_key(os_name)
+    results = []
+    for entry in TOOL_CHECKS:
+        applies = key in entry.get("only", ["darwin", "linux"])
+        install = entry["install"].get(key, f"not available on {os_name}")
+        status = "ok" if applies and shell_ok(entry["check"]) else "missing" if applies else "skipped"
+        results.append(
+            {
+                "group": entry["group"],
+                "tool": entry["tool"],
+                "check": entry["check"],
+                "status": status,
+                "install": install,
+            }
+        )
+    return results
+
+
+def runnable_check(name: str, command: str) -> dict[str, Any]:
+    result = command_output(command)
+    return {"name": name, "ok": result["ok"], "status": result["status"]}
+
+
+def check_required_report() -> dict[str, Any]:
+    result = subprocess.run(
+        [str(ROOT / "scripts/check-required"), "--json"],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return {"ok": False, "missing": [], "warnings": [], "exit_status": 1}
+    data["exit_status"] = result.returncode
+    return data
+
+
+def docker_report(tool_results: list[dict[str, str]]) -> dict[str, Any]:
+    docker = next((tool for tool in tool_results if tool["tool"] == "docker"), None)
+    if not docker or docker["status"] != "ok":
+        return {"checked": False, "status": "missing"}
+    daemon = command_output("docker info")
+    if not daemon["ok"]:
+        return {"checked": True, "status": "daemon-unreachable"}
+    image = os.environ.get("EVE_TOOLCHAIN_IMAGE", "eve-toolchain:local")
+    image_status = command_output(f"docker image inspect {shlex.quote(image)}")
+    return {"checked": True, "status": "image-present" if image_status["ok"] else "image-missing", "image": image}
+
+
+def build_report() -> dict[str, Any]:
+    os_name = host_os()
+    tools = tool_report(os_name)
+    state_dir = Workdir.state_base() / "instances"
+    Workdir.ensure_dir(state_dir)
+    return {
+        "os": {"name": os_name, "key": os_key(os_name)},
+        "tools": tools,
+        "checks": [
+            runnable_check("catalog-options", "./scripts/catalog-options --json"),
+            runnable_check("plugins.validate", "./scripts/plugin-list --validate"),
+        ],
+        "docker": docker_report(tools),
+        "providers_status_available": (ROOT / "scripts/providers-status").is_file()
+        and os.access(ROOT / "scripts/providers-status", os.X_OK),
+        "state": {"dir": str(state_dir)},
+        "required_fields": check_required_report(),
     }
-  end
-end
 
-def runnable_check(name, command)
-  result = command_output(command)
-  {
-    "name" => name,
-    "ok" => result.fetch("ok"),
-    "status" => result.fetch("status")
-  }
-end
 
-def check_required_report
-  stdout, _stderr, status = Open3.capture3(File.join(ROOT, "scripts", "check-required"), "--json")
-  data = JSON.parse(stdout)
-  data["exit_status"] = status.exitstatus
-  data
-rescue JSON::ParserError
-  { "ok" => false, "missing" => [], "warnings" => [], "exit_status" => 1 }
-end
+def print_section(title: str) -> None:
+    print()
+    print(f"== {title} ==")
 
-def docker_report(tool_results)
-  docker = tool_results.find { |tool| tool["tool"] == "docker" }
-  return { "checked" => false, "status" => "missing" } unless docker && docker["status"] == "ok"
 
-  daemon = command_output("docker info")
-  return { "checked" => true, "status" => "daemon-unreachable" } unless daemon.fetch("ok")
+def print_tool_table(tools: list[dict[str, str]]) -> None:
+    groups = []
+    for tool in tools:
+        if tool["group"] not in groups:
+            groups.append(tool["group"])
+    for group in groups:
+        entries = [tool for tool in tools if tool["group"] == group]
+        print_section(f"{group} tools")
+        print(f"  {'Tool':<24} {'Status':<8} Install")
+        for tool in entries:
+            if tool["status"] == "skipped":
+                continue
+            label = "[OK]" if tool["status"] == "ok" else "[WARN]"
+            print(f"  {tool['tool']:<24} {label:<8} {tool['install']}")
 
-  image = ENV.fetch("EVE_TOOLCHAIN_IMAGE", "eve-toolchain:local")
-  image_status = command_output("docker image inspect #{image.shellescape}")
-  {
-    "checked" => true,
-    "status" => image_status.fetch("ok") ? "image-present" : "image-missing",
-    "image" => image
-  }
-end
 
-def build_report
-  os = host_os
-  tools = tool_report(os)
-  state_dir = File.join(Eve::SDK::Workdir.state_base, "instances")
-  Eve::SDK::Workdir.ensure_dir(state_dir)
+def print_report(report: dict[str, Any]) -> None:
+    print(f"Host OS: {report['os']['name']}")
+    print_tool_table(report["tools"])
+    print_section("docker")
+    match report["docker"]["status"]:
+        case "missing":
+            print("  [INFO] Docker CLI missing")
+        case "daemon-unreachable":
+            print("  [INFO] Docker daemon not reachable; start Docker before using make docker.build")
+        case "image-present":
+            print(f"  [OK] Eve toolchain image: {report['docker']['image']}")
+        case "image-missing":
+            print("  [INFO] Eve toolchain image missing; build with: make docker.build")
+    print_section("catalog")
+    for check in report["checks"]:
+        print(f"  {'[OK]' if check['ok'] else '[FAIL]'} {check['name']}")
+    print_section("providers")
+    subprocess.run(["./scripts/providers-status"], cwd=ROOT, check=False)
+    print_section("state")
+    print(f"  [OK] state directory: {report['state']['dir']}")
+    print("  [INFO] recover interrupted state with: make instance.recover INSTANCE=<name>")
+    required = report["required_fields"]
+    print_section("required fields")
+    if required["ok"]:
+        print("  [OK] all required fields populated")
+    else:
+        print("  [INFO] missing required fields:")
+        for entry in required.get("missing", []):
+            print(f"    {entry['provider']}.{entry['scope']}.{entry['field']} - {entry['description']}")
+    warnings = required.get("warnings", [])
+    if warnings:
+        print_section("portability warnings")
+        for warning in warnings:
+            print(f"  [WARN] {warning['id']}: {warning['description']}")
 
-  {
-    "os" => { "name" => os, "key" => os_key(os).to_s },
-    "tools" => tools,
-    "checks" => [
-      runnable_check("catalog-options", "./scripts/catalog-options --json"),
-      runnable_check("plugins.validate", "./scripts/plugin-list --validate")
-    ],
-    "docker" => docker_report(tools),
-    "providers_status_available" => File.executable?(File.join(ROOT, "scripts", "providers-status")),
-    "state" => { "dir" => state_dir },
-    "required_fields" => check_required_report
-  }
-end
 
-def print_section(title)
-  puts
-  puts "== #{title} =="
-end
+def main() -> int:
+    report = build_report()
+    if FORMAT == "json":
+        print(json.dumps(report, indent=2))
+    else:
+        print_report(report)
+    return 1 if any(not check["ok"] for check in report["checks"]) else 0
 
-def print_tool_table(tools)
-  tools.group_by { |tool| tool["group"] }.each do |group, entries|
-    print_section("#{group} tools")
-    puts format("  %-24s %-8s %s", "Tool", "Status", "Install")
-    entries.each do |tool|
-      next if tool["status"] == "skipped"
 
-      label = tool["status"] == "ok" ? "[OK]" : "[WARN]"
-      puts format("  %-24s %-8s %s", tool["tool"], label, tool["install"])
-    end
-  end
-end
-
-def print_report(report)
-  puts "Host OS: #{report.dig("os", "name")}"
-  print_tool_table(report.fetch("tools"))
-
-  print_section("docker")
-  case report.dig("docker", "status")
-  when "missing"
-    puts "  [INFO] Docker CLI missing"
-  when "daemon-unreachable"
-    puts "  [INFO] Docker daemon not reachable; start Docker before using make docker.build"
-  when "image-present"
-    puts "  [OK] Eve toolchain image: #{report.dig("docker", "image")}"
-  when "image-missing"
-    puts "  [INFO] Eve toolchain image missing; build with: make docker.build"
-  end
-
-  print_section("catalog")
-  report.fetch("checks").each do |check|
-    label = check["ok"] ? "[OK]" : "[FAIL]"
-    puts "  #{label} #{check["name"]}"
-  end
-
-  print_section("providers")
-  system("./scripts/providers-status")
-
-  print_section("state")
-  puts "  [OK] state directory: #{report.dig("state", "dir")}"
-  puts "  [INFO] recover interrupted state with: make instance.recover INSTANCE=<name>"
-
-  required = report.fetch("required_fields")
-  print_section("required fields")
-  if required["ok"]
-    puts "  [OK] all required fields populated"
-  else
-    puts "  [INFO] missing required fields:"
-    required.fetch("missing", []).each do |entry|
-      puts "    #{entry["provider"]}.#{entry["scope"]}.#{entry["field"]} - #{entry["description"]}"
-    end
-  end
-
-  warnings = required.fetch("warnings", [])
-  return if warnings.empty?
-
-  print_section("portability warnings")
-  warnings.each do |warning|
-    puts "  [WARN] #{warning["id"]}: #{warning["description"]}"
-  end
-end
-
-report = build_report
-
-if FORMAT == "json"
-  puts JSON.pretty_generate(report)
-else
-  print_report(report)
-end
-
-failed_checks = report.fetch("checks").any? { |check| !check["ok"] }
-exit(failed_checks ? 1 : 0)
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,29 +1,29 @@
-#!/usr/bin/env ruby
-# Validate provider-specific OS metadata declared by the provider manifest.
+#!/usr/bin/env python3
+"""Validate provider-specific OS metadata declared by the provider manifest."""
 
-require "json"
+from __future__ import annotations
 
-mode = ARGV.shift
-label = ARGV.shift
-keys = ARGV
+import json
+import os
+import sys
 
-unless %w[all any].include?(mode) && label && !keys.empty?
-  warn "validate-os: usage: validate-os <all|any> <label> <key> [key...]"
-  exit 2
-end
+args = sys.argv[1:]
+mode = args.pop(0) if args else ""
+label = args.pop(0) if args else ""
+keys = args
 
-json = ENV["EVE_RESOLVED_JSON"]
-json = $stdin.read if json.nil? || json.empty?
-resolved = JSON.parse(json)
-os = resolved.fetch("os")
+if mode not in {"all", "any"} or not label or not keys:
+    print("validate-os: usage: validate-os <all|any> <label> <key> [key...]", file=sys.stderr)
+    raise SystemExit(2)
 
-valid = if mode == "any"
-          keys.any? { |key| os.key?(key) && !os[key].to_s.empty? }
-        else
-          keys.all? { |key| os.key?(key) && !os[key].to_s.empty? }
-        end
+raw_json = os.environ.get("EVE_RESOLVED_JSON") or sys.stdin.read()
+resolved = json.loads(raw_json)
+os_doc = resolved["os"]
 
-unless valid
-  warn "OS/provider mismatch: OS #{os.fetch("id")} has no #{label}"
-  exit 1
-end
+def has_key(key: str) -> bool:
+    return key in os_doc and str(os_doc[key]) != ""
+
+valid = any(has_key(key) for key in keys) if mode == "any" else all(has_key(key) for key in keys)
+if not valid:
+    print(f"OS/provider mismatch: OS {os_doc['id']} has no {label}", file=sys.stderr)
+    raise SystemExit(1)

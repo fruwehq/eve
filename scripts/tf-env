@@ -1,174 +1,162 @@
-#!/usr/bin/env ruby
-# tf-env: emit TF_VAR_* exports for a profile, gated by provider.
-# Usage: scripts/tf-env <instance>
-#
-# Emits shell-compatible "export KEY='value';" lines suitable for eval.
-# Preserves the same CLI, env output format, behavior, and exit codes as the
-# original sh implementation.
+#!/usr/bin/env python3
+"""Emit Terraform environment exports for a resolved instance/profile."""
 
-require "open3"
-require "json"
+from __future__ import annotations
 
-ROOT = File.expand_path("..", __dir__)
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
 
-def usage
-  warn "usage: scripts/tf-env <instance>"
-  exit 2
-end
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
-profile = ARGV[0]
-usage if profile.nil? || profile.empty?
+from eve_sdk.tf_env import normalize_path, print_kv  # noqa: E402
 
-Dir.chdir(ROOT)
 
-def run_cmd(*args)
-  out, status = Open3.capture2(*args)
-  return out.strip if status.success?
-  warn "tf-env: command failed: #{args.join(' ')}"
-  exit status.exitstatus || 1
-end
+def usage() -> None:
+    print("usage: scripts/tf-env <instance>", file=sys.stderr)
 
-def run_json(*args)
-  out, status = Open3.capture2e(*args)
-  raise out unless status.success?
 
-  JSON.parse(out)
-end
+def run_cmd(*args: str) -> str:
+    result = subprocess.run(args, cwd=ROOT, text=True, capture_output=True, check=False)
+    if result.returncode != 0:
+        print(f"tf-env: command failed: {' '.join(args)}", file=sys.stderr)
+        raise SystemExit(result.returncode)
+    return result.stdout.strip()
 
-def command_vector(plugin, spec)
-  exec_path = spec.fetch("exec")
-  unless exec_path.start_with?("/")
-    plugin_exec = File.join(File.dirname(plugin.fetch("path")), exec_path)
-    root_exec = File.join(ROOT, exec_path)
-    exec_path = File.exist?(plugin_exec) ? plugin_exec : root_exec
-  end
-  unless File.file?(exec_path) && File.executable?(exec_path)
-    warn "tf-env: provider plugin #{plugin.fetch("id")} command is not executable: #{spec.fetch("exec")}"
-    exit 1
-  end
-  [exec_path, *(spec["args"] || [])]
-end
 
-def provider_plugin_for(provider)
-  plugin_doc = run_json(File.join(ROOT, "scripts/plugin-list"), "--kind", "provider", "--json")
-  plugin_doc.fetch("plugins").find { |entry| entry["id"] == provider }
-end
+def run_json(*args: str) -> dict[str, object]:
+    result = subprocess.run(args, cwd=ROOT, text=True, capture_output=True, check=False)
+    if result.returncode != 0:
+        print(result.stdout + result.stderr, end="", file=sys.stderr)
+        raise SystemExit(result.returncode)
+    parsed = json.loads(result.stdout)
+    if not isinstance(parsed, dict):
+        raise RuntimeError(f"{args[0]} did not emit a JSON object")
+    return parsed
 
-if ENV["EVE_RUNTIME_ENV_LOADED"] != "1"
-  loader = File.join(ROOT, "scripts/lib/load-runtime-env.sh")
-  out, err, status = Open3.capture3(
-    "sh",
-    "-eu",
-    "-c",
-    '. "$1" && env -0',
-    "tf-env-loader",
-    loader,
-  )
-  unless status.success?
-    warn "tf-env: runtime env loader failed:"
-    warn err unless err.strip.empty?
-    exit status.exitstatus || 1
-  end
-  out.split("\0").each do |entry|
-    idx = entry.index("=")
-    next unless idx
-    key = entry[0...idx]
-    val = entry[(idx + 1)..]
-    ENV[key] = val
-  end
-end
 
-resolved_env_raw = run_cmd("./scripts/profile-resolve", "--profile", profile, "--emit", "env")
+def command_vector(plugin: dict[str, object], spec: dict[str, object]) -> list[str]:
+    exec_path = str(spec["exec"])
+    if not exec_path.startswith("/"):
+        plugin_exec = Path(str(plugin["path"])).parent / exec_path
+        root_exec = ROOT / exec_path
+        exec_path = str(plugin_exec if plugin_exec.exists() else root_exec)
+    if not Path(exec_path).is_file() or not os.access(exec_path, os.X_OK):
+        print(
+            f"tf-env: provider plugin {plugin['id']} command is not executable: {spec['exec']}",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    return [exec_path, *[str(arg) for arg in spec.get("args", [])]]
 
-env = {}
-resolved_env_raw.each_line do |line|
-  line.chomp!
-  idx = line.index("=")
-  next unless idx
-  key = line[0...idx]
-  val = line[(idx + 1)..]
-  env[key] = val
-end
 
-provider = env["PROVIDER"]
-os_family = env["OS_FAMILY"]
-ssh_user = env["SSH_USER"]
-vm_user_name = env["VM_USER_NAME"]
-vm_user_name = ssh_user if vm_user_name.nil? || vm_user_name.empty?
+def provider_plugin_for(provider: str) -> dict[str, object] | None:
+    plugin_doc = run_json(str(ROOT / "scripts/plugin-list"), "--kind", "provider", "--json")
+    plugins = plugin_doc["plugins"]
+    if not isinstance(plugins, list):
+        return None
+    for entry in plugins:
+        if isinstance(entry, dict) and entry.get("id") == provider:
+            return entry
+    return None
 
-def quote(value)
-  "'" + value.gsub("'", "'\\''") + "'"
-end
 
-def print_kv(key, value)
-  puts "export #{key}=#{quote(value)};"
-end
+def load_runtime_env() -> None:
+    if os.environ.get("EVE_RUNTIME_ENV_LOADED") == "1":
+        return
+    loader = ROOT / "scripts/lib/load-runtime-env.sh"
+    result = subprocess.run(
+        ["sh", "-eu", "-c", '. "$1" && env -0', "tf-env-loader", str(loader)],
+        cwd=ROOT,
+        text=False,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        print("tf-env: runtime env loader failed:", file=sys.stderr)
+        stderr = result.stderr.decode()
+        if stderr.strip():
+            print(stderr, end="", file=sys.stderr)
+        raise SystemExit(result.returncode)
+    for entry in result.stdout.split(b"\0"):
+        if b"=" not in entry:
+            continue
+        key, value = entry.split(b"=", 1)
+        os.environ[key.decode()] = value.decode()
 
-def print_provider_tf_env(provider, env)
-  plugin = provider_plugin_for(provider)
-  unless plugin
-    warn "tf-env: provider plugin not found: #{provider}"
-    exit 1
-  end
 
-  spec = plugin.fetch("commands")["tf-env"]
-  unless spec
-    warn "tf-env: provider plugin #{provider} has no tf-env command"
-    exit 1
-  end
+def parse_env(raw: str) -> dict[str, str]:
+    env: dict[str, str] = {}
+    for line in raw.splitlines():
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        env[key] = value
+    return env
 
-  out, err, status = Open3.capture3({ "EVE_TF_ENV_JSON" => JSON.generate(env) }, *command_vector(plugin, spec), chdir: ROOT)
-  print out
-  return if status.success?
 
-  warn err unless err.strip.empty?
-  exit status.exitstatus || 1
-end
+def print_provider_tf_env(provider: str, env: dict[str, str]) -> None:
+    plugin = provider_plugin_for(provider)
+    if not plugin:
+        print(f"tf-env: provider plugin not found: {provider}", file=sys.stderr)
+        raise SystemExit(1)
+    commands = plugin.get("commands")
+    spec = commands.get("tf-env") if isinstance(commands, dict) else None
+    if not isinstance(spec, dict):
+        print(f"tf-env: provider plugin {provider} has no tf-env command", file=sys.stderr)
+        raise SystemExit(1)
+    child_env = os.environ | {"EVE_TF_ENV_JSON": json.dumps(env)}
+    result = subprocess.run(
+        command_vector(plugin, spec),
+        cwd=ROOT,
+        env=child_env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    print(result.stdout, end="")
+    if result.returncode != 0:
+        if result.stderr.strip():
+            print(result.stderr, end="", file=sys.stderr)
+        raise SystemExit(result.returncode)
 
-def normalize_path(value)
-  return value if value.nil? || value.empty?
-  home = ENV["HOME"].to_s
-  case value
-  when "~"
-    home
-  when /\A~\// then home + value[1..]
-  when "$HOME"
-    home
-  when /\A\$HOME\// then home + value[5..]
-  when "$(HOME)"
-    home
-  when /\A\$\(HOME\)\// then home + value[7..]
-  else value
-  end
-end
 
-instance_name = ENV["EVE_INSTANCE_NAME"]
-unless instance_name.nil? || instance_name.empty?
-  ip_args = ["./scripts/instance-paths", "--instance", instance_name, "--emit", "env"]
-  registry = ENV["EVE_INSTANCE_REGISTRY"]
-  ip_args += ["--registry", registry] if registry && !registry.empty?
-  instance_paths_raw = run_cmd(*ip_args)
+def main(argv: list[str]) -> int:
+    profile = argv[0] if argv else ""
+    if not profile:
+        usage()
+        return 2
 
-  paths = {}
-  instance_paths_raw.each_line do |line|
-    line.chomp!
-    idx = line.index("=")
-    next unless idx
-    key = line[0...idx]
-    val = line[(idx + 1)..]
-    paths[key] = val
-  end
+    load_runtime_env()
+    env = parse_env(run_cmd(str(ROOT / "scripts/profile-resolve"), "--profile", profile, "--emit", "env"))
+    provider = env["PROVIDER"]
+    os_family = env.get("OS_FAMILY", "")
+    vm_user_name = env.get("VM_USER_NAME") or env.get("SSH_USER", "")
 
-  print_kv("TF_WORKSPACE", instance_name)
-  print_kv("EVE_TF_DATA_BASE", paths["INSTANCE_TF_DATA_BASE"].to_s)
-  print_kv("EVE_TF_STATE_BASE", paths["INSTANCE_TF_STATE_BASE"].to_s)
-end
+    instance_name = os.environ.get("EVE_INSTANCE_NAME", "")
+    if instance_name:
+        ip_args = [str(ROOT / "scripts/instance-paths"), "--instance", instance_name, "--emit", "env"]
+        registry = os.environ.get("EVE_INSTANCE_REGISTRY")
+        if registry:
+            ip_args += ["--registry", registry]
+        paths = parse_env(run_cmd(*ip_args))
+        print_kv("TF_WORKSPACE", instance_name)
+        print_kv("EVE_TF_DATA_BASE", paths.get("INSTANCE_TF_DATA_BASE", ""))
+        print_kv("EVE_TF_STATE_BASE", paths.get("INSTANCE_TF_STATE_BASE", ""))
 
-print_kv("TF_VAR_bundle_packages", env["BUNDLE_PACKAGES"].to_s)
-print_kv("TF_VAR_location_name", env["LOCATION_NAME"].to_s)
-print_kv("TF_VAR_os_family", os_family.to_s)
-print_kv("TF_VAR_os_id", env["OS_ID"].to_s)
-print_kv("TF_VAR_profile_name", profile)
-print_kv("TF_VAR_ssh_public_key_file", normalize_path(ENV["SSH_PUBLIC_KEY_FILE"].to_s))
-print_kv("TF_VAR_vm_user_name", vm_user_name.to_s)
-print_provider_tf_env(provider, env)
+    print_kv("TF_VAR_bundle_packages", env.get("BUNDLE_PACKAGES", ""))
+    print_kv("TF_VAR_location_name", env.get("LOCATION_NAME", ""))
+    print_kv("TF_VAR_os_family", os_family)
+    print_kv("TF_VAR_os_id", env.get("OS_ID", ""))
+    print_kv("TF_VAR_profile_name", profile)
+    print_kv("TF_VAR_ssh_public_key_file", normalize_path(os.environ.get("SSH_PUBLIC_KEY_FILE", "")))
+    print_kv("TF_VAR_vm_user_name", vm_user_name)
+    print_provider_tf_env(provider, env)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

@@ -1,12 +1,24 @@
-#!/usr/bin/env ruby
-# frozen_string_literal: true
+#!/usr/bin/env python3
+from __future__ import annotations
 
-ROOT = File.expand_path("..", __dir__)
-instance = ARGV.shift || ENV["INSTANCE"]
+import os
+import sys
+from pathlib import Path
 
-unless instance && !instance.empty?
-  warn "Usage: scripts/instance-ip <instance>"
-  exit 2
-end
+ROOT = Path(__file__).resolve().parents[1]
 
-exec(File.join(ROOT, "scripts/provider-dispatch"), "--instance", instance, "--command", "ip")
+
+def main(argv: list[str]) -> int:
+    instance = argv[0] if argv else os.environ.get("INSTANCE")
+    if not instance:
+        print("Usage: scripts/instance-ip <instance>", file=sys.stderr)
+        return 2
+    os.execv(
+        str(ROOT / "scripts/provider-dispatch"),
+        [str(ROOT / "scripts/provider-dispatch"), "--instance", instance, "--command", "ip"],
+    )
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

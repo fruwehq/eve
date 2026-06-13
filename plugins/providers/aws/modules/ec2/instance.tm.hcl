@@ -217,6 +217,15 @@ generate_hcl "z_ec2_instance.tf" {
       }
     }
 
+    locals {
+      windows_user_data = templatefile(
+        "${terramate.root.path.fs.absolute}/oses/windows-server-2025/ssh.ps1.tftpl",
+        {
+          public_key = trimspace(file(pathexpand(var.ssh_public_key_file)))
+        }
+      )
+    }
+
     # ── EC2 Instance ──────────────────────────────────────────────────────
 
     resource "aws_instance" "main" {
@@ -225,8 +234,8 @@ generate_hcl "z_ec2_instance.tf" {
       subnet_id                            = data.aws_subnets.default.ids[0]
       vpc_security_group_ids               = [data.aws_security_group.default.id]
       iam_instance_profile                 = aws_iam_instance_profile.main.name
-      instance_initiated_shutdown_behavior = "stop"
-      user_data_base64                     = var.os_family == "ubuntu" ? data.cloudinit_config.ubuntu[0].rendered : null
+      instance_initiated_shutdown_behavior = var.use_spot ? null : "stop"
+      user_data_base64                     = var.os_family == "ubuntu" ? data.cloudinit_config.ubuntu[0].rendered : base64encode("<powershell>\n${local.windows_user_data}\n</powershell>")
 
       root_block_device {
         volume_type           = var.root_volume_type
@@ -245,6 +254,7 @@ generate_hcl "z_ec2_instance.tf" {
           market_type = "spot"
           spot_options {
             instance_interruption_behavior = "stop"
+            spot_instance_type             = "persistent"
           }
         }
       }
@@ -253,6 +263,16 @@ generate_hcl "z_ec2_instance.tf" {
         Project   = global.aws.tags.Project
         ManagedBy = global.aws.tags.ManagedBy
         Name      = var.profile_name
+      }
+
+      # A persistent spot request relaunches the instance when it is terminated,
+      # so `terraform destroy` respawns the box and hangs (pegged CPU, never
+      # finishes). Cancel the request before teardown so the instance stays
+      # gone. Guarded for on-demand (no request id) and never blocks destroy.
+      provisioner "local-exec" {
+        when       = destroy
+        on_failure = continue
+        command    = self.spot_instance_request_id != "" ? "aws ec2 cancel-spot-instance-requests --region ${substr(self.availability_zone, 0, length(self.availability_zone) - 1)} --spot-instance-request-ids ${self.spot_instance_request_id}" : "true"
       }
     }
 

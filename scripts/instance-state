@@ -1,116 +1,83 @@
-#!/usr/bin/env ruby
-# Read or update local v3 instance state.
-# All reads and writes go through core/sdk/state.rb (sole state owner).
+#!/usr/bin/env python3
+"""Read or update local v3 instance state."""
 
-require "json"
+from __future__ import annotations
 
-ROOT = File.expand_path("..", __dir__)
-$LOAD_PATH.unshift(File.join(ROOT, "core"))
-require "sdk"
+import argparse
+import json
+import sys
+from pathlib import Path
 
-def usage
-  warn <<~USAGE
-    Usage:
-      scripts/instance-state --instance <name> --get
-      scripts/instance-state --instance <name> --recover-running
-      scripts/instance-state --instance <name> --observed-json <json>
-      scripts/instance-state --instance <name> --operation <name> --status <status> [--desired-state <state>] [--provider-state <state>] [--provision-state <state>] [--package <id> --package-state <state>] [--error <message>]
-  USAGE
-end
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
-instance = nil
-get = false
-recover_running = false
-operation = nil
-status = nil
-desired_state = nil
-provider_state = nil
-provision_state = nil
-package = nil
-package_state = nil
-observed_json = nil
-error = nil
+from eve_sdk.schema import SchemaValidationError
+from eve_sdk.state import State, StateError
 
-args = ARGV.dup
-until args.empty?
-  case args.shift
-  when "--instance"
-    instance = args.shift
-  when "--get"
-    get = true
-  when "--recover-running"
-    recover_running = true
-  when "--operation"
-    operation = args.shift
-  when "--status"
-    status = args.shift
-  when "--desired-state"
-    desired_state = args.shift
-  when "--provider-state"
-    provider_state = args.shift
-  when "--provision-state"
-    provision_state = args.shift
-  when "--package"
-    package = args.shift
-  when "--package-state"
-    package_state = args.shift
-  when "--observed-json"
-    observed_json = args.shift
-  when "--error"
-    error = args.shift
-  when "-h", "--help"
-    usage
-    exit 0
-  else
-    usage
-    exit 2
-  end
-end
 
-unless instance
-  usage
-  exit 2
-end
+def parser() -> argparse.ArgumentParser:
+    arg_parser = argparse.ArgumentParser(
+        prog="scripts/instance-state",
+        usage=(
+            "scripts/instance-state --instance <name> --get\n"
+            "      scripts/instance-state --instance <name> --recover-running\n"
+            "      scripts/instance-state --instance <name> --observed-json <json>\n"
+            "      scripts/instance-state --instance <name> --operation <name> --status <status> "
+            "[--desired-state <state>] [--provider-state <state>] [--provision-state <state>] "
+            "[--package <id> --package-state <state>] [--error <message>]"
+        ),
+        add_help=True,
+    )
+    arg_parser.add_argument("--instance", required=True)
+    arg_parser.add_argument("--get", action="store_true")
+    arg_parser.add_argument("--recover-running", action="store_true")
+    arg_parser.add_argument("--operation")
+    arg_parser.add_argument("--status")
+    arg_parser.add_argument("--desired-state")
+    arg_parser.add_argument("--provider-state")
+    arg_parser.add_argument("--provision-state")
+    arg_parser.add_argument("--package")
+    arg_parser.add_argument("--package-state")
+    arg_parser.add_argument("--observed-json")
+    arg_parser.add_argument("--error")
+    return arg_parser
 
-begin
-  if get
-    puts JSON.pretty_generate(Eve::SDK::State.read(instance))
-    exit 0
-  end
 
-  if observed_json
-    observed = JSON.parse(observed_json)
-    raise "observed_json must be an object" unless observed.is_a?(Hash)
+def main() -> int:
+    args = parser().parse_args()
+    try:
+        if args.get:
+            state = State.read(args.instance)
+        elif args.observed_json:
+            observed = json.loads(args.observed_json)
+            if not isinstance(observed, dict):
+                raise ValueError("observed_json must be an object")
+            state = State.update_observed(args.instance, observed)
+        elif args.recover_running:
+            state = State.recover_running(args.instance)
+        else:
+            if not args.operation or not args.status:
+                parser().print_usage(sys.stderr)
+                return 2
+            if (args.package is None) != (args.package_state is None):
+                raise ValueError("package and package_state must be provided together")
+            state = State.record_operation(
+                args.instance,
+                args.operation,
+                args.status,
+                error=args.error,
+                desired_state=args.desired_state,
+                provider_state=args.provider_state,
+                provision_state=args.provision_state,
+                package=args.package,
+                package_state=args.package_state,
+            )
+        print(json.dumps(state, indent=2))
+        return 0
+    except (StateError, SchemaValidationError, json.JSONDecodeError, ValueError) as error:
+        print(f"instance-state: {error}", file=sys.stderr)
+        return 2
 
-    state = Eve::SDK::State.update_observed(instance, observed)
-    puts JSON.pretty_generate(state)
-    exit 0
-  end
 
-  if recover_running
-    state = Eve::SDK::State.recover_running(instance)
-    puts JSON.pretty_generate(state)
-    exit 0
-  end
-
-  unless operation && status
-    usage
-    exit 2
-  end
-
-  raise "package and package_state must be provided together" if package.nil? != package_state.nil?
-
-  state = Eve::SDK::State.record_operation(
-    instance, operation, status,
-    error: error,
-    desired_state: desired_state,
-    provider_state: provider_state,
-    provision_state: provision_state,
-    package: package,
-    package_state: package_state
-  )
-  puts JSON.pretty_generate(state)
-rescue Eve::SDK::StateError, Eve::SDK::SchemaValidationError, JSON::ParserError, ArgumentError => e
-  warn "instance-state: #{e.message}"
-  exit 2
-end
+if __name__ == "__main__":
+    raise SystemExit(main())

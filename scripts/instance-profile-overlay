@@ -1,112 +1,107 @@
-#!/usr/bin/env ruby
-# Emit a catalog overlay that exposes one concrete instance as a profile.
+#!/usr/bin/env python3
+"""Emit a catalog overlay that exposes one concrete instance as a profile."""
 
-require "fileutils"
-require "json"
-require "open3"
-require "yaml"
+from __future__ import annotations
 
-ROOT = File.expand_path("..", __dir__)
+import argparse
+import copy
+import json
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any
 
-def usage
-  warn <<~USAGE
-    Usage:
-      scripts/instance-profile-overlay --instance <name> [--registry <path>] [--output <path>]
-  USAGE
-end
+import yaml
 
-instance_name = nil
-registry_path = ENV["EVE_INSTANCE_REGISTRY"] && !ENV["EVE_INSTANCE_REGISTRY"].empty? \
-                ? File.expand_path(ENV["EVE_INSTANCE_REGISTRY"], Dir.pwd) \
-                : nil
-output_path = nil
+ROOT = Path(__file__).resolve().parents[1]
 
-args = ARGV.dup
-until args.empty?
-  case args.shift
-  when "--instance"
-    instance_name = args.shift
-  when "--registry"
-    registry_path = File.expand_path(args.shift, Dir.pwd)
-  when "--output"
-    output_path = File.expand_path(args.shift, Dir.pwd)
-  when "-h", "--help"
-    usage
-    exit 0
-  else
-    usage
-    exit 2
-  end
-end
 
-unless instance_name
-  usage
-  exit 2
-end
+def parser() -> argparse.ArgumentParser:
+    arg_parser = argparse.ArgumentParser(prog="scripts/instance-profile-overlay")
+    arg_parser.add_argument("--instance", required=True)
+    arg_parser.add_argument("--registry")
+    arg_parser.add_argument("--output")
+    return arg_parser
 
-cmd = [File.join(ROOT, "scripts/instance-resolve"), "--instance", instance_name, "--emit", "json"]
-cmd += ["--registry", registry_path] if registry_path
 
-resolved_json, status = Open3.capture2e(*cmd)
-unless status.success?
-  warn resolved_json
-  exit(status.exitstatus || 1)
-end
+def resolve_instance(instance_name: str, registry_path: str | None) -> dict[str, Any]:
+    cmd = [str(ROOT / "scripts/instance-resolve"), "--instance", instance_name, "--emit", "json"]
+    if registry_path:
+        cmd += ["--registry", registry_path]
+    result = subprocess.run(cmd, cwd=ROOT, text=True, capture_output=True, check=False)
+    if result.returncode != 0:
+        print(result.stdout + result.stderr, end="", file=sys.stderr)
+        raise SystemExit(result.returncode)
+    parsed = json.loads(result.stdout)
+    if not isinstance(parsed, dict):
+        raise RuntimeError("instance-resolve did not emit a JSON object")
+    return parsed
 
-resolved = JSON.parse(resolved_json)
-composition = resolved.fetch("composition")
-machine = resolved.fetch("machine")
-os = resolved.fetch("os")
-init = resolved.fetch("init")
-location = resolved.fetch("location")
-machine_name = "instance-#{instance_name}-machine"
-provider = machine.fetch("provider")
-provider_config = resolved["provider_config"].is_a?(Hash) ? resolved["provider_config"] : {}
 
-overlay_machine = Marshal.load(Marshal.dump(machine))
-overlay_machine["name"] = machine_name
-source_machine = Marshal.load(Marshal.dump(machine))
-overlay_machines = [source_machine, overlay_machine].sort_by { |entry| entry.fetch("name") }
-source_location = Marshal.load(Marshal.dump(location))
+def build_overlay(instance_name: str, resolved: dict[str, Any]) -> dict[str, Any]:
+    composition = resolved["composition"]
+    machine = resolved["machine"]
+    os_doc = resolved["os"]
+    init = resolved["init"]
+    location = resolved["location"]
+    provider = machine["provider"]
+    provider_config = resolved.get("provider_config") if isinstance(resolved.get("provider_config"), dict) else {}
 
-overlay_profile = {
-  "name" => instance_name,
-  "machine" => machine_name,
-  "os" => composition.fetch("os"),
-  "init" => composition.fetch("init"),
-  "bundles" => composition.fetch("bundles", []),
-  "location" => composition.fetch("location")
-}
-overlay_profile["packages"] = composition["packages"] if composition.key?("packages")
-overlay_profile["lifecycle"] = composition["lifecycle"] if composition.key?("lifecycle")
+    machine_name = f"instance-{instance_name}-machine"
+    overlay_machine = copy.deepcopy(machine)
+    overlay_machine["name"] = machine_name
+    source_machine = copy.deepcopy(machine)
+    source_location = copy.deepcopy(location)
 
-overlay = {
-  "inits" => [Marshal.load(Marshal.dump(init))],
-  "locations" => [source_location],
-  "machines" => overlay_machines,
-  "oses" => [Marshal.load(Marshal.dump(os))],
-  "profiles" => [overlay_profile]
-}
+    overlay_profile = {
+        "name": instance_name,
+        "machine": machine_name,
+        "os": composition["os"],
+        "init": composition["init"],
+        "bundles": composition.get("bundles", []),
+        "location": composition["location"],
+    }
+    if "packages" in composition:
+        overlay_profile["packages"] = composition["packages"]
+    if "lifecycle" in composition:
+        overlay_profile["lifecycle"] = composition["lifecycle"]
 
-unless provider_config.empty?
-  overlay_location = Marshal.load(Marshal.dump(location))
-  location_name = "instance-#{instance_name}-location"
-  overlay_location["name"] = location_name
-  overlay_location[provider] = (overlay_location[provider] || {}).merge(provider_config)
-  if provider == "raspberry-pi" && overlay_location[provider]["host"].to_s.empty?
-    overlay_location[provider]["host"] = overlay_location[provider]["ip"]
-  end
-  overlay_profile["location"] = location_name
-  overlay["locations"] = [source_location, overlay_location].sort_by { |entry| entry.fetch("name") }
-end
+    overlay = {
+        "inits": [copy.deepcopy(init)],
+        "locations": [source_location],
+        "machines": sorted([source_machine, overlay_machine], key=lambda entry: entry["name"]),
+        "oses": [copy.deepcopy(os_doc)],
+        "profiles": [overlay_profile],
+    }
 
-yaml = overlay.to_yaml
-if output_path
-  FileUtils.mkdir_p(File.dirname(output_path))
-  if File.exist?(output_path) && File.read(output_path) == yaml
-    exit 0
-  end
-  File.write(output_path, yaml)
-else
-  puts yaml
-end
+    if provider_config:
+        overlay_location = copy.deepcopy(location)
+        location_name = f"instance-{instance_name}-location"
+        overlay_location["name"] = location_name
+        overlay_location[provider] = {**overlay_location.get(provider, {}), **provider_config}
+        if provider == "raspberry-pi" and not str(overlay_location[provider].get("host", "")):
+            overlay_location[provider]["host"] = overlay_location[provider].get("ip")
+        overlay_profile["location"] = location_name
+        overlay["locations"] = sorted([source_location, overlay_location], key=lambda entry: entry["name"])
+
+    return overlay
+
+
+def main() -> int:
+    args = parser().parse_args()
+    registry_path = str(Path(args.registry).expanduser().resolve()) if args.registry else None
+    output_path = Path(args.output).expanduser().resolve() if args.output else None
+    resolved = resolve_instance(args.instance, registry_path)
+    overlay_yaml = yaml.safe_dump(build_overlay(args.instance, resolved), sort_keys=False)
+    if output_path:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        if output_path.exists() and output_path.read_text(encoding="utf-8") == overlay_yaml:
+            return 0
+        output_path.write_text(overlay_yaml, encoding="utf-8")
+    else:
+        print(overlay_yaml, end="")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

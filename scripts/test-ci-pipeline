@@ -1,168 +1,317 @@
-#!/usr/bin/env ruby
-# Validate GitHub Actions pipeline assumptions that local unit tests do not cover.
+#!/usr/bin/env python3
+"""Validate GitHub Actions pipeline assumptions that local unit tests do not cover."""
 
-require "net/http"
-require "optparse"
-require "uri"
-require "yaml"
+from __future__ import annotations
 
-ROOT = `git rev-parse --show-toplevel`.strip
-Dir.chdir(ROOT)
+import argparse
+import os
+import subprocess
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+from pathlib import Path
+from typing import Any
 
-options = { remote: true }
-OptionParser.new do |parser|
-  parser.banner = "Usage: scripts/test-ci-pipeline [--offline]"
-  parser.on("--offline", "Skip remote release-asset checks") { options[:remote] = false }
-end.parse!
+try:
+    import yaml
+except ModuleNotFoundError:
+    print("PyYAML is required for scripts/test-ci-pipeline; run `poetry install`.", file=sys.stderr)
+    raise SystemExit(2) from None
 
-@failures = 0
 
-def pass(message)
-  puts "  [OK] #{message}"
-end
+class Checks:
+    def __init__(self) -> None:
+        self.failures = 0
 
-def fail_check(message)
-  @failures += 1
-  warn "  [FAIL] #{message}"
-end
+    def ok(self, message: str) -> None:
+        print(f"  [OK] {message}")
 
-def assert_check(message)
-  if yield
-    pass(message)
-  else
-    fail_check(message)
-  end
-end
+    def fail(self, message: str) -> None:
+        self.failures += 1
+        print(f"  [FAIL] {message}", file=sys.stderr)
 
-def http_head_ok?(url, redirects: 5)
-  return [false, "too many redirects"] if redirects.negative?
+    def assert_check(self, message: str, condition: bool) -> None:
+        if condition:
+            self.ok(message)
+        else:
+            self.fail(message)
 
-  uri = URI(url)
-  response = Net::HTTP.start(
-    uri.hostname,
-    uri.port,
-    use_ssl: uri.scheme == "https",
-    open_timeout: 10,
-    read_timeout: 10,
-  ) do |http|
-    http.request(Net::HTTP::Head.new(uri))
-  end
 
-  case response
-  when Net::HTTPSuccess
-    [true, response.code]
-  when Net::HTTPRedirection
-    location = response["location"]
-    redirected = URI.join(url, location).to_s
-    http_head_ok?(redirected, redirects: redirects - 1)
-  else
-    [false, "#{response.code} #{response.message}"]
-  end
-rescue StandardError => e
-  [false, e.message]
-end
+def repo_root() -> Path:
+    result = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"],
+        check=True,
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    return Path(result.stdout.strip())
 
-workflow_path = ".github/workflows/test.yml"
-workflow = YAML.safe_load(File.read(workflow_path), permitted_classes: [], aliases: true)
-jobs = workflow.fetch("jobs")
 
-puts "\n== ci-pipeline workflow contract =="
+def load_workflow(path: Path) -> dict[str, Any]:
+    with path.open() as handle:
+        loaded = yaml.safe_load(handle)
+    if not isinstance(loaded, dict):
+        raise SystemExit(f"{path} did not parse to a YAML mapping")
+    return loaded
 
-triggers = workflow["on"] || workflow[true]
-assert_check("workflow runs on pull_request") do
-  triggers.is_a?(Hash) && triggers.key?("pull_request")
-end
 
-test_job = jobs.fetch("test")
-matrix_os = test_job.dig("strategy", "matrix", "os")
-assert_check("test matrix includes macos-latest and ubuntu-24.04") do
-  matrix_os.is_a?(Array) && matrix_os.sort == ["macos-latest", "ubuntu-24.04"]
-end
+def step_names(steps: list[Any]) -> list[str]:
+    return [step["name"] for step in steps if isinstance(step, dict) and isinstance(step.get("name"), str)]
 
-test_steps = test_job.fetch("steps")
-step_names = test_steps.filter_map { |step| step["name"] if step.is_a?(Hash) }
-assert_check("test job installs Terramate") { step_names.include?("Install Terramate") }
-assert_check("test job runs make test") { step_names.include?("Run make test") }
 
-terramate_step = test_steps.find { |step| step.is_a?(Hash) && step["name"] == "Install Terramate" }
-terramate_version = terramate_step&.dig("env", "TERRAMATE_VERSION")
-terramate_run = terramate_step&.fetch("run", "")
+def find_step(steps: list[Any], name: str) -> dict[str, Any] | None:
+    for step in steps:
+        if isinstance(step, dict) and step.get("name") == name:
+            return step
+    return None
 
-assert_check("Terramate version is declared in workflow") do
-  terramate_version.is_a?(String) && !terramate_version.empty?
-end
-assert_check("Terramate x86_64 tarball mapping matches release asset names") do
-  terramate_run.include?("x86_64|amd64) tool_arch=x86_64 ;;")
-end
-assert_check("Terramate arm64 tarball mapping matches release asset names") do
-  terramate_run.include?("arm64|aarch64) tool_arch=arm64 ;;")
-end
 
-docker_slim_job = jobs.fetch("docker-runtime-slim")
-docker_slim_steps = docker_slim_job.fetch("steps")
-docker_slim_step_names = docker_slim_steps.filter_map { |step| step["name"] if step.is_a?(Hash) }
-assert_check("docker-runtime-slim runs on ubuntu-24.04") do
-  docker_slim_job["runs-on"] == "ubuntu-24.04"
-end
-assert_check("docker-runtime-slim builds and smokes image") do
-  docker_slim_step_names.include?("Build slim runtime image") &&
-    docker_slim_step_names.include?("Smoke slim runtime image")
-end
-assert_check("docker-runtime-slim reports inspectable image size") do
-  docker_slim_step_names.include?("Report slim image size")
-end
-size_step = docker_slim_steps.find { |step| step.is_a?(Hash) && step["name"] == "Report slim image size" }
-size_run = size_step&.fetch("run", "")
-assert_check("docker-runtime-slim reports compressed image size") do
-  size_run.include?("slim image: uncompressed=${inspect_size} compressed=${compressed_size}")
-end
-assert_check("docker-runtime-slim enforces uncompressed size under 1600 MB") do
-  size_run.include?('"${inspect_size}" -ge 1600000000')
-end
-assert_check("docker-runtime-slim enforces compressed size under 500 MB") do
-  size_run.include?('"${compressed_size}" -ge 500000000')
-end
+def run_text(step: dict[str, Any] | None) -> str:
+    if step is None:
+        return ""
+    run = step.get("run", "")
+    return run if isinstance(run, str) else ""
 
-docker_full_job = jobs.fetch("docker-runtime-full")
-assert_check("docker-runtime-full is schedule-only") do
-  docker_full_job["if"].to_s.include?("github.event_name == 'schedule'")
-end
 
-puts "\n== ci-pipeline Terramate asset checks =="
+def http_head_ok(url: str, redirects: int = 5) -> tuple[bool, str]:
+    if redirects < 0:
+        return False, "too many redirects"
 
-if options[:remote]
-  if terramate_version.nil? || terramate_version.empty?
-    fail_check("Terramate release asset checks require TERRAMATE_VERSION")
-  else
-    {
-      "darwin" => ["arm64", "x86_64"],
-      "linux" => ["arm64", "x86_64"],
-    }.each do |os_name, arches|
-      arches.each do |arch|
-        asset = "terramate_#{terramate_version}_#{os_name}_#{arch}.tar.gz"
-        url = "https://github.com/terramate-io/terramate/releases/download/v#{terramate_version}/#{asset}"
-        ok, detail = http_head_ok?(url)
-        assert_check("#{asset} exists upstream") { ok }
-        warn "    #{url}: #{detail}" unless ok
-      end
-    end
-  end
-else
-  puts "  [SKIP] remote Terramate release-asset checks (--offline)"
-end
+    request = urllib.request.Request(url, method="HEAD")
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            status = response.status
+            if 200 <= status < 300:
+                return True, str(status)
+            if 300 <= status < 400:
+                location = response.headers.get("location")
+                if location is None:
+                    return False, f"{status} redirect without location"
+                redirected = urllib.parse.urljoin(url, location)
+                return http_head_ok(redirected, redirects=redirects - 1)
+            return False, f"{status} {response.reason}"
+    except urllib.error.HTTPError as error:
+        return False, f"{error.code} {error.reason}"
+    except urllib.error.URLError as error:
+        return False, str(error.reason)
 
-puts "\n== ci-pipeline Docker installer contract =="
 
-["docker/Dockerfile", "docker/Dockerfile.toolchain"].each do |path|
-  content = File.read(path)
-  assert_check("#{path} maps Terraform amd64 separately from Terramate x86_64") do
-    content.include?("terraform_arch=amd64") && content.include?("terramate_arch=x86_64")
-  end
-end
+def count_docker_builds(workflow: dict[str, Any]) -> int:
+    jobs = workflow.get("jobs", {})
+    if not isinstance(jobs, dict):
+        return 0
 
-if @failures.positive?
-  warn "\n#{@failures} ci-pipeline check(s) failed."
-  exit 1
-end
+    count = 0
+    for job in jobs.values():
+        if not isinstance(job, dict):
+            continue
+        steps = job.get("steps", [])
+        if not isinstance(steps, list):
+            continue
+        for step in steps:
+            text = run_text(step) if isinstance(step, dict) else ""
+            if "--target runtime-slim" in text and "--file docker/Dockerfile" in text:
+                count += 1
+    return count
 
-puts "\nAll ci-pipeline checks passed."
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--offline", action="store_true", help="Skip remote release-asset checks")
+    args = parser.parse_args()
+
+    root = repo_root()
+    os.chdir(root)
+    workflow_path = root / ".github/workflows/test.yml"
+    workflow = load_workflow(workflow_path)
+    checks = Checks()
+
+    print("\n== ci-pipeline workflow contract ==")
+
+    triggers = workflow.get("on", workflow.get(True))
+    checks.assert_check(
+        "workflow runs on pull_request",
+        isinstance(triggers, dict) and "pull_request" in triggers,
+    )
+
+    jobs = workflow.get("jobs", {})
+    if not isinstance(jobs, dict):
+        raise SystemExit("workflow jobs must be a mapping")
+
+    test_job = jobs.get("test", {})
+    matrix_os = test_job.get("strategy", {}).get("matrix", {}).get("os") if isinstance(test_job, dict) else None
+    checks.assert_check(
+        "test matrix includes macos-latest and ubuntu-24.04",
+        isinstance(matrix_os, list) and sorted(matrix_os) == ["macos-latest", "ubuntu-24.04"],
+    )
+
+    test_steps = test_job.get("steps", []) if isinstance(test_job, dict) else []
+    if not isinstance(test_steps, list):
+        test_steps = []
+    test_step_names = step_names(test_steps)
+    checks.assert_check("test job installs Terramate", "Install Terramate" in test_step_names)
+    checks.assert_check("test job runs make test", "Run make test" in test_step_names)
+    checks.assert_check("test job publishes timing summary", "Timing summary" in test_step_names)
+    checks.assert_check(
+        "test job writes timing summary to GITHUB_STEP_SUMMARY",
+        "$GITHUB_STEP_SUMMARY" in run_text(find_step(test_steps, "Timing summary")),
+    )
+    python_step = find_step(test_steps, "Install Python")
+    python_version = python_step.get("with", {}).get("python-version") if python_step else None
+    checks.assert_check("test job uses Python 3.14", python_version == "3.14")
+    make_test_step = find_step(test_steps, "Run make test")
+    make_test_env = make_test_step.get("env", {}) if make_test_step else {}
+    checks.assert_check(
+        "Ubuntu host job explicitly skips duplicate Docker smoke",
+        isinstance(make_test_env, dict) and make_test_env.get("EVE_SKIP_DOCKER_SMOKE") == "${{ runner.os == 'Linux' && '1' || '' }}",
+    )
+
+    terramate_step = find_step(test_steps, "Install Terramate")
+    terramate_version = terramate_step.get("env", {}).get("TERRAMATE_VERSION") if terramate_step else None
+    terramate_run = run_text(terramate_step)
+    checks.assert_check(
+        "Terramate version is declared in workflow",
+        isinstance(terramate_version, str) and bool(terramate_version),
+    )
+    checks.assert_check(
+        "Terramate x86_64 tarball mapping matches release asset names",
+        "x86_64|amd64) tool_arch=x86_64 ;;" in terramate_run,
+    )
+    checks.assert_check(
+        "Terramate arm64 tarball mapping matches release asset names",
+        "arm64|aarch64) tool_arch=arm64 ;;" in terramate_run,
+    )
+
+    docker_slim_job = jobs.get("docker-runtime-slim", {})
+    docker_slim_steps = docker_slim_job.get("steps", []) if isinstance(docker_slim_job, dict) else []
+    if not isinstance(docker_slim_steps, list):
+        docker_slim_steps = []
+    docker_slim_step_names = step_names(docker_slim_steps)
+    checks.assert_check(
+        "docker-runtime-slim runs on ubuntu-24.04",
+        isinstance(docker_slim_job, dict) and docker_slim_job.get("runs-on") == "ubuntu-24.04",
+    )
+    checks.assert_check(
+        "docker-runtime-slim builds and smokes image",
+        "Build slim runtime image" in docker_slim_step_names
+        and "Smoke slim runtime image" in docker_slim_step_names,
+    )
+    checks.assert_check("docker-runtime-slim reports inspectable image size", "Report slim image size" in docker_slim_step_names)
+    checks.assert_check("docker-runtime-slim publishes timing summary", "Timing summary" in docker_slim_step_names)
+    checks.assert_check(
+        "docker-runtime-slim writes timing summary to GITHUB_STEP_SUMMARY",
+        "$GITHUB_STEP_SUMMARY" in run_text(find_step(docker_slim_steps, "Timing summary")),
+    )
+    checks.assert_check("docker-runtime-slim sets up Docker Buildx", "Set up Docker Buildx" in docker_slim_step_names)
+    checks.assert_check("docker-runtime-slim computes explicit cache scope", "Compute slim runtime cache scope" in docker_slim_step_names)
+    checks.assert_check("docker-runtime-slim probes explicit cache key", "Probe slim runtime cache key" in docker_slim_step_names)
+    checks.assert_check("docker-runtime-slim reports cache misses explicitly", "Report Docker cache status" in docker_slim_step_names)
+    cache_scope_run = run_text(find_step(docker_slim_steps, "Compute slim runtime cache scope"))
+    checks.assert_check(
+        "docker-runtime-slim cache scope includes runner OS, arch, Dockerfile, and lockfile",
+        "docker/Dockerfile poetry.lock" in cache_scope_run
+        and "RUNNER_OS" in cache_scope_run
+        and "RUNNER_ARCH" in cache_scope_run
+        and "EVE_DOCKER_CACHE_SCOPE=slim-" in cache_scope_run,
+    )
+    checks.assert_check(
+        "docker-runtime-slim cache status logs cache miss: rebuilding",
+        "cache miss: rebuilding" in run_text(find_step(docker_slim_steps, "Report Docker cache status")),
+    )
+    checks.assert_check("only one dedicated slim Docker build exists", count_docker_builds(workflow) == 1)
+
+    build_run = run_text(find_step(docker_slim_steps, "Build slim runtime image"))
+    checks.assert_check("docker-runtime-slim imports BuildKit GHA cache", '--cache-from "type=gha,scope=${EVE_DOCKER_CACHE_SCOPE}"' in build_run)
+    checks.assert_check("docker-runtime-slim exports BuildKit GHA cache", '--cache-to "type=gha,mode=max,scope=${EVE_DOCKER_CACHE_SCOPE}"' in build_run)
+
+    size_run = run_text(find_step(docker_slim_steps, "Report slim image size"))
+    checks.assert_check(
+        "docker-runtime-slim reports compressed image size",
+        "slim image: uncompressed=${inspect_size} compressed=${compressed_size}" in size_run,
+    )
+    checks.assert_check(
+        "docker-runtime-slim enforces uncompressed size under 1600 MB",
+        '"${inspect_size}" -ge 1600000000' in size_run,
+    )
+    checks.assert_check(
+        "docker-runtime-slim enforces compressed size under 500 MB",
+        '"${compressed_size}" -ge 500000000' in size_run,
+    )
+
+    docker_full_job = jobs.get("docker-runtime-full", {})
+    docker_full_steps = docker_full_job.get("steps", []) if isinstance(docker_full_job, dict) else []
+    if not isinstance(docker_full_steps, list):
+        docker_full_steps = []
+    docker_full_step_names = step_names(docker_full_steps)
+    checks.assert_check(
+        "docker-runtime-full is schedule-only",
+        isinstance(docker_full_job, dict) and "github.event_name == 'schedule'" in str(docker_full_job.get("if", "")),
+    )
+    checks.assert_check("docker-runtime-full publishes timing summary", "Timing summary" in docker_full_step_names)
+    checks.assert_check("docker-runtime-full sets up Docker Buildx", "Set up Docker Buildx" in docker_full_step_names)
+    checks.assert_check("docker-runtime-full computes explicit cache scope", "Compute full runtime cache scope" in docker_full_step_names)
+    checks.assert_check("docker-runtime-full probes explicit cache key", "Probe full runtime cache key" in docker_full_step_names)
+    checks.assert_check("docker-runtime-full reports cache misses explicitly", "Report Docker cache status" in docker_full_step_names)
+    checks.assert_check("docker-runtime-full smokes image", "Smoke full runtime image" in docker_full_step_names)
+    checks.assert_check("docker-runtime-full reports image size", "Report full image size" in docker_full_step_names)
+    full_cache_scope_run = run_text(find_step(docker_full_steps, "Compute full runtime cache scope"))
+    checks.assert_check(
+        "docker-runtime-full cache scope includes runner OS, arch, Dockerfile, and lockfile",
+        "docker/Dockerfile poetry.lock" in full_cache_scope_run
+        and "RUNNER_OS" in full_cache_scope_run
+        and "RUNNER_ARCH" in full_cache_scope_run
+        and "EVE_DOCKER_FULL_CACHE_SCOPE=full-" in full_cache_scope_run,
+    )
+    checks.assert_check(
+        "docker-runtime-full cache status logs cache miss: rebuilding",
+        "cache miss: rebuilding" in run_text(find_step(docker_full_steps, "Report Docker cache status")),
+    )
+    full_build_run = run_text(find_step(docker_full_steps, "Build full runtime image"))
+    checks.assert_check("docker-runtime-full pins linux/amd64 platform", "--platform linux/amd64" in full_build_run)
+    checks.assert_check("docker-runtime-full imports BuildKit GHA cache", '--cache-from "type=gha,scope=${EVE_DOCKER_FULL_CACHE_SCOPE}"' in full_build_run)
+    checks.assert_check("docker-runtime-full exports BuildKit GHA cache", '--cache-to "type=gha,mode=max,scope=${EVE_DOCKER_FULL_CACHE_SCOPE}"' in full_build_run)
+    checks.assert_check(
+        "docker-runtime-full reports compressed image size",
+        "full image: uncompressed=${inspect_size} compressed=${compressed_size}" in run_text(find_step(docker_full_steps, "Report full image size")),
+    )
+
+    print("\n== ci-pipeline Terramate asset checks ==")
+
+    if args.offline:
+        print("  [SKIP] remote Terramate release-asset checks (--offline)")
+    elif not isinstance(terramate_version, str) or not terramate_version:
+        checks.fail("Terramate release asset checks require TERRAMATE_VERSION")
+    else:
+        for os_name in ("darwin", "linux"):
+            for arch in ("arm64", "x86_64"):
+                asset = f"terramate_{terramate_version}_{os_name}_{arch}.tar.gz"
+                url = f"https://github.com/terramate-io/terramate/releases/download/v{terramate_version}/{asset}"
+                ok, detail = http_head_ok(url)
+                checks.assert_check(f"{asset} exists upstream", ok)
+                if not ok:
+                    print(f"    {url}: {detail}", file=sys.stderr)
+
+    print("\n== ci-pipeline Docker installer contract ==")
+
+    for path in ("docker/Dockerfile", "docker/Dockerfile.toolchain"):
+        content = (root / path).read_text()
+        checks.assert_check(
+            f"{path} maps Terraform amd64 separately from Terramate x86_64",
+            "terraform_arch=amd64" in content and "terramate_arch=x86_64" in content,
+        )
+
+    runtime_dockerfile = (root / "docker/Dockerfile").read_text()
+    checks.assert_check("docker runtime uses official Python 3.14 slim base", "python:3.14-slim-trixie" in runtime_dockerfile)
+    checks.assert_check("docker runtime does not download Python source", "www.python.org/ftp/python" not in runtime_dockerfile)
+
+    if checks.failures:
+        print(f"\n{checks.failures} ci-pipeline check(s) failed.", file=sys.stderr)
+        return 1
+
+    print("\nAll ci-pipeline checks passed.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

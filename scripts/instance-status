@@ -1,122 +1,117 @@
-#!/usr/bin/env ruby
-# Emit a combined local status view for a concrete v3 instance.
-# State reads go through core/sdk/state.rb (sole state owner).
-# The JSON output is the shared view object consumed by the TUI.
+#!/usr/bin/env python3
+from __future__ import annotations
 
-require "json"
-require "open3"
+import json
+import os
+import sys
+from pathlib import Path
 
-ROOT = File.expand_path("..", __dir__)
-$LOAD_PATH.unshift(File.join(ROOT, "core"))
-require "sdk"
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
-def usage
-  warn <<~USAGE
-    Usage:
-      scripts/instance-status --instance <name> [--registry <path>] [--json]
-  USAGE
-end
+from eve_sdk.dispatch import run_json  # noqa: E402
+from eve_sdk.state import State  # noqa: E402
 
-def run_json(*cmd)
-  out, status = Open3.capture2e(*cmd)
-  raise out unless status.success?
 
-  JSON.parse(out)
-end
+def usage() -> None:
+    print("Usage:\n  scripts/instance-status --instance <name> [--registry <path>] [--json]", file=sys.stderr)
 
-instance_name = nil
-registry_path = ENV["EVE_INSTANCE_REGISTRY"] ? File.expand_path(ENV["EVE_INSTANCE_REGISTRY"], Dir.pwd) : nil
-json = false
 
-args = ARGV.dup
-until args.empty?
-  case args.shift
-  when "--instance"
-    instance_name = args.shift
-  when "--registry"
-    registry_path = File.expand_path(args.shift, Dir.pwd)
-  when "--json"
-    json = true
-  when "-h", "--help"
-    usage
-    exit 0
-  else
-    usage
-    exit 2
-  end
-end
+def main(argv: list[str]) -> int:
+    instance_name: str | None = None
+    registry_path = os.environ.get("EVE_INSTANCE_REGISTRY")
+    registry_path = str(Path(registry_path).resolve()) if registry_path else None
+    emit_json = False
+    args = list(argv)
+    while args:
+        arg = args.pop(0)
+        if arg == "--instance" and args:
+            instance_name = args.pop(0)
+        elif arg == "--registry" and args:
+            registry_path = str(Path(args.pop(0)).resolve())
+        elif arg == "--json":
+            emit_json = True
+        elif arg in {"-h", "--help"}:
+            usage()
+            return 0
+        else:
+            usage()
+            return 2
+    if not instance_name:
+        usage()
+        return 2
+    try:
+        resolve_cmd = [str(ROOT / "scripts/instance-resolve"), "--instance", instance_name, "--emit", "json"]
+        paths_cmd = [str(ROOT / "scripts/instance-paths"), "--instance", instance_name, "--emit", "json"]
+        package_cmd = [str(ROOT / "scripts/package-list"), "--instance", instance_name, "--json"]
+        if registry_path:
+            resolve_cmd.extend(["--registry", registry_path])
+            paths_cmd.extend(["--registry", registry_path])
+            package_cmd.extend(["--registry", registry_path])
+        resolved = run_json(*resolve_cmd)
+        paths = run_json(*paths_cmd)
+        packages = run_json(*package_cmd)["packages"]
+        status = State.build_view(instance_name=instance_name, resolved=resolved, packages=packages, paths=paths)
+        state = status["state"]
+        if emit_json:
+            print(json.dumps(status, indent=2))
+            return 0
+        instance = status["instance"]
+        print(f"Instance: {instance['name']}")
+        print(f"Provider: {instance['provider']} ({instance['provider_plugin']}, {instance['engine']})")
+        print(f"OS: {instance['os']} ({instance['os_family']})")
+        print(
+            "State: desired={desired_state} provider={provider_state} provision={provision_state}".format(
+                desired_state=state["desired_state"],
+                provider_state=state["provider_state"],
+                provision_state=state["provision_state"],
+            )
+        )
+        observed = state.get("observed_state", {})
+        if observed:
+            print(
+                "Observed: provider={provider} ip={ip} at={at}".format(
+                    provider=observed.get("provider_status", "unknown"),
+                    ip=observed.get("ip", "-"),
+                    at=observed.get("observed_at", "unknown"),
+                )
+            )
+            if observed.get("refresh_error"):
+                print(f"Refresh error: {observed['refresh_error']}")
+        last_operation = (
+            f"{state['last_operation']['name']} {state['last_operation']['status']}"
+            if state.get("last_operation")
+            else "none"
+        )
+        print(f"Last operation: {last_operation}")
+        print(f"Last error: {state.get('last_error') or 'none'}")
+        package_summary = status["packages"]["summary"]
+        selected_packages = status["packages"]["selected"]
+        print(
+            "Selected package states: installed={installed} missing={missing} unknown={unknown} failed={failed}".format(
+                installed=package_summary["installed"],
+                missing=package_summary["missing"],
+                unknown=package_summary["unknown"],
+                failed=package_summary["failed"],
+            )
+        )
+        if not selected_packages:
+            print("Selected packages: none")
+        else:
+            print(f"\n{'PACKAGE':<24} {'STATE':<11} {'SUPPORTED':<9} SELECTED_BY")
+            print(f"{'-------':<24} {'-----':<11} {'---------':<9} -----------")
+            for package in selected_packages:
+                print(
+                    f"{package['id']:<24} "
+                    f"{package.get('state', {}).get('status', 'unknown'):<11} "
+                    f"{'yes' if package.get('supported') else 'no':<9} "
+                    f"{','.join(package.get('selected_by', []))}"
+                )
+        return 0
+    except Exception as error:
+        print(f"instance-status: {error}", file=sys.stderr)
+        return 1
 
-unless instance_name
-  usage
-  exit 2
-end
 
-begin
-  resolve_cmd = [File.join(ROOT, "scripts/instance-resolve"), "--instance", instance_name, "--emit", "json"]
-  paths_cmd = [File.join(ROOT, "scripts/instance-paths"), "--instance", instance_name, "--emit", "json"]
-  package_cmd = [File.join(ROOT, "scripts/package-list"), "--instance", instance_name, "--json"]
-  if registry_path
-    resolve_cmd += ["--registry", registry_path]
-    paths_cmd += ["--registry", registry_path]
-    package_cmd += ["--registry", registry_path]
-  end
-
-  resolved = run_json(*resolve_cmd)
-  paths = run_json(*paths_cmd)
-  packages = run_json(*package_cmd).fetch("packages")
-
-  status = Eve::SDK::State.build_view(
-    instance_name: instance_name,
-    resolved: resolved,
-    packages: packages,
-    paths: paths
-  )
-
-  state = status["state"]
-
-  if json
-    puts JSON.pretty_generate(status)
-  else
-    instance = status.fetch("instance")
-    printf "Instance: %s\n", instance.fetch("name")
-    printf "Provider: %s (%s, %s)\n", instance.fetch("provider"), instance.fetch("provider_plugin"), instance.fetch("engine")
-    printf "OS: %s (%s)\n", instance.fetch("os"), instance.fetch("os_family")
-    printf "State: desired=%s provider=%s provision=%s\n",
-           state.fetch("desired_state"),
-           state.fetch("provider_state"),
-           state.fetch("provision_state")
-    observed = state.fetch("observed_state", {})
-    unless observed.empty?
-      printf "Observed: provider=%s ip=%s at=%s\n",
-             observed.fetch("provider_status", "unknown"),
-             observed.fetch("ip", "-"),
-             observed.fetch("observed_at", "unknown")
-      printf "Refresh error: %s\n", observed["refresh_error"] if observed["refresh_error"]
-    end
-    printf "Last operation: %s\n", state["last_operation"] ? "#{state.dig("last_operation", "name")} #{state.dig("last_operation", "status")}" : "none"
-    printf "Last error: %s\n", state["last_error"] || "none"
-    package_summary = status.fetch("packages", {}).fetch("summary", {})
-    selected_packages = status.fetch("packages", {}).fetch("selected", [])
-    printf "Selected package states: installed=%d missing=%d unknown=%d failed=%d\n",
-           package_summary.fetch("installed"),
-           package_summary.fetch("missing"),
-           package_summary.fetch("unknown"),
-           package_summary.fetch("failed")
-    if selected_packages.empty?
-      printf "Selected packages: none\n"
-    else
-      printf "\n%-24s %-11s %-9s %s\n", "PACKAGE", "STATE", "SUPPORTED", "SELECTED_BY"
-      printf "%-24s %-11s %-9s %s\n", "-------", "-----", "---------", "-----------"
-      selected_packages.each do |package|
-        printf "%-24s %-11s %-9s %s\n",
-               package.fetch("id"),
-               package.dig("state", "status") || "unknown",
-               package["supported"] ? "yes" : "no",
-               package.fetch("selected_by", []).join(",")
-      end
-    end
-  end
-rescue StandardError => e
-  warn "instance-status: #{e.message}"
-  exit 1
-end
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

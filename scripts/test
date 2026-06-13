@@ -28,7 +28,7 @@ run() {
 for suite in "${SUITES[@]}"; do
   case "$suite" in
     catalog)   run "catalog"   ./scripts/test-catalog   ;;
-    ci-pipeline) run "ci-pipeline" ./scripts/test-ci-pipeline ;;
+    ci-pipeline) run "ci-pipeline" poetry run python scripts/test-ci-pipeline ;;
     config-save) run "config-save" ./scripts/test-config-save ;;
     core-boundary) run "core-boundary" ./scripts/test-core-boundary ;;
     docker) run "docker" ./scripts/test-docker ;;

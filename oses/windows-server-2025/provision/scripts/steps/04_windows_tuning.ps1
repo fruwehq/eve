@@ -55,6 +55,12 @@ if (-not $Pass) {
   throw "Windows password not provided. Set EPHEMERAL_WINDOWS_PASSWORD or create $EnvFile with a windows_password field."
 }
 
+Write-Host "Ensuring Administrator password matches provisioning secret..."
+& net.exe user $User $Pass | Out-Null
+if ($LASTEXITCODE -ne 0) {
+  throw "Failed to update Administrator password."
+}
+
 # Prevent display sleep / system standby while on AC power
 $acMonitorTimeout = (powercfg /query SCHEME_CURRENT SUB_VIDEO VIDEOIDLE | Select-String "Current AC Power Setting Index:" | Select-Object -First 1) -replace '.*:\s*', ''
 $acStandbyTimeout = (powercfg /query SCHEME_CURRENT SUB_SLEEP STANDBYIDLE | Select-String "Current AC Power Setting Index:" | Select-Object -First 1) -replace '.*:\s*', ''
@@ -64,6 +70,22 @@ if ($acMonitorTimeout -ne '0x00000000' -or $acStandbyTimeout -ne '0x00000000') {
   powercfg -change -standby-timeout-ac 0
   $changed = $true
   $needsReboot = $true
+}
+
+# Disable Windows Defender real-time monitoring. On the low-core gaming VMs,
+# MsMpEng real-time scanning competes with the capture/encode pipeline during
+# gameplay, spiking the CPU and causing NVENC encode-wait timeouts and audio
+# buffer underruns (crackle). This is an ephemeral gaming VM: the AV engine
+# stays installed, only the hot-path real-time scan is turned off.
+try {
+  if ((Get-MpComputerStatus -ErrorAction Stop).RealTimeProtectionEnabled) {
+    Set-MpPreference -DisableRealtimeMonitoring $true -ErrorAction Stop
+    Write-Host "Disabled Windows Defender real-time monitoring."
+  } else {
+    Write-Host "Windows Defender real-time monitoring already disabled."
+  }
+} catch {
+  Write-Warning "Could not disable Defender real-time monitoring: $($_.Exception.Message)"
 }
 
 # Disable hibernation

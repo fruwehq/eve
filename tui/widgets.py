@@ -11,6 +11,7 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import (
     Button,
+    Checkbox,
     DataTable,
     Input,
     Label,
@@ -34,6 +35,7 @@ from tui.render import (
 from tui.settings import (
     CONFIG_SECTIONS,
     field_label,
+    load_missing_fields,
     load_provider_schema,
     load_provider_secret_keys,
     load_structured,
@@ -50,32 +52,8 @@ class ProviderPane(Static):
         margin-bottom: 1;
     }
 
-    .provider-row {
-        height: 3;
-        layout: horizontal;
-        margin-bottom: 0;
-    }
-
-    .provider-name {
-        width: 12;
-        height: 3;
-        content-align: left middle;
-        padding-left: 1;
-    }
-
-    .provider-reachability {
-        width: 4;
-        height: 3;
-        content-align: center middle;
-    }
-
-    .provider-actions-row {
-        height: 3;
-    }
-
-    .provider-actions-row Button {
-        height: 3;
-        min-width: 10;
+    #provider-table {
+        height: auto;
     }
     """
 
@@ -106,14 +84,38 @@ class ProviderPane(Static):
         self.providers = providers
         self.reachability = reachability or {}
         self._provider_ids: list[str] = []
+        self._actions: dict[str, list[dict[str, Any]]] = {}
+        self._configured: dict[str, bool] = {}
+        self._notes: dict[str, str] = {}
 
     def compose(self) -> ComposeResult:
+        table: DataTable[Any] = DataTable(id="provider-table")
+        table.add_columns("Provider", "Configured", "Reachable")
+        table.cursor_type = "row"
+        yield table
+
+    def on_mount(self) -> None:
+        self._populate()
+
+    def _populate(self) -> None:
+        table = self.query_one("#provider-table", DataTable)
+        table.clear()
         self._provider_ids = []
+        self._actions = {}
         for provider in self.providers:
             provider_id = str(provider.get("id", ""))
             self._provider_ids.append(provider_id)
             display_name = str(provider.get("display_name", provider_id))
-            actions = provider.get("actions", [])
+            self._actions[provider_id] = provider.get("actions", [])
+
+            configured = self._configured.get(provider_id)
+            if configured is True:
+                configured_text = "[success]yes[/]"
+            elif configured is False:
+                configured_text = "[dim]no[/]"
+            else:
+                configured_text = "[dim]?[/]"
+
             reachable = self.reachability.get(provider_id)
             if reachable is True:
                 reach_text = "[success]●[/]"
@@ -121,53 +123,38 @@ class ProviderPane(Static):
                 reach_text = "[warning]○[/]"
             else:
                 reach_text = "[dim]?[/]"
-            with Horizontal(classes="provider-row"):
-                yield Static(display_name, classes="provider-name")
-                yield Static(reach_text, classes="provider-reachability")
-                with Horizontal(classes="provider-actions-row"):
-                    for action in actions:
-                        label = str(action.get("label") or action.get("id", ""))
-                        button = Button(label, id=f"ppa-{provider_id}-{action.get('id', '')}")
-                        button.variant = "primary" if bool(action.get("interactive")) else "default"
-                        yield button
-                    yield Button("Configure", id=f"ppc-{provider_id}", variant="success")
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        button_id = event.button.id or ""
-        if button_id.startswith("ppc-"):
-            provider_id = button_id[4:]
-            event.stop()
-            self.post_message(self.ConfigureRequested(provider_id))
-            return
-        if not button_id.startswith("ppa-"):
-            return
-        rest = button_id[4:]
-        for provider in self.providers:
-            provider_id = str(provider.get("id", ""))
-            prefix = f"{provider_id}-"
-            if rest.startswith(prefix):
-                action_id = rest[len(prefix):]
-                for action in provider.get("actions", []):
-                    if str(action.get("id")) == action_id:
-                        event.stop()
-                        self.post_message(self.ActionRequested(provider_id, action))
-                        return
+            table.add_row(display_name, configured_text, reach_text, key=provider_id)
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        provider_id = str(event.row_key.value)
+        self.post_message(self.ConfigureRequested(provider_id))
+        event.stop()
+
+    def update_providers(self, providers: list[dict[str, Any]]) -> None:
+        self.providers = providers
+        self._populate()
+
+    def update_status(
+        self,
+        configured: dict[str, bool],
+        reachable: dict[str, bool],
+        notes: dict[str, str],
+    ) -> None:
+        self._configured = configured
+        self.reachability = reachable
+        self._notes = notes
+        self._populate()
 
     def update_reachability(self, reachability: dict[str, bool]) -> None:
         self.reachability = reachability
-        rows = self.query(".provider-row")
-        for idx, row in enumerate(rows):
-            if idx >= len(self._provider_ids):
-                break
-            provider_id = self._provider_ids[idx]
-            reach_widget = row.query_one(".provider-reachability", Static)
-            reachable = reachability.get(provider_id)
-            if reachable is True:
-                reach_widget.update("[success]●[/]")
-            elif reachable is False:
-                reach_widget.update("[warning]○[/]")
-            else:
-                reach_widget.update("[dim]?[/]")
+        self._populate()
+
+    def get_actions(self, provider_id: str) -> list[dict[str, Any]]:
+        return self._actions.get(provider_id, [])
+
+    def get_notes(self, provider_id: str) -> str:
+        return self._notes.get(provider_id, "-")
 
 
 class ConfirmScreen(ModalScreen[bool]):
@@ -222,6 +209,74 @@ class ConfirmScreen(ModalScreen[bool]):
 
     def action_dismiss_cancel(self) -> None:
         self.dismiss(False)
+
+
+class DeleteConfirmScreen(ModalScreen[dict[str, Any] | None]):
+    CSS = """
+    DeleteConfirmScreen {
+        align: center middle;
+    }
+
+    #delete-dialog {
+        width: 72;
+        height: 14;
+        border: round $error;
+        background: $surface;
+        padding: 1 2;
+    }
+
+    #delete-message {
+        margin-bottom: 1;
+    }
+
+    #delete-options {
+        margin-bottom: 1;
+    }
+
+    #delete-actions {
+        height: 3;
+        width: 28;
+        background: transparent;
+    }
+
+    #delete-actions Button {
+        width: 12;
+        min-width: 12;
+    }
+    """
+
+    BINDINGS = [
+        Binding("escape", "dismiss_cancel", "Cancel"),
+    ]
+
+    def __init__(self, instance: str) -> None:
+        super().__init__()
+        self.instance_name = instance
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="delete-dialog"):
+            yield Label("[b]Delete instance?[/b]")
+            yield Static(
+                f"Remove {self.instance_name} from the local registry.",
+                id="delete-message",
+            )
+            with Vertical(id="delete-options"):
+                yield Checkbox("Purge local workdir and state", id="delete-purge", value=True)
+                yield Checkbox("Force (skip provider state check)", id="delete-force", value=False)
+            with Horizontal(id="delete-actions"):
+                yield Button("Cancel", id="cancel")
+                yield Button("Delete", id="confirm", variant="error")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "confirm":
+            purge = self.query_one("#delete-purge", Checkbox).value
+            force = self.query_one("#delete-force", Checkbox).value
+            self.dismiss({"confirmed": True, "purge": purge, "force": force})
+        else:
+            self.dismiss(None)
+
+    def action_dismiss_cancel(self) -> None:
+        self.dismiss(None)
 
 
 class ChoiceScreen(ModalScreen[str | None]):
@@ -1084,7 +1139,8 @@ class EditFieldScreen(ModalScreen[str | None]):
 
     #edit-dialog {
         width: 64;
-        height: 11;
+        height: auto;
+        max-height: 28;
         border: round $primary;
         background: $surface;
         padding: 1 2;
@@ -1094,19 +1150,25 @@ class EditFieldScreen(ModalScreen[str | None]):
         margin-bottom: 1;
     }
 
+    #edit-detail {
+        margin-bottom: 1;
+        color: $text-muted;
+    }
+
     #edit-input {
+        width: 100%;
         margin-bottom: 1;
     }
 
     #edit-actions {
         height: 3;
-        width: 36;
+        width: 100%;
+        align-horizontal: center;
         background: transparent;
     }
 
     #edit-actions Button {
-        width: 14;
-        min-width: 14;
+        margin: 0 1;
     }
     """
 
@@ -1114,15 +1176,50 @@ class EditFieldScreen(ModalScreen[str | None]):
         Binding("escape", "dismiss_cancel", "Cancel"),
     ]
 
-    def __init__(self, label: str, current: str, *, password: bool = False) -> None:
+    def __init__(
+        self,
+        label: str,
+        current: str,
+        *,
+        password: bool = False,
+        description: str = "",
+        default: str = "",
+        field_type: str = "",
+        user_value: str = "",
+        is_default_in_use: bool = False,
+        is_unset: bool = False,
+    ) -> None:
         super().__init__()
         self.field_label_text = label
         self.current_value = current
         self.password_mode = password
+        self.field_description = description
+        self.field_default = default
+        self.field_type = field_type
+        self.user_value = user_value
+        self.is_default_in_use = is_default_in_use
+        self.is_unset = is_unset
 
     def compose(self) -> ComposeResult:
         with Vertical(id="edit-dialog"):
             yield Label(f"[b]{self.field_label_text}[/b]", id="edit-label")
+            detail_lines: list[str] = []
+            if self.is_unset:
+                detail_lines.append("[warning]Unset (no value available)[/]")
+            elif self.is_default_in_use:
+                detail_lines.append("[dim]Using default value[/]")
+            else:
+                detail_lines.append("[success]Using a custom value[/]")
+            if self.password_mode:
+                detail_lines.append(f"Your value: {'set' if self.user_value else '\u2014'}")
+            else:
+                detail_lines.append(f"Your value: {self.user_value or '\u2014'}")
+            detail_lines.append(f"Default: {self.field_default or '\u2014'}")
+            if self.field_type:
+                detail_lines.append(f"Type: {self.field_type}")
+            if self.field_description:
+                detail_lines.append(self.field_description)
+            yield Static("\n".join(detail_lines), id="edit-detail")
             yield Input(value=self.current_value, id="edit-input", password=self.password_mode)
             with Horizontal(id="edit-actions"):
                 yield Button("Cancel", id="cancel")
@@ -1133,6 +1230,10 @@ class EditFieldScreen(ModalScreen[str | None]):
             self.dismiss(self.query_one("#edit-input", Input).value.strip())
         else:
             self.dismiss(None)
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        event.stop()
+        self.dismiss(self.query_one("#edit-input", Input).value.strip())
 
     def action_dismiss_cancel(self) -> None:
         self.dismiss(None)
@@ -1174,12 +1275,46 @@ class SettingsScreen(ModalScreen[None]):
         super().__init__()
         self._structured: dict[str, dict[str, dict[str, Any]]] = {}
         self._row_keys: list[str] = []
+        self._required_entries: dict[str, dict[str, Any]] = {}
+        self._schema_descriptions: dict[str, str] = {}
+        self._schema_defaults: dict[str, str] = {}
+
+    def _load_schema_for_provider(self, provider_id: str) -> None:
+        try:
+            schema = load_provider_schema(provider_id)
+        except Exception:
+            return
+        for scope in ("config", "secrets"):
+            fields = schema.get(scope, {})
+            if not isinstance(fields, dict):
+                continue
+            for field_id, field_def in fields.items():
+                if not isinstance(field_def, dict):
+                    continue
+                key = f"{provider_id}:{field_id}"
+                desc = str(field_def.get("description") or "")
+                default = str(field_def.get("default") or "")
+                if desc:
+                    self._schema_descriptions[key] = desc
+                if default:
+                    self._schema_defaults[key] = default
+
+    def _field_description(self, section_id: str, field_id: str) -> str:
+        key = f"{section_id}:{field_id}"
+        desc = self._schema_descriptions.get(key, "")
+        default = self._schema_defaults.get(key, "")
+        parts = []
+        if desc:
+            parts.append(desc)
+        if default:
+            parts.append(f"[dim]default: {default}[/]")
+        return "  ".join(parts) if parts else "-"
 
     def compose(self) -> ComposeResult:
         with Vertical(id="settings-dialog"):
             yield Label("[b]Settings[/b]", id="settings-title")
             table: DataTable[Any] = DataTable(id="settings-table")
-            table.add_columns("Section", "Field", "Value", "Source")
+            table.add_columns("Section", "Field", "Value", "Source", "Description")
             table.cursor_type = "row"
             yield table
             with Horizontal(id="settings-actions"):
@@ -1200,9 +1335,37 @@ class SettingsScreen(ModalScreen[None]):
         except Exception:
             self._structured = {}
 
+        self._schema_descriptions = {}
+        self._schema_defaults = {}
+        provider_sections = {"aws", "gcp", "truenas"}
+        for provider_id in provider_sections:
+            self._load_schema_for_provider(provider_id)
+
         table = self.query_one("#settings-table", DataTable)
         table.clear()
         self._row_keys = []
+        self._required_entries = {}
+
+        try:
+            for entry in load_missing_fields():
+                provider_id = entry.get("provider", "")
+                scope = entry.get("scope", "")
+                field = entry.get("field", "")
+                key = f"req:{provider_id}:{scope}:{field}"
+                self._required_entries[key] = entry
+                self._row_keys.append(key)
+                label = field_label(provider_id.replace("-", "_"), field)
+                desc = self._field_description(provider_id, field)
+                table.add_row(
+                    f"[bold]{provider_id}[/bold]",
+                    f"[bold]{label}[/bold]",
+                    "[bold red]\u2014 required \u2014[/bold red]",
+                    f"[{scope}]",
+                    desc,
+                    key=key,
+                )
+        except Exception:
+            pass
 
         for section_info in CONFIG_SECTIONS:
             section_id = section_info["id"]
@@ -1216,12 +1379,39 @@ class SettingsScreen(ModalScreen[None]):
                 source = info.get("source") or "unset"
                 label = field_label(section_id, field_id)
                 source_display = f"[{source}]"
+                desc = self._field_description(section_id, field_id)
                 key = f"{section_id}.{field_id}"
                 self._row_keys.append(key)
-                table.add_row(section_label, label, value or "\u2014", source_display, key=key)
+                table.add_row(section_label, label, value or "\u2014", source_display, desc, key=key)
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         row_key = str(event.row_key.value)
+
+        if row_key in self._required_entries:
+            entry = self._required_entries[row_key]
+            provider_id = entry.get("provider", "")
+            scope = entry.get("scope", "")
+            field = entry.get("field", "")
+            label = field_label(provider_id.replace("-", "_"), field)
+            password = scope == "secrets"
+
+            def handle_required_edit(result: str | None) -> None:
+                if result is not None:
+                    try:
+                        if scope == "secrets":
+                            save_provider_secret(provider_id, field, result)
+                        else:
+                            save_value(provider_id.replace("-", "_"), field, result)
+                        self._load_values()
+                        self.notify(f"Saved {label}")
+                    except Exception as e:
+                        self.notify(f"Save failed: {e}", severity="error")
+
+            self.app.push_screen(
+                EditFieldScreen(label, "", password=password), handle_required_edit
+            )
+            return
+
         section, field = row_key.split(".", 1)
         label = field_label(section, field)
         fields = self._structured.get(section, {})
@@ -1254,6 +1444,8 @@ class SettingsScreen(ModalScreen[None]):
         if row is None or row < 0 or row >= len(self._row_keys):
             return
         key = self._row_keys[row]
+        if key in self._required_entries:
+            return
         section, field = key.split(".", 1)
         info = self._structured.get(section, {}).get(field, {})
         if info.get("source") == "config.yaml":
@@ -1277,7 +1469,8 @@ class FirstRunScreen(ModalScreen[None]):
     }
 
     #fr-dialog {
-        width: 72;
+        width: 96;
+        max-width: 100;
         height: 30;
         border: round $warning;
         background: $surface;
@@ -1323,24 +1516,65 @@ class FirstRunScreen(ModalScreen[None]):
             yield Label("[b]Welcome to Eve[/b]", id="fr-title")
             yield Static(
                 "Some required configuration is missing.\n"
-                "Set these fields before creating instances.",
+                "Select a field below to set it, or press Enter on a row.",
                 id="fr-message",
             )
             table: DataTable[Any] = DataTable(id="fr-missing")
             table.add_columns("Provider", "Field", "Description")
+            table.cursor_type = "row"
             yield table
             with Horizontal(id="fr-actions"):
                 yield Button("Open Settings", id="fr-settings", variant="primary")
                 yield Button("Skip for now", id="fr-skip")
 
     def on_mount(self) -> None:
+        self._populate_table()
+
+    def _populate_table(self) -> None:
         table = self.query_one("#fr-missing", DataTable)
         table.clear()
-        for entry in self.missing_fields:
+        for i, entry in enumerate(self.missing_fields):
             provider = str(entry.get("provider", ""))
             field = str(entry.get("field", ""))
             desc = str(entry.get("description", ""))
-            table.add_row(provider, field, desc)
+            table.add_row(provider, field, desc, key=str(i))
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        try:
+            idx = int(str(event.row_key.value))
+        except (ValueError, IndexError):
+            return
+        if idx < 0 or idx >= len(self.missing_fields):
+            return
+        entry = self.missing_fields[idx]
+        provider_id = str(entry.get("provider", ""))
+        scope = str(entry.get("scope", ""))
+        field = str(entry.get("field", ""))
+        label = field_label(provider_id.replace("-", "_"), field)
+        password = scope == "secrets"
+
+        def handle_edit(result: str | None) -> None:
+            if result is not None:
+                try:
+                    if scope == "secrets":
+                        save_provider_secret(provider_id, field, result)
+                    else:
+                        save_value(provider_id.replace("-", "_"), field, result)
+                    self._refresh_missing()
+                    self.notify(f"Saved {label}")
+                except Exception as e:
+                    self.notify(f"Save failed: {e}", severity="error")
+
+        self.app.push_screen(EditFieldScreen(label, "", password=password), handle_edit)
+
+    def _refresh_missing(self) -> None:
+        try:
+            self.missing_fields = load_missing_fields()
+        except Exception:
+            return
+        self._populate_table()
+        if not self.missing_fields:
+            self.dismiss(None)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "fr-skip":
@@ -1378,6 +1612,22 @@ class ProviderConfigScreen(ModalScreen[None]):
         height: 1fr;
     }
 
+    #pc-notes {
+        margin-bottom: 1;
+        color: $text-muted;
+    }
+
+    #pc-provider-actions {
+        height: auto;
+        margin-bottom: 1;
+    }
+
+    #pc-provider-actions Button {
+        height: 3;
+        min-width: 10;
+        margin-right: 1;
+    }
+
     #pc-actions {
         height: 3;
         width: 48;
@@ -1394,20 +1644,37 @@ class ProviderConfigScreen(ModalScreen[None]):
         Binding("escape", "dismiss_cancel", "Cancel"),
     ]
 
-    def __init__(self, provider_id: str, provider_name: str) -> None:
+    def __init__(
+        self,
+        provider_id: str,
+        provider_name: str,
+        actions: list[dict[str, Any]] | None = None,
+        notes: str = "",
+    ) -> None:
         super().__init__()
         self.provider_id = provider_id
         self.provider_name = provider_name
         self._schema: dict[str, Any] = {}
         self._secret_keys_set: list[str] = []
+        self._actions = actions or []
+        self._notes = notes
 
     def compose(self) -> ComposeResult:
         with Vertical(id="pc-dialog"):
             yield Label(f"[b]Configure {self.provider_name}[/b]", id="pc-title")
+            if self._notes and self._notes != "-":
+                yield Static(self._notes, id="pc-notes")
             table: DataTable[Any] = DataTable(id="pc-table")
-            table.add_columns("Field", "Value", "Type")
+            table.add_columns("Setting", "Source", "Value")
             table.cursor_type = "row"
             yield table
+            if self._actions:
+                with Horizontal(id="pc-provider-actions"):
+                    for action in self._actions:
+                        label = str(action.get("label") or action.get("id", ""))
+                        btn = Button(label, id=f"pca-{action.get('id', '')}")
+                        btn.variant = "primary" if bool(action.get("interactive")) else "default"
+                        yield btn
             with Horizontal(id="pc-actions"):
                 yield Button("Test", id="pc-test", variant="primary")
                 yield Button("Close", id="pc-close")
@@ -1428,44 +1695,94 @@ class ProviderConfigScreen(ModalScreen[None]):
         table = self.query_one("#pc-table", DataTable)
         table.clear()
 
+        section_key = self.provider_id.replace("-", "_")
+        section_data = structured.get(section_key, {})
+
         config_fields = self._schema.get("config", {})
         for field_id in sorted(config_fields.keys()):
             spec = config_fields[field_id]
-            label = spec.get("description") or field_label(self.provider_id, field_id)
-            section_data = structured.get(self.provider_id.replace("-", "_"), {})
-            value = section_data.get(field_id, {}).get("value") or ""
-            ftype = spec.get("type", "string")
-            if spec.get("required"):
-                ftype += " *"
-            table.add_row(label, value or "\u2014", ftype, key=f"config.{field_id}")
+            if not isinstance(spec, dict):
+                continue
+            label = field_label(self.provider_id, field_id)
+            setting_text = label[:30]
+            schema_default = str(spec.get("default") or "")
+            field_info = section_data.get(field_id, {})
+            user_value = str(field_info.get("value") or "") if field_info.get("value") else ""
+            source_raw = str(field_info.get("source") or "unset")
+
+            if source_raw == "config":
+                source_text = "[success]custom[/]"
+                value_text = user_value or "\u2014"
+            elif source_raw == "default":
+                source_text = "[dim]default[/]"
+                value_text = user_value or schema_default or "\u2014"
+            else:
+                if schema_default:
+                    source_text = "[dim]default[/]"
+                    value_text = schema_default
+                else:
+                    source_text = "[warning]unset[/]"
+                    value_text = "\u2014"
+
+            table.add_row(setting_text, source_text, value_text, key=f"config.{field_id}")
 
         secret_fields = self._schema.get("secrets", {})
         for field_id in sorted(secret_fields.keys()):
             spec = secret_fields[field_id]
-            label = spec.get("description") or field_label(self.provider_id, field_id)
+            if not isinstance(spec, dict):
+                continue
+            label = field_label(self.provider_id, field_id)
+            setting_text = label[:30]
             is_set = field_id in self._secret_keys_set
-            display = "\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf" if is_set else "\u2014"
-            ftype = "secret"
-            if spec.get("required"):
-                ftype += " *"
-            table.add_row(label, display, ftype, key=f"secret.{field_id}")
+
+            if is_set:
+                source_text = "[success]custom[/]"
+                value_text = "[dim]set[/]"
+            else:
+                source_text = "[warning]unset[/]"
+                value_text = "\u2014"
+
+            table.add_row(setting_text, source_text, value_text, key=f"secret.{field_id}")
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         row_key = str(event.row_key.value)
         scope, field = row_key.split(".", 1)
         fields = self._schema.get(scope, {})
         spec = fields.get(field, {})
-        label = spec.get("description") or field_label(self.provider_id, field)
+        if not isinstance(spec, dict):
+            spec = {}
+        label = field_label(self.provider_id, field)
+        description = str(spec.get("description") or "")
+        schema_default = str(spec.get("default") or "")
+        field_type = str(spec.get("type") or "")
 
         is_secret = scope == "secret"
         current = ""
+        user_value = ""
+        is_default_in_use = False
+        is_unset = False
+
         if not is_secret:
             try:
                 structured = load_structured()
                 section_data = structured.get(self.provider_id.replace("-", "_"), {})
-                current = section_data.get(field, {}).get("value") or ""
+                field_info = section_data.get(field, {})
+                current = str(field_info.get("value") or "") if field_info.get("value") else ""
+                user_value = current
+                source = str(field_info.get("source") or "unset")
+                if source == "config":
+                    is_default_in_use = False
+                elif source == "default":
+                    is_default_in_use = True
+                else:
+                    is_unset = not schema_default
+                    is_default_in_use = bool(schema_default)
             except Exception:
-                pass
+                is_unset = not schema_default
+        else:
+            is_set = field in self._secret_keys_set
+            user_value = "set" if is_set else ""
+            is_unset = not is_set
 
         def handle_edit(result: str | None) -> None:
             if result is not None:
@@ -1484,15 +1801,37 @@ class ProviderConfigScreen(ModalScreen[None]):
                 except Exception as e:
                     self.notify(f"Save failed: {e}", severity="error")
 
-        self.app.push_screen(EditFieldScreen(label, current, password=is_secret), handle_edit)
+        self.app.push_screen(
+            EditFieldScreen(
+                label,
+                current,
+                password=is_secret,
+                description=description,
+                default=schema_default,
+                field_type=field_type,
+                user_value=user_value if not is_secret else "",
+                is_default_in_use=is_default_in_use,
+                is_unset=is_unset,
+            ),
+            handle_edit,
+        )
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "pc-close":
+        button_id = event.button.id or ""
+        if button_id == "pc-close":
             self.dismiss(None)
-        elif event.button.id == "pc-test":
+        elif button_id == "pc-test":
             self.post_message(ProviderPane.TestConnectionRequested(self.provider_id))
             self.notify("Testing connection...")
             self.dismiss(None)
+        elif button_id.startswith("pca-"):
+            action_id = button_id[4:]
+            for action in self._actions:
+                if str(action.get("id")) == action_id:
+                    event.stop()
+                    self.post_message(ProviderPane.ActionRequested(self.provider_id, action))
+                    self.dismiss(None)
+                    return
 
     def action_dismiss_cancel(self) -> None:
         self.dismiss(None)

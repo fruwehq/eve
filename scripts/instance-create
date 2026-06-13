@@ -1,173 +1,200 @@
-#!/usr/bin/env ruby
-# Create a concrete local VM instance entry in the instance registry.
+#!/usr/bin/env python3
+from __future__ import annotations
 
-require "fileutils"
-require "tempfile"
-require "time"
-require "yaml"
+import fcntl
+import os
+import re
+import subprocess
+import sys
+import tempfile
+from contextlib import contextmanager
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
 
-ROOT = File.expand_path("..", __dir__)
-$LOAD_PATH.unshift(File.join(ROOT, "core"))
-require "sdk"
-DEFAULT_REGISTRY_PATH = Eve::SDK::Workdir.instance_registry_path
+import yaml
 
-def with_registry_lock(registry_path)
-  FileUtils.mkdir_p(File.dirname(registry_path))
-  File.open("#{registry_path}.lock", File::RDWR | File::CREAT, 0o600) do |lock|
-    lock.flock(File::LOCK_EX)
-    yield
-  end
-end
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
-def write_registry!(registry_path, registry)
-  Tempfile.create(["eve-registry-", ".yaml"], File.dirname(registry_path)) do |tmp|
-    tmp.write(registry.to_yaml)
-    tmp.close
-    FileUtils.mv(tmp.path, registry_path)
-  end
-end
+from eve_sdk.resolve import default_registry_path  # noqa: E402
+from eve_sdk.state import State  # noqa: E402
 
-def usage
-  warn <<~USAGE
-    Usage:
-      scripts/instance-create --instance <name> --machine <machine> --os <os-id> --location <location> [options]
 
-    Options:
-      --registry <path>
-      --machine <machine>
-      --os <os-id>
-      --init <init-id>     Override automatic init selection when more than one init matches.
-      --location <location>
-      --provider-host <host>
-      --provider-ip <ip>
-      --bundles <bundle-a,bundle-b>
-      --packages <package-a,package-b>
-      --disk-gb <gb>
-      --memory-mb <mb>
-      --cpu-cores <n>
-      --vcpus <n>
-      --instance-type <aws-type>
-      --root-volume-type <aws-volume-type>
-      --plan <vultr-plan>
-  USAGE
-end
+@contextmanager
+def registry_lock(registry_path: Path) -> Any:
+    registry_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = Path(f"{registry_path}.lock")
+    with lock_path.open("a+b") as lock:
+        os.chmod(lock_path, 0o600)
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
-name = nil
-registry_path = ENV["EVE_INSTANCE_REGISTRY"] && !ENV["EVE_INSTANCE_REGISTRY"].empty? \
-                ? File.expand_path(ENV["EVE_INSTANCE_REGISTRY"], Dir.pwd) \
-                : DEFAULT_REGISTRY_PATH
-fields = {}
-overrides = {}
-provider_config = {}
 
-args = ARGV.dup
-until args.empty?
-  case args.shift
-  when "--instance"
-    name = args.shift
-  when "--registry"
-    registry_path = File.expand_path(args.shift, Dir.pwd)
-  when "--machine"
-    fields["machine"] = args.shift
-  when "--os"
-    fields["os"] = args.shift
-  when "--init"
-    fields["init"] = args.shift
-  when "--location"
-    fields["location"] = args.shift
-  when "--provider-host"
-    provider_config["host"] = args.shift
-  when "--provider-ip"
-    provider_config["ip"] = args.shift
-  when "--bundles"
-    fields["bundles"] = args.shift.to_s.split(",").map(&:strip).reject(&:empty?)
-  when "--packages"
-    fields["packages"] = args.shift.to_s.split(",").map(&:strip).reject(&:empty?)
-  when "--disk-gb"
-    overrides["disk_gb"] = Integer(args.shift)
-  when "--memory-mb"
-    overrides["memory_mb"] = Integer(args.shift)
-  when "--cpu-cores"
-    overrides["cpu_cores"] = Integer(args.shift)
-  when "--vcpus"
-    overrides["vcpus"] = Integer(args.shift)
-  when "--instance-type"
-    overrides["instance_type"] = args.shift
-  when "--root-volume-type"
-    overrides["root_volume_type"] = args.shift
-  when "--plan"
-    overrides["plan"] = args.shift
-  when "-h", "--help"
-    usage
-    exit 0
-  else
-    usage
-    exit 2
-  end
-end
+def load_registry(registry_path: Path) -> dict[str, Any]:
+    if not registry_path.exists():
+        return {"version": 1, "instances": []}
+    loaded = yaml.safe_load(registry_path.read_text(encoding="utf-8")) or {}
+    if not isinstance(loaded, dict):
+        raise ValueError(f"{registry_path}: registry must be a mapping")
+    loaded.setdefault("version", 1)
+    loaded.setdefault("instances", [])
+    return loaded
 
-unless name
-  usage
-  exit 2
-end
 
-required_fields = %w[machine os location]
-if required_fields.any? { |field| fields[field].nil? || fields[field].empty? }
-  warn "instance-create: provide --machine, --os, and --location"
-  exit 2
-end
+def write_registry(registry_path: Path, registry: dict[str, Any]) -> None:
+    registry_path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        "w",
+        encoding="utf-8",
+        dir=registry_path.parent,
+        prefix="eve-registry-",
+        suffix=".yaml",
+        delete=False,
+    ) as tmp:
+        tmp.write(yaml.safe_dump(registry, sort_keys=False))
+        tmp_name = tmp.name
+    os.replace(tmp_name, registry_path)
 
-unless name.match?(/\A[a-z][a-z0-9-]*\z/)
-  warn "instance-create: name must match [a-z][a-z0-9-]*"
-  exit 2
-end
 
-with_registry_lock(registry_path) do
-  registry = if File.exist?(registry_path)
-               YAML.safe_load(File.read(registry_path), permitted_classes: [], aliases: true) || {}
-             else
-               { "version" => 1, "instances" => [] }
-             end
-  registry["version"] ||= 1
-  registry["instances"] ||= []
+def usage() -> None:
+    print(
+        """Usage:
+  scripts/instance-create --instance <name> --machine <machine> --os <os-id> --location <location> [options]
 
-  if registry["instances"].any? { |instance| instance["name"] == name }
-    warn "instance-create: instance already exists: #{name}"
-    exit 1
-  end
-
-  now = Time.now.utc.iso8601
-  entry = {
-    "name" => name,
-    "created_at" => now,
-    "updated_at" => now
-  }.merge(fields)
-  entry["overrides"] = overrides unless overrides.empty?
-  entry["provider_config"] = provider_config unless provider_config.empty?
-
-  registry["instances"] << entry
-
-  Tempfile.create(["eve-instance-", ".yaml"]) do |tmp|
-    tmp.write(registry.to_yaml)
-    tmp.close
-
-    ok = system(
-      File.join(ROOT, "scripts/instance-resolve"),
-      "--registry", tmp.path,
-      "--instance", name,
-      "--validate",
-      out: File::NULL
+Options:
+  --registry <path>
+  --machine <machine>
+  --os <os-id>
+  --init <init-id>     Override automatic init selection when more than one init matches.
+  --location <location>
+  --provider-host <host>
+  --provider-ip <ip>
+  --bundles <bundle-a,bundle-b>
+  --packages <package-a,package-b>
+  --disk-gb <gb>
+  --memory-mb <mb>
+  --cpu-cores <n>
+  --vcpus <n>
+  --instance-type <aws-type>
+  --root-volume-type <aws-volume-type>
+  --plan <vultr-plan>""",
+        file=sys.stderr,
     )
-    unless ok
-      warn "instance-create: resolved instance did not validate; registry was not changed"
-      exit 1
-    end
-  end
 
-  write_registry!(registry_path, registry)
-end
 
-Eve::SDK::State.delete!(name)
+def parse_args(argv: list[str]) -> tuple[str | None, Path, dict[str, Any], dict[str, Any], dict[str, Any]]:
+    name: str | None = None
+    registry_path = Path(os.environ.get("EVE_INSTANCE_REGISTRY") or default_registry_path()).resolve()
+    fields: dict[str, Any] = {}
+    overrides: dict[str, Any] = {}
+    provider_config: dict[str, Any] = {}
+    args = list(argv)
+    while args:
+        arg = args.pop(0)
+        if arg == "--instance" and args:
+            name = args.pop(0)
+        elif arg == "--registry" and args:
+            registry_path = Path(args.pop(0)).resolve()
+        elif arg == "--machine" and args:
+            fields["machine"] = args.pop(0)
+        elif arg == "--os" and args:
+            fields["os"] = args.pop(0)
+        elif arg == "--init" and args:
+            fields["init"] = args.pop(0)
+        elif arg == "--location" and args:
+            fields["location"] = args.pop(0)
+        elif arg == "--provider-host" and args:
+            provider_config["host"] = args.pop(0)
+        elif arg == "--provider-ip" and args:
+            provider_config["ip"] = args.pop(0)
+        elif arg == "--bundles" and args:
+            fields["bundles"] = [part.strip() for part in args.pop(0).split(",") if part.strip()]
+        elif arg == "--packages" and args:
+            fields["packages"] = [part.strip() for part in args.pop(0).split(",") if part.strip()]
+        elif arg == "--disk-gb" and args:
+            overrides["disk_gb"] = int(args.pop(0))
+        elif arg == "--memory-mb" and args:
+            overrides["memory_mb"] = int(args.pop(0))
+        elif arg == "--cpu-cores" and args:
+            overrides["cpu_cores"] = int(args.pop(0))
+        elif arg == "--vcpus" and args:
+            overrides["vcpus"] = int(args.pop(0))
+        elif arg == "--instance-type" and args:
+            overrides["instance_type"] = args.pop(0)
+        elif arg == "--root-volume-type" and args:
+            overrides["root_volume_type"] = args.pop(0)
+        elif arg == "--plan" and args:
+            overrides["plan"] = args.pop(0)
+        elif arg in {"-h", "--help"}:
+            usage()
+            raise SystemExit(0)
+        else:
+            usage()
+            raise SystemExit(2)
+    return name, registry_path, fields, overrides, provider_config
 
-puts "Created instance: #{name}"
-puts "Registry: #{registry_path}"
+
+def main(argv: list[str]) -> int:
+    name, registry_path, fields, overrides, provider_config = parse_args(argv)
+    if not name:
+        usage()
+        return 2
+    if any(not fields.get(field) for field in ["machine", "os", "location"]):
+        print("instance-create: provide --machine, --os, and --location", file=sys.stderr)
+        return 2
+    if not re.match(r"^[a-z][a-z0-9-]*$", name):
+        print("instance-create: name must match [a-z][a-z0-9-]*", file=sys.stderr)
+        return 2
+
+    try:
+        with registry_lock(registry_path):
+            registry = load_registry(registry_path)
+            instances = registry.setdefault("instances", [])
+            if any(isinstance(instance, dict) and instance.get("name") == name for instance in instances):
+                print(f"instance-create: instance already exists: {name}", file=sys.stderr)
+                return 1
+            now = datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+            entry = {"name": name, "created_at": now, "updated_at": now} | fields
+            if overrides:
+                entry["overrides"] = overrides
+            if provider_config:
+                entry["provider_config"] = provider_config
+            instances.append(entry)
+            with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".yaml", delete=False) as tmp:
+                tmp.write(yaml.safe_dump(registry, sort_keys=False))
+                tmp_registry = tmp.name
+            try:
+                result = subprocess.run(
+                    [
+                        str(ROOT / "scripts/instance-resolve"),
+                        "--registry",
+                        tmp_registry,
+                        "--instance",
+                        name,
+                        "--validate",
+                    ],
+                    cwd=ROOT,
+                    stdout=subprocess.DEVNULL,
+                    check=False,
+                )
+            finally:
+                Path(tmp_registry).unlink(missing_ok=True)
+            if result.returncode != 0:
+                print("instance-create: resolved instance did not validate; registry was not changed", file=sys.stderr)
+                return 1
+            write_registry(registry_path, registry)
+        State.delete(name)
+        print(f"Created instance: {name}")
+        print(f"Registry: {registry_path}")
+        return 0
+    except Exception as error:
+        print(f"instance-create: {error}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

@@ -10,9 +10,9 @@ x-local-qemu-medium: &local_qemu_medium
   cpus: 2
   memory_mb: 4096
   # QEMU/cloud-image boxes start with a small root disk. The full local dev
-  # desktop smoke stack needs more room than the default image provides, but
-  # should stay modest enough not to starve the host.
-  disk_gb: 64
+  # desktop smoke stack may need more room via an explicit override, but the
+  # default should stay small enough that local experiments are cheap.
+  disk_gb: 20
 
 x-ttl-default: &ttl_default
   ttl_hours: 168
@@ -33,6 +33,18 @@ machines:
       instance_type: t3.large
       disk_gb: 80
       root_volume_type: gp3
+      use_spot: false
+
+  - name: aws-gpu-g4dn-spot # 4 vCPUs, 16 GiB RAM, 125 GB NVMe, 1 NVIDIA T4 GPU (16 GB VRAM), spot
+    provider: aws
+    kind: vm
+    supports:
+      arches: [amd64]
+    defaults:
+      instance_type: g4dn.xlarge
+      disk_gb: 180
+      root_volume_type: gp3
+      use_spot: true
 
   - name: aws-gpu-g5
     provider: aws
@@ -42,6 +54,7 @@ machines:
     defaults:
       instance_type: g5.2xlarge
       disk_gb: 200
+      use_spot: false
 
   - name: gcp-cheap-x86
     provider: gcp
@@ -139,13 +152,15 @@ oses:
     family: ubuntu
     version: "26.04"
     arch: arm64
-    vagrant_box: cloud-image/ubuntu-26.04
+    cloud_image_url: https://cloud-images.ubuntu.com/releases/26.04/release/ubuntu-26.04-server-cloudimg-arm64.img
+    cloud_image_sha256: 5e091e27d60116efbb0c743b8dd5cb2d15618e414ef04db0817ed43c8e2d7c7b
     metal_image: ubuntu-26.04-arm64
 
   - id: windows-server-2025
     family: windows
     version: "2025"
     arch: amd64
+    aws_ami_name_pattern: Windows_Server-2025-English-Full-Base-*
     vultr_os_id: 2514 # Windows 2025 Standard x64
 
 # -----------------------------------------------------------------------------
@@ -162,7 +177,7 @@ inits:
 
   - id: ssh-windows-powershell7
     os_family: windows
-    providers: [vultr]
+    providers: [aws, vultr]
 
 # -----------------------------------------------------------------------------
 # Workload package catalog

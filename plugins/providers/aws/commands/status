@@ -29,8 +29,21 @@ if [ -z "$STATE_JSON" ]; then
   VM_STATUS="not created"
 else
   RAW=$(eve_tf_attr "$STATE_JSON" "aws_instance.main" "instance_state")
+  # instance_state in terraform state is the last-applied value and is not
+  # refreshed, so a spot-reclaimed or out-of-band-terminated instance still
+  # reads "running" here. Verify the tracked instance against live AWS.
+  INSTANCE_ID=$(eve_tf_attr "$STATE_JSON" "aws_instance.main" "id")
+  if [ -n "$INSTANCE_ID" ] && command -v aws >/dev/null 2>&1; then
+    LIVE=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" \
+      ${AWS_PROFILE:+--profile "$AWS_PROFILE"} ${AWS_REGION:+--region "$AWS_REGION"} \
+      --query 'Reservations[].Instances[].State.Name' --output text 2>/dev/null || true)
+    # Empty result = the instance no longer exists (terminated and aged out).
+    RAW="${LIVE:-terminated}"
+  fi
   case "$RAW" in
     "") VM_STATUS="not created" ;;
+    stopped) VM_STATUS="$RAW" ;;
+    terminated|shutting-down) VM_STATUS="absent" ;;
     *) VM_STATUS="$RAW" ;;
   esac
 

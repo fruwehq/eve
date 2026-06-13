@@ -7,7 +7,7 @@ cd "$(git rev-parse --show-toplevel)"
 cache_dir="$(mktemp -d "${TMPDIR:-/tmp}/eve-python-cache.XXXXXX")"
 trap 'rm -rf "$cache_dir"' EXIT
 
-RUFF_CACHE_DIR="$cache_dir/ruff" poetry run ruff check scripts/eve-tui
+RUFF_CACHE_DIR="$cache_dir/ruff" poetry run ruff check eve_sdk scripts/eve-tui
 MYPY_CACHE_DIR="$cache_dir/mypy" poetry run mypy scripts/eve-tui
 
 poetry run pytest tests/python

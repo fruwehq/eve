@@ -79,7 +79,7 @@ Supported metadata:
 
 ```yaml
 supports:
-  engines: [terraform] # terraform|vagrant|metal
+  engines: [terraform] # terraform|qemu|metal
   kinds: [vm]          # vm|metal
 ```
 

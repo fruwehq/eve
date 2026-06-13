@@ -24,11 +24,9 @@ if [ "${1:-}" = "--self-test" ]; then
     '#!/bin/sh'
   )
   NEG_SHEBANGS=(
-    '#!/usr/bin/env ruby'
     '#!/usr/bin/env python'
     '#!/usr/bin/env python3'
     '#!/usr/bin/env zsh'
-    '#!/usr/bin/ruby'
     '#!/usr/bin/python'
   )
   ST_FAIL=0
@@ -106,7 +104,7 @@ for f in scripts/*; do
 done
 
 if [[ "$fail" -ne 0 ]]; then
-  printf '\nAdd to %s or move the logic into a provider plugin / port to Ruby.\n' "$ALLOWLIST" >&2
+  printf '\nAdd to %s or move the logic into a provider/plugin-specific command.\n' "$ALLOWLIST" >&2
   exit 1
 fi
 

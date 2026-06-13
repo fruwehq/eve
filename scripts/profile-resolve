@@ -84,75 +84,75 @@ if [ -z "$RESOLVED_JSON_INPUT" ] && [ ! -f "$CATALOG_PATH" ]; then
   exit 1
 fi
 
-if ! command -v ruby >/dev/null 2>&1; then
-  echo "ruby is required to parse YAML catalogs (missing ruby)" >&2
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "python3 is required to parse YAML catalogs (missing python3)" >&2
   exit 1
 fi
 
 if [ -n "$RESOLVED_JSON_INPUT" ]; then
   CATALOG_JSON=""
 else
-  CATALOG_JSON="$(ruby -rjson -ryaml -e '
-  def load_any(path)
-    return nil unless File.exist?(path)
-    ext = File.extname(path).downcase
-    case ext
-    when ".yaml", ".yml"
-      YAML.safe_load(File.read(path), permitted_classes: [], aliases: true) || {}
-    when ".json"
-      JSON.parse(File.read(path))
-    else
-      raise "Unsupported catalog format: #{path} (expected .yaml/.yml/.json)"
-    end
-  end
+  CATALOG_JSON="$(python3 - "$CATALOG_PATH" "$LOCAL_CATALOG_PATH" <<'PY'
+import json
+import sys
+from pathlib import Path
 
-  def deep_merge(a, b)
-    return b if a.nil?
-    return a if b.nil?
-    if a.is_a?(Hash) && b.is_a?(Hash)
-      out = a.dup
-      b.each do |k, v|
-        out[k] = deep_merge(out[k], v)
-      end
-      out
-    else
-      b
-    end
-  end
+import yaml
 
-  def merge_by_key(base_arr, over_arr, key)
-    base_arr ||= []
-    over_arr ||= []
-    out = base_arr.map { |x| x.dup }
 
-    over_arr.each do |entry|
-      next unless entry.is_a?(Hash)
-      idx = out.index { |x| x.is_a?(Hash) && x[key] == entry[key] }
-      if idx
-        out[idx] = deep_merge(out[idx], entry)
-      else
-        out << entry
-      end
-    end
-    out
-  end
+def load_any(raw_path):
+    path = Path(raw_path)
+    if not path.exists():
+        return {}
+    if path.suffix.lower() in {".yaml", ".yml"}:
+        return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    if path.suffix.lower() == ".json":
+        return json.loads(path.read_text(encoding="utf-8"))
+    raise SystemExit(f"Unsupported catalog format: {path} (expected .yaml/.yml/.json)")
 
-  base = load_any(ARGV[0]) || {}
-  over = load_any(ARGV[1]) || {}
 
-  merged = deep_merge(base, over)
+def deep_merge(base, override):
+    if base is None:
+        return override
+    if override is None:
+        return base
+    if isinstance(base, dict) and isinstance(override, dict):
+        merged = dict(base)
+        for key, value in override.items():
+            merged[key] = deep_merge(merged.get(key), value)
+        return merged
+    return override
 
-  # section-aware list merging by logical identity keys
-  merged["machines"]  = merge_by_key(base["machines"],  over["machines"],  "name")
-  merged["oses"]      = merge_by_key(base["oses"],      over["oses"],      "id")
-  merged["inits"]     = merge_by_key(base["inits"],     over["inits"],     "id")
-  merged["packages"]  = merge_by_key(base["packages"],  over["packages"],  "id")
-  merged["bundles"]   = merge_by_key(base["bundles"],   over["bundles"],   "id")
-  merged["locations"] = merge_by_key(base["locations"], over["locations"], "name")
-  merged["profiles"]  = merge_by_key(base["profiles"],  over["profiles"],  "name")
 
-  puts JSON.generate(merged)
-' "$CATALOG_PATH" "$LOCAL_CATALOG_PATH")"
+def merge_by_key(base_items, override_items, key):
+    merged = [dict(item) if isinstance(item, dict) else item for item in (base_items or [])]
+    for entry in override_items or []:
+        if not isinstance(entry, dict):
+            continue
+        index = next((i for i, item in enumerate(merged) if isinstance(item, dict) and item.get(key) == entry.get(key)), None)
+        if index is None:
+            merged.append(entry)
+        else:
+            merged[index] = deep_merge(merged[index], entry)
+    return merged
+
+
+base = load_any(sys.argv[1])
+override = load_any(sys.argv[2])
+catalog = deep_merge(base, override)
+for section, key in {
+    "machines": "name",
+    "oses": "id",
+    "inits": "id",
+    "packages": "id",
+    "bundles": "id",
+    "locations": "name",
+    "profiles": "name",
+}.items():
+    catalog[section] = merge_by_key(base.get(section), override.get(section), key)
+print(json.dumps(catalog))
+PY
+)"
 fi
 
 # shellcheck disable=SC2016
@@ -217,6 +217,7 @@ else
     bundle_packages: $bundle_packages,
     engine: (
       if ($m.kind // "") == "metal" then "metal"
+      elif (($m.provider // "") == "local-qemu") then "qemu"
       elif (($m.provider // "") | startswith("local-")) then "vagrant"
       else "terraform"
       end
@@ -289,6 +290,7 @@ emit_env() {
     "VM_DISK_TYPE=" + (.machine.defaults.disk_type // ""),
     "VM_INSTANCE_TYPE=" + (.machine.defaults.instance_type // ""),
     "VM_ROOT_VOLUME_TYPE=" + (.machine.defaults.root_volume_type // ""),
+    "VM_USE_SPOT=" + (if (.machine.defaults | has("use_spot")) then (.machine.defaults.use_spot | tostring) else "" end),
     "GCP_IMAGE_FAMILY=" + (.os.gcp_image_family // ""),
     "GCP_IMAGE_PROJECT=" + (.os.gcp_image_project // ""),
     "VULTR_OS_ID=" + ((.os.vultr_os_id // 0) | tostring),
@@ -296,7 +298,7 @@ emit_env() {
     "LOCATION_AVAILABILITY_ZONE=" + ($locp.availability_zone // ""),
     "LOCATION_ZONE=" + ($locp.zone // ""),
     "SSH_USER=" + provision_user($locp),
-    "CLOUD_IMAGE_URL=" + (.os.cloud_image_url // ""),
+    "CLOUD_IMAGE_URL=" + (.machine.provider as $p | if (["local-qemu","truenas"] | index($p)) then (.os.cloud_image_url // "") else "" end),
     "HUMAN_USER_NAME=" + human_user($locp),
     "PROVISION_USER_NAME=" + provision_user($locp),
     "RASPBERRY_PI_HOST=" + (
@@ -335,7 +337,7 @@ emit_vagrant() {
     ($r.os.arch // "amd64") as $arch |
     (if ($r.os.arch // "amd64") == "arm64" then "aarch64" else "x86_64" end) as $qemu_arch |
     $r.profile.name as $name |
-    (($r.machine.defaults.cpus // 2) | tostring) as $cpus |
+    (($r.machine.defaults.cpu_cores // $r.machine.defaults.cpus // 2) | tostring) as $cpus |
     (($r.machine.defaults.memory_mb // 4096)) as $memory_mb |
     ($memory_mb | tostring) as $memory |
     (((($memory_mb / 1024) | floor) | tostring) + "G") as $qemu_memory |
@@ -430,14 +432,21 @@ emit_vagrant() {
 
 PROVIDER_FROM_RESOLVE="$(echo "$RESOLVED_JSON" | jq -r '.machine.provider // empty' 2>/dev/null || true)"
 if [ -n "$PROVIDER_FROM_RESOLVE" ]; then
-  SECRETS_EXPORT="$(ruby -I "$(dirname "$0")/../core" -r sdk -e '
-    require "shellwords"
-    secrets = Eve::SDK::Secrets.read(ARGV[0])
-    secrets.each do |k, v|
-      next if v.nil? || ENV.key?(k)
-      puts "export #{k}=#{Shellwords.escape(v)}"
-    end
-  ' "$PROVIDER_FROM_RESOLVE")"
+  SECRETS_EXPORT="$(python3 - "$PROVIDER_FROM_RESOLVE" <<'PY'
+import os
+import shlex
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path.cwd()))
+from eve_sdk.secrets import Secrets
+
+for key, value in Secrets.read(sys.argv[1]).items():
+    if value is None or key in os.environ:
+        continue
+    print(f"export {key}={shlex.quote(str(value))}")
+PY
+)"
   if [ -n "$SECRETS_EXPORT" ]; then
     eval "$SECRETS_EXPORT"
   fi

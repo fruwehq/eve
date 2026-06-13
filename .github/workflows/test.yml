@@ -10,6 +10,7 @@ on:
 
 jobs:
   test:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     strategy:
       fail-fast: false
       matrix:
@@ -19,6 +20,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0 # only used in PRs; don't use in default branches. This is used to identify the delta
+
+      - name: Initialize timing summary
+        run: |
+          printf 'EVE_CI_TIMINGS=%s/eve-ci-timings.tsv\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+          : > "$RUNNER_TEMP/eve-ci-timings.tsv"
 
       - name: Install Terraform
         uses: hashicorp/setup-terraform@v3
@@ -31,6 +37,15 @@ jobs:
           TERRAMATE_VERSION: "0.17.0"
         run: |
           set -euo pipefail
+          step_name="Install Terramate"
+          start="$(date +%s)"
+          finish_timing() {
+            status="$?"
+            end="$(date +%s)"
+            printf '%s\t%s\t%s\n' "$step_name" "$((end - start))" "$status" >> "$EVE_CI_TIMINGS"
+            exit "$status"
+          }
+          trap finish_timing EXIT
           case "$(uname -s)" in
             Darwin) tool_os=darwin ;;
             Linux) tool_os=linux ;;
@@ -50,52 +65,219 @@ jobs:
       - name: Install Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          python-version: "3.14"
 
       - name: Install Ubuntu packages
         if: runner.os == 'Linux'
         run: |
+          set -euo pipefail
+          step_name="Install Ubuntu packages"
+          start="$(date +%s)"
+          finish_timing() {
+            status="$?"
+            end="$(date +%s)"
+            printf '%s\t%s\t%s\n' "$step_name" "$((end - start))" "$status" >> "$EVE_CI_TIMINGS"
+            exit "$status"
+          }
+          trap finish_timing EXIT
           sudo apt-get update -y
           sudo apt-get install -y --no-install-recommends ca-certificates curl gnupg jq openssh-client ripgrep shellcheck sshpass yq
 
       - name: Install macOS packages
         if: runner.os == 'macOS'
-        run: brew install jq ripgrep shellcheck yq
-
-      - name: Install Ruby
-        uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: "3.3"
-          bundler-cache: true
+        run: |
+          set -euo pipefail
+          step_name="Install macOS packages"
+          start="$(date +%s)"
+          finish_timing() {
+            status="$?"
+            end="$(date +%s)"
+            printf '%s\t%s\t%s\n' "$step_name" "$((end - start))" "$status" >> "$EVE_CI_TIMINGS"
+            exit "$status"
+          }
+          trap finish_timing EXIT
+          brew install jq ripgrep shellcheck yq
 
       - name: Install Python dependencies
         run: |
+          set -euo pipefail
+          step_name="Install Python dependencies"
+          start="$(date +%s)"
+          finish_timing() {
+            status="$?"
+            end="$(date +%s)"
+            printf '%s\t%s\t%s\n' "$step_name" "$((end - start))" "$status" >> "$EVE_CI_TIMINGS"
+            exit "$status"
+          }
+          trap finish_timing EXIT
           python -m pip install --upgrade poetry
           poetry install --no-interaction --no-root
 
       - name: Generate Terramate code
-        run: terramate generate
+        run: |
+          set -euo pipefail
+          step_name="Generate Terramate code"
+          start="$(date +%s)"
+          finish_timing() {
+            status="$?"
+            end="$(date +%s)"
+            printf '%s\t%s\t%s\n' "$step_name" "$((end - start))" "$status" >> "$EVE_CI_TIMINGS"
+            exit "$status"
+          }
+          trap finish_timing EXIT
+          terramate generate
 
       - name: Run provision runner smoke
-        run: make test.provision-runner
+        run: |
+          set -euo pipefail
+          step_name="Run provision runner smoke"
+          start="$(date +%s)"
+          finish_timing() {
+            status="$?"
+            end="$(date +%s)"
+            printf '%s\t%s\t%s\n' "$step_name" "$((end - start))" "$status" >> "$EVE_CI_TIMINGS"
+            exit "$status"
+          }
+          trap finish_timing EXIT
+          poetry run make test.provision-runner
 
       - name: Run make test
-        run: make test
+        env:
+          EVE_SKIP_DOCKER_SMOKE: ${{ runner.os == 'Linux' && '1' || '' }}
+        run: |
+          set -euo pipefail
+          step_name="Run make test"
+          start="$(date +%s)"
+          finish_timing() {
+            status="$?"
+            end="$(date +%s)"
+            printf '%s\t%s\t%s\n' "$step_name" "$((end - start))" "$status" >> "$EVE_CI_TIMINGS"
+            exit "$status"
+          }
+          trap finish_timing EXIT
+          poetry run make test
+
+      - name: Timing summary
+        if: always()
+        run: |
+          set -euo pipefail
+          {
+            echo "### Timing summary"
+            echo
+            echo "| Step | Seconds | Exit |"
+            echo "| --- | ---: | ---: |"
+            if [ -s "$EVE_CI_TIMINGS" ]; then
+              while IFS="$(printf '\t')" read -r step seconds status; do
+                echo "| ${step} | ${seconds} | ${status} |"
+              done < "$EVE_CI_TIMINGS"
+            else
+              echo "| no timed shell steps completed | 0 | 0 |"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
   docker-runtime-slim:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
+      - name: Initialize timing summary
+        run: |
+          printf 'EVE_CI_TIMINGS=%s/eve-ci-timings.tsv\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+          : > "$RUNNER_TEMP/eve-ci-timings.tsv"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Compute slim runtime cache scope
+        run: |
+          set -euo pipefail
+          case "$(uname -s)" in
+            Linux) checksum_tool="sha256sum" ;;
+            Darwin) checksum_tool="shasum -a 256" ;;
+            *) echo "unsupported OS for cache scope: $(uname -s)" >&2; exit 2 ;;
+          esac
+          lock_hash="$(cat docker/Dockerfile poetry.lock | ${checksum_tool} | awk '{print $1}')"
+          printf 'EVE_DOCKER_CACHE_SCOPE=slim-%s-%s-%s\n' "${RUNNER_OS}" "${RUNNER_ARCH}" "${lock_hash}" >> "$GITHUB_ENV"
+
+      - name: Probe slim runtime cache key
+        id: slim-cache-probe
+        uses: actions/cache/restore@v4
+        with:
+          key: buildkit-slim-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('docker/Dockerfile', 'poetry.lock') }}
+          lookup-only: true
+          path: ${{ runner.temp }}/eve-buildkit-cache-marker
+
+      - name: Report Docker cache status
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.slim-cache-probe.outputs.cache-hit }}" = "true" ]; then
+            echo "cache hit: BuildKit cache key buildkit-${EVE_DOCKER_CACHE_SCOPE}"
+          else
+            echo "cache miss: rebuilding"
+          fi
+
       - name: Build slim runtime image
-        run: docker build -f docker/Dockerfile --target runtime-slim -t eve/eve:slim -t eve/eve:latest .
+        run: |
+          set -euo pipefail
+          step_name="Build slim runtime image"
+          start="$(date +%s)"
+          finish_timing() {
+            status="$?"
+            end="$(date +%s)"
+            printf '%s\t%s\t%s\n' "$step_name" "$((end - start))" "$status" >> "$EVE_CI_TIMINGS"
+            exit "$status"
+          }
+          trap finish_timing EXIT
+          docker buildx build \
+            --file docker/Dockerfile \
+            --target runtime-slim \
+            --tag eve/eve:slim \
+            --tag eve/eve:latest \
+            --load \
+            --cache-from "type=gha,scope=${EVE_DOCKER_CACHE_SCOPE}" \
+            --cache-to "type=gha,mode=max,scope=${EVE_DOCKER_CACHE_SCOPE}" \
+            .
+
+      - name: Write Docker cache marker
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/eve-buildkit-cache-marker"
+          printf '%s\n' "$EVE_DOCKER_CACHE_SCOPE" > "$RUNNER_TEMP/eve-buildkit-cache-marker/scope"
+
+      - name: Save Docker cache marker
+        if: success() && steps.slim-cache-probe.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          key: buildkit-slim-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('docker/Dockerfile', 'poetry.lock') }}
+          path: ${{ runner.temp }}/eve-buildkit-cache-marker
 
       - name: Smoke slim runtime image
-        run: docker run --rm eve/eve:slim make help
+        run: |
+          set -euo pipefail
+          step_name="Smoke slim runtime image"
+          start="$(date +%s)"
+          finish_timing() {
+            status="$?"
+            end="$(date +%s)"
+            printf '%s\t%s\t%s\n' "$step_name" "$((end - start))" "$status" >> "$EVE_CI_TIMINGS"
+            exit "$status"
+          }
+          trap finish_timing EXIT
+          docker run --rm eve/eve:slim make help
 
       - name: Report slim image size
         run: |
           set -euo pipefail
+          step_name="Report slim image size"
+          start="$(date +%s)"
+          finish_timing() {
+            status="$?"
+            end="$(date +%s)"
+            printf '%s\t%s\t%s\n' "$step_name" "$((end - start))" "$status" >> "$EVE_CI_TIMINGS"
+            exit "$status"
+          }
+          trap finish_timing EXIT
           inspect_size="$(docker image inspect eve/eve:slim --format '{{.Size}}')"
           compressed_size="$(docker save eve/eve:slim | gzip -c | wc -c | tr -d ' ')"
           echo "slim image: uncompressed=${inspect_size} compressed=${compressed_size}"
@@ -108,11 +290,145 @@ jobs:
             exit 1
           fi
 
+      - name: Timing summary
+        if: always()
+        run: |
+          set -euo pipefail
+          {
+            echo "### Timing summary"
+            echo
+            echo "| Step | Seconds | Exit |"
+            echo "| --- | ---: | ---: |"
+            if [ -s "$EVE_CI_TIMINGS" ]; then
+              while IFS="$(printf '\t')" read -r step seconds status; do
+                echo "| ${step} | ${seconds} | ${status} |"
+              done < "$EVE_CI_TIMINGS"
+            else
+              echo "| no timed shell steps completed | 0 | 0 |"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
   docker-runtime-full:
     if: github.event_name == 'schedule'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
+      - name: Initialize timing summary
+        run: |
+          printf 'EVE_CI_TIMINGS=%s/eve-ci-timings.tsv\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+          : > "$RUNNER_TEMP/eve-ci-timings.tsv"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Compute full runtime cache scope
+        run: |
+          set -euo pipefail
+          case "$(uname -s)" in
+            Linux) checksum_tool="sha256sum" ;;
+            Darwin) checksum_tool="shasum -a 256" ;;
+            *) echo "unsupported OS for cache scope: $(uname -s)" >&2; exit 2 ;;
+          esac
+          lock_hash="$(cat docker/Dockerfile poetry.lock | ${checksum_tool} | awk '{print $1}')"
+          printf 'EVE_DOCKER_FULL_CACHE_SCOPE=full-%s-%s-%s\n' "${RUNNER_OS}" "${RUNNER_ARCH}" "${lock_hash}" >> "$GITHUB_ENV"
+
+      - name: Probe full runtime cache key
+        id: full-cache-probe
+        uses: actions/cache/restore@v4
+        with:
+          key: buildkit-full-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('docker/Dockerfile', 'poetry.lock') }}
+          lookup-only: true
+          path: ${{ runner.temp }}/eve-full-buildkit-cache-marker
+
+      - name: Report Docker cache status
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.full-cache-probe.outputs.cache-hit }}" = "true" ]; then
+            echo "cache hit: BuildKit cache key buildkit-${EVE_DOCKER_FULL_CACHE_SCOPE}"
+          else
+            echo "cache miss: rebuilding"
+          fi
+
       - name: Build full runtime image
-        run: docker build -f docker/Dockerfile --target runtime-full -t eve/eve:full .
+        run: |
+          set -euo pipefail
+          step_name="Build full runtime image"
+          start="$(date +%s)"
+          finish_timing() {
+            status="$?"
+            end="$(date +%s)"
+            printf '%s\t%s\t%s\n' "$step_name" "$((end - start))" "$status" >> "$EVE_CI_TIMINGS"
+            exit "$status"
+          }
+          trap finish_timing EXIT
+          docker buildx build \
+            --platform linux/amd64 \
+            --file docker/Dockerfile \
+            --target runtime-full \
+            --tag eve/eve:full \
+            --load \
+            --cache-from "type=gha,scope=${EVE_DOCKER_FULL_CACHE_SCOPE}" \
+            --cache-to "type=gha,mode=max,scope=${EVE_DOCKER_FULL_CACHE_SCOPE}" \
+            .
+
+      - name: Write Docker cache marker
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/eve-full-buildkit-cache-marker"
+          printf '%s\n' "$EVE_DOCKER_FULL_CACHE_SCOPE" > "$RUNNER_TEMP/eve-full-buildkit-cache-marker/scope"
+
+      - name: Save Docker cache marker
+        if: success() && steps.full-cache-probe.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          key: buildkit-full-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('docker/Dockerfile', 'poetry.lock') }}
+          path: ${{ runner.temp }}/eve-full-buildkit-cache-marker
+
+      - name: Smoke full runtime image
+        run: |
+          set -euo pipefail
+          step_name="Smoke full runtime image"
+          start="$(date +%s)"
+          finish_timing() {
+            status="$?"
+            end="$(date +%s)"
+            printf '%s\t%s\t%s\n' "$step_name" "$((end - start))" "$status" >> "$EVE_CI_TIMINGS"
+            exit "$status"
+          }
+          trap finish_timing EXIT
+          docker run --rm --platform linux/amd64 eve/eve:full make help
+
+      - name: Report full image size
+        run: |
+          set -euo pipefail
+          step_name="Report full image size"
+          start="$(date +%s)"
+          finish_timing() {
+            status="$?"
+            end="$(date +%s)"
+            printf '%s\t%s\t%s\n' "$step_name" "$((end - start))" "$status" >> "$EVE_CI_TIMINGS"
+            exit "$status"
+          }
+          trap finish_timing EXIT
+          inspect_size="$(docker image inspect eve/eve:full --format '{{.Size}}')"
+          compressed_size="$(docker save eve/eve:full | gzip -c | wc -c | tr -d ' ')"
+          echo "full image: uncompressed=${inspect_size} compressed=${compressed_size}"
+
+      - name: Timing summary
+        if: always()
+        run: |
+          set -euo pipefail
+          {
+            echo "### Timing summary"
+            echo
+            echo "| Step | Seconds | Exit |"
+            echo "| --- | ---: | ---: |"
+            if [ -s "$EVE_CI_TIMINGS" ]; then
+              while IFS="$(printf '\t')" read -r step seconds status; do
+                echo "| ${step} | ${seconds} | ${status} |"
+              done < "$EVE_CI_TIMINGS"
+            else
+              echo "| no timed shell steps completed | 0 | 0 |"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

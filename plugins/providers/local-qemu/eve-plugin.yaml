@@ -3,17 +3,17 @@ kind: provider
 id: local-qemu
 display_name: Local QEMU
 commands:
-  resolve: {exec: commands/provider-command, args: [resolve]}
+  resolve: {exec: commands/local-qemu, args: [resolve]}
   init: {exec: commands/init}
-  plan: {exec: commands/up, args: [--plan]}
-  up: {exec: commands/up}
-  down: {exec: commands/down}
-  start: {exec: commands/start}
-  stop: {exec: commands/stop}
-  status: {exec: commands/status}
-  ip: {exec: commands/ip}
-  ssh: {exec: commands/ssh}
-  validate: {exec: ../_common/commands/validate-os, args: [all, Vagrant box, vagrant_box]}
+  plan: {exec: commands/local-qemu, args: [plan]}
+  up: {exec: commands/local-qemu, args: [up]}
+  down: {exec: commands/local-qemu, args: [down]}
+  start: {exec: commands/local-qemu, args: [start]}
+  stop: {exec: commands/local-qemu, args: [stop]}
+  status: {exec: commands/local-qemu, args: [status]}
+  ip: {exec: commands/local-qemu, args: [ip]}
+  ssh: {exec: commands/local-qemu, args: [ssh]}
+  validate: {exec: ../_common/commands/validate-os, args: [all, cloud image URL, cloud_image_url]}
 actions:
   - id: status-details
     label: Status
@@ -26,8 +26,8 @@ actions:
     target: provider.init
 access:
   ubuntu:
-    bootstrap_user: {env: VM_USER_NAME}
-    provision_user: {env: VM_USER_NAME}
+    bootstrap_user: {env: VM_USER_NAME, value: ubuntu}
+    provision_user: {env: VM_USER_NAME, value: ubuntu}
     human_user: {env: VM_USER_NAME, fallback: provision_user}
 config_schema:
   config:
@@ -35,6 +35,6 @@ config_schema:
       type: boolean
       description: "Set to true to open the hypervisor console window."
 supports:
-  engines: [vagrant]
+  engines: [qemu]
   kinds: [vm]
-env: [VAGRANT_SHOW_CONSOLE]
+env: []
