@@ -244,21 +244,27 @@ def verify_checksum(path: Path, expected: str) -> None:
         )
 
 
+def validate_image_metadata(data: dict[str, Any]) -> None:
+    url = data["os"].get("cloud_image_url")
+    if not url:
+        raise RuntimeError(f"OS {data['os']['id']} has no cloud_image_url")
+    sha = data["os"].get("cloud_image_sha256")
+    if not sha:
+        raise RuntimeError(
+            f"OS {data['os']['id']} has no cloud_image_sha256; "
+            f"add the SHA-256 hash to config/catalog.yaml before using {PROVIDER}"
+        )
+
+
 def ensure_disk(data: dict[str, Any]) -> Path:
     instance = data["instance"]["name"]
     workdir = qemu_dir(instance)
     disk = workdir / "disk.qcow2"
     if disk.exists():
         return disk
-    url = data["os"].get("cloud_image_url")
-    if not url:
-        raise RuntimeError(f"OS {data['os']['id']} has no cloud_image_url")
-    expected_sha256 = data["os"].get("cloud_image_sha256")
-    if not expected_sha256:
-        raise RuntimeError(
-            f"OS {data['os']['id']} has no cloud_image_sha256; "
-            f"add the SHA-256 hash to config/catalog.yaml before using {PROVIDER}"
-        )
+    validate_image_metadata(data)
+    url = data["os"]["cloud_image_url"]
+    expected_sha256 = data["os"]["cloud_image_sha256"]
     base = workdir / "base.qcow2"
     workdir.mkdir(parents=True, exist_ok=True)
     if not base.exists():
@@ -363,6 +369,7 @@ def cmd_up(data: dict[str, Any]) -> int:
     if state_for(instance) == "running":
         print(f"[{PROVIDER}] instance already running: {instance}")
         return 0
+    validate_image_metadata(data)
     port = ssh_port(instance)
     args = qemu_args(data, port)
     print(f"[{PROVIDER}] starting {instance} on SSH port {port}")
