@@ -39,12 +39,15 @@ def main(argv: list[str]) -> int:
     registry_path = Path(os.environ.get("EVE_INSTANCE_REGISTRY") or default_registry_path()).resolve()
     emit = "json"
     aggregate = False
+    statuses_only = False
     observe = False
     args = list(argv)
     while args:
         arg = args.pop(0)
         if arg == "--aggregate":
             aggregate = True
+        elif arg == "--statuses":
+            statuses_only = True
         elif arg == "--observe":
             observe = True
         elif arg == "--instance" and args:
@@ -60,7 +63,7 @@ def main(argv: list[str]) -> int:
             usage()
             return 2
     try:
-        if aggregate:
+        if aggregate or statuses_only:
             registry = load_any(registry_path)
             statuses: dict[str, dict[str, object]] = {}
             for instance in registry.get("instances", []):
@@ -69,11 +72,21 @@ def main(argv: list[str]) -> int:
                 name = str(instance["name"])
                 state = State.read(name)
                 observed = state.get("observed_state", {})
-                statuses[name] = state_machine.status_with_observed_state(
-                    {"state": state, "observed_state": observed},
+                status = state_machine.status_with_observed_state(
+                    {"instance": instance, "state": state, "observed_state": observed},
                     {"observed_state": observed},
                 )
-            print(json.dumps({"aggregate": state_machine.aggregate_summary(statuses)}, indent=2))
+                inner = status.get("state")
+                if isinstance(inner, dict):
+                    # The list renders effective_provider_state, which is computed
+                    # rather than stored; add it so this fast (no-resolve) read is a
+                    # drop-in for rendering the instance table.
+                    inner["effective_provider_state"] = state_machine.effective_provider_state(inner)
+                statuses[name] = status
+            if statuses_only:
+                print(json.dumps({"statuses": statuses}, separators=(",", ":")))
+            else:
+                print(json.dumps({"aggregate": state_machine.aggregate_summary(statuses)}, indent=2))
             return 0
         if not instance_name:
             usage()

@@ -12,7 +12,6 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from eve_sdk.secrets import Secrets, SecretsError  # noqa: E402
 from eve_sdk.workdir import Workdir  # noqa: E402
 
 
@@ -86,45 +85,26 @@ def build_report() -> dict[str, Any]:
     config = load_yaml(Workdir.config_path())
     missing: list[dict[str, str]] = []
 
-    for manifest in sorted((ROOT / "plugins/providers").glob("*/eve-plugin.yaml")):
-        data = load_yaml(manifest)
-        if data.get("kind") != "provider":
+    for section_id in sorted(defaults.keys()):
+        section_defaults = defaults.get(section_id)
+        if not isinstance(section_defaults, dict):
             continue
-        provider_id = str(data["id"])
-        schema = data.get("config_schema") or {}
-        for field, spec in (schema.get("config") or {}).items():
-            if not isinstance(spec, dict) or not spec.get("required"):
+        section_config = config.get(section_id)
+        if not isinstance(section_config, dict):
+            section_config = {}
+        for field, value in section_defaults.items():
+            if not str(value).startswith("REQUIRED_"):
                 continue
-            provider_key = provider_id.replace("-", "_")
-            config_section = config.get(provider_key) if isinstance(config.get(provider_key), dict) else {}
-            default_section = defaults.get(provider_key) if isinstance(defaults.get(provider_key), dict) else {}
-            config_val = config_section.get(field)
-            default_val = default_section.get(field)
-            if not str(config_val or "").strip() and not str(default_val or "").strip():
+            if not str(section_config.get(field, "")).strip():
                 missing.append(
                     {
-                        "provider": provider_id,
+                        "provider": section_id,
                         "scope": "config",
                         "field": str(field),
-                        "description": str(spec.get("description") or ""),
+                        "description": f"Global required setting: {section_id}.{field}",
                     }
                 )
-        for field, spec in (schema.get("secrets") or {}).items():
-            if not isinstance(spec, dict) or not spec.get("required"):
-                continue
-            try:
-                keys = Secrets.keys_set(provider_id)
-            except SecretsError:
-                keys = []
-            if field not in keys:
-                missing.append(
-                    {
-                        "provider": provider_id,
-                        "scope": "secrets",
-                        "field": str(field),
-                        "description": str(spec.get("description") or ""),
-                    }
-                )
+
     return {"missing": missing, "warnings": portability_warnings(), "ok": not missing}
 
 

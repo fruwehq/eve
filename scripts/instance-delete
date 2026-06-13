@@ -123,11 +123,15 @@ def main(argv: list[str]) -> int:
             if not force:
                 state_path = Workdir.state_path(instance_name)
                 if state_path.exists():
-                    provider_state = State.read(instance_name).get("provider_state")
+                    state = State.read(instance_name)
+                    provider_state = state.get("provider_state")
                     if provider_state and provider_state not in {"absent", "unknown"}:
-                        suffix = " PURGE=1" if purge else ""
-                        print(
-                            f"""instance-delete: refusing to delete {instance_name}; provider_state={provider_state}.
+                        observed = state.get("observed_state", {})
+                        observed_status = observed.get("provider_status") if isinstance(observed, dict) else None
+                        if observed_status != "absent":
+                            suffix = " PURGE=1" if purge else ""
+                            print(
+                                f"""instance-delete: refusing to delete {instance_name}; provider_state={provider_state}.
 Provider resources may still exist (cloud VM, terraform state, etc.).
 
 Recommended:
@@ -136,9 +140,9 @@ Recommended:
 
 Or bypass this check if you have already destroyed the cloud side:
   make instance.delete INSTANCE={instance_name}{suffix} FORCE=1""",
-                            file=sys.stderr,
-                        )
-                        return 1
+                                file=sys.stderr,
+                            )
+                            return 1
             if purge:
                 paths = run_json(
                     str(ROOT / "scripts/instance-paths"),

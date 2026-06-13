@@ -249,7 +249,7 @@ EOF
           ;;
       esac
     fi
-    : "${EPHEMERAL_SUNSHINE_PASSWORD:?set EPHEMERAL_SUNSHINE_PASSWORD in .env.local}"
+    : "${EPHEMERAL_SUNSHINE_PASSWORD:?set EPHEMERAL_SUNSHINE_PASSWORD via config-save or your shell}"
 
     mkdir -p ./tmp
     jq -n \

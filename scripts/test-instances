@@ -203,6 +203,126 @@ else
   FAIL=$((FAIL + 1))
 fi
 
+qemu_cpu_overlay="$tmp_overlay_dir/qemu-cpu-dev.catalog.local.yaml"
+qemu_cpu_plan="$tmp_overlay_dir/qemu-cpu-dev.plan"
+if ./scripts/instance-create \
+  --registry "$tmp_registry" \
+  --instance qemu-cpu-dev \
+  --machine local-qemu-medium \
+  --os ubuntu-26.04-arm64 \
+  --init ssh-ubuntu-cloud-init \
+  --location tokyo \
+  --cpu-cores 4 >/dev/null &&
+  ./scripts/instance-profile-overlay --registry "$tmp_registry" --instance qemu-cpu-dev --output "$qemu_cpu_overlay" &&
+  EVE_CATALOG_LOCAL="$qemu_cpu_overlay" EVE_INSTANCE_REGISTRY="$tmp_registry" EVE_INSTANCE_WORKDIR="$tmp_overlay_dir/qemu-work" \
+    ./scripts/provider-dispatch --instance qemu-cpu-dev --command plan >"$qemu_cpu_plan" &&
+  grep -qx '\[local-qemu\] cpus=4' "$qemu_cpu_plan" &&
+  grep -qx '\[local-qemu\] disk_gb=20' "$qemu_cpu_plan"; then
+  printf '  [OK] local-qemu plan honors CPU override and 20G default disk\n'
+else
+  printf '  [FAIL] local-qemu plan CPU/default disk mismatch\n' >&2
+  sed -n '1,80p' "$qemu_cpu_plan" >&2 || true
+  FAIL=$((FAIL + 1))
+fi
+
+kvm_accel_result="$(python3 <<'PYEOF' 2>/dev/null
+import os
+from pathlib import Path
+_orig_exists = Path.exists
+_orig_access = os.access
+def _patched_exists(self):
+    if str(self) == "/dev/kvm":
+        return True
+    return _orig_exists(self)
+def _patched_access(path, mode):
+    if str(path) == "/dev/kvm":
+        return True
+    return _orig_access(path, mode)
+Path.exists = _patched_exists
+os.access = _patched_access
+if True:
+    kvm = Path("/dev/kvm")
+    if kvm.exists() and os.access(str(kvm), os.R_OK | os.W_OK):
+        print("kvm")
+    else:
+        print("tcg")
+PYEOF
+)"
+if [ "$kvm_accel_result" = "kvm" ]; then
+  printf '  [OK] local-qemu accel logic returns kvm when /dev/kvm is present\n'
+else
+  printf '  [FAIL] local-qemu accel logic did not return kvm (got: %s)\n' "$kvm_accel_result" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+atomic_dl_dir="$(mktemp -d "${TMPDIR:-/tmp}/eve-atomic-dl-test.XXXXXX")"
+cat >"$atomic_dl_dir/serve-bad" <<'PY'
+import http.server, sys
+class Handler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-Length", "999999999")
+        self.end_headers()
+        self.wfile.write(b"truncated")
+        self.close_connection = True
+    def log_message(self, *args):
+        pass
+http.server.HTTPServer(("127.0.0.1", int(sys.argv[1])), Handler).handle_request()
+PY
+cat >"$atomic_dl_dir/rewrite.py" <<'PY'
+import json, sys
+d = json.load(sys.stdin)
+d["os"]["cloud_image_url"] = "http://127.0.0.1:18923/image.img"
+d["os"]["cloud_image_sha256"] = "a" * 64
+json.dump(d, sys.stdout, separators=(",", ":"))
+PY
+python3 "$atomic_dl_dir/serve-bad" 18923 &
+bad_http_pid=$!
+sleep 0.3
+atomic_json="$(./scripts/instance-resolve --registry "$FIXTURE" --instance dev-a --emit json | python3 "$atomic_dl_dir/rewrite.py")"
+if EVE_INSTANCE_WORKDIR="$atomic_dl_dir" EVE_RESOLVED_JSON="$atomic_json" \
+  python3 plugins/providers/local-qemu/commands/local-qemu up >/dev/null 2>&1; then
+  rc=0
+else
+  rc=$?
+fi
+kill $bad_http_pid 2>/dev/null || true
+wait $bad_http_pid 2>/dev/null || true
+base_file="$atomic_dl_dir/instances/dev-a/qemu/base.qcow2"
+partial_file="$atomic_dl_dir/instances/dev-a/qemu/base.qcow2.partial"
+if [ -f "$base_file" ]; then
+  printf '  [FAIL] atomic download left base.qcow2 after failed download\n' >&2
+  FAIL=$((FAIL + 1))
+elif [ -f "$partial_file" ]; then
+  printf '  [FAIL] atomic download left .partial file after failure\n' >&2
+  FAIL=$((FAIL + 1))
+elif [ "$rc" -eq 0 ]; then
+  printf '  [FAIL] atomic download unexpectedly succeeded\n' >&2
+  FAIL=$((FAIL + 1))
+else
+  printf '  [OK] failed download leaves no base.qcow2 or .partial artifact\n'
+fi
+rm -rf "$atomic_dl_dir"
+
+no_sha_dir="$(mktemp -d "${TMPDIR:-/tmp}/eve-no-sha-test.XXXXXX")"
+cat >"$no_sha_dir/strip_sha.py" <<'PY'
+import json, sys
+d = json.load(sys.stdin)
+d["os"].pop("cloud_image_sha256", None)
+json.dump(d, sys.stdout, separators=(",", ":"))
+PY
+no_sha_json="$(./scripts/instance-resolve --registry "$FIXTURE" --instance dev-a --emit json | python3 "$no_sha_dir/strip_sha.py")"
+no_sha_err="$(EVE_INSTANCE_WORKDIR="$no_sha_dir" EVE_RESOLVED_JSON="$no_sha_json" \
+  python3 plugins/providers/local-qemu/commands/local-qemu up 2>&1 || true)"
+if printf '%s' "$no_sha_err" | grep -q "cloud_image_sha256"; then
+  printf '  [OK] local-qemu rejects OS without cloud_image_sha256\n'
+else
+  printf '  [FAIL] local-qemu should reject OS without cloud_image_sha256\n' >&2
+  printf '%s\n' "$no_sha_err" >&2
+  FAIL=$((FAIL + 1))
+fi
+rm -rf "$no_sha_dir"
+
 if EVE_INSTANCE_REGISTRY="$tmp_registry" make --no-print-directory instance.validate INSTANCE=test-dev >/dev/null &&
   EVE_INSTANCE_REGISTRY="$tmp_registry" make --no-print-directory instance.list |
     grep -q '^test-dev'; then
@@ -355,7 +475,7 @@ fi
 
 cat >"$tmp_local_catalog" <<'YAML'
 oses:
-  - id: ubuntu-no-vagrant
+  - id: ubuntu-no-cloud-image
     family: ubuntu
     version: "26.04"
     arch: arm64
@@ -365,7 +485,7 @@ version: 1
 instances:
   - name: qemu-invalid-os
     machine: local-qemu-medium
-    os: ubuntu-no-vagrant
+    os: ubuntu-no-cloud-image
     init: ssh-ubuntu-cloud-init
     location: tokyo
     bundles: []
@@ -375,7 +495,7 @@ if EVE_CATALOG_LOCAL="$tmp_local_catalog" \
   ./scripts/instance-resolve --registry "$tmp_external_registry" --instance qemu-invalid-os --validate 2>"$invalid_output"; then
   printf '  [FAIL] instance resolver accepted provider-invalid OS metadata\n' >&2
   FAIL=$((FAIL + 1))
-elif grep -q 'OS/provider mismatch: OS ubuntu-no-vagrant has no Vagrant box' "$invalid_output"; then
+elif grep -q 'OS/provider mismatch: OS ubuntu-no-cloud-image has no cloud image URL' "$invalid_output"; then
   printf '  [OK] instance resolver runs provider OS metadata validation hook\n'
 else
   printf '  [FAIL] instance resolver provider OS validation hook mismatch\n' >&2
@@ -1374,29 +1494,16 @@ else
   printf '  [OK] instance-paths rejects unsafe instance name\n'
 fi
 
-ssh_workdir="$(mktemp -d "${TMPDIR:-/tmp}/eve-instance-ssh.XXXXXX")"
-mkdir -p "$ssh_workdir/dev-a" "$ssh_workdir/bin"
-ssh_workdir="$(cd "$ssh_workdir" && pwd -P)"
-EVE_INSTANCE_REGISTRY="$FIXTURE" EVE_INSTANCE_WORKDIR="$ssh_workdir" \
-  ./scripts/instance-profile-overlay --registry "$FIXTURE" --instance dev-a --output "$ssh_workdir/dev-a/catalog.local.yaml"
-touch "$ssh_workdir/dev-a/Vagrantfile"
-cat >"$ssh_workdir/bin/vagrant" <<'SH'
-#!/usr/bin/env sh
-pwd
-SH
-chmod +x "$ssh_workdir/bin/vagrant"
-ssh_pwd="$(
-  PATH="$ssh_workdir/bin:$PATH" \
-    EVE_CATALOG_LOCAL="$ssh_workdir/dev-a/catalog.local.yaml" \
-    EVE_INSTANCE_REGISTRY="$FIXTURE" \
-    EVE_INSTANCE_WORKDIR="$ssh_workdir" \
+ssh_dry_run="$(
+  EVE_PROVIDER_DRY_RUN=1 EVE_INSTANCE_REGISTRY="$FIXTURE" \
     ./scripts/instance-ssh dev-a -- 'true'
 )"
-if [ "$ssh_pwd" = "$ssh_workdir/dev-a" ]; then
-  printf '  [OK] instance-ssh uses per-instance vagrant workdir\n'
+if printf '%s\n' "$ssh_dry_run" |
+  jq -e '.provider == "local-qemu" and .command == "ssh" and .engine == "qemu" and .dry_run == true' >/dev/null; then
+  printf '  [OK] instance-ssh dispatches local-qemu through qemu provider command\n'
 else
-  printf '  [FAIL] instance-ssh used wrong workdir\n' >&2
-  printf 'expected: %s\nactual:   %s\n' "$ssh_workdir/dev-a" "$ssh_pwd" >&2
+  printf '  [FAIL] instance-ssh local-qemu dispatch mismatch\n' >&2
+  printf '%s\n' "$ssh_dry_run" >&2
   FAIL=$((FAIL + 1))
 fi
 

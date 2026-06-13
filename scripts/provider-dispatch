@@ -5,6 +5,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -24,6 +25,7 @@ from eve_sdk.dispatch import (  # noqa: E402
     validate_provider_output,
 )
 from eve_sdk.schema import validate_output  # noqa: E402
+from eve_sdk.secrets import Secrets  # noqa: E402
 
 
 def usage() -> None:
@@ -80,13 +82,28 @@ def parse_args(argv: list[str]) -> tuple[str | None, str | None, str | None, str
     return instance_name, provider_name, command, registry_path, dry_run, extra_args
 
 
+def inject_secrets(provider_name: str, plugin: dict[str, Any], env: dict[str, str]) -> dict[str, str]:
+    secrets = Secrets.read(provider_name)
+    if not secrets:
+        return env
+    schema_secrets = (plugin.get("config_schema") or {}).get("secrets") or {}
+    for secret_key, value in secrets.items():
+        env[secret_key] = value
+        schema_entry = schema_secrets.get(secret_key)
+        if isinstance(schema_entry, dict):
+            mapped = schema_entry.get("env_var")
+            if mapped:
+                env[mapped] = value
+    return env
+
+
 def provider_level(provider_name: str, command: str, dry_run: bool, extra_args: list[str]) -> None:
     plugin = load_plugin("provider", provider_name)
     spec = plugin.get("commands", {}).get(command)
     if not isinstance(spec, dict):
         raise DispatchError(f"provider plugin {provider_name} has no command: {command}")
     cmd = command_vector(plugin, spec) + extra_args
-    env = os.environ | {"EVE_PROVIDER_PLUGIN": provider_name}
+    env = inject_secrets(provider_name, plugin, dict(os.environ) | {"EVE_PROVIDER_PLUGIN": provider_name})
     if dry_run:
         env["EVE_PLUGIN_DRY_RUN"] = "1"
         print(json.dumps({"kind": "provider", "provider": provider_name, "command": command, "dry_run": True}))
@@ -124,12 +141,12 @@ def instance_level(
         return 0
 
     overlay = prepare_overlay(instance_name, registry_path)
-    env = os.environ | {
+    env = inject_secrets(provider, plugin, dict(os.environ) | {
         "EVE_CATALOG_LOCAL": overlay,
         "EVE_INSTANCE_NAME": instance_name,
         "EVE_PROVIDER_PLUGIN": provider,
         "EVE_RESOLVED_JSON": json.dumps(resolved, separators=(",", ":")),
-    }
+    })
     if registry_path:
         env["EVE_INSTANCE_REGISTRY"] = registry_path
 

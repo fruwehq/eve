@@ -22,34 +22,34 @@ export INSTANCE
 # Output format for small inspection helpers.
 EMIT ?= env
 
-# Load dotenv files
--include .env
-
-# Non-secret structured preferences. Values here override .env defaults, while
-# .env.local and command-line make variables remain the highest-precedence user
-# overrides.
+# Structured preferences from config/defaults.yaml + .eve/config.yaml.
+# All runtime settings flow through config-env; no dotenv files.
 EVE_CONFIG_EXPORTS := $(shell ./scripts/config-env --make 2>/dev/null)
 $(foreach assignment,$(EVE_CONFIG_EXPORTS),$(eval export $(assignment)))
 
--include .env.local
-
-# TIMEZONE is the only "documented in .env" variable that defaults instead of
-# erroring when unset: fall back to the host's configured timezone.
+# TIMEZONE defaults to the host's configured timezone when unset in config.
 ifeq ($(strip $(TIMEZONE)),)
 TIMEZONE := $(shell ./scripts/host-timezone 2>/dev/null)
 endif
 
+ifneq ($(strip $(AWS_CONFIG_FILE)),)
 export AWS_CONFIG_FILE
+endif
+ifneq ($(strip $(AWS_PROFILE)),)
 export AWS_PROFILE
+endif
+ifneq ($(strip $(AWS_REGION)),)
 export AWS_REGION
+endif
+ifneq ($(strip $(AWS_SHARED_CREDENTIALS_FILE)),)
 export AWS_SHARED_CREDENTIALS_FILE
+endif
 export EVE_PROVISION_USER
 export EPHEMERAL_DISPLAY_RESOLUTION
 export EPHEMERAL_DISPLAY_FPS
 export EPHEMERAL_MOONLIGHT_BITRATE_KBPS
 export EPHEMERAL_MOONLIGHT_VIDEO_CODEC
 export EPHEMERAL_MOONLIGHT_VIDEO_DECODER
-export EPHEMERAL_SUNSHINE_PASSWORD
 export EPHEMERAL_WINDOWS_PASSWORD
 export GOOGLE_APPLICATION_CREDENTIALS
 export GOOGLE_CLOUD_PROJECT

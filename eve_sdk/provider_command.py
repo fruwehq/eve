@@ -10,6 +10,21 @@ from eve_sdk.schema import validate_input, validate_output
 from eve_sdk.workdir import Workdir
 
 
+def emit_dry_run(provider: str, command: str, resolved: dict) -> int:
+    payload = {
+        "kind": "provider",
+        "provider": provider,
+        "command": command,
+        "instance": resolved["instance"]["name"],
+        "profile": resolved["instance"]["name"],
+        "engine": resolved["engine"],
+        "dry_run": os.environ.get("EVE_PLUGIN_DRY_RUN") == "1",
+    }
+    validate_output(payload, "provider_command_output")
+    print(json.dumps(payload, separators=(",", ":")))
+    return 0
+
+
 def _provider_from_executable() -> str:
     path = Path(sys.argv[0]).resolve()
     parts = path.parts
@@ -35,18 +50,7 @@ def dispatch(argv: list[str]) -> int:
             raise DispatchError(f"provider command for {provider} cannot handle resolved provider {resolved_provider}")
 
         if os.environ.get("EVE_PLUGIN_DRY_RUN") == "1" or command == "resolve":
-            payload = {
-                "kind": "provider",
-                "provider": provider,
-                "command": command,
-                "instance": resolved["instance"]["name"],
-                "profile": resolved["instance"]["name"],
-                "engine": resolved["engine"],
-                "dry_run": os.environ.get("EVE_PLUGIN_DRY_RUN") == "1",
-            }
-            validate_output(payload, "provider_command_output")
-            print(json.dumps(payload, separators=(",", ":")))
-            return 0
+            return emit_dry_run(provider, command, resolved)
 
         engine = resolved["engine"]
         if command == "init":

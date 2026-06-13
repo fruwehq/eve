@@ -30,10 +30,6 @@ docker_args=(
   --volume "$ROOT:/workspace"
 )
 
-if [ -f "$ROOT/.env.local" ]; then
-  docker_args+=(--env-file "$ROOT/.env.local")
-fi
-
 if [ -d "$HOME/.ssh" ]; then
   docker_args+=(--volume "$HOME/.ssh:/home/eve/.ssh:ro")
 fi

@@ -217,6 +217,7 @@ else
     bundle_packages: $bundle_packages,
     engine: (
       if ($m.kind // "") == "metal" then "metal"
+      elif (($m.provider // "") == "local-qemu") then "qemu"
       elif (($m.provider // "") | startswith("local-")) then "vagrant"
       else "terraform"
       end
@@ -289,6 +290,7 @@ emit_env() {
     "VM_DISK_TYPE=" + (.machine.defaults.disk_type // ""),
     "VM_INSTANCE_TYPE=" + (.machine.defaults.instance_type // ""),
     "VM_ROOT_VOLUME_TYPE=" + (.machine.defaults.root_volume_type // ""),
+    "VM_USE_SPOT=" + (if (.machine.defaults | has("use_spot")) then (.machine.defaults.use_spot | tostring) else "" end),
     "GCP_IMAGE_FAMILY=" + (.os.gcp_image_family // ""),
     "GCP_IMAGE_PROJECT=" + (.os.gcp_image_project // ""),
     "VULTR_OS_ID=" + ((.os.vultr_os_id // 0) | tostring),
@@ -296,7 +298,7 @@ emit_env() {
     "LOCATION_AVAILABILITY_ZONE=" + ($locp.availability_zone // ""),
     "LOCATION_ZONE=" + ($locp.zone // ""),
     "SSH_USER=" + provision_user($locp),
-    "CLOUD_IMAGE_URL=" + (.os.cloud_image_url // ""),
+    "CLOUD_IMAGE_URL=" + (.machine.provider as $p | if (["local-qemu","truenas"] | index($p)) then (.os.cloud_image_url // "") else "" end),
     "HUMAN_USER_NAME=" + human_user($locp),
     "PROVISION_USER_NAME=" + provision_user($locp),
     "RASPBERRY_PI_HOST=" + (
@@ -335,7 +337,7 @@ emit_vagrant() {
     ($r.os.arch // "amd64") as $arch |
     (if ($r.os.arch // "amd64") == "arm64" then "aarch64" else "x86_64" end) as $qemu_arch |
     $r.profile.name as $name |
-    (($r.machine.defaults.cpus // 2) | tostring) as $cpus |
+    (($r.machine.defaults.cpu_cores // $r.machine.defaults.cpus // 2) | tostring) as $cpus |
     (($r.machine.defaults.memory_mb // 4096)) as $memory_mb |
     ($memory_mb | tostring) as $memory |
     (((($memory_mb / 1024) | floor) | tostring) + "G") as $qemu_memory |

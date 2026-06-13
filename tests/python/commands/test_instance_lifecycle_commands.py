@@ -79,6 +79,53 @@ def test_instance_create_and_delete_happy_path(tmp_path: Path) -> None:
     assert not registry.exists()
 
 
+def test_instance_delete_refuses_recorded_provider_state_without_observed_absent(tmp_path: Path) -> None:
+    registry = tmp_path / "instances.yaml"
+    state_dir = tmp_path / "state"
+    create = run_cmd(
+        "scripts/instance-create",
+        "--registry",
+        str(registry),
+        "--instance",
+        "demo-a",
+        "--machine",
+        "local-qemu-medium",
+        "--os",
+        "ubuntu-26.04-arm64",
+        "--location",
+        "tokyo",
+        env={"EVE_STATE_DIR": str(state_dir)},
+    )
+    record = run_cmd(
+        "scripts/instance-state",
+        "--instance",
+        "demo-a",
+        "--operation",
+        "provider.up",
+        "--status",
+        "succeeded",
+        "--provider-state",
+        "running",
+        "--desired-state",
+        "running",
+        env={"EVE_STATE_DIR": str(state_dir)},
+    )
+    delete = run_cmd(
+        "scripts/instance-delete",
+        "--registry",
+        str(registry),
+        "--instance",
+        "demo-a",
+        env={"EVE_STATE_DIR": str(state_dir)},
+    )
+
+    assert create.returncode == 0, create.stderr
+    assert record.returncode == 0, record.stderr
+    assert delete.returncode == 1
+    assert "provider_state=running" in delete.stderr
+    assert registry.exists()
+
+
 def test_instance_create_rejects_duplicate(tmp_path: Path) -> None:
     registry = tmp_path / "instances.yaml"
     registry.write_text(

@@ -255,6 +255,8 @@ def engine_for(machine: dict[str, Any]) -> str:
     provider = machine["provider"]
     if machine.get("kind") == "metal":
         return "metal"
+    if provider == "local-qemu":
+        return "qemu"
     if str(provider).startswith("local-"):
         return "vagrant"
     return "terraform"
@@ -464,6 +466,7 @@ def emit_env(resolved: dict[str, Any]) -> str:
         "VM_DISK_TYPE": str(machine_defaults.get("disk_type") or ""),
         "VM_INSTANCE_TYPE": str(machine_defaults.get("instance_type") or ""),
         "VM_ROOT_VOLUME_TYPE": str(machine_defaults.get("root_volume_type") or ""),
+        "VM_USE_SPOT": str(machine_defaults["use_spot"]).lower() if "use_spot" in machine_defaults else "",
         "GCP_IMAGE_FAMILY": str(os_doc.get("gcp_image_family") or ""),
         "GCP_IMAGE_PROJECT": str(os_doc.get("gcp_image_project") or ""),
         "VULTR_OS_ID": str(os_doc.get("vultr_os_id") or 0),
@@ -471,7 +474,7 @@ def emit_env(resolved: dict[str, Any]) -> str:
         "LOCATION_AVAILABILITY_ZONE": str(locp.get("availability_zone") or ""),
         "LOCATION_ZONE": str(locp.get("zone") or ""),
         "SSH_USER": access["bootstrap_user"],
-        "CLOUD_IMAGE_URL": str(os_doc.get("cloud_image_url") or ""),
+        "CLOUD_IMAGE_URL": str(os_doc.get("cloud_image_url") or "") if provider in ("local-qemu", "truenas") else "",
         "HUMAN_USER_NAME": access["human_user"],
         "PROVISION_USER_NAME": access["provision_user"],
         "RASPBERRY_PI_HOST": str(pi_host),

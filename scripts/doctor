@@ -65,7 +65,7 @@ TOOL_CHECKS = [
         "install Terramate release tarball",
         "install Terramate release tarball",
     ),
-    tool("provider", "vagrant", "command -v vagrant", "brew install hashicorp/tap/vagrant", "apt install vagrant"),
+
     tool("os", "dscacheutil", "command -v dscacheutil", "bundled with macOS", "", ["darwin"]),
     tool("os", "getent", "command -v getent", "", "apt install libc-bin", ["linux"]),
     tool("os", "pbcopy", "command -v pbcopy", "bundled with macOS", "", ["darwin"]),

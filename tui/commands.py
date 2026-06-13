@@ -74,6 +74,17 @@ def instance_observe_view(instance: str) -> dict[str, Any]:
     return load_json([str(ROOT / "scripts/instance-view"), "--instance", instance, "--observe"])
 
 
+def instance_statuses() -> dict[str, dict[str, Any]]:
+    """Last-known status for every instance from one fast (~0.6s) call.
+
+    Reads persisted state without resolving or live-observing each instance
+    (~3-8s each), so the instance table can render real state immediately; the
+    selected instance is then live-observed for fresh detail."""
+    doc = load_json([str(ROOT / "scripts/instance-view"), "--statuses"])
+    statuses = doc.get("statuses", {})
+    return statuses if isinstance(statuses, dict) else {}
+
+
 def provider_status_table() -> str:
     code, out, err = run_command(["make", "--no-print-directory", "providers.status"])
     if code != 0:
