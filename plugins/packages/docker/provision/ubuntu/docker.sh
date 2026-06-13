@@ -56,7 +56,7 @@ human_run systemctl --user enable --now docker
 # shellcheck disable=SC2016 # Written literally so each login shell resolves its own uid.
 profile_line='export DOCKER_HOST="unix:///run/user/$(id -u)/docker.sock"'
 if ! sudo test -f "$HUMAN_HOME/.profile" || ! sudo grep -Fqx "$profile_line" "$HUMAN_HOME/.profile" 2>/dev/null; then
-  printf '\n# Rootless Docker daemon for ephemeral-cloud-gaming.\n%s\n' "$profile_line" \
+  printf '\n# Rootless Docker daemon for eve.\n%s\n' "$profile_line" \
     | sudo tee -a "$HUMAN_HOME/.profile" >/dev/null
   sudo chown "$HUMAN_USER_NAME:$HUMAN_GROUP" "$HUMAN_HOME/.profile"
 fi
