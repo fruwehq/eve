@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+set -eu
+
+exec ./scripts/package-status-command nomachine 'if [ -x /usr/NX/bin/nxserver ]; then echo installed; else echo missing; fi'

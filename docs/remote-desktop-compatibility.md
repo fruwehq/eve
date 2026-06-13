@@ -40,6 +40,14 @@ accidentally selecting multiple desktops together.
 | `rustdesk` | Ubuntu | XFCE | X11 | supported | Uses LightDM autologin plus an X11 desktop session. |
 | `rustdesk` | Ubuntu | XFCE Headless | X11 | unsupported | RustDesk needs an active local desktop session; use RDP. |
 | `rustdesk` | Ubuntu | GNOME/KDE | Wayland | unsupported | Unattended Wayland sharing requires peer-side screen selection or is not proven. |
+| `nomachine` | Windows | Windows | Native | supported | NoMachine service against the active desktop; connect with the Windows user's credentials. |
+| `nomachine` | Ubuntu | XFCE | X11 | supported | NX server attaches to the local X11 desktop; connect with the system user's password. |
+| `nomachine` | Ubuntu | XFCE Headless | X11 | supported | NoMachine creates a virtual NX display when no local session is attached. |
+| `nomachine` | Ubuntu | GNOME/KDE | Wayland | wip | NoMachine recommends X11 capture; unattended Wayland sharing still needs live validation. |
+| `splashtop` | Windows | Windows | Native | supported | Splashtop Streamer against the active desktop; free for same-LAN/VPN use after account login. |
+| `splashtop` | Ubuntu amd64 | XFCE | X11 | wip | Streamer attaches to a local X11 session (LAN/VPN personal tier); still needs live validation. |
+| `splashtop` | Ubuntu | XFCE Headless | X11 | unsupported | Splashtop needs an active local session; use RDP for headless XFCE. |
+| `splashtop` | Ubuntu | GNOME/KDE | Wayland | unsupported | Splashtop does not expose the local Wayland compositor unattended. |
 | `sunshine` | Windows | VDD | Native | supported | Uses Virtual Display Driver as the intended single Sunshine display. |
 | `sunshine` | Ubuntu | XFCE | X11 | wip | Linux capture exists, but ultrawide `5120x1440` still needs live validation. |
 | `sunshine` | Ubuntu | XFCE Headless | X11 | wip | Linux capture exists, but ultrawide `5120x1440` still needs live validation. |

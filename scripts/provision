@@ -194,11 +194,16 @@ export PROVIDER="$PROVIDER"
 export EPHEMERAL_SUNSHINE_PASSWORD="${EPHEMERAL_SUNSHINE_PASSWORD:-}"
 export RDP_GATE_PASSWORD="${RDP_GATE_PASSWORD:-}"
 export RDP_GATE_USER="${RDP_GATE_USER:-}"
+export NOMACHINE_VERSION="${NOMACHINE_VERSION:-}"
 export RASPBERRY_PI_HDMI_CONNECTOR="${RASPBERRY_PI_HDMI_CONNECTOR:-}"
 export RASPBERRY_PI_HDMI_MODE="${RASPBERRY_PI_HDMI_MODE:-}"
 export RUSTDESK_KEY="${RUSTDESK_KEY:-}"
 export RUSTDESK_PASSWORD="${RUSTDESK_PASSWORD:-}"
 export RUSTDESK_SERVER="${RUSTDESK_SERVER:-}"
+export SPLASHTOP_EMAIL="${SPLASHTOP_EMAIL:-}"
+export SPLASHTOP_PASSWORD="${SPLASHTOP_PASSWORD:-}"
+export SPLASHTOP_STREAMER_PATH="${SPLASHTOP_STREAMER_PATH:-}"
+export SPLASHTOP_STREAMER_URL="${SPLASHTOP_STREAMER_URL:-}"
 export SUNSHINE_MAX_BITRATE_KBPS="${SUNSHINE_MAX_BITRATE_KBPS:-}"
 export SUNSHINE_VERSION="${SUNSHINE_VERSION:-}"
 export THINLINC_ACCEPT_EULA="${THINLINC_ACCEPT_EULA:-}"
@@ -260,7 +265,11 @@ EOF
       --arg rp "${RUSTDESK_PASSWORD:-}" \
       --arg rs "${RUSTDESK_SERVER:-}" \
       --arg sv "${SUNSHINE_VERSION:-}" \
-      '{windows_password: $wp, sunshine_password: $sp, display_resolution: $dr, rustdesk_key: $rk, rustdesk_password: $rp, rustdesk_server: $rs, sunshine_version: $sv}' \
+      --arg nv "${NOMACHINE_VERSION:-}" \
+      --arg se "${SPLASHTOP_EMAIL:-}" \
+      --arg spw "${SPLASHTOP_PASSWORD:-}" \
+      --arg su "${SPLASHTOP_STREAMER_URL:-}" \
+      '{windows_password: $wp, sunshine_password: $sp, display_resolution: $dr, rustdesk_key: $rk, rustdesk_password: $rp, rustdesk_server: $rs, sunshine_version: $sv, nomachine_version: $nv, splashtop_email: $se, splashtop_password: $spw, splashtop_streamer_url: $su}' \
       > ./tmp/env.json
 
     STAGE=$(mktemp -d)

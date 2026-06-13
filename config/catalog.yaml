@@ -195,9 +195,11 @@ packages:
   - id: kde-desktop
   - id: kde-desktop-headless
   - id: macos-desktop-theme
+  - id: nomachine
   - id: opencode
   - id: rdp
   - id: rustdesk
+  - id: splashtop
   - id: steam
   - id: sunshine
   - id: thinlinc

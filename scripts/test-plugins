@@ -142,6 +142,22 @@ else
   FAIL=$((FAIL + 1))
 fi
 
+if ./scripts/plugin-list --kind package --json | \
+  jq -e '.plugins[] | select(.id == "nomachine") | (.supports.os_families == ["ubuntu", "windows"]) and (.compatibility_enforced == true) and (.actions[] | select(.id == "nomachine" and .target == "nomachine.connect"))' >/dev/null; then
+  printf '  [OK] NoMachine package metadata validates\n'
+else
+  printf '  [FAIL] NoMachine package metadata mismatch\n' >&2
+  FAIL=$((FAIL + 1))
+fi
+
+if ./scripts/plugin-list --kind package --json | \
+  jq -e '.plugins[] | select(.id == "splashtop") | (.supports.arches == ["amd64"]) and (.env | index("SPLASHTOP_EMAIL")) and (.actions[] | select(.id == "splashtop-info" and .target == "splashtop.info"))' >/dev/null; then
+  printf '  [OK] Splashtop package metadata validates\n'
+else
+  printf '  [FAIL] Splashtop package metadata mismatch\n' >&2
+  FAIL=$((FAIL + 1))
+fi
+
 if ./scripts/package-list --registry "$FIXTURE" --instance dev-a --json | \
   jq -e '.packages[] | select(.id == "rustdesk") | (.actions[] | select(.id == "rustdesk" and .target == "rustdesk.connect"))' >/dev/null; then
   printf '  [OK] package-list exposes package actions to callers\n'
@@ -195,6 +211,14 @@ if EVE_INSTANCE_REGISTRY="$FIXTURE" ./scripts/package-action --instance dev-a --
   printf '  [OK] ThinLinc package action dry-run resolves manifest target\n'
 else
   printf '  [FAIL] ThinLinc package action dry-run resolves manifest target\n' >&2
+  FAIL=$((FAIL + 1))
+fi
+
+if EVE_INSTANCE_REGISTRY="$FIXTURE" ./scripts/package-action --instance dev-a --package nomachine --action nomachine-info --dry-run | \
+  jq -e '.kind == "package-action" and .package == "nomachine" and .action == "nomachine-info" and .target == "nomachine.info" and .dry_run == true' >/dev/null; then
+  printf '  [OK] NoMachine package action dry-run resolves manifest target\n'
+else
+  printf '  [FAIL] NoMachine package action dry-run resolves manifest target\n' >&2
   FAIL=$((FAIL + 1))
 fi
 

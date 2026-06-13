@@ -33,6 +33,9 @@ moonlight:
   video_codec:
   video_decoder:
 
+nomachine:
+  version:
+
 rdp:
   gate_password:
   gate_user:
@@ -46,6 +49,12 @@ raspberry_pi:
 rustdesk:
   password:
   server:
+
+splashtop:
+  email:
+  password:
+  streamer_path:
+  streamer_url:
 
 sunshine:
   max_bitrate_kbps:
