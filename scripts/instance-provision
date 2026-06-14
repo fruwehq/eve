@@ -1,155 +1,180 @@
-#!/usr/bin/env bash
-# Converge provisioning for a concrete v3 instance through the generated
-# profile overlay, while recording v3 provision state.
+#!/usr/bin/env python3
+"""Converge provisioning for a concrete v3 instance through the generated
+profile overlay, while recording v3 provision state.
 
-set -euo pipefail
-
-ROOT="$(git rev-parse --show-toplevel)"
-cd "$ROOT"
-
-usage() {
-  cat >&2 <<'USAGE'
 Usage: scripts/instance-provision --instance <name> [--registry <path>] [--force] [--dry-run]
-USAGE
-}
+"""
 
-INSTANCE_NAME=""
-REGISTRY_PATH="${EVE_INSTANCE_REGISTRY:-}"
-FORCE=0
-DRY_RUN="${EVE_PROVISION_DRY_RUN:-0}"
+from __future__ import annotations
 
-while [ "$#" -gt 0 ]; do
-  case "$1" in
-    --instance)
-      INSTANCE_NAME="${2:-}"
-      shift 2
-      ;;
-    --registry)
-      REGISTRY_PATH="${2:-}"
-      shift 2
-      ;;
-    --force)
-      FORCE=1
-      shift
-      ;;
-    --dry-run)
-      DRY_RUN=1
-      shift
-      ;;
-    -h|--help)
-      usage
-      exit 0
-      ;;
-    *)
-      usage
-      exit 2
-      ;;
-  esac
-done
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
 
-if [ -z "$INSTANCE_NAME" ]; then
-  usage
-  exit 2
-fi
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
-path_args=(--instance "$INSTANCE_NAME" --emit env)
-if [ -n "$REGISTRY_PATH" ]; then
-  path_args+=(--registry "$REGISTRY_PATH")
-fi
-INSTANCE_PATHS="$(./scripts/instance-paths "${path_args[@]}")"
+from eve_sdk.instance_dispatch import instance_paths_env  # noqa: E402
+from eve_sdk.package_dispatch import emit_json  # noqa: E402
+from eve_sdk.tf_dispatch import repo_root  # noqa: E402
 
-extract_path() {
-  printf '%s\n' "$INSTANCE_PATHS" | awk -F= -v key="$1" '$1 == key { print substr($0, index($0, "=") + 1) }'
-}
+_USAGE = (
+    "Usage: scripts/instance-provision --instance <name> "
+    "[--registry <path>] [--force] [--dry-run]"
+)
 
-OVERLAY="$(extract_path INSTANCE_OVERLAY_PATH)"
 
-overlay_args=(--instance "$INSTANCE_NAME" --output "$OVERLAY")
-if [ -n "$REGISTRY_PATH" ]; then
-  overlay_args+=(--registry "$REGISTRY_PATH")
-fi
-./scripts/instance-profile-overlay "${overlay_args[@]}"
+def main(argv: list[str]) -> int:
+    instance_name = ""
+    registry_path = os.environ.get("EVE_INSTANCE_REGISTRY", "")
+    force = False
+    dry_run = os.environ.get("EVE_PROVISION_DRY_RUN", "0") == "1"
 
-export EVE_CATALOG_LOCAL="$OVERLAY"
-export EVE_INSTANCE_NAME="$INSTANCE_NAME"
-if [ -n "$REGISTRY_PATH" ]; then
-  export EVE_INSTANCE_REGISTRY="$REGISTRY_PATH"
-fi
+    args = list(argv)
+    while args:
+        arg = args.pop(0)
+        if arg == "--instance" and args:
+            instance_name = args.pop(0)
+        elif arg == "--registry" and args:
+            registry_path = args.pop(0)
+        elif arg == "--force":
+            force = True
+        elif arg == "--dry-run":
+            dry_run = True
+        elif arg in {"-h", "--help"}:
+            print(_USAGE, file=sys.stderr)
+            return 0
+        else:
+            print(_USAGE, file=sys.stderr)
+            return 2
 
-record_state() {
-  local status="$1"
-  local provision_state="$2"
-  local error="${3:-}"
+    if not instance_name:
+        print(_USAGE, file=sys.stderr)
+        return 2
 
-  if [ "${EVE_DISABLE_STATE:-0}" = "1" ] || [ "$DRY_RUN" = "1" ]; then
-    return
-  fi
+    root = repo_root()
 
-  cmd=(./scripts/instance-state
-    --instance "$INSTANCE_NAME"
-    --operation provision
-    --status "$status"
-    --provision-state "$provision_state")
-  if [ -n "$error" ]; then
-    cmd+=(--error "$error")
-  fi
-  "${cmd[@]}" >/dev/null
-}
+    paths = instance_paths_env(root, instance_name, registry_path or None)
+    overlay = paths.get("INSTANCE_OVERLAY_PATH", "")
 
-mark_selected_packages_installed() {
-  if [ "${EVE_DISABLE_STATE:-0}" = "1" ] || [ "$DRY_RUN" = "1" ]; then
-    return
-  fi
+    overlay_cmd = [
+        str(root / "scripts/instance-profile-overlay"),
+        "--instance", instance_name, "--output", overlay,
+    ]
+    if registry_path:
+        overlay_cmd += ["--registry", registry_path]
+    rc = subprocess.run(overlay_cmd, cwd=root, check=False).returncode
+    if rc != 0:
+        return rc
 
-  selected_packages="$(./scripts/package-list --instance "$INSTANCE_NAME" --json | jq -r '.packages[] | select(.selected == true and .installable == true) | .id')"
-  for package in $selected_packages; do
-    ./scripts/instance-state \
-      --instance "$INSTANCE_NAME" \
-      --operation "package.install" \
-      --status succeeded \
-      --package "$package" \
-      --package-state installed >/dev/null
-  done
-}
+    os.environ["EVE_CATALOG_LOCAL"] = overlay
+    os.environ["EVE_INSTANCE_NAME"] = instance_name
+    if registry_path:
+        os.environ["EVE_INSTANCE_REGISTRY"] = registry_path
 
-if [ "$DRY_RUN" = "1" ]; then
-  force_bool=false
-  if [ "$FORCE" = "1" ]; then
-    force_bool=true
-  fi
-  jq -n \
-    --arg instance "$INSTANCE_NAME" \
-    --arg overlay "$OVERLAY" \
-    --argjson force "$force_bool" \
-    '{instance: $instance, command: "provision", overlay: $overlay, force: $force, dry_run: true}'
-  exit 0
-fi
+    state_disabled = os.environ.get("EVE_DISABLE_STATE", "0") == "1" or dry_run
 
-record_state "running" "provisioning"
+    def record_state(status: str, provision_state: str, error: str = "") -> None:
+        if state_disabled:
+            return
+        cmd = [
+            str(root / "scripts/instance-state"),
+            "--instance", instance_name,
+            "--operation", "provision",
+            "--status", status,
+            "--provision-state", provision_state,
+        ]
+        if error:
+            cmd += ["--error", error]
+        # set -e: a failing instance-state call is fatal with its exit status.
+        state_rc = subprocess.run(
+            cmd, cwd=root, stdout=subprocess.DEVNULL, check=False,
+        ).returncode
+        if state_rc != 0:
+            raise SystemExit(state_rc)
 
-if [ "$FORCE" = "1" ]; then
-  if ! ./scripts/instance-run provision.clear-state "$INSTANCE_NAME"; then
-    record_state "failed" "error" "provision.clear-state failed"
-    exit 1
-  fi
-fi
+    def mark_selected_packages_installed() -> None:
+        if state_disabled:
+            return
+        # stdout captured (replaces the `package-list | jq` pipeline); stderr of
+        # package-list passes through. Under pipefail a failure is fatal.
+        result = subprocess.run(
+            [str(root / "scripts/package-list"), "--instance", instance_name, "--json"],
+            cwd=root, text=True, stdout=subprocess.PIPE, check=False,
+        )
+        if result.returncode != 0:
+            raise SystemExit(result.returncode)
+        doc = json.loads(result.stdout)
+        packages = doc.get("packages", []) if isinstance(doc, dict) else []
+        for package in packages:
+            if not isinstance(package, dict):
+                continue
+            if package.get("selected") is True and package.get("installable") is True:
+                package_id = str(package.get("id"))
+                state_rc = subprocess.run(
+                    [
+                        str(root / "scripts/instance-state"),
+                        "--instance", instance_name,
+                        "--operation", "package.install",
+                        "--status", "succeeded",
+                        "--package", package_id,
+                        "--package-state", "installed",
+                    ],
+                    cwd=root, stdout=subprocess.DEVNULL, check=False,
+                ).returncode
+                if state_rc != 0:
+                    raise SystemExit(state_rc)
 
-provision_script="${EVE_PROVISION_SCRIPT:-./scripts/provision}"
-# Pass the SDK-validated, depends_on-ordered resolved JSON through so
-# profile-resolve's fast-path emits BUNDLE_PACKAGES in topological
-# order; without this the catalog path emits them alphabetically and
-# dependencies install after their dependents.
-resolve_cmd=(./scripts/instance-resolve --instance "$INSTANCE_NAME" --emit json)
-[ -n "$REGISTRY_PATH" ] && resolve_cmd+=(--registry "$REGISTRY_PATH")
-EVE_RESOLVED_JSON="$("${resolve_cmd[@]}")"
-export EVE_RESOLVED_JSON
+    if dry_run:
+        emit_json({
+            "instance": instance_name,
+            "command": "provision",
+            "overlay": overlay,
+            "force": force,
+            "dry_run": True,
+        })
+        return 0
 
-exit_code=0
-"$provision_script" "$INSTANCE_NAME" || exit_code=$?
-if [ "$exit_code" -ne 0 ]; then
-  record_state "failed" "error" "exit $exit_code"
-  exit "$exit_code"
-fi
+    record_state("running", "provisioning")
 
-mark_selected_packages_installed
-record_state "succeeded" "provisioned"
+    if force:
+        clear_rc = subprocess.run(
+            [str(root / "scripts/instance-run"), "provision.clear-state", instance_name],
+            cwd=root, check=False,
+        ).returncode
+        if clear_rc != 0:
+            record_state("failed", "error", "provision.clear-state failed")
+            return 1
+
+    provision_script = os.environ.get("EVE_PROVISION_SCRIPT", str(root / "scripts/provision"))
+    resolve_cmd = [
+        str(root / "scripts/instance-resolve"),
+        "--instance", instance_name, "--emit", "json",
+    ]
+    if registry_path:
+        resolve_cmd += ["--registry", registry_path]
+    # stdout captured into EVE_RESOLVED_JSON (command-substitution strips
+    # trailing newlines); stderr passes through; failure is fatal (set -e).
+    resolved = subprocess.run(
+        resolve_cmd, cwd=root, text=True, stdout=subprocess.PIPE, check=False,
+    )
+    if resolved.returncode != 0:
+        return resolved.returncode
+    os.environ["EVE_RESOLVED_JSON"] = resolved.stdout.rstrip("\n")
+
+    exit_code = subprocess.run(
+        [provision_script, instance_name], cwd=root, check=False,
+    ).returncode
+    if exit_code != 0:
+        record_state("failed", "error", f"exit {exit_code}")
+        return exit_code
+
+    mark_selected_packages_installed()
+    record_state("succeeded", "provisioned")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

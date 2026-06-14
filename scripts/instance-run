@@ -1,113 +1,154 @@
-#!/usr/bin/env bash
-# Run an instance-oriented command through generated profile compatibility data.
+#!/usr/bin/env python3
+"""Run an instance-oriented command through generated profile compatibility data.
 
-set -euo pipefail
+Usage: scripts/instance-run <make-target> [instance]
+"""
 
-ROOT="$(git rev-parse --show-toplevel)"
-cd "$ROOT"
-# shellcheck source=lib/load-runtime-env.sh
-. ./scripts/lib/load-runtime-env.sh
+from __future__ import annotations
 
-TARGET="${1:?Usage: scripts/instance-run <make-target> [instance]}"
-INSTANCE_NAME="${2:-${INSTANCE:-}}"
-EXTRA_ARGS=("${@:3}")
+import os
+import subprocess
+import sys
+from pathlib import Path
 
-if [ -z "$INSTANCE_NAME" ]; then
-  echo "instance-run: INSTANCE is required" >&2
-  echo "Usage: make $TARGET INSTANCE=<name>" >&2
-  exit 2
-fi
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
-path_args=(--instance "$INSTANCE_NAME" --emit env)
-if [ -n "${EVE_INSTANCE_REGISTRY:-}" ]; then
-  path_args+=(--registry "$EVE_INSTANCE_REGISTRY")
-fi
-INSTANCE_PATHS="$(./scripts/instance-paths "${path_args[@]}")"
-extract_path() {
-  printf '%s\n' "$INSTANCE_PATHS" | awk -F= -v key="$1" '$1 == key { print substr($0, index($0, "=") + 1) }'
-}
-OVERLAY="$(extract_path INSTANCE_OVERLAY_PATH)"
+from eve_sdk.instance_dispatch import instance_paths_env, load_runtime_env  # noqa: E402
+from eve_sdk.tf_dispatch import repo_root  # noqa: E402
 
-overlay_args=(--instance "$INSTANCE_NAME" --output "$OVERLAY")
-if [ -n "${EVE_INSTANCE_REGISTRY:-}" ]; then
-  overlay_args+=(--registry "$EVE_INSTANCE_REGISTRY")
-fi
+_PROVIDER_TARGETS = {"init", "plan", "up", "down", "start", "stop", "status", "ip", "ssh"}
 
-./scripts/instance-profile-overlay "${overlay_args[@]}"
 
-echo "[instance-run] target=$TARGET instance=$INSTANCE_NAME overlay=$OVERLAY" >&2
+def _resolve_os_family(root: Path, instance_name: str) -> str:
+    """Read OS_FAMILY via instance-resolve (inherits EVE_INSTANCE_REGISTRY).
 
-export EVE_CATALOG_LOCAL="$OVERLAY"
-export EVE_INSTANCE_NAME="$INSTANCE_NAME"
+    Mirrors ``OS_FAMILY="$(./scripts/instance-resolve --instance <name> --emit
+    env | awk ...)``: failure is fatal under ``set -e``/``pipefail``.
+    """
+    result = subprocess.run(
+        [str(root / "scripts/instance-resolve"), "--instance", instance_name, "--emit", "env"],
+        cwd=root, text=True, capture_output=True, check=False,
+    )
+    if result.returncode != 0:
+        raise SystemExit(result.returncode)
+    for line in result.stdout.splitlines():
+        if line.startswith("OS_FAMILY="):
+            return line.split("=", 1)[1]
+    return ""
 
-case "$TARGET" in
-  init|plan|up|down|start|stop|status|ip|ssh)
-    exec ./scripts/provider-dispatch --instance "$INSTANCE_NAME" --command "$TARGET"
-    ;;
-  provision)
-    exec ./scripts/instance-provision --instance "$INSTANCE_NAME"
-    ;;
-  env)
-    exec ./scripts/instance-resolve --instance "$INSTANCE_NAME" --emit env
-    ;;
-  info)
-    exec ./scripts/instance-resolve --instance "$INSTANCE_NAME" --emit json
-    ;;
-  validate)
-    exec ./scripts/instance-resolve --instance "$INSTANCE_NAME" --validate
-    ;;
-  logs)
-    exec ./scripts/logs "$INSTANCE_NAME"
-    ;;
-  provision.clear-state)
-    OS_FAMILY="$(./scripts/instance-resolve --instance "$INSTANCE_NAME" --emit env | awk -F= '/^OS_FAMILY=/{print $2}')"
-    case "$OS_FAMILY" in
-      ubuntu)
-        exec ./scripts/instance-ssh "$INSTANCE_NAME" -- 'rm -rf ~/provision/state ~/provision/logs ~/provision/downloads'
-        ;;
-      windows)
-        exec ./scripts/instance-ssh "$INSTANCE_NAME" -- 'if (Test-Path "C:\Users\Administrator\provision\state") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\state" }; if (Test-Path "C:\Users\Administrator\provision\logs") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\logs" }; if (Test-Path "C:\Users\Administrator\provision\downloads") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\downloads" }'
-        ;;
-      *)
-        echo "[provision.clear-state] unknown os_family: $OS_FAMILY" >&2
-        exit 2
-        ;;
-    esac
-    ;;
-  provision.wait)
-    exec ./scripts/wait-for-provision "$INSTANCE_NAME"
-    ;;
-  update)
-    exec ./scripts/update-tools "$INSTANCE_NAME"
-    ;;
-  reboot)
-    OS_FAMILY="$(./scripts/instance-resolve --instance "$INSTANCE_NAME" --emit env | awk -F= '/^OS_FAMILY=/{print $2}')"
-    case "$OS_FAMILY" in
-      windows) exec ./scripts/instance-ssh "$INSTANCE_NAME" -- 'shutdown /r /t 0' ;;
-      *) exec ./scripts/instance-ssh "$INSTANCE_NAME" -- 'sudo reboot' ;;
-    esac
-    ;;
-  show-password)
-    exec ./scripts/instance-password "$INSTANCE_NAME"
-    ;;
-  ssh.run)
-    if [ -t 0 ]; then
-      echo "Usage: echo '<command>' | make ssh.run INSTANCE=<name>" >&2
-      exit 2
-    fi
-    cmd="$(cat)"
-    exec ./scripts/instance-ssh "$INSTANCE_NAME" -- "$cmd"
-    ;;
-  ssh.wait)
-    exec ./scripts/ssh-wait "$INSTANCE_NAME"
-    ;;
-  upload)
-    if [ "${#EXTRA_ARGS[@]}" -gt 0 ]; then
-      exec ./scripts/upload "$INSTANCE_NAME" "${EXTRA_ARGS[@]}"
-    fi
-    exec ./scripts/upload "$INSTANCE_NAME"
-    ;;
-esac
 
-echo "instance-run: unsupported target: $TARGET" >&2
-exit 2
+def main(argv: list[str]) -> int:
+    root = repo_root()
+    load_runtime_env(root)
+
+    target = argv[0] if argv else ""
+    if not target:
+        print("Usage: scripts/instance-run <make-target> [instance]", file=sys.stderr)
+        return 2
+    instance_name = argv[1] if len(argv) > 1 else os.environ.get("INSTANCE", "")
+    extra_args = list(argv[2:])
+
+    if not instance_name:
+        print("instance-run: INSTANCE is required", file=sys.stderr)
+        print(f"Usage: make {target} INSTANCE=<name>", file=sys.stderr)
+        return 2
+
+    registry = os.environ.get("EVE_INSTANCE_REGISTRY", "")
+    paths = instance_paths_env(root, instance_name, registry or None)
+    overlay = paths.get("INSTANCE_OVERLAY_PATH", "")
+
+    overlay_cmd = [
+        str(root / "scripts/instance-profile-overlay"),
+        "--instance", instance_name, "--output", overlay,
+    ]
+    if registry:
+        overlay_cmd += ["--registry", registry]
+    rc = subprocess.run(overlay_cmd, cwd=root, check=False).returncode
+    if rc != 0:
+        return rc
+
+    print(
+        f"[instance-run] target={target} instance={instance_name} overlay={overlay}",
+        file=sys.stderr,
+    )
+
+    os.environ["EVE_CATALOG_LOCAL"] = overlay
+    os.environ["EVE_INSTANCE_NAME"] = instance_name
+
+    ssh = str(root / "scripts/instance-ssh")
+
+    def run(cmd: list[str]) -> int:
+        return subprocess.run(cmd, cwd=root, check=False).returncode
+
+    if target in _PROVIDER_TARGETS:
+        return run([
+            str(root / "scripts/provider-dispatch"),
+            "--instance", instance_name, "--command", target,
+        ])
+    if target == "provision":
+        return run([str(root / "scripts/instance-provision"), "--instance", instance_name])
+    if target == "env":
+        return run([
+            str(root / "scripts/instance-resolve"),
+            "--instance", instance_name, "--emit", "env",
+        ])
+    if target == "info":
+        return run([
+            str(root / "scripts/instance-resolve"),
+            "--instance", instance_name, "--emit", "json",
+        ])
+    if target == "validate":
+        return run([
+            str(root / "scripts/instance-resolve"),
+            "--instance", instance_name, "--validate",
+        ])
+    if target == "logs":
+        return run([str(root / "scripts/logs"), instance_name])
+    if target == "provision.clear-state":
+        os_family = _resolve_os_family(root, instance_name)
+        if os_family == "ubuntu":
+            return run([ssh, instance_name, "--",
+                        "rm -rf ~/provision/state ~/provision/logs ~/provision/downloads"])
+        if os_family == "windows":
+            return run([ssh, instance_name, "--",
+                        'if (Test-Path "C:\\Users\\Administrator\\provision\\state") '
+                        '{ Remove-Item -Recurse -Force '
+                        '"C:\\Users\\Administrator\\provision\\state" }; '
+                        'if (Test-Path "C:\\Users\\Administrator\\provision\\logs") '
+                        '{ Remove-Item -Recurse -Force '
+                        '"C:\\Users\\Administrator\\provision\\logs" }; '
+                        'if (Test-Path "C:\\Users\\Administrator\\provision\\downloads") '
+                        '{ Remove-Item -Recurse -Force '
+                        '"C:\\Users\\Administrator\\provision\\downloads" }'])
+        print(f"[provision.clear-state] unknown os_family: {os_family}", file=sys.stderr)
+        return 2
+    if target == "provision.wait":
+        return run([str(root / "scripts/wait-for-provision"), instance_name])
+    if target == "update":
+        return run([str(root / "scripts/update-tools"), instance_name])
+    if target == "reboot":
+        os_family = _resolve_os_family(root, instance_name)
+        if os_family == "windows":
+            return run([ssh, instance_name, "--", "shutdown /r /t 0"])
+        return run([ssh, instance_name, "--", "sudo reboot"])
+    if target == "show-password":
+        return run([str(root / "scripts/instance-password"), instance_name])
+    if target == "ssh.run":
+        if sys.stdin.isatty():
+            print("Usage: echo '<command>' | make ssh.run INSTANCE=<name>", file=sys.stderr)
+            return 2
+        # $(cat) strips trailing newlines; replicate for arg-level fidelity.
+        command = sys.stdin.read().rstrip("\n")
+        return run([ssh, instance_name, "--", command])
+    if target == "ssh.wait":
+        return run([str(root / "scripts/ssh-wait"), instance_name])
+    if target == "upload":
+        return run([str(root / "scripts/upload"), instance_name, *extra_args])
+
+    print(f"instance-run: unsupported target: {target}", file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

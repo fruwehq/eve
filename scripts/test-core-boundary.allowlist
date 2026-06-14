@@ -31,9 +31,6 @@ scripts/vagrant-up:provider/OS reference - local-qemu Vagrant dispatch - Phase 3
 scripts/doctor:bash shebang - provider-specific CLI tool checks - port to Python or plugin command
 scripts/eve:bash shebang - dev convenience wrapper - port to Python or plugin command
 scripts/eve-docker:bash shebang - dev docker wrapper - port to Python or plugin command
-scripts/instance-password:bash shebang - vultr-specific password retrieval - port to Python or plugin command
-scripts/instance-provision:bash shebang - provision dispatch - port to Python or plugin command
-scripts/instance-run:bash shebang - instance run wrapper - port to Python or plugin command
 scripts/logs:bash shebang - remote log streaming - port to Python or plugin command
 scripts/profile-resolve:bash shebang - catalog resolution and env emission - port to Python or plugin command
 scripts/providers-status:bash shebang - provider connectivity checks - port to Python or plugin command
