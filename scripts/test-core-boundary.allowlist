@@ -1,4 +1,4 @@
-# Allowlist: central scripts with known provider/OS coupling and bash shebangs.
+# Allowlist: central core files with known provider/OS coupling and bash shebangs.
 #
 # Format:
 #   <path>:<reason>
@@ -7,24 +7,25 @@
 #   provider/OS reference - ...  — accepted by the provider/OS ID check
 #   bash shebang - ...           — accepted by the bash language policy check
 #
-# Each entry is a TODO for future porting or plugin relocation.
+# Every provider/OS entry below is tracked Phase 3 extraction debt: the literal
+# exists in core today and will move into the owning provider/plugin during
+# Phase 3. No silent passes — if the scan finds a literal not listed here, the
+# boundary check fails.
 
-# --- Provider/OS coupling ---
-scripts/catalog-options:provider/OS reference - provider-specific OS image metadata gating - Part 2 moves key checks into provider plugins
-scripts/config-env:provider/OS reference - provider-to-config-key mapping - Part 2 moves into provider plugin config
-scripts/config-env:provider/OS reference - provider-to-config-key mapping - config_schema will replace
-scripts/doctor:provider/OS reference - provider-specific CLI tool checks - Part 2 moves into provider plugins
-scripts/instance-create:provider/OS reference - provider-specific CLI usage hints - Part 2 derives from provider manifests
-scripts/instance-password:provider/OS reference - vultr-specific password retrieval - Part 2 moves into vultr plugin
-scripts/instance-profile-overlay:provider/OS reference - raspberry-pi host validation - Part 2 moves into raspberry-pi plugin
-scripts/instance-resolve:provider/OS reference - provider-specific OS key validation - Part 2 moves into per-plugin validate hooks
-scripts/package-provision:provider/OS reference - raspberry-pi password handling - Part 2 moves into raspberry-pi plugin
-scripts/profile-resolve:provider/OS reference - provider-specific env emission - Part 2 moves into provider plugins
-scripts/providers-status:provider/OS reference - provider-specific connectivity checks - Part 2 moves into provider plugins
-scripts/provision:provider/OS reference - vultr-specific password retrieval - Part 2 moves into vultr plugin
-scripts/remote-console:provider/OS reference - local-qemu not-implemented guard - Part 2 moves into local-qemu plugin
-scripts/remote-waypipe:provider/OS reference - raspberry-pi IP handling - Part 2 moves into raspberry-pi plugin
-scripts/vagrant-up:provider/OS reference - local-qemu Vagrant dispatch - Part 2 moves into local-qemu plugin
+# --- Provider/OS coupling (Phase 3 extraction debt) ---
+eve_sdk/config.py:provider/OS reference - provider-keyed env-var table - Phase 3: provider env table extraction
+eve_sdk/resolve.py:provider/OS reference - provider branches and image-field env emission - Phase 3: provider env emission extraction
+scripts/doctor:provider/OS reference - provider-specific CLI tool checks - Phase 3: moves into provider plugins
+scripts/instance-create:provider/OS reference - provider-specific CLI usage hints - Phase 3: derives from provider manifests
+scripts/instance-password:provider/OS reference - vultr-specific password retrieval - Phase 3: moves into vultr plugin
+scripts/instance-profile-overlay:provider/OS reference - raspberry-pi host validation - Phase 3: moves into raspberry-pi plugin
+scripts/package-provision:provider/OS reference - raspberry-pi password handling - Phase 3: moves into raspberry-pi plugin
+scripts/profile-resolve:provider/OS reference - provider-specific env emission - Phase 3: moves into provider plugins
+scripts/providers-status:provider/OS reference - provider-specific connectivity checks - Phase 3: moves into provider plugins
+scripts/provision:provider/OS reference - vultr-specific password retrieval - Phase 3: moves into vultr plugin
+scripts/remote-console:provider/OS reference - local-qemu not-implemented guard - Phase 3: moves into local-qemu plugin
+scripts/remote-waypipe:provider/OS reference - raspberry-pi IP handling - Phase 3: moves into raspberry-pi plugin
+scripts/vagrant-up:provider/OS reference - local-qemu Vagrant dispatch - Phase 3: moves into local-qemu plugin
 
 # --- Bash shebangs (language policy: no new bash in scripts/) ---
 scripts/doctor:bash shebang - provider-specific CLI tool checks - port to Python or plugin command
@@ -64,7 +65,6 @@ scripts/tf-init:bash shebang - terraform init dispatcher - port to Python or plu
 scripts/tf-plan:bash shebang - terraform plan dispatcher - port to Python or plugin command
 scripts/test:bash shebang - test runner - port to Python or plugin command
 scripts/test-catalog:bash shebang - catalog validation - port to Python or plugin command
-scripts/test-core-boundary:bash shebang - boundary lint - port to Python or plugin command
 scripts/test-instances:bash shebang - instance validation - port to Python or plugin command
 scripts/test-lint:bash shebang - lint checks - port to Python or plugin command
 scripts/test-plugins:bash shebang - plugin validation - port to Python or plugin command
