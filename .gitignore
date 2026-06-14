@@ -50,6 +50,7 @@ node_modules
 # Python
 __pycache__/
 *.pyc
+.venv/
 
 # dotenv environment variable files
 .env.local.bak.*
