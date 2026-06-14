@@ -31,7 +31,6 @@ scripts/vagrant-up:provider/OS reference - local-qemu Vagrant dispatch - Phase 3
 # --- Bash shebangs (language policy: no new bash in scripts/) ---
 scripts/eve:bash shebang - dev convenience wrapper - port to Python or plugin command
 scripts/eve-docker:bash shebang - dev docker wrapper - port to Python or plugin command
-scripts/ssh-wait:bash shebang - SSH reachability poll - port to Python or plugin command
 scripts/test:bash shebang - test runner - port to Python or plugin command
 scripts/test-catalog:bash shebang - catalog validation - port to Python or plugin command
 scripts/test-instances:bash shebang - instance validation - port to Python or plugin command
@@ -43,4 +42,3 @@ scripts/test-shellcheck:bash shebang - shellcheck runner - port to Python or plu
 scripts/test-terraform:bash shebang - terraform validation - port to Python or plugin command
 scripts/test-tf-isolation:bash shebang - tf-env isolation tests - port to Python or plugin command
 scripts/test-tui:bash shebang - TUI tests - port to Python or plugin command
-scripts/wait-for-provision:bash shebang - provision completion poll - port to Python or plugin command
