@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 import os
-import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -147,11 +146,7 @@ def docker_report(tool_results: list[dict[str, str]]) -> dict[str, Any]:
     if not docker or docker["status"] != "ok":
         return {"checked": False, "status": "missing"}
     daemon = command_output("docker info")
-    if not daemon["ok"]:
-        return {"checked": True, "status": "daemon-unreachable"}
-    image = os.environ.get("EVE_TOOLCHAIN_IMAGE", "eve-toolchain:local")
-    image_status = command_output(f"docker image inspect {shlex.quote(image)}")
-    return {"checked": True, "status": "image-present" if image_status["ok"] else "image-missing", "image": image}
+    return {"checked": True, "status": "ready" if daemon["ok"] else "daemon-unreachable"}
 
 
 def build_report() -> dict[str, Any]:
@@ -203,11 +198,9 @@ def print_report(report: dict[str, Any]) -> None:
         case "missing":
             print("  [INFO] Docker CLI missing")
         case "daemon-unreachable":
-            print("  [INFO] Docker daemon not reachable; start Docker before using make docker.build")
-        case "image-present":
-            print(f"  [OK] Eve toolchain image: {report['docker']['image']}")
-        case "image-missing":
-            print("  [INFO] Eve toolchain image missing; build with: make docker.build")
+            print("  [INFO] Docker daemon not reachable")
+        case "ready":
+            print("  [OK] Docker available")
     print_section("catalog")
     for check in report["checks"]:
         print(f"  {'[OK]' if check['ok'] else '[FAIL]'} {check['name']}")

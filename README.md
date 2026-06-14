@@ -306,21 +306,20 @@ after that, `eve` opens the same TUI from any directory as long as
 `~/.local/bin` is on your `PATH`.
 Use `poetry install` once to install the Python command and TUI dependencies.
 
-### Optional containerized toolchain
+### Optional runtime images
 
 ```bash
 make docker.runtime.slim
 make docker.runtime.full
-make docker.build
-make docker.shell
-make docker.test
 ```
 
 The v3.3 runtime images bake the repository into `/opt/eve` and default
 `EVE_HOME` to `/data`. `eve/eve:slim` is the cloud-provider runtime;
-`eve/eve:full` adds QEMU for local-qemu work. The older
-`docker.build` target remains as a contributor toolchain image for shelling
-into the checkout and running tests.
+`eve/eve:full` adds QEMU for local-qemu work. eve itself is **not** meant to be
+run as a container for normal use (that breaks local-qemu, vagrant, and the
+`remote-*` GUI launchers); for containers-as-instances see the docker *provider*.
+For a contributor dev environment, use the VS Code devcontainer under
+`.devcontainer/` (built from `docker/Dockerfile.toolchain`).
 
 On Linux hosts, `make test` includes the slim runtime Docker smoke by default.
 CI sets `EVE_SKIP_DOCKER_SMOKE=1` in the Ubuntu host job because the required

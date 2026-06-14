@@ -10,6 +10,5 @@ bash allowlist inside `scripts/`, the bootstrap shims live here, out of the
 - **`eve`** — the user launcher: `cd` to the repo root and `exec poetry run python
   scripts/eve-tui`. (`scripts/eve-tui` is the real TUI entrypoint and *does* run
   under poetry, so it stays in `scripts/`.)
-- **`eve-docker`** — runs eve tasks inside the optional containerized toolchain.
 
 Everything that runs *after* the environment is up belongs in `scripts/` as Python.
