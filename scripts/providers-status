@@ -1,168 +1,213 @@
-#!/usr/bin/env bash
-# Check provider configuration and connectivity.
-#
-# Usage:
-#   scripts/providers-status                    # show all providers (table)
-#   scripts/providers-status <provider>         # check one provider (table row)
-#   scripts/providers-status <provider> <field> # print single field (configured|reachable|notes)
-set -euo pipefail
+#!/usr/bin/env python3
+"""Check provider configuration and connectivity.
 
-PROVIDER="${1:-}"
-FIELD="${2:-}"
+Usage:
+  scripts/providers-status                    # show all providers (table)
+  scripts/providers-status <provider>         # check one provider (table row)
+  scripts/providers-status <provider> <field> # print single field (configured|reachable|notes)
+"""
+from __future__ import annotations
 
-cd "$(git rev-parse --show-toplevel)"
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
 
-check_aws() {
-  configured=no reachable=no notes="no working AWS credentials; run the AWS Login provider action or set aws.profile"
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
-  if ! command -v aws >/dev/null 2>&1; then
-    notes="aws cli not found"
-    return
-  fi
+from eve_sdk.tf_dispatch import repo_root  # noqa: E402
 
-  # Always probe the AWS credential chain - a logged-in default profile (SSO),
-  # ambient env vars, or an instance role are all valid even when AWS_PROFILE
-  # is unset. Gating the probe on AWS_PROFILE hid working SSO sessions.
-  AWS_STS_ARGS=(sts get-caller-identity)
-  [ -n "${AWS_PROFILE:-}" ] && AWS_STS_ARGS=(--profile "${AWS_PROFILE}" "${AWS_STS_ARGS[@]}")
-  [ -n "${AWS_REGION:-}" ] && AWS_STS_ARGS=(--region "${AWS_REGION}" "${AWS_STS_ARGS[@]}")
+PROVIDERS = ["aws", "gcp", "local-qemu", "truenas", "vultr"]
+HEADER = "Provider           Configured  Reachable  Notes"
+SEPARATOR = "-----------------  ----------  ---------  -------------------------------------------"
 
-  if aws "${AWS_STS_ARGS[@]}" >/dev/null 2>&1; then
-    configured=yes
-    reachable=yes
-    notes="aws sts ok${AWS_PROFILE:+ (profile ${AWS_PROFILE})}"
-  elif [ -n "${AWS_PROFILE:-}" ] || [ -n "${AWS_ACCESS_KEY_ID:-}" ]; then
-    configured=yes
-    notes="configured but aws sts failed - run the AWS Login provider action (SSO session may be expired)"
-  else
-    notes="no working AWS credentials; run AWS Login (SSO) or set aws.profile in settings"
-  fi
-}
+_DEVNULL = subprocess.DEVNULL
 
-check_local_qemu() {
-  configured=no reachable=no notes="qemu not found"
 
-  if command -v qemu-system-aarch64 >/dev/null 2>&1 || command -v qemu-system-x86_64 >/dev/null 2>&1; then
-    configured=yes
-    reachable=yes
-    notes="qemu available"
-  fi
-}
+def check_aws() -> tuple[str, str, str]:
+    configured = "no"
+    reachable = "no"
 
-check_gcp() {
-  configured=no reachable=no notes="missing GOOGLE_CLOUD_PROJECT/GOOGLE_PROJECT or gcloud config project"
+    if shutil.which("aws") is None:
+        return configured, reachable, "aws cli not found"
 
-  local project="${GOOGLE_CLOUD_PROJECT:-${GOOGLE_PROJECT:-}}"
-  if [ -z "$project" ] && command -v gcloud >/dev/null 2>&1; then
-    project="$(gcloud config get-value project 2>/dev/null || true)"
-  fi
+    # Always probe the AWS credential chain - a logged-in default profile (SSO),
+    # ambient env vars, or an instance role are all valid even when AWS_PROFILE
+    # is unset. Gating the probe on AWS_PROFILE hid working SSO sessions.
+    args = ["sts", "get-caller-identity"]
+    aws_profile = os.environ.get("AWS_PROFILE", "")
+    aws_region = os.environ.get("AWS_REGION", "")
+    if aws_profile:
+        args = ["--profile", aws_profile, *args]
+    if aws_region:
+        args = ["--region", aws_region, *args]
 
-  if [ -n "$project" ]; then
-    configured=yes
-    if ! command -v gcloud >/dev/null 2>&1; then
-      notes="configured, but gcloud not found"
-    elif [ -n "${GOOGLE_OAUTH_ACCESS_TOKEN:-}" ]; then
-      reachable=yes
-      notes="GOOGLE_OAUTH_ACCESS_TOKEN set; project=$project"
-    elif gcloud auth application-default print-access-token >/dev/null 2>&1; then
-      reachable=yes
-      notes="gcloud application-default auth ok; project=$project"
-    elif gcloud auth print-access-token >/dev/null 2>&1; then
-      reachable=yes
-      notes="gcloud user auth ok; project=$project; Terraform may need GOOGLE_OAUTH_ACCESS_TOKEN"
-    else
-      notes="configured, but gcloud auth failed; project=$project"
-    fi
-  fi
-}
+    if subprocess.run(["aws", *args], stdout=_DEVNULL, stderr=_DEVNULL, check=False).returncode == 0:
+        suffix = f" (profile {aws_profile})" if aws_profile else ""
+        return "yes", "yes", f"aws sts ok{suffix}"
+    if aws_profile or os.environ.get("AWS_ACCESS_KEY_ID", ""):
+        return ("yes", "no",
+                "configured but aws sts failed - run the AWS Login provider action "
+                "(SSO session may be expired)")
+    return "no", "no", "no working AWS credentials; run AWS Login (SSO) or set aws.profile in settings"
 
-check_truenas() {
-  local host="${TRUENAS_HOST:-}"
-  local port="${TRUENAS_SSH_PORT:-22}"
-  local user="${TRUENAS_SSH_USER:-}"
-  configured=no reachable=no notes="missing TRUENAS_HOST"
 
-  if [ -n "$host" ]; then
-    configured=yes
-    notes="host=$host"
-    if nc -z -w 2 "$host" "$port" >/dev/null 2>&1; then
-      reachable=yes
-      notes="ssh port $port reachable"
-    else
-      notes="ssh port $port unreachable"
-    fi
-    if [ -n "$user" ] && [ -n "${TRUENAS_SSH_PRIVATE_KEY_FILE:-}" ] && [ -f "${TRUENAS_SSH_PRIVATE_KEY_FILE}" ]; then
-      mkdir -p ./tmp
-      if ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new \
-        -o UserKnownHostsFile=./tmp/known_hosts \
-        -p "$port" -i "${TRUENAS_SSH_PRIVATE_KEY_FILE}" \
-        "$user@$host" \
-        'midclt call system.version >/dev/null 2>&1 && echo ok' 2>/dev/null | grep -q ok; then
-        reachable=yes
-        notes="ssh auth ok; midclt reachable"
-      else
-        notes="host reachable; ssh auth or permissions failed"
-      fi
-    fi
-    if [ -n "${TRUENAS_API_KEY:-}" ] && curl -ksS --connect-timeout 3 --max-time 8 \
-      -H "Authorization: Bearer ${TRUENAS_API_KEY}" \
-      "https://$host/api/v2.0/system/version" >/dev/null 2>&1; then
-      reachable=yes
-      notes="api key accepted"
-    fi
-  fi
-}
+def check_local_qemu() -> tuple[str, str, str]:
+    if shutil.which("qemu-system-aarch64") or shutil.which("qemu-system-x86_64"):
+        return "yes", "yes", "qemu available"
+    return "no", "no", "qemu not found"
 
-check_vultr() {
-  configured=no reachable=no notes="missing VULTR_API_KEY"
 
-  if [ -n "${VULTR_API_KEY:-}" ]; then
-    configured=yes
-    if curl -fsS -H "Authorization: Bearer ${VULTR_API_KEY}" \
-      https://api.vultr.com/v2/account >/dev/null 2>&1; then
-      reachable=yes
-      notes="api ok"
-    else
-      notes="configured, but api call failed"
-    fi
-  fi
-}
+def check_gcp() -> tuple[str, str, str]:
+    notes = "missing GOOGLE_CLOUD_PROJECT/GOOGLE_PROJECT or gcloud config project"
+    project = os.environ.get("GOOGLE_CLOUD_PROJECT", "") or os.environ.get("GOOGLE_PROJECT", "")
+    if not project and shutil.which("gcloud"):
+        result = subprocess.run(
+            ["gcloud", "config", "get-value", "project"],
+            capture_output=True, text=True, check=False,
+        )
+        project = result.stdout.strip()
 
-print_row() {
-  local name="$1"
-  printf '%-17s  %-10s  %-9s  %s\n' "$name" "$configured" "$reachable" "$notes"
-}
+    if not project:
+        return "no", "no", notes
+    configured = "yes"
+    if shutil.which("gcloud") is None:
+        return configured, "no", "configured, but gcloud not found"
+    if os.environ.get("GOOGLE_OAUTH_ACCESS_TOKEN", ""):
+        return configured, "yes", f"GOOGLE_OAUTH_ACCESS_TOKEN set; project={project}"
+    if subprocess.run(
+        ["gcloud", "auth", "application-default", "print-access-token"],
+        stdout=_DEVNULL, stderr=_DEVNULL, check=False,
+    ).returncode == 0:
+        return configured, "yes", f"gcloud application-default auth ok; project={project}"
+    if subprocess.run(
+        ["gcloud", "auth", "print-access-token"],
+        stdout=_DEVNULL, stderr=_DEVNULL, check=False,
+    ).returncode == 0:
+        return (configured, "yes",
+                f"gcloud user auth ok; project={project}; Terraform may need GOOGLE_OAUTH_ACCESS_TOKEN")
+    return configured, "no", f"configured, but gcloud auth failed; project={project}"
 
-PROVIDERS="aws gcp local-qemu truenas vultr"
 
-if [ -n "$PROVIDER" ]; then
-  case "$PROVIDER" in
-    aws)               check_aws ;;
-    gcp)               check_gcp ;;
-    local-qemu)        check_local_qemu ;;
-    truenas)           check_truenas ;;
-    vultr)             check_vultr ;;
-    *)                 echo "Unknown provider: $PROVIDER (valid: $PROVIDERS)" >&2; exit 1 ;;
-  esac
+def check_truenas(root: Path) -> tuple[str, str, str]:
+    host = os.environ.get("TRUENAS_HOST", "")
+    port = os.environ.get("TRUENAS_SSH_PORT", "22")
+    user = os.environ.get("TRUENAS_SSH_USER", "")
+    key_file = os.environ.get("TRUENAS_SSH_PRIVATE_KEY_FILE", "")
+    configured = "no"
+    reachable = "no"
+    notes = "missing TRUENAS_HOST"
 
-  if [ -n "$FIELD" ]; then
-    case "$FIELD" in
-      configured) printf '%s\n' "$configured" ;;
-      reachable)  printf '%s\n' "$reachable" ;;
-      notes)      printf '%s\n' "$notes" ;;
-      *)          echo "Unknown field: $FIELD (valid: configured, reachable, notes)" >&2; exit 1 ;;
-    esac
-  else
-    printf '%s\n' 'Provider           Configured  Reachable  Notes'
-    printf '%s\n' '-----------------  ----------  ---------  -------------------------------------------'
-    print_row "$PROVIDER"
-  fi
-else
-  printf '%s\n' 'Provider           Configured  Reachable  Notes'
-  printf '%s\n' '-----------------  ----------  ---------  -------------------------------------------'
-  check_aws;               print_row "aws"
-  check_gcp;               print_row "gcp"
-  check_local_qemu;         print_row "local-qemu"
-  check_truenas;           print_row "truenas"
-  check_vultr;             print_row "vultr"
-fi
+    if not host:
+        return configured, reachable, notes
+
+    configured = "yes"
+    notes = f"host={host}"
+    if subprocess.run(
+        ["nc", "-z", "-w", "2", host, port], stdout=_DEVNULL, stderr=_DEVNULL, check=False,
+    ).returncode == 0:
+        reachable = "yes"
+        notes = f"ssh port {port} reachable"
+    else:
+        notes = f"ssh port {port} unreachable"
+
+    if user and key_file and Path(key_file).is_file():
+        tmp_dir = root / "tmp"
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        known_hosts = tmp_dir / "known_hosts"
+        probe = subprocess.run(
+            ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
+             "-o", "StrictHostKeyChecking=accept-new",
+             "-o", f"UserKnownHostsFile={known_hosts}",
+             "-p", port, "-i", key_file, f"{user}@{host}",
+             "midclt call system.version >/dev/null 2>&1 && echo ok"],
+            capture_output=True, text=True, check=False,
+        )
+        if "ok" in probe.stdout:
+            reachable = "yes"
+            notes = "ssh auth ok; midclt reachable"
+        else:
+            notes = "host reachable; ssh auth or permissions failed"
+
+    api_key = os.environ.get("TRUENAS_API_KEY", "")
+    if api_key and subprocess.run(
+        ["curl", "-ksS", "--connect-timeout", "3", "--max-time", "8",
+         "-H", f"Authorization: Bearer {api_key}",
+         f"https://{host}/api/v2.0/system/version"],
+        stdout=_DEVNULL, stderr=_DEVNULL, check=False,
+    ).returncode == 0:
+        reachable = "yes"
+        notes = "api key accepted"
+
+    return configured, reachable, notes
+
+
+def check_vultr() -> tuple[str, str, str]:
+    api_key = os.environ.get("VULTR_API_KEY", "")
+    if not api_key:
+        return "no", "no", "missing VULTR_API_KEY"
+    if subprocess.run(
+        ["curl", "-fsS", "-H", f"Authorization: Bearer {api_key}",
+         "https://api.vultr.com/v2/account"],
+        stdout=_DEVNULL, stderr=_DEVNULL, check=False,
+    ).returncode == 0:
+        return "yes", "yes", "api ok"
+    return "yes", "no", "configured, but api call failed"
+
+
+def print_row(name: str, configured: str, reachable: str, notes: str) -> None:
+    print(f"{name:<17}  {configured:<10}  {reachable:<9}  {notes}")
+
+
+def _run_check(name: str, root: Path) -> tuple[str, str, str]:
+    if name == "aws":
+        return check_aws()
+    if name == "gcp":
+        return check_gcp()
+    if name == "local-qemu":
+        return check_local_qemu()
+    if name == "truenas":
+        return check_truenas(root)
+    return check_vultr()
+
+
+def main(argv: list[str]) -> int:
+    provider = argv[0] if len(argv) > 0 else ""
+    field = argv[1] if len(argv) > 1 else ""
+    root = repo_root()
+
+    if provider:
+        if provider not in PROVIDERS:
+            print(f"Unknown provider: {provider} (valid: {' '.join(PROVIDERS)})", file=sys.stderr)
+            return 1
+        configured, reachable, notes = _run_check(provider, root)
+        if field:
+            if field == "configured":
+                print(configured)
+            elif field == "reachable":
+                print(reachable)
+            elif field == "notes":
+                print(notes)
+            else:
+                print(
+                    f"Unknown field: {field} (valid: configured, reachable, notes)",
+                    file=sys.stderr,
+                )
+                return 1
+        else:
+            print(HEADER)
+            print(SEPARATOR)
+            print_row(provider, configured, reachable, notes)
+    else:
+        print(HEADER)
+        print(SEPARATOR)
+        for name in PROVIDERS:
+            configured, reachable, notes = _run_check(name, root)
+            print_row(name, configured, reachable, notes)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))
