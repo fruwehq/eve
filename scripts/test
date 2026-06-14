@@ -7,6 +7,11 @@
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
+# Providers/packages are external (v4.0 Phase 3); sync them into .eve/plugins so
+# the suites can load the catalog and dispatch. Idempotent; uses the committed
+# config/plugin-sources.yaml (local-path sources by default).
+./scripts/plugins-pull >/dev/null
+
 FAIL=0
 if [ "$#" -eq 0 ]; then
   SUITES=(catalog config-save core-boundary docker doctor instances lifecycle os-portability plugins plugins-sync provision-runner schemas secrets state-concurrency terraform tf-isolation tui python shellcheck lint)

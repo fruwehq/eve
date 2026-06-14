@@ -1,4 +1,0 @@
-#!/usr/bin/env sh
-set -eu
-
-exec ./scripts/package-status-command xfce-desktop 'dpkg -s xfce4 >/dev/null 2>&1 && echo installed || echo missing'

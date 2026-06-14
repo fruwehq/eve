@@ -7,13 +7,14 @@ import pytest
 from eve_sdk.plugin_manifest import PluginManifest
 
 
-def test_plugin_manifest_loads_and_validates_builtin_provider() -> None:
-    plugin = PluginManifest.load(Path("plugins/providers/vultr/eve-plugin.yaml"))
+def test_plugin_manifest_loads_and_validates_a_provider() -> None:
+    # Providers are external (pulled into .eve/plugins) after v4.0 Phase 3.
+    plugin = next(p for p in PluginManifest.load_all("provider") if p["id"] == "vultr")
 
     PluginManifest.validate(plugin)
 
     assert plugin["id"] == "vultr"
-    assert PluginManifest.public(plugin)["source"] == "builtin"
+    assert PluginManifest.public(plugin)["source"] == "external"
 
 
 def test_plugin_manifest_rejects_missing_command(tmp_path: Path) -> None:

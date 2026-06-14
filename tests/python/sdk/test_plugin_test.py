@@ -260,19 +260,18 @@ class TestBuiltinConformance:
 
     @staticmethod
     def _plugin_paths() -> list[Path]:
-        from eve_sdk.workdir import Workdir
-        root = Workdir.repo_root() / "plugins"
-        return sorted(root.glob("*/*/eve-plugin.yaml"))
+        # First-party plugins are external (synced into .eve/plugins) after Phase 3.
+        from eve_sdk.plugin_manifest import PluginManifest
+        return [Path(p) for p in PluginManifest.plugin_paths()]
 
     def test_all_builtins_pass(self) -> None:
         paths = self._plugin_paths()
-        assert paths, "no builtin plugin manifests found"
+        assert paths, "no plugin manifests found (run `eve pull`)"
         failures: list[str] = []
         for path in paths:
             result = run_plugin_test(path)
             if not result.passed:
-                rel = path.relative_to(path.parents[2])
-                failures.append(f"{rel}: {_failed_names(result)}")
+                failures.append(f"{path.parent.name}: {_failed_names(result)}")
         assert not failures, "\n".join(failures)
 
 

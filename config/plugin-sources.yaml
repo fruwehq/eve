@@ -1,0 +1,22 @@
+# Default first-party plugin sources (v4.0 agnostic core).
+#
+# Core ships no providers/packages — they are pulled from these external repos by
+# `eve pull`. Sources here use LOCAL relative paths (resolved against the eve repo
+# root), so a sibling checkout works with no remote and no push. To pull from
+# GitHub instead, replace `url` with the git URL and `ref` with a pinned tag, e.g.
+#   url: https://github.com/fruwehq/eve-providers.git
+#   ref: v1.0.0
+# A local override at `.eve/plugin-sources.yaml` is merged on top (its source ids win).
+sources:
+  - id: eve-providers
+    url: ../eve-providers
+    ref: main
+    auth: none
+  - id: eve-packages-linux
+    url: ../eve-packages-linux
+    ref: main
+    auth: none
+  - id: eve-packages-windows
+    url: ../eve-packages-windows
+    ref: main
+    auth: none

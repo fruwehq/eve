@@ -1,4 +1,0 @@
-#!/usr/bin/env sh
-set -eu
-
-exec ./scripts/package-status-command macos-desktop-theme 'if [ -f "$HOME/.local/bin/eve-gnome-macos-theme" ]; then echo installed; else echo missing; fi'

@@ -1,4 +1,0 @@
-#!/usr/bin/env sh
-set -eu
-
-exec ./scripts/package-status-command splashtop 'if [ -x /opt/splashtop-streamer/SRStreamer.sh ] || command -v SRStreamer >/dev/null 2>&1; then echo installed; else echo missing; fi'

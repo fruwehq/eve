@@ -1,4 +1,0 @@
-#!/usr/bin/env sh
-set -eu
-
-exec ./scripts/package-down-windows sunshine 'winget uninstall --id LizardByte.Sunshine --silent --accept-source-agreements; exit 0'

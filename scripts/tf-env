@@ -109,6 +109,10 @@ def print_provider_tf_env(provider: str, env: dict[str, str]) -> None:
         print(f"tf-env: provider plugin {provider} has no tf-env command", file=sys.stderr)
         raise SystemExit(1)
     child_env = os.environ | {"EVE_TF_ENV_JSON": json.dumps(env)}
+    # Ensure the (possibly external/synced) provider command can import eve_sdk.
+    child_env["PYTHONPATH"] = str(ROOT) + (
+        os.pathsep + child_env["PYTHONPATH"] if child_env.get("PYTHONPATH") else ""
+    )
     result = subprocess.run(
         command_vector(plugin, spec),
         cwd=ROOT,

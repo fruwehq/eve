@@ -20,11 +20,23 @@ class DispatchError(Exception):
     pass
 
 
+def command_env(extra: dict[str, str] | None = None) -> dict[str, str]:
+    """Env for invoking plugin/script commands. Ensures the eve repo root is on
+    PYTHONPATH so external (synced) plugin command scripts can `import eve_sdk`
+    regardless of where they live on disk (their own `parents[N]` path assumes
+    the in-repo layout and is wrong once extracted)."""
+    env = os.environ | (extra or {})
+    root = str(Workdir.repo_root())
+    existing = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = root + (os.pathsep + existing if existing else "")
+    return env
+
+
 def run_json(*cmd: str, env: dict[str, str] | None = None) -> dict[str, Any]:
     result = subprocess.run(
         list(cmd),
         cwd=Workdir.repo_root(),
-        env=os.environ | (env or {}),
+        env=command_env(env),
         text=True,
         capture_output=True,
         check=False,
@@ -260,7 +272,7 @@ def stream_command(
     process = subprocess.Popen(
         cmd,
         cwd=Workdir.repo_root(),
-        env=env,
+        env=command_env(env),
         text=True,
         stdin=subprocess.PIPE if stdin_text is not None else None,
         stdout=subprocess.PIPE,
@@ -300,4 +312,4 @@ def open_url(url: str) -> None:
 
 def exec_cmd(cmd: list[str], env: dict[str, str] | None = None) -> None:
     os.chdir(Workdir.repo_root())
-    os.execvpe(cmd[0], cmd, os.environ | (env or {}))
+    os.execvpe(cmd[0], cmd, command_env(env))

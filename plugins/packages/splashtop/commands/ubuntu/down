@@ -1,4 +1,0 @@
-#!/usr/bin/env sh
-set -eu
-
-exec ./scripts/package-down-command splashtop 'sudo /opt/splashtop-streamer/SRStreamer.sh stop 2>/dev/null || true; sudo apt-get remove -y splashtop-streamer || true'

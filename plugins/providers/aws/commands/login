@@ -1,6 +1,0 @@
-#!/usr/bin/env bash
-set -euo pipefail
-
-cd "$(git rev-parse --show-toplevel)"
-./scripts/env-require AWS_PROFILE
-exec aws login --profile "$AWS_PROFILE"

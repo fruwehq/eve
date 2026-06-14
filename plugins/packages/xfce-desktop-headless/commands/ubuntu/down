@@ -1,4 +1,0 @@
-#!/usr/bin/env sh
-set -eu
-
-exec ./scripts/package-down-command xfce-desktop-headless 'sudo DEBIAN_FRONTEND=noninteractive apt-get remove -y xfce4 xfce4-terminal xterm || true'

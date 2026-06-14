@@ -33,7 +33,16 @@ class PluginManifest:
 
     @staticmethod
     def plugin_roots() -> list[Path]:
-        roots = [Workdir.repo_root() / "plugins", Workdir.plugins_dir()]
+        # repo_root/plugins: legacy builtin location (empty after v4.0 Phase 3).
+        # repo_root/.eve/plugins: the eve repo's own pulled first-party plugins,
+        #   discoverable regardless of EVE_HOME (so tests that relocate EVE_HOME
+        #   still see the default providers/packages).
+        # Workdir.plugins_dir(): EVE_HOME-relative synced plugins (the user's).
+        roots = [
+            Workdir.repo_root() / "plugins",
+            Workdir.repo_root() / ".eve" / "plugins",
+            Workdir.plugins_dir(),
+        ]
         extra = [
             Path(entry).expanduser().resolve()
             for entry in os.environ.get("EVE_PLUGIN_ROOTS", "").split(":")
@@ -51,8 +60,14 @@ class PluginManifest:
     def plugin_paths(cls) -> list[Path]:
         paths: list[Path] = []
         for root in cls.plugin_roots():
-            if root.exists():
-                paths.extend(root.glob("**/eve-plugin.yaml"))
+            if not root.exists():
+                continue
+            # os.walk(followlinks=True): synced sources are exposed as symlinks
+            # under .eve/plugins/<id>; we must descend into them to find manifests.
+            # (pathlib's ** symlink-following is 3.13+; this stays 3.12-compatible.)
+            for dirpath, _dirs, files in os.walk(root, followlinks=True):
+                if "eve-plugin.yaml" in files:
+                    paths.append(Path(dirpath) / "eve-plugin.yaml")
         return sorted(paths)
 
     @classmethod

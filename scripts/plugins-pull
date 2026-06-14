@@ -87,9 +87,14 @@ def _resolve_synced(sources: list[Source]) -> list[dict]:
     sources). Returns the resolved set as lockfile dicts.
     """
     plugins_dir = Workdir.plugins_dir()
+    # Builtin ids (the legacy in-repo plugins) are exempt from resolution. Scan the
+    # builtin root directly rather than via load_all() — load_all() dedups by
+    # kind:id and would raise on the synced sources' (legitimately) repeated ids.
+    builtin_root = Workdir.repo_root() / "plugins"
     builtin_ids = frozenset(
-        plugin["id"] for plugin in PluginManifest.load_all() if plugin.get("_source") == "builtin"
-    )
+        PluginManifest.load(path)["id"]
+        for path in builtin_root.glob("**/eve-plugin.yaml")
+    ) if builtin_root.exists() else frozenset()
     candidates = []
     for source in sources:
         version = version_from_ref(source.ref)

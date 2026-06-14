@@ -9,7 +9,7 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-RESOLVER_HELPER = ROOT / "plugins/providers/raspberry-pi/lib/host-resolver.sh"
+RESOLVER_HELPER = ROOT / ".eve/plugins/eve-providers/raspberry-pi/lib/host-resolver.sh"
 failures = 0
 
 

@@ -13,7 +13,7 @@ commands:
   status: {exec: tests/fixtures/plugins/providers/acme/commands/provider-command, args: [status]}
   ip: {exec: tests/fixtures/plugins/providers/acme/commands/provider-command, args: [ip]}
   ssh: {exec: tests/fixtures/plugins/providers/acme/commands/provider-command, args: [ssh]}
-  validate: {exec: plugins/providers/_common/commands/validate-os, args: [any, AWS image selector, aws_ami_name_pattern, aws_ami_id, aws_ssm_parameter]}
+  validate: {exec: tests/fixtures/plugins/providers/_common/commands/validate-os, args: [any, AWS image selector, aws_ami_name_pattern, aws_ami_id, aws_ssm_parameter]}
 access:
   ubuntu:
     bootstrap_user: {env: VM_USER_NAME}

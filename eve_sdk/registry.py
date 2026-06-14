@@ -118,15 +118,34 @@ def _is_unsafe_subdir(subdir: str) -> bool:
     return ".." in Path(subdir).parts
 
 
+def default_sources_path() -> Path:
+    """Committed default source list (the first-party fruwehq repos)."""
+    return Workdir.repo_root() / "config/plugin-sources.yaml"
+
+
 def load_sources(path: Path | None = None, *, allow_unpinned: bool | None = None) -> list[Source]:
-    """Load sources from `.eve/plugin-sources.yaml` (or *path*)."""
-    target = path or Workdir.plugin_sources_path()
-    if not target.exists():
-        return []
+    """Load sources. With no explicit *path*, merge the committed default
+    (`config/plugin-sources.yaml`) with the local override
+    (`.eve/plugin-sources.yaml`); a source id in the local file overrides the
+    default. With an explicit *path*, read only that file."""
     if allow_unpinned is None:
         allow_unpinned = os.environ.get("EVE_ALLOW_UNPINNED_PLUGINS") == "1"
-    doc = yaml.safe_load(target.read_text(encoding="utf-8"))
-    return parse_sources(doc, allow_unpinned=allow_unpinned)
+    override = os.environ.get("EVE_PLUGIN_SOURCES")
+    if path is not None:
+        files = [path]
+    elif override:
+        # Single explicit sources file; bypasses the committed default + local merge.
+        files = [Path(override)]
+    else:
+        files = [default_sources_path(), Workdir.plugin_sources_path()]
+    merged: dict[str, Source] = {}
+    for target in files:
+        if target is None or not target.exists():
+            continue
+        doc = yaml.safe_load(target.read_text(encoding="utf-8"))
+        for source in parse_sources(doc, allow_unpinned=allow_unpinned):
+            merged[source.id] = source
+    return list(merged.values())
 
 
 # --------------------------------------------------------------------------- #
@@ -192,12 +211,26 @@ def sync(
     return locked
 
 
+def resolve_url(url: str) -> str:
+    """Resolve a source url. Remote urls (``scheme://`` or ``user@host:path``) are
+    returned as-is; a **local path** is supported as a first-class source kind —
+    absolute paths pass through, relative paths resolve against the eve repo root
+    (so a sibling checkout like ``../eve-providers`` works without a remote or a
+    push). This is the configured alternative to pulling from GitHub."""
+    if "://" in url or re.match(r"^[^/]+@[^/]+:", url):
+        return url
+    path = Path(url).expanduser()
+    if not path.is_absolute():
+        path = (Workdir.repo_root() / path).resolve()
+    return str(path)
+
+
 def _materialize_worktree(source: Source, worktree: Path, env: dict[str, str]) -> None:
     if (worktree / ".git").is_dir():
         _git("fetch", "--tags", "--prune", "origin", cwd=worktree, env=env)
     else:
         worktree.mkdir(parents=True, exist_ok=True)
-        _git("clone", "--no-checkout", source.url, str(worktree), env=env)
+        _git("clone", "--no-checkout", resolve_url(source.url), str(worktree), env=env)
     # Sparse-checkout only the subdir (whole repo when subdir is empty).
     if source.subdir:
         _git("sparse-checkout", "set", "--no-cone", source.subdir, cwd=worktree, env=env)

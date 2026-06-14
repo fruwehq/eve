@@ -1,4 +1,0 @@
-#!/usr/bin/env sh
-set -eu
-
-exec ./scripts/package-status-command gnome-desktop-headless 'dpkg -s gnome-session >/dev/null 2>&1 && echo installed || echo missing'

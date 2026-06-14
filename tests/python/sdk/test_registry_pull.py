@@ -51,7 +51,12 @@ def _make_package_repo(root: Path, pkg_id: str, *, tag: str, requires: dict | No
 
 
 def _run_pull(eve_home: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    env = {**os.environ, "EVE_HOME": str(eve_home)}
+    # EVE_PLUGIN_SOURCES isolates the test from the committed default source list.
+    env = {
+        **os.environ,
+        "EVE_HOME": str(eve_home),
+        "EVE_PLUGIN_SOURCES": str(eve_home / ".eve" / "plugin-sources.yaml"),
+    }
     return subprocess.run(
         ["poetry", "run", "python", "scripts/plugins-pull", *args],
         cwd=ROOT, env=env, text=True, capture_output=True, check=False,

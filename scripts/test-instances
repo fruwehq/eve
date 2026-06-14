@@ -10,6 +10,15 @@ FIXTURE="tests/fixtures/instances.yaml"
 GOLDEN_DIR="tests/golden/instances"
 UPDATE="${UPDATE_GOLDEN:-0}"
 
+# Providers are external (synced) after v4.0 Phase 3 — resolve the local-qemu
+# command path dynamically instead of assuming the old in-repo plugins/ layout.
+LOCAL_QEMU_CMD="$(./scripts/plugin-list --kind provider --json | python3 -c "
+import json, os, sys
+d = json.load(sys.stdin)
+p = next(x for x in d['plugins'] if x['id'] == 'local-qemu')
+print(os.path.join(os.path.dirname(p['path']), 'commands', 'local-qemu'))
+")"
+
 mkdir -p "$GOLDEN_DIR"
 
 # Keep output deterministic regardless of local host configuration.
@@ -281,7 +290,7 @@ bad_http_pid=$!
 sleep 0.3
 atomic_json="$(./scripts/instance-resolve --registry "$FIXTURE" --instance dev-a --emit json | python3 "$atomic_dl_dir/rewrite.py")"
 if EVE_INSTANCE_WORKDIR="$atomic_dl_dir" EVE_RESOLVED_JSON="$atomic_json" \
-  python3 plugins/providers/local-qemu/commands/local-qemu up >/dev/null 2>&1; then
+  PYTHONPATH="$PWD" python3 "$LOCAL_QEMU_CMD" up >/dev/null 2>&1; then
   rc=0
 else
   rc=$?
@@ -313,7 +322,7 @@ json.dump(d, sys.stdout, separators=(",", ":"))
 PY
 no_sha_json="$(./scripts/instance-resolve --registry "$FIXTURE" --instance dev-a --emit json | python3 "$no_sha_dir/strip_sha.py")"
 no_sha_err="$(EVE_INSTANCE_WORKDIR="$no_sha_dir" EVE_RESOLVED_JSON="$no_sha_json" \
-  python3 plugins/providers/local-qemu/commands/local-qemu up 2>&1 || true)"
+  PYTHONPATH="$PWD" python3 "$LOCAL_QEMU_CMD" up 2>&1 || true)"
 if printf '%s' "$no_sha_err" | grep -q "cloud_image_sha256"; then
   printf '  [OK] local-qemu rejects OS without cloud_image_sha256\n'
 else
