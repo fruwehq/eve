@@ -14,6 +14,7 @@
 
 # --- Provider/OS coupling (Phase 3 extraction debt) ---
 eve_sdk/config.py:provider/OS reference - provider-keyed env-var table - Phase 3: provider env table extraction
+eve_sdk/profile_resolve.py:provider/OS reference - provider-specific env emission (faithful port of bash jq emit_env) - Phase 3: provider env emission extraction
 eve_sdk/resolve.py:provider/OS reference - provider branches and image-field env emission - Phase 3: provider env emission extraction
 scripts/doctor:provider/OS reference - provider-specific CLI tool checks - Phase 3: moves into provider plugins
 scripts/instance-create:provider/OS reference - provider-specific CLI usage hints - Phase 3: derives from provider manifests
@@ -30,8 +31,6 @@ scripts/vagrant-up:provider/OS reference - local-qemu Vagrant dispatch - Phase 3
 # --- Bash shebangs (language policy: no new bash in scripts/) ---
 scripts/eve:bash shebang - dev convenience wrapper - port to Python or plugin command
 scripts/eve-docker:bash shebang - dev docker wrapper - port to Python or plugin command
-scripts/profile-resolve:bash shebang - catalog resolution and env emission - port to Python or plugin command
-scripts/provision:bash shebang - provision upload and bootstrap - port to Python or plugin command
 scripts/ssh-wait:bash shebang - SSH reachability poll - port to Python or plugin command
 scripts/test:bash shebang - test runner - port to Python or plugin command
 scripts/test-catalog:bash shebang - catalog validation - port to Python or plugin command

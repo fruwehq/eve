@@ -1,367 +1,512 @@
-#!/usr/bin/env bash
-# Upload the OS-appropriate provisioning tree to the profile's instance
-# and run the bootstrap entry point.
-#
-# Usage: scripts/provision <instance>
-#
-# Ubuntu: uploads ./oses/<catalog-os-id>/provision/ -> $HOME/provision
-# Windows: uploads ./oses/<catalog-os-id>/provision/ -> C:\Users\<user>\provision
+#!/usr/bin/env python3
+"""Upload the OS-appropriate provisioning tree to the profile's instance
+and run the bootstrap entry point.
 
-set -euo pipefail
+Usage: scripts/provision <instance>
 
-PROFILE="${1:?Usage: scripts/provision <instance>}"
-cd "$(git rev-parse --show-toplevel)"
+Ubuntu: uploads ./oses/<catalog-os-id>/provision/ -> $HOME/provision
+Windows: uploads ./oses/<catalog-os-id>/provision/ -> C:\\Users\\<user>\\provision
+"""
 
-RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
-env_value() {
-  printf '%s\n' "$RESOLVED_ENV" | awk -F= -v key="$1" '$1 == key { print substr($0, index($0, "=") + 1) }'
-}
-OS_FAMILY=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^OS_FAMILY=/{print $2}')
-OS_ID=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^OS_ID=/{print $2}')
-BUNDLE_PACKAGES=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^BUNDLE_PACKAGES=/{print $2}')
-PROFILE_NAME=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^PROFILE_NAME=/{print $2}')
-PROVIDER=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^PROVIDER=/{print $2}')
-OS_PROVISION_DIR="oses/$OS_ID/provision"
+from __future__ import annotations
 
-echo "[provision] profile=$PROFILE os=$OS_ID os_family=$OS_FAMILY"
+import hashlib
+import json
+import os
+import subprocess
+import sys
+import tempfile
+from datetime import UTC, datetime
+from pathlib import Path
+from shutil import copy2, copytree
 
-if [ ! -d "$OS_PROVISION_DIR" ]; then
-  echo "[provision] OS provisioning directory not found: $OS_PROVISION_DIR" >&2
-  exit 2
-fi
-OS_PROVISION_DIR=$(cd "$OS_PROVISION_DIR" && pwd -P)
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
-./scripts/ssh-wait "$PROFILE"
+from eve_sdk.tf_dispatch import apply_tf_env  # noqa: E402
 
-case "$OS_FAMILY" in
-  ubuntu)
-    if ! ./scripts/instance-ssh "$PROFILE" -- 'sudo -n true' >/dev/null 2>&1; then
-      if [ "$PROVIDER" = "raspberry-pi" ] && [ -n "${RASPBERRY_PI_USER_PASSWORD:-}" ]; then
-        echo "[provision] configuring passwordless sudo for Raspberry Pi provisioning"
-        # shellcheck disable=SC2016
-        printf '%s\n' "$RASPBERRY_PI_USER_PASSWORD" | ./scripts/instance-ssh "$PROFILE" -- \
-          'tmp=$(mktemp); printf "%s ALL=(ALL) NOPASSWD:ALL\n" "$USER" > "$tmp"; chmod 0440 "$tmp"; sudo -S -p "" install -o root -g root -m 0440 "$tmp" /etc/sudoers.d/90-eve-provision; rm -f "$tmp"; sudo -n visudo -cf /etc/sudoers.d/90-eve-provision'
-      fi
-    fi
 
-    if ! ./scripts/instance-ssh "$PROFILE" -- 'sudo -n true' >/dev/null 2>&1; then
-      echo "[provision] Linux provisioning requires passwordless sudo for the SSH user." >&2
-      echo "[provision] Configure RASPBERRY_PI_USER_PASSWORD or sudo NOPASSWD for VM_USER_NAME on $PROFILE, then retry." >&2
-      exit 1
-    fi
+def _run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+    """Run a subprocess in ROOT, forwarding stderr by default."""
+    return subprocess.run(cmd, cwd=ROOT, text=True, **kwargs)  # type: ignore[arg-type]
 
-    STAGE=$(mktemp -d)
-    trap 'rm -rf "$STAGE"' EXIT
-    cp -R "$OS_PROVISION_DIR/scripts" "$STAGE/scripts"
-    mkdir -p "$STAGE/state"
-    rm -f "$STAGE/scripts/steps/"*.sh
 
-    ordered_steps=()
-    ordered_plugin_roots=()
+def _ssh_retry(profile: str, label: str, remote_cmd: str) -> int:
+    return _run([
+        str(ROOT / "scripts/ssh-retry"), label,
+        str(ROOT / "scripts/instance-ssh"), profile, "--", remote_cmd,
+    ], stderr=None).returncode
 
-    copy_step() {
-      local step="$1"
-      local plugin_root="$2"
-      local source=""
-      local target
-      target="$STAGE/scripts/steps/$(basename "$step")"
 
-      if [ -f "$OS_PROVISION_DIR/scripts/steps/$step" ]; then
-        source="$OS_PROVISION_DIR/scripts/steps/$step"
-      elif [ -f "$plugin_root/$step" ]; then
-        source="$plugin_root/$step"
-      else
-        echo "[provision] install step not found: $step" >&2
-        exit 2
-      fi
+def _ssh_retry_scp(profile: str, label: str, source: str, dest: str) -> int:
+    return _run([
+        str(ROOT / "scripts/ssh-retry"), label,
+        str(ROOT / "scripts/instance-ssh"), profile, "--scp", source, dest,
+    ], stderr=None).returncode
 
-      cp "$source" "$target"
+
+def _parse_env(output: str) -> dict[str, str]:
+    env: dict[str, str] = {}
+    for line in output.splitlines():
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        env[key] = value
+    return env
+
+
+def _selected_packages(bundle_packages: str) -> list[str]:
+    return [pkg for pkg in bundle_packages.split(",") if pkg]
+
+
+def _plugin_ubuntu_steps(plugin_doc: dict, bundle_packages: str) -> list[tuple[str, str]]:
+    """Return [(plugin_path, step_name)] in selection order from BUNDLE_PACKAGES."""
+    selected = _selected_packages(bundle_packages)
+    by_id = {p["id"]: p for p in plugin_doc.get("plugins") or []}
+    result: list[tuple[str, str]] = []
+    for package_id in selected:
+        plugin = by_id.get(package_id)
+        if not plugin:
+            continue
+        for step in (plugin.get("install") or {}).get("ubuntu", {}).get("steps") or []:
+            result.append((plugin["path"], step))
+    return result
+
+
+def _plugin_windows_steps(plugin_doc: dict, bundle_packages: str) -> list[tuple[str, str]]:
+    selected = _selected_packages(bundle_packages)
+    by_id = {p["id"]: p for p in plugin_doc.get("plugins") or []}
+    result: list[tuple[str, str]] = []
+    for package_id in selected:
+        plugin = by_id.get(package_id)
+        if not plugin:
+            continue
+        for step in (plugin.get("install") or {}).get("windows", {}).get("steps") or []:
+            result.append((plugin["path"], step))
+    return result
+
+
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _write_manifest(state_dir: Path, steps: list[dict], os_family: str) -> None:
+    manifest = {
+        "api_version": 1,
+        "os_family": os_family,
+        "created_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "steps": steps,
     }
-
-    add_step() {
-      local step="$1"
-      local plugin_root="$2"
-      local existing
-
-      if [ "${#ordered_steps[@]}" -gt 0 ]; then
-        for existing in "${ordered_steps[@]}"; do
-          [ "$existing" = "$step" ] && return 0
-        done
-      fi
-
-      ordered_steps+=("$step")
-      ordered_plugin_roots+=("$plugin_root")
-    }
-
-    add_step "base.sh" ""
-    add_step "human-user.sh" ""
-    add_step "timezone.sh" ""
-
-    PLUGIN_DOC=$(./scripts/plugin-list --kind package --json)
-    while IFS=$'\t' read -r plugin_path step; do
-      [ -n "$plugin_path" ] || continue
-      case "$step" in
-        base.sh|human-user.sh|timezone.sh|finish.sh) continue ;;
-      esac
-      add_step "$step" "$(dirname "$plugin_path")"
-    done < <(
-      # Iterate $selected in selection order so depends_on toposort from
-      # instance-resolve drives the step ordering. Iterating .plugins[]
-      # would re-sort alphabetically and put dependents before deps.
-      printf '%s' "$PLUGIN_DOC" |
-        jq -r --arg packages_csv "$BUNDLE_PACKAGES" '
-          ($packages_csv | split(",") | map(select(length > 0))) as $selected |
-          (.plugins | map({key: .id, value: .}) | from_entries) as $by_id |
-          $selected[] |
-          ($by_id[.] // empty) as $plugin |
-          ($plugin.install.ubuntu.steps // [])[] |
-          [$plugin.path, .] | @tsv
-        '
-    )
-    add_step "finish.sh" ""
-
-    for index in "${!ordered_steps[@]}"; do
-      copy_step "${ordered_steps[$index]}" "${ordered_plugin_roots[$index]}"
-    done
-    printf '%s\n' "${ordered_steps[@]##*/}" > "$STAGE/state/steps.list"
-
-    # Write provision manifest with step hashes so the guest runner can
-    # detect host-uploaded-vs-guest-executing drift.
-    manifest_steps="[]"
-    for index in "${!ordered_steps[@]}"; do
-      step_file="$STAGE/scripts/steps/${ordered_steps[$index]##*/}"
-      step_hash=$(shasum -a 256 "$step_file" | awk '{print $1}')
-      manifest_steps=$(printf '%s' "$manifest_steps" | jq \
-        --arg order "$index" \
-        --arg name "${ordered_steps[$index]##*/}" \
-        --arg sha "$step_hash" \
-        '. += [{"order": ($order|tonumber), "name": $name, "sha256": $sha}]')
-    done
-    jq -n \
-      --argjson steps "$manifest_steps" \
-      --arg os_family "$OS_FAMILY" \
-      --arg created_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-      '{api_version: 1, os_family: $os_family, created_at: $created_at, steps: $steps}' \
-      > "$STAGE/state/provision-manifest.json"
-
-    # bundle_packages: one package per line for cheap grep lookup in step scripts
-    printf '%s\n' "$BUNDLE_PACKAGES" | tr ',' '\n' > "$STAGE/state/bundle_packages"
-    printf '%s\n' "$BUNDLE_PACKAGES" | tr ',' '\n' > "$STAGE/state/selected_packages"
-
-    THINLINC_REMOTE_SERVER_BUNDLE_PATH="${THINLINC_SERVER_BUNDLE_PATH:-}"
-    UPLOAD_THINLINC_BUNDLE=0
-    case ",$BUNDLE_PACKAGES," in
-      *,thinlinc,*)
-        if [ -n "${THINLINC_SERVER_BUNDLE_PATH:-}" ]; then
-          if [ ! -e "$THINLINC_SERVER_BUNDLE_PATH" ]; then
-            echo "[provision] THINLINC_SERVER_BUNDLE_PATH does not exist: $THINLINC_SERVER_BUNDLE_PATH" >&2
-            exit 2
-          fi
-          thinlinc_bundle_basename="$(basename "$THINLINC_SERVER_BUNDLE_PATH")"
-          THINLINC_REMOTE_SERVER_BUNDLE_PATH="\$HOME/provision/downloads/thinlinc/$thinlinc_bundle_basename"
-          UPLOAD_THINLINC_BUNDLE=1
-        fi
-        ;;
-    esac
-
-    # Auto-detect host timezone if not explicitly set
-    _HOST_TZ="${TIMEZONE:-}"
-    if [ -z "$_HOST_TZ" ]; then
-      _HOST_TZ="$(./scripts/host-timezone 2>/dev/null || true)"
-    fi
-    THINLINC_AGENT_HOSTNAME_DEFAULT="${THINLINC_AGENT_HOSTNAME:-}"
-    case ",$BUNDLE_PACKAGES," in
-      *,thinlinc,*)
-        if [ -z "$THINLINC_AGENT_HOSTNAME_DEFAULT" ]; then
-          THINLINC_AGENT_HOSTNAME_DEFAULT="$(./scripts/instance-ip "$PROFILE" 2>/dev/null || true)"
-        fi
-        ;;
-    esac
-    # env file: sourced by runner.sh so steps see PROFILE_NAME and local config.
-    cat > "$STAGE/state/env" <<EOF
-export ACCESS_BOOTSTRAP_USER="$(env_value ACCESS_BOOTSTRAP_USER)"
-export ACCESS_HUMAN_USER="$(env_value ACCESS_HUMAN_USER)"
-export ACCESS_PROVISION_USER="$(env_value ACCESS_PROVISION_USER)"
-export OS_FAMILY="$OS_FAMILY"
-export PROFILE_NAME="$PROFILE_NAME"
-export HUMAN_USER_NAME="$(env_value HUMAN_USER_NAME)"
-export PROVISION_USER_NAME="$(env_value PROVISION_USER_NAME)"
-export VM_USER_NAME="$(env_value VM_USER_NAME)"
-export VM_USER_PASSWORD="${VM_USER_PASSWORD:-}"
-export EPHEMERAL_DISPLAY_RESOLUTION="${EPHEMERAL_DISPLAY_RESOLUTION:-}"
-export EPHEMERAL_DISPLAY_FPS="${EPHEMERAL_DISPLAY_FPS:-}"
-export PROVIDER="$PROVIDER"
-export EPHEMERAL_SUNSHINE_PASSWORD="${EPHEMERAL_SUNSHINE_PASSWORD:-}"
-export RDP_GATE_PASSWORD="${RDP_GATE_PASSWORD:-}"
-export RDP_GATE_USER="${RDP_GATE_USER:-}"
-export NOMACHINE_VERSION="${NOMACHINE_VERSION:-}"
-export RASPBERRY_PI_HDMI_CONNECTOR="${RASPBERRY_PI_HDMI_CONNECTOR:-}"
-export RASPBERRY_PI_HDMI_MODE="${RASPBERRY_PI_HDMI_MODE:-}"
-export RUSTDESK_KEY="${RUSTDESK_KEY:-}"
-export RUSTDESK_PASSWORD="${RUSTDESK_PASSWORD:-}"
-export RUSTDESK_SERVER="${RUSTDESK_SERVER:-}"
-export SPLASHTOP_EMAIL="${SPLASHTOP_EMAIL:-}"
-export SPLASHTOP_PASSWORD="${SPLASHTOP_PASSWORD:-}"
-export SPLASHTOP_STREAMER_PATH="${SPLASHTOP_STREAMER_PATH:-}"
-export SPLASHTOP_STREAMER_URL="${SPLASHTOP_STREAMER_URL:-}"
-export SUNSHINE_MAX_BITRATE_KBPS="${SUNSHINE_MAX_BITRATE_KBPS:-}"
-export SUNSHINE_VERSION="${SUNSHINE_VERSION:-}"
-export THINLINC_ACCEPT_EULA="${THINLINC_ACCEPT_EULA:-}"
-export THINLINC_AGENT_HOSTNAME="${THINLINC_AGENT_HOSTNAME_DEFAULT:-}"
-export THINLINC_SERVER_BUNDLE_PATH="${THINLINC_REMOTE_SERVER_BUNDLE_PATH:-}"
-export THINLINC_SERVER_BUNDLE_URL="${THINLINC_SERVER_BUNDLE_URL:-}"
-export THINLINC_WEBACCESS_PORT="${THINLINC_WEBACCESS_PORT:-}"
-export TIMEZONE="$_HOST_TZ"
-export VIRTUAL_MONITOR_WIDTH="${VIRTUAL_MONITOR_WIDTH:-1920}"
-export VIRTUAL_MONITOR_HEIGHT="${VIRTUAL_MONITOR_HEIGHT:-1080}"
-EOF
-
-    echo "[provision] uploading $OS_PROVISION_DIR/ to remote"
-    # Remote paths are relative to $HOME (SFTP/SCP default) to avoid shell-expansion pitfalls.
-    ./scripts/ssh-retry "prepare linux provision directory" ./scripts/instance-ssh "$PROFILE" -- 'rm -rf ~/provision/state ~/provision/scripts ~/provision/logs && mkdir -p ~/provision/state'
-    if [ "$UPLOAD_THINLINC_BUNDLE" = "1" ]; then
-      ./scripts/ssh-retry "prepare ThinLinc bundle directory" ./scripts/instance-ssh "$PROFILE" -- 'rm -rf ~/provision/downloads/thinlinc && mkdir -p ~/provision/downloads/thinlinc'
-      ./scripts/ssh-retry "upload ThinLinc server bundle" ./scripts/instance-ssh "$PROFILE" --scp "$THINLINC_SERVER_BUNDLE_PATH" 'provision/downloads/thinlinc'
-    fi
-    ./scripts/ssh-retry "upload linux scripts" ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/scripts" 'provision/'
-    ./scripts/ssh-retry "upload linux bundle package list" ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/state/bundle_packages" 'provision/state/'
-    ./scripts/ssh-retry "upload linux selected package list" ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/state/selected_packages" 'provision/state/'
-    ./scripts/ssh-retry "upload linux environment" ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/state/env" 'provision/state/'
-    ./scripts/ssh-retry "upload linux step list" ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/state/steps.list" 'provision/state/'
-    ./scripts/ssh-retry "upload linux provision manifest" ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/state/provision-manifest.json" 'provision/state/'
-    echo "[provision] running bootstrap.sh"
-    ./scripts/ssh-retry "start linux provisioning runner" ./scripts/instance-ssh "$PROFILE" -- 'chmod +x ~/provision/scripts/bootstrap.sh ~/provision/scripts/runner.sh ~/provision/scripts/steps/*.sh ~/provision/scripts/lib/*.sh && ~/provision/scripts/bootstrap.sh'
-    echo "[provision] waiting for linux provisioning to finish (polling remote log every ${EVE_PROVISION_WAIT_POLL_INTERVAL:-5}s)"
-    ./scripts/wait-for-provision "$PROFILE"
-    ;;
-  windows)
-    # Windows password: env var override, else terraform output (vultr only).
-    WINDOWS_PASSWORD="${EPHEMERAL_WINDOWS_PASSWORD:-}"
-    if [ -z "$WINDOWS_PASSWORD" ]; then
-      PROVIDER=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^PROVIDER=/{print $2}')
-      TAGS=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^STACK_TAGS=/{print $2}')
-      case "$PROVIDER" in
-        vultr)
-          eval "$(./scripts/tf-env "$PROFILE")"
-          WINDOWS_PASSWORD=$(
-            terramate run --quiet --disable-safeguards=git-untracked,git-uncommitted,git-out-of-sync,outdated-code --tags="$TAGS-services" -- \
-              terraform output -raw vultr_instance_default_password
-          )
-          ;;
-        *)
-          echo "[provision] set EPHEMERAL_WINDOWS_PASSWORD (no terraform output available for provider=$PROVIDER)" >&2
-          exit 1
-          ;;
-      esac
-    fi
-    : "${EPHEMERAL_SUNSHINE_PASSWORD:?set EPHEMERAL_SUNSHINE_PASSWORD via config-save or your shell}"
-
-    mkdir -p ./tmp
-    jq -n \
-      --arg wp "$WINDOWS_PASSWORD" \
-      --arg sp "$EPHEMERAL_SUNSHINE_PASSWORD" \
-      --arg dr "${EPHEMERAL_DISPLAY_RESOLUTION:-}" \
-      --arg rk "${RUSTDESK_KEY:-}" \
-      --arg rp "${RUSTDESK_PASSWORD:-}" \
-      --arg rs "${RUSTDESK_SERVER:-}" \
-      --arg sv "${SUNSHINE_VERSION:-}" \
-      --arg nv "${NOMACHINE_VERSION:-}" \
-      --arg se "${SPLASHTOP_EMAIL:-}" \
-      --arg spw "${SPLASHTOP_PASSWORD:-}" \
-      --arg su "${SPLASHTOP_STREAMER_URL:-}" \
-      '{windows_password: $wp, sunshine_password: $sp, display_resolution: $dr, rustdesk_key: $rk, rustdesk_password: $rp, rustdesk_server: $rs, sunshine_version: $sv, nomachine_version: $nv, splashtop_email: $se, splashtop_password: $spw, splashtop_streamer_url: $su}' \
-      > ./tmp/env.json
-
-    STAGE=$(mktemp -d)
-    trap 'rm -rf "$STAGE"' EXIT
-    cp -R "$OS_PROVISION_DIR" "$STAGE/provision"
-
-    copy_windows_step() {
-      local step="$1"
-      local plugin_root="$2"
-      local source=""
-      local target
-      target="$STAGE/provision/scripts/steps/$(basename "$step")"
-
-      if [ -f "$OS_PROVISION_DIR/scripts/steps/$step" ]; then
-        source="$OS_PROVISION_DIR/scripts/steps/$step"
-      elif [ -f "$plugin_root/$step" ]; then
-        source="$plugin_root/$step"
-      else
-        echo "[provision] windows install step not found: $step" >&2
-        exit 2
-      fi
-
-      cp "$source" "$target"
-      if [ -n "$plugin_root" ] && [ -d "$plugin_root/provision/windows/lib" ]; then
-        cp -R "$plugin_root/provision/windows/lib/." "$STAGE/provision/scripts/lib/"
-      fi
-      if [ -n "$plugin_root" ] && [ -d "$plugin_root/provision/windows/templates" ]; then
-        mkdir -p "$STAGE/provision/scripts/templates"
-        cp -R "$plugin_root/provision/windows/templates/." "$STAGE/provision/scripts/templates/"
-      fi
-    }
-
-    PLUGIN_DOC=$(./scripts/plugin-list --kind package --json)
-    while IFS=$'\t' read -r plugin_path step; do
-      [ -n "$plugin_path" ] || continue
-      [ -n "$step" ] || continue
-      copy_windows_step "$step" "$(dirname "$plugin_path")"
-    done < <(
-      # Iterate $selected in selection order; see ubuntu branch for rationale.
-      printf '%s' "$PLUGIN_DOC" |
-        jq -r --arg packages_csv "$BUNDLE_PACKAGES" '
-          ($packages_csv | split(",") | map(select(length > 0))) as $selected |
-          (.plugins | map({key: .id, value: .}) | from_entries) as $by_id |
-          $selected[] |
-          ($by_id[.] // empty) as $plugin |
-          ($plugin.install.windows.steps // [])[] |
-          [$plugin.path, .] | @tsv
-        '
+    (state_dir / "provision-manifest.json").write_text(
+        json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
     )
 
-    # Write provision manifest with step hashes so the guest runner can
-    # detect host-uploaded-vs-guest-executing drift.
-    manifest_steps="[]"
-    step_index=0
-    for step_file in "$STAGE/provision/scripts/steps/"*.ps1; do
-      [ -f "$step_file" ] || continue
-      step_hash=$(shasum -a 256 "$step_file" | awk '{print $1}')
-      step_name=$(basename "$step_file")
-      manifest_steps=$(printf '%s' "$manifest_steps" | jq \
-        --arg order "$step_index" \
-        --arg name "$step_name" \
-        --arg sha "$step_hash" \
-        '. += [{"order": ($order|tonumber), "name": $name, "sha256": $sha}]')
-      step_index=$((step_index + 1))
-    done
-    jq -n \
-      --argjson steps "$manifest_steps" \
-      --arg os_family "$OS_FAMILY" \
-      --arg created_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-      '{api_version: 1, os_family: $os_family, created_at: $created_at, steps: $steps}' \
-      > "$STAGE/provision/state/provision-manifest.json"
 
-    echo "[provision] uploading $OS_PROVISION_DIR/ to remote"
-    # Clear scripts AND state — without state reset, currentStep can outrun the
-    # available step files when new steps are added, silently skipping them.
-    ./scripts/ssh-retry "prepare windows provision directory" ./scripts/instance-ssh "$PROFILE" -- 'New-Item -ItemType Directory -Force C:\Users\Administrator\provision | Out-Null; if (Test-Path "C:\Users\Administrator\provision\scripts") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\scripts" }; if (Test-Path "C:\Users\Administrator\provision\state") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\state" }; if (Test-Path "C:\Users\Administrator\provision\logs") { Remove-Item -Recurse -Force "C:\Users\Administrator\provision\logs" }; New-Item -ItemType Directory -Force C:\Users\Administrator\provision\state | Out-Null'
-    ./scripts/ssh-retry "upload windows provision tree" ./scripts/instance-ssh "$PROFILE" --scp "$STAGE/provision" '/C:/Users/Administrator/'
-    ./scripts/ssh-retry "upload windows env.json" ./scripts/instance-ssh "$PROFILE" --scp ./tmp/env.json '/C:/Users/Administrator/provision/state/env.json'
-    echo "[provision] running bootstrap.ps1"
-    # The Windows runner may trigger a reboot mid-step, which drops the SSH
-    # connection (exit 255). The Scheduled Task resumes the runner after
-    # reboot, so exit 255 is expected and not an error.
-    exit_code=0
-    ./scripts/instance-ssh "$PROFILE" -- '& "C:\Users\Administrator\provision\scripts\bootstrap.ps1"' || exit_code=$?
-    if [ "$exit_code" -ne 0 ] && [ "$exit_code" -ne 255 ]; then
-      exit "$exit_code"
-    fi
-    echo "[provision] waiting for windows provisioning to finish (polling remote log every ${EVE_PROVISION_WAIT_POLL_INTERVAL:-5}s)"
-    ./scripts/wait-for-provision "$PROFILE"
-    ;;
-  *)
-    echo "[provision] unknown os_family: $OS_FAMILY" >&2
-    exit 2
-    ;;
-esac
+def provision_ubuntu(profile: str, env: dict[str, str], root: Path) -> int:
+    os_family = env.get("OS_FAMILY", "")
+    os_id = env.get("OS_ID", "")
+    bundle_packages = env.get("BUNDLE_PACKAGES", "")
+    profile_name = env.get("PROFILE_NAME", "")
+    provider = env.get("PROVIDER", "")
+    os_provision_dir = root / "oses" / os_id / "provision"
+
+    if not os_provision_dir.is_dir():
+        print(f"[provision] OS provisioning directory not found: {os_provision_dir.relative_to(root)}", file=sys.stderr)
+        return 2
+
+    ssh_wait_rc = _run([str(root / "scripts/ssh-wait"), profile]).returncode
+    if ssh_wait_rc != 0:
+        return ssh_wait_rc
+
+    instance_ssh = str(root / "scripts/instance-ssh")
+
+    def check_sudo() -> bool:
+        return subprocess.run(
+            [instance_ssh, profile, "--", "sudo -n true"],
+            cwd=root, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
+        ).returncode == 0
+
+    if not check_sudo():
+        rpi_password = os.environ.get("RASPBERRY_PI_USER_PASSWORD", "")
+        if provider == "raspberry-pi" and rpi_password:
+            print("[provision] configuring passwordless sudo for Raspberry Pi provisioning")
+            remote_cmd = (
+                'tmp=$(mktemp); printf "%s ALL=(ALL) NOPASSWD:ALL\\n" "$USER" > "$tmp"; '
+                'chmod 0440 "$tmp"; sudo -S -p "" install -o root -g root -m 0440 "$tmp" '
+                '/etc/sudoers.d/90-eve-provision; rm -f "$tmp"; '
+                'sudo -n visudo -cf /etc/sudoers.d/90-eve-provision'
+            )
+            subprocess.run(
+                [instance_ssh, profile, "--", remote_cmd],
+                cwd=root, input=f"{rpi_password}\n", text=True, check=False,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+
+    if not check_sudo():
+        print(
+            "[provision] Linux provisioning requires passwordless sudo"
+            " for the SSH user.", file=sys.stderr,
+        )
+        print(
+            f"[provision] Configure RASPBERRY_PI_USER_PASSWORD or sudo NOPASSWD"
+            f" for VM_USER_NAME on {profile}, then retry.", file=sys.stderr,
+        )
+        return 1
+
+    stage = Path(tempfile.mkdtemp())
+    try:
+        copytree(os_provision_dir / "scripts", stage / "scripts")
+        (stage / "state").mkdir(parents=True, exist_ok=True)
+        for f in (stage / "scripts" / "steps").glob("*.sh"):
+            f.unlink()
+
+        ordered_steps: list[str] = []
+        ordered_roots: list[str] = []
+        step_set: set[str] = set()
+
+        def add_step(step: str, plugin_root: str) -> None:
+            if step in step_set:
+                return
+            step_set.add(step)
+            ordered_steps.append(step)
+            ordered_roots.append(plugin_root)
+
+        add_step("base.sh", "")
+        add_step("human-user.sh", "")
+        add_step("timezone.sh", "")
+
+        plugin_doc = json.loads(subprocess.run(
+            [str(root / "scripts/plugin-list"), "--kind", "package", "--json"],
+            cwd=root, capture_output=True, text=True, check=False,
+        ).stdout)
+        for plugin_path, step in _plugin_ubuntu_steps(plugin_doc, bundle_packages):
+            if not plugin_path:
+                continue
+            if step in ("base.sh", "human-user.sh", "timezone.sh", "finish.sh"):
+                continue
+            add_step(step, str(Path(plugin_path).parent))
+
+        add_step("finish.sh", "")
+
+        steps_dir = stage / "scripts" / "steps"
+        for idx, step in enumerate(ordered_steps):
+            plugin_root = ordered_roots[idx]
+            target = steps_dir / Path(step).name
+            source: Path | None = None
+            os_step = os_provision_dir / "scripts" / "steps" / step
+            if os_step.is_file():
+                source = os_step
+            elif plugin_root:
+                plugin_step = Path(plugin_root) / step
+                if plugin_step.is_file():
+                    source = plugin_step
+            if source is None:
+                print(f"[provision] install step not found: {step}", file=sys.stderr)
+                return 2
+            copy2(source, target)
+
+        (stage / "state" / "steps.list").write_text(
+            "\n".join(Path(s).name for s in ordered_steps) + "\n", encoding="utf-8"
+        )
+
+        manifest_steps: list[dict] = []
+        for idx, step in enumerate(ordered_steps):
+            step_file = steps_dir / Path(step).name
+            manifest_steps.append({
+                "order": idx,
+                "name": Path(step).name,
+                "sha256": _sha256(step_file),
+            })
+        _write_manifest(stage / "state", manifest_steps, os_family)
+
+        pkg_lines = "\n".join(_selected_packages(bundle_packages))
+        (stage / "state" / "bundle_packages").write_text(pkg_lines + "\n", encoding="utf-8")
+        (stage / "state" / "selected_packages").write_text(pkg_lines + "\n", encoding="utf-8")
+
+        thinlinc_remote_path = os.environ.get("THINLINC_SERVER_BUNDLE_PATH", "")
+        upload_thinlinc = False
+        if "thinlinc" in _selected_packages(bundle_packages) and thinlinc_remote_path:
+            if not Path(thinlinc_remote_path).exists():
+                print(
+                    f"[provision] THINLINC_SERVER_BUNDLE_PATH does not exist:"
+                    f" {thinlinc_remote_path}", file=sys.stderr,
+                )
+                return 2
+            thinlinc_basename = os.path.basename(thinlinc_remote_path)
+            thinlinc_remote_path = f"$HOME/provision/downloads/thinlinc/{thinlinc_basename}"
+            upload_thinlinc = True
+
+        host_tz = os.environ.get("TIMEZONE", "")
+        if not host_tz:
+            tz_result = subprocess.run(
+                [str(root / "scripts/host-timezone")], cwd=root,
+                capture_output=True, text=True, check=False,
+            )
+            if tz_result.returncode == 0:
+                host_tz = tz_result.stdout.strip()
+
+        thinlinc_agent_hostname = os.environ.get("THINLINC_AGENT_HOSTNAME", "")
+        if "thinlinc" in _selected_packages(bundle_packages) and not thinlinc_agent_hostname:
+            ip_result = subprocess.run(
+                [str(root / "scripts/instance-ip"), profile], cwd=root,
+                capture_output=True, text=True, check=False,
+            )
+            if ip_result.returncode == 0:
+                thinlinc_agent_hostname = ip_result.stdout.strip()
+
+        env_lines = [
+            f'export ACCESS_BOOTSTRAP_USER="{env.get("ACCESS_BOOTSTRAP_USER", "")}"',
+            f'export ACCESS_HUMAN_USER="{env.get("ACCESS_HUMAN_USER", "")}"',
+            f'export ACCESS_PROVISION_USER="{env.get("ACCESS_PROVISION_USER", "")}"',
+            f'export OS_FAMILY="{os_family}"',
+            f'export PROFILE_NAME="{profile_name}"',
+            f'export HUMAN_USER_NAME="{env.get("HUMAN_USER_NAME", "")}"',
+            f'export PROVISION_USER_NAME="{env.get("PROVISION_USER_NAME", "")}"',
+            f'export VM_USER_NAME="{env.get("VM_USER_NAME", "")}"',
+            f'export VM_USER_PASSWORD="{os.environ.get("VM_USER_PASSWORD", "")}"',
+            f'export EPHEMERAL_DISPLAY_RESOLUTION="{os.environ.get("EPHEMERAL_DISPLAY_RESOLUTION", "")}"',
+            f'export EPHEMERAL_DISPLAY_FPS="{os.environ.get("EPHEMERAL_DISPLAY_FPS", "")}"',
+            f'export PROVIDER="{provider}"',
+            f'export EPHEMERAL_SUNSHINE_PASSWORD="{os.environ.get("EPHEMERAL_SUNSHINE_PASSWORD", "")}"',
+            f'export RDP_GATE_PASSWORD="{os.environ.get("RDP_GATE_PASSWORD", "")}"',
+            f'export RDP_GATE_USER="{os.environ.get("RDP_GATE_USER", "")}"',
+            f'export NOMACHINE_VERSION="{os.environ.get("NOMACHINE_VERSION", "")}"',
+            f'export RASPBERRY_PI_HDMI_CONNECTOR="{os.environ.get("RASPBERRY_PI_HDMI_CONNECTOR", "")}"',
+            f'export RASPBERRY_PI_HDMI_MODE="{os.environ.get("RASPBERRY_PI_HDMI_MODE", "")}"',
+            f'export RUSTDESK_KEY="{os.environ.get("RUSTDESK_KEY", "")}"',
+            f'export RUSTDESK_PASSWORD="{os.environ.get("RUSTDESK_PASSWORD", "")}"',
+            f'export RUSTDESK_SERVER="{os.environ.get("RUSTDESK_SERVER", "")}"',
+            f'export SPLASHTOP_EMAIL="{os.environ.get("SPLASHTOP_EMAIL", "")}"',
+            f'export SPLASHTOP_PASSWORD="{os.environ.get("SPLASHTOP_PASSWORD", "")}"',
+            f'export SPLASHTOP_STREAMER_PATH="{os.environ.get("SPLASHTOP_STREAMER_PATH", "")}"',
+            f'export SPLASHTOP_STREAMER_URL="{os.environ.get("SPLASHTOP_STREAMER_URL", "")}"',
+            f'export SUNSHINE_MAX_BITRATE_KBPS="{os.environ.get("SUNSHINE_MAX_BITRATE_KBPS", "")}"',
+            f'export SUNSHINE_VERSION="{os.environ.get("SUNSHINE_VERSION", "")}"',
+            f'export THINLINC_ACCEPT_EULA="{os.environ.get("THINLINC_ACCEPT_EULA", "")}"',
+            f'export THINLINC_AGENT_HOSTNAME="{thinlinc_agent_hostname}"',
+            f'export THINLINC_SERVER_BUNDLE_PATH="{thinlinc_remote_path}"',
+            f'export THINLINC_SERVER_BUNDLE_URL="{os.environ.get("THINLINC_SERVER_BUNDLE_URL", "")}"',
+            f'export THINLINC_WEBACCESS_PORT="{os.environ.get("THINLINC_WEBACCESS_PORT", "")}"',
+            f'export TIMEZONE="{host_tz}"',
+            f'export VIRTUAL_MONITOR_WIDTH="{os.environ.get("VIRTUAL_MONITOR_WIDTH", "1920")}"',
+            f'export VIRTUAL_MONITOR_HEIGHT="{os.environ.get("VIRTUAL_MONITOR_HEIGHT", "1080")}"',
+        ]
+        (stage / "state" / "env").write_text("\n".join(env_lines) + "\n", encoding="utf-8")
+
+        print(f"[provision] uploading {os_provision_dir.relative_to(root)}/ to remote")
+        rc = _ssh_retry(profile, "prepare linux provision directory",
+                        "rm -rf ~/provision/state ~/provision/scripts ~/provision/logs && mkdir -p ~/provision/state")
+        if rc:
+            return rc
+        if upload_thinlinc:
+            rc = _ssh_retry(profile, "prepare ThinLinc bundle directory",
+                            "rm -rf ~/provision/downloads/thinlinc && mkdir -p ~/provision/downloads/thinlinc")
+            if rc:
+                return rc
+            rc = _ssh_retry_scp(profile, "upload ThinLinc server bundle",
+                                os.environ["THINLINC_SERVER_BUNDLE_PATH"], "provision/downloads/thinlinc")
+            if rc:
+                return rc
+        rc = _ssh_retry_scp(profile, "upload linux scripts", str(stage / "scripts"), "provision/")
+        if rc:
+            return rc
+        bundle_pkg_path = str(stage / "state" / "bundle_packages")
+        rc = _ssh_retry_scp(profile, "upload linux bundle package list",
+                            bundle_pkg_path, "provision/state/")
+        if rc:
+            return rc
+        selected_pkg_path = str(stage / "state" / "selected_packages")
+        rc = _ssh_retry_scp(profile, "upload linux selected package list",
+                            selected_pkg_path, "provision/state/")
+        if rc:
+            return rc
+        rc = _ssh_retry_scp(profile, "upload linux environment",
+                            str(stage / "state" / "env"), "provision/state/")
+        if rc:
+            return rc
+        rc = _ssh_retry_scp(profile, "upload linux step list",
+                            str(stage / "state" / "steps.list"), "provision/state/")
+        if rc:
+            return rc
+        manifest_path = str(stage / "state" / "provision-manifest.json")
+        rc = _ssh_retry_scp(profile, "upload linux provision manifest",
+                            manifest_path, "provision/state/")
+        if rc:
+            return rc
+        print("[provision] running bootstrap.sh")
+        rc = _ssh_retry(profile, "start linux provisioning runner",
+                        "chmod +x ~/provision/scripts/bootstrap.sh ~/provision/scripts/runner.sh"
+                        " ~/provision/scripts/steps/*.sh ~/provision/scripts/lib/*.sh"
+                        " && ~/provision/scripts/bootstrap.sh")
+        if rc:
+            return rc
+        poll_interval = os.environ.get("EVE_PROVISION_WAIT_POLL_INTERVAL", "5")
+        print(f"[provision] waiting for linux provisioning to finish (polling remote log every {poll_interval}s)")
+        rc = _run([str(root / "scripts/wait-for-provision"), profile]).returncode
+        return rc
+    finally:
+        import shutil
+        shutil.rmtree(stage, ignore_errors=True)
+
+
+def provision_windows(profile: str, env: dict[str, str], root: Path) -> int:
+    os_family = env.get("OS_FAMILY", "")
+    os_id = env.get("OS_ID", "")
+    bundle_packages = env.get("BUNDLE_PACKAGES", "")
+    provider = env.get("PROVIDER", "")
+    tags = env.get("STACK_TAGS", "")
+    os_provision_dir = root / "oses" / os_id / "provision"
+
+    windows_password = os.environ.get("EPHEMERAL_WINDOWS_PASSWORD", "")
+    if not windows_password:
+        if provider == "vultr":
+            apply_tf_env(root, profile)
+            windows_password = subprocess.run(
+                ["terramate", "run", "--quiet",
+                 "--disable-safeguards=git-untracked",
+                 "--disable-safeguards=git-uncommitted",
+                 "--disable-safeguards=git-out-of-sync",
+                 "--disable-safeguards=outdated-code",
+                 f"--tags={tags}-services", "--",
+                 "terraform", "output", "-raw", "vultr_instance_default_password"],
+                cwd=root, capture_output=True, text=True, check=False,
+            ).stdout
+        else:
+            print(
+                f"[provision] set EPHEMERAL_WINDOWS_PASSWORD"
+                f" (no terraform output available for provider={provider})",
+                file=sys.stderr,
+            )
+            return 1
+
+    sunshine_password = os.environ.get("EPHEMERAL_SUNSHINE_PASSWORD", "")
+    if not sunshine_password:
+        print("set EPHEMERAL_SUNSHINE_PASSWORD via config-save or your shell", file=sys.stderr)
+        return 1
+
+    tmp_dir = root / "tmp"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    env_json = {
+        "windows_password": windows_password,
+        "sunshine_password": sunshine_password,
+        "display_resolution": os.environ.get("EPHEMERAL_DISPLAY_RESOLUTION", ""),
+        "rustdesk_key": os.environ.get("RUSTDESK_KEY", ""),
+        "rustdesk_password": os.environ.get("RUSTDESK_PASSWORD", ""),
+        "rustdesk_server": os.environ.get("RUSTDESK_SERVER", ""),
+        "sunshine_version": os.environ.get("SUNSHINE_VERSION", ""),
+        "nomachine_version": os.environ.get("NOMACHINE_VERSION", ""),
+        "splashtop_email": os.environ.get("SPLASHTOP_EMAIL", ""),
+        "splashtop_password": os.environ.get("SPLASHTOP_PASSWORD", ""),
+        "splashtop_streamer_url": os.environ.get("SPLASHTOP_STREAMER_URL", ""),
+    }
+    (tmp_dir / "env.json").write_text(json.dumps(env_json, indent=2) + "\n", encoding="utf-8")
+
+    stage = Path(tempfile.mkdtemp())
+    try:
+        copytree(os_provision_dir, stage / "provision")
+
+        plugin_doc = json.loads(subprocess.run(
+            [str(root / "scripts/plugin-list"), "--kind", "package", "--json"],
+            cwd=root, capture_output=True, text=True, check=False,
+        ).stdout)
+        for plugin_path, step in _plugin_windows_steps(plugin_doc, bundle_packages):
+            if not plugin_path or not step:
+                continue
+            plugin_root = Path(plugin_path).parent
+            source: Path | None = None
+            target = stage / "provision" / "scripts" / "steps" / Path(step).name
+            os_step = os_provision_dir / "scripts" / "steps" / step
+            if os_step.is_file():
+                source = os_step
+            elif (plugin_root / step).is_file():
+                source = plugin_root / step
+            if source is None:
+                print(f"[provision] windows install step not found: {step}", file=sys.stderr)
+                return 2
+            copy2(source, target)
+            if (plugin_root / "provision" / "windows" / "lib").is_dir():
+                copytree(plugin_root / "provision" / "windows" / "lib",
+                         stage / "provision" / "scripts" / "lib", dirs_exist_ok=True)
+            if (plugin_root / "provision" / "windows" / "templates").is_dir():
+                (stage / "provision" / "scripts" / "templates").mkdir(parents=True, exist_ok=True)
+                copytree(plugin_root / "provision" / "windows" / "templates",
+                         stage / "provision" / "scripts" / "templates", dirs_exist_ok=True)
+
+        manifest_steps: list[dict] = []
+        step_files = sorted((stage / "provision" / "scripts" / "steps").glob("*.ps1"))
+        for idx, step_file in enumerate(step_files):
+            manifest_steps.append({
+                "order": idx,
+                "name": step_file.name,
+                "sha256": _sha256(step_file),
+            })
+        (stage / "provision" / "state").mkdir(parents=True, exist_ok=True)
+        _write_manifest(stage / "provision" / "state", manifest_steps, os_family)
+
+        print(f"[provision] uploading {os_provision_dir.relative_to(root)}/ to remote")
+        rc = _ssh_retry(profile, "prepare windows provision directory",
+                        'New-Item -ItemType Directory -Force C:\\Users\\Administrator\\provision | Out-Null; '
+                        'if (Test-Path "C:\\Users\\Administrator\\provision\\scripts") { '
+                        'Remove-Item -Recurse -Force "C:\\Users\\Administrator\\provision\\scripts" }; '
+                        'if (Test-Path "C:\\Users\\Administrator\\provision\\state") { '
+                        'Remove-Item -Recurse -Force "C:\\Users\\Administrator\\provision\\state" }; '
+                        'if (Test-Path "C:\\Users\\Administrator\\provision\\logs") { '
+                        'Remove-Item -Recurse -Force "C:\\Users\\Administrator\\provision\\logs" }; '
+                        'New-Item -ItemType Directory -Force C:\\Users\\Administrator\\provision\\state | Out-Null')
+        if rc:
+            return rc
+        rc = _ssh_retry_scp(profile, "upload windows provision tree",
+                            str(stage / "provision"), "/C:/Users/Administrator/")
+        if rc:
+            return rc
+        rc = _ssh_retry_scp(profile, "upload windows env.json",
+                            str(tmp_dir / "env.json"), "/C:/Users/Administrator/provision/state/env.json")
+        if rc:
+            return rc
+        print("[provision] running bootstrap.ps1")
+        instance_ssh = str(root / "scripts/instance-ssh")
+        result = subprocess.run(
+            [instance_ssh, profile, "--", '& "C:\\Users\\Administrator\\provision\\scripts\\bootstrap.ps1"'],
+            cwd=root, check=False,
+        )
+        if result.returncode != 0 and result.returncode != 255:
+            return result.returncode
+        poll_interval = os.environ.get("EVE_PROVISION_WAIT_POLL_INTERVAL", "5")
+        print(f"[provision] waiting for windows provisioning to finish (polling remote log every {poll_interval}s)")
+        rc = _run([str(root / "scripts/wait-for-provision"), profile]).returncode
+        return rc
+    finally:
+        import shutil
+        shutil.rmtree(stage, ignore_errors=True)
+
+
+def main(argv: list[str]) -> int:
+    profile = argv[0] if argv else ""
+    if not profile:
+        print("Usage: scripts/provision <instance>", file=sys.stderr)
+        return 2
+
+    result = subprocess.run(
+        [str(ROOT / "scripts/profile-resolve"), "--profile", profile, "--emit", "env"],
+        cwd=ROOT, capture_output=True, text=True, check=False,
+    )
+    sys.stderr.write(result.stderr)
+    if result.returncode != 0:
+        return result.returncode
+    env = _parse_env(result.stdout)
+
+    os_family = env.get("OS_FAMILY", "")
+    os_id = env.get("OS_ID", "")
+
+    print(f"[provision] profile={profile} os={os_id} os_family={os_family}")
+
+    if os_family == "ubuntu":
+        return provision_ubuntu(profile, env, ROOT)
+    if os_family == "windows":
+        return provision_windows(profile, env, ROOT)
+    print(f"[provision] unknown os_family: {os_family}", file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

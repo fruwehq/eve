@@ -1,445 +1,147 @@
-#!/usr/bin/env sh
-set -eu
+#!/usr/bin/env python3
+"""Resolve a profile against the catalog and emit env/JSON/Vagrant output.
 
-CATALOG_PATH="config/catalog.yaml"
-LOCAL_CATALOG_PATH="${EVE_CATALOG_LOCAL:-config/catalog.local.yaml}"
-PROFILE=""
-VALIDATE=0
-EMIT=""
-OUTPUT=""
+Usage: scripts/profile-resolve --profile <name> [--validate]
+       [--emit env|json|vagrant] [--output <path>] [--local-catalog <path>]
+"""
 
-usage() {
-  cat <<'EOF'
-Usage:
-  scripts/profile-resolve --profile <name> [--validate] [--emit env|json|vagrant] [--output <path>] [--local-catalog <path>]
+from __future__ import annotations
 
-Notes:
-  - Base catalog: config/catalog.yaml
-  - Optional local overlay: config/catalog.local.yaml (if present)
-  - EVE_CATALOG_LOCAL can point at a generated overlay for INSTANCE workflows.
-
-Examples:
-  scripts/profile-resolve --profile aws-ubuntu-dev-headless --validate
-  scripts/profile-resolve --profile aws-ubuntu-dev-headless --emit env
-  scripts/profile-resolve --profile local-vbox-ubuntu-dev --emit vagrant --output ./.generated/Vagrantfile
-EOF
-}
-
-while [ "$#" -gt 0 ]; do
-  case "$1" in
-    --profile)
-      PROFILE="${2:-}"
-      shift 2
-      ;;
-    --validate)
-      VALIDATE=1
-      shift
-      ;;
-    --emit)
-      EMIT="${2:-}"
-      shift 2
-      ;;
-    --output)
-      OUTPUT="${2:-}"
-      shift 2
-      ;;
-    --local-catalog)
-      LOCAL_CATALOG_PATH="${2:-}"
-      shift 2
-      ;;
-    -h|--help)
-      usage
-      exit 0
-      ;;
-    *)
-      echo "Unknown argument: $1" >&2
-      usage >&2
-      exit 2
-      ;;
-  esac
-done
-
-if [ -z "$PROFILE" ]; then
-  echo "--profile is required" >&2
-  usage >&2
-  exit 2
-fi
-
-# SDK fast-path: if a caller (provider-dispatch, package-dispatch) has already
-# resolved+validated the instance and exported EVE_RESOLVED_JSON, reuse it
-# instead of re-loading the catalog. The instance-resolve output is a strict
-# superset of this script's RESOLVED_JSON shape (same .profile/.machine/.os/
-# .init/.location/.bundle_packages/.engine/.stack_tags keys), so the
-# downstream jq emitters work unchanged. This keeps the SDK-validated
-# contract flowing through into bash dispatchers under
-# plugins/providers/_common.
-if [ -n "${EVE_RESOLVED_JSON:-}" ]; then
-  RESOLVED_JSON_INPUT="$EVE_RESOLVED_JSON"
-else
-  RESOLVED_JSON_INPUT=""
-fi
-
-if [ -z "$RESOLVED_JSON_INPUT" ] && [ ! -f "$CATALOG_PATH" ]; then
-  echo "Catalog not found: $CATALOG_PATH" >&2
-  exit 1
-fi
-
-if ! command -v python3 >/dev/null 2>&1; then
-  echo "python3 is required to parse YAML catalogs (missing python3)" >&2
-  exit 1
-fi
-
-if [ -n "$RESOLVED_JSON_INPUT" ]; then
-  CATALOG_JSON=""
-else
-  CATALOG_JSON="$(EVE_CATALOG_LOCAL="$LOCAL_CATALOG_PATH" python3 - <<'PY'
-import json
 import os
 import sys
 from pathlib import Path
 
-import yaml
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
-sys.path.insert(0, ".")
-from eve_sdk.catalog import load_catalog
+from eve_sdk.profile_resolve import (  # noqa: E402
+    PROFILE_NOT_FOUND_EXIT,
+    ProfileResolveError,
+    adopt_resolved_instance,
+    apply_provider_secrets,
+    emit_env,
+    emit_json,
+    emit_vagrant,
+    load_catalog_with_profiles,
+    resolve_profile,
+)
 
-catalog = load_catalog()
+_USAGE_USAGE_LINE = (
+    "  scripts/profile-resolve --profile <name> [--validate] "
+    "[--emit env|json|vagrant] [--output <path>] [--local-catalog <path>]"
+)
+USAGE = (
+    "Usage:\n"
+    f"{_USAGE_USAGE_LINE}\n"
+    "\n"
+    "Notes:\n"
+    "  - Base catalog: config/catalog.yaml\n"
+    "  - Optional local overlay: config/catalog.local.yaml (if present)\n"
+    "  - EVE_CATALOG_LOCAL can point at a generated overlay for INSTANCE workflows.\n"
+    "\n"
+    "Examples:\n"
+    "  scripts/profile-resolve --profile aws-ubuntu-dev-headless --validate\n"
+    "  scripts/profile-resolve --profile aws-ubuntu-dev-headless --emit env\n"
+    "  scripts/profile-resolve --profile local-vbox-ubuntu-dev --emit vagrant"
+    " --output ./.generated/Vagrantfile\n"
+)
 
-# Profiles are a profile-resolve concept not handled by the aggregator.
-# Include them from the local overlay or base catalog if present.
-profiles = []
-for raw_path in [os.environ.get("EVE_CATALOG_LOCAL", ""), "config/catalog.yaml"]:
-    if not raw_path:
-        continue
-    path = Path(raw_path)
-    if not path.exists():
-        continue
-    doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    if isinstance(doc, dict) and isinstance(doc.get("profiles"), list):
-        profiles = doc["profiles"]
-        break
-catalog["profiles"] = profiles
-print(json.dumps(catalog))
-PY
-)"
-fi
 
-# shellcheck disable=SC2016
-# $-prefixed names below are jq variables, not shell expansions.
-jq_get='def by_name($arr; $key; $val): ($arr // [] | map(select(.[$key] == $val)) | .[0]);
+def main(argv: list[str]) -> int:
+    profile = ""
+    validate = False
+    emit = ""
+    output = ""
 
-. as $root |
-by_name($root.profiles; "name"; $profile) as $profile_override |
-($profile_override) as $p |
-if $p == null then
-  error("Profile not found: \($profile)")
-else
-  by_name($root.machines; "name"; $p.machine) as $m |
-  if $m == null then error("Machine not found: \($p.machine)") else . end |
-  by_name($root.oses; "id"; $p.os) as $o |
-  if $o == null then error("OS not found: \($p.os)") else . end |
-  by_name($root.inits; "id"; $p.init) as $i |
-  if $i == null then error("Init not found: \($p.init)") else . end |
-  by_name($root.locations; "name"; $p.location) as $l |
-  if $l == null then error("Location not found: \($p.location)") else . end |
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg == "--profile":
+            profile = argv[i + 1] if i + 1 < len(argv) else ""
+            i += 2
+        elif arg == "--validate":
+            validate = True
+            i += 1
+        elif arg == "--emit":
+            emit = argv[i + 1] if i + 1 < len(argv) else ""
+            i += 2
+        elif arg == "--output":
+            output = argv[i + 1] if i + 1 < len(argv) else ""
+            i += 2
+        elif arg == "--local-catalog":
+            os.environ["EVE_CATALOG_LOCAL"] = argv[i + 1] if i + 1 < len(argv) else ""
+            i += 2
+        elif arg in ("-h", "--help"):
+            print(USAGE)
+            return 0
+        else:
+            print(f"Unknown argument: {arg}", file=sys.stderr)
+            print(USAGE, file=sys.stderr)
+            return 2
 
-  ($p.bundles // []) as $bundle_ids |
-  ($root.bundles // []) as $all_bundles |
-  ($bundle_ids | map(by_name($all_bundles; "id"; .))) as $bundle_objs |
-  if ($bundle_objs | any(. == null)) then
-    error("One or more bundles not found in profile: \($p.name)")
-  else . end |
+    if not profile:
+        print("--profile is required", file=sys.stderr)
+        print(USAGE, file=sys.stderr)
+        return 2
 
-  (($p.packages // []) | unique) as $direct_packages |
-  ($bundle_objs | map(.includes // []) | flatten | . + $direct_packages | unique) as $bundle_packages |
-  ($root.packages // [] | map(.id)) as $package_catalog |
-  if ($bundle_packages | all(. as $pkg | $package_catalog | index($pkg) != null) | not) then
-    error("Profile references unknown package id")
-  else . end |
+    resolved_json_input = os.environ.get("EVE_RESOLVED_JSON") or ""
 
-  if (($i.os_family // "") != "" and ($i.os_family != ($o.family // ""))) then
-    error("Init/OS mismatch: init \($i.id) expects \($i.os_family), got OS family \($o.family)")
-  else . end |
+    if not resolved_json_input:
+        catalog_path = ROOT / "config/catalog.yaml"
+        if not catalog_path.exists():
+            print(f"Catalog not found: {catalog_path}", file=sys.stderr)
+            return 1
 
-  if ((($i.providers // []) | length) > 0 and (($i.providers // []) | index($m.provider // "") == null)) then
-    error("Init/provider mismatch: init \($i.id) expects provider \($i.providers | join(", ")), got machine provider \($m.provider)")
-  elif (($i.provider // "") != "" and ($i.provider != ($m.provider // ""))) then
-    error("Init/provider mismatch: init \($i.id) expects provider \($i.provider), got machine provider \($m.provider)")
-  else . end |
+    try:
+        if resolved_json_input:
+            resolved = adopt_resolved_instance(resolved_json_input)
+        else:
+            catalog = load_catalog_with_profiles()
+            resolved = resolve_profile(catalog, profile)
+    except ProfileResolveError as error:
+        print(str(error), file=sys.stderr)
+        return PROFILE_NOT_FOUND_EXIT
 
-  # Package dependency validation lives in scripts/instance-resolve via
-  # the depends_on manifest field. profile-resolve only enforces
-  # catalog/profile integrity here; dependency checks would duplicate
-  # logic and require keeping a hardcoded list of dep edges in this jq
-  # filter.
+    if validate:
+        print(f"Profile validated: {profile}")
 
-  if ($l[($m.provider // "")] == null) then
-    error("Location \($l.name) has no mapping for provider \($m.provider)")
-  else . end |
+    if not emit:
+        return 0
 
-  {
-    profile: $p,
-    machine: $m,
-    os: $o,
-    init: $i,
-    location: $l,
-    bundle_packages: $bundle_packages,
-    engine: (
-      if ($m.kind // "") == "metal" then "metal"
-      elif (($m.provider // "") == "local-qemu") then "qemu"
-      elif (($m.provider // "") | startswith("local-")) then "vagrant"
-      else "terraform"
-      end
-    ),
-    stack_tags: ($m.provider // "")
-  }
-end'
+    apply_provider_secrets(resolved)
 
-if [ -n "$RESOLVED_JSON_INPUT" ]; then
-  # SDK fast-path: caller supplied a validated resolved-instance JSON
-  # (output of scripts/instance-resolve, schema:
-  # core/schema/resolved-instance.schema.json). That shape carries the
-  # catalog-resolved data under .machine/.os/.init/.location plus an
-  # .instance block with the instance name. profile-resolve's downstream
-  # jq emitters expect a .profile.name field (legacy profile shape), so
-  # map .instance.name -> .profile.name without touching other keys.
-  RESOLVED_JSON="$(printf '%s' "$RESOLVED_JSON_INPUT" | jq -c '
-    if (.profile // null) == null then
-      .profile = ((.instance // {}) + { name: ((.instance // {}).name // "") })
-    else . end
-  ')"
-else
-  RESOLVED_JSON="$(printf '%s' "$CATALOG_JSON" | jq -ce --arg profile "$PROFILE" "$jq_get")"
-fi
+    if emit == "env":
+        out = emit_env(resolved)
+    elif emit == "json":
+        out = emit_json(resolved)
+    elif emit == "vagrant":
+        try:
+            out = emit_vagrant(resolved)
+        except SystemExit as exit_exc:
+            if exit_exc.code == 2:
+                os_family = resolved.get("os", {}).get("family", "")
+                print(
+                    f"profile-resolve: --emit vagrant only supports os.family=ubuntu (got: {os_family})",
+                    file=sys.stderr,
+                )
+                return 2
+            raise
+        except ProfileResolveError as error:
+            print(str(error), file=sys.stderr)
+            return PROFILE_NOT_FOUND_EXIT
+    else:
+        print(f"Unsupported --emit format: {emit}", file=sys.stderr)
+        return 2
 
-if [ "$VALIDATE" -eq 1 ]; then
-  echo "Profile validated: $PROFILE"
-fi
+    normalized = out.rstrip("\n") + "\n"
+    if output:
+        Path(output).parent.mkdir(parents=True, exist_ok=True)
+        Path(output).write_text(normalized, encoding="utf-8")
+    else:
+        sys.stdout.write(normalized)
 
-if [ -z "$EMIT" ]; then
-  exit 0
-fi
+    return 0
 
-emit_env() {
-  echo "$RESOLVED_JSON" | jq -r '
-    def env_or($name; $fallback): ((env[$name] | select(. != "")) // $fallback);
-    def provision_user($locp):
-      if (.os.family == "windows") then "Administrator"
-      elif (.machine.provider == "truenas") then env_or("EVE_PROVISION_USER"; $locp.provision_user // "")
-      else env_or("VM_USER_NAME"; "")
-      end;
-    def human_user($locp):
-      (env_or("VM_USER_NAME"; "")) as $human |
-      if $human != "" then $human else provision_user($locp) end;
-    (.machine.provider) as $provider |
-    (.location[$provider] // {}) as $locp |
-    "ACCESS_BOOTSTRAP_USER=" + provision_user($locp),
-    "ACCESS_HUMAN_USER=" + human_user($locp),
-    "ACCESS_PROVISION_USER=" + provision_user($locp),
-    "PROFILE_NAME=" + .profile.name,
-    "ENGINE=" + .engine,
-    "PROVIDER=" + $provider,
-    "STACK_TAGS=" + .stack_tags,
-    "LOCATION_NAME=" + .location.name,
-    "OS_ID=" + .os.id,
-    "OS_FAMILY=" + .os.family,
-    "INIT_ID=" + .init.id,
-    "BUNDLE_PACKAGES=" + (.bundle_packages | join(",")),
-    "VM_MEMORY_MB=" + ((.machine.defaults.memory_mb // 0) | tostring),
-    "VM_CPU_CORES=" + ((.machine.defaults.cpu_cores // .machine.defaults.cpus // 0) | tostring),
-    "VM_CPU_MODE=" + (.machine.defaults.cpu_mode // ""),
-    "VM_VCPUS=" + ((.machine.defaults.vcpus // 1) | tostring),
-    "VM_AUTOSTART=" + ((.machine.defaults.autostart // true) | tostring),
-    "VM_STATE=" + (.machine.defaults.state // "STOPPED"),
-    "VM_NIC_ATTACH=" + (.machine.defaults.network // $locp.bridge // "br0"),
-    "VM_DISK_GB=" + ((.machine.defaults.disk_gb // 30) | tostring),
-    "VM_POOL=" + (.machine.defaults.pool // $locp.pool // "main"),
-    "VM_PLAN=" + (.machine.defaults.plan // ""),
-    "VM_MACHINE_TYPE=" + (.machine.defaults.machine_type // ""),
-    "VM_DISK_TYPE=" + (.machine.defaults.disk_type // ""),
-    "VM_INSTANCE_TYPE=" + (.machine.defaults.instance_type // ""),
-    "VM_ROOT_VOLUME_TYPE=" + (.machine.defaults.root_volume_type // ""),
-    "VM_USE_SPOT=" + (if (.machine.defaults | has("use_spot")) then (.machine.defaults.use_spot | tostring) else "" end),
-    "GCP_IMAGE_FAMILY=" + (.os.gcp_image_family // ""),
-    "GCP_IMAGE_PROJECT=" + (.os.gcp_image_project // ""),
-    "VULTR_OS_ID=" + ((.os.vultr_os_id // 0) | tostring),
-    "LOCATION_REGION=" + ($locp.region // ""),
-    "LOCATION_AVAILABILITY_ZONE=" + ($locp.availability_zone // ""),
-    "LOCATION_ZONE=" + ($locp.zone // ""),
-    "SSH_USER=" + provision_user($locp),
-    "CLOUD_IMAGE_URL=" + (.machine.provider as $p | if (["local-qemu","truenas"] | index($p)) then (.os.cloud_image_url // "") else "" end),
-    "HUMAN_USER_NAME=" + human_user($locp),
-    "PROVISION_USER_NAME=" + provision_user($locp),
-    "RASPBERRY_PI_HOST=" + (
-      if (.machine.provider == "raspberry-pi" and (($locp.host // "") != "")) then $locp.host
-      else env_or("RASPBERRY_PI_HOST"; $locp.host // "")
-      end
-    ),
-    "RASPBERRY_PI_IP=" + (
-      if (.machine.provider == "raspberry-pi" and (($locp.ip // "") != "")) then $locp.ip
-      else env_or("RASPBERRY_PI_IP"; $locp.ip // "")
-      end
-    ),
-    "TRUENAS_HOST=" + env_or("TRUENAS_HOST"; $locp.host // ""),
-    "TRUENAS_SSH_PORT=" + env_or("TRUENAS_SSH_PORT"; (($locp.ssh_port // 22) | tostring)),
-    "TRUENAS_SSH_USER=" + env_or("TRUENAS_SSH_USER"; $locp.ssh_user // ""),
-    "VM_USER_NAME=" + env_or("VM_USER_NAME"; "")
-  '
-}
 
-emit_json() {
-  echo "$RESOLVED_JSON"
-}
-
-emit_vagrant() {
-  family=$(echo "$RESOLVED_JSON" | jq -r '.os.family')
-  if [ "$family" != "ubuntu" ]; then
-    echo "profile-resolve: --emit vagrant only supports os.family=ubuntu (got: $family)" >&2
-    exit 2
-  fi
-  echo "$RESOLVED_JSON" | jq -r '
-    . as $r |
-    (if $r.machine.provider == "local-qemu" then "qemu"
-     else error("Vagrant emit only supports local-qemu, got " + $r.machine.provider)
-     end) as $provider |
-    ($r.os.vagrant_box // "cloud-image/ubuntu-26.04") as $box |
-    ($r.os.arch // "amd64") as $arch |
-    (if ($r.os.arch // "amd64") == "arm64" then "aarch64" else "x86_64" end) as $qemu_arch |
-    $r.profile.name as $name |
-    (($r.machine.defaults.cpu_cores // $r.machine.defaults.cpus // 2) | tostring) as $cpus |
-    (($r.machine.defaults.memory_mb // 4096)) as $memory_mb |
-    ($memory_mb | tostring) as $memory |
-    (((($memory_mb / 1024) | floor) | tostring) + "G") as $qemu_memory |
-    (((($r.machine.defaults.disk_gb // 30) | tostring) + "G")) as $qemu_disk |
-    ($r.bundle_packages | join(" ")) as $pkg_list |
-
-    { docker: ($r.bundle_packages | index("docker") != null), dev: ($r.bundle_packages | index("dev-toolchain") != null) } as $flags |
-
-    # Port forwards: vagrant defaults to NAT and only forwards SSH, so each
-    # remote-access port has to be enumerated here or remote-* helpers on the
-    # host (which always hit 127.0.0.1 for vagrant) cannot reach the VM.
-    (
-      (if ($r.bundle_packages | index("sunshine")) != null then
-        "  # Sunshine / Moonlight\n" +
-        "  config.vm.network \"forwarded_port\", guest: 47984, host: 47984, auto_correct: true\n" +
-        "  config.vm.network \"forwarded_port\", guest: 47989, host: 47989, auto_correct: true\n" +
-        "  config.vm.network \"forwarded_port\", guest: 47990, host: 47990, auto_correct: true\n" +
-        "  config.vm.network \"forwarded_port\", guest: 48010, host: 48010, auto_correct: true\n" +
-        "  config.vm.network \"forwarded_port\", guest: 47998, host: 47998, protocol: \"udp\", auto_correct: true\n" +
-        "  config.vm.network \"forwarded_port\", guest: 47999, host: 47999, protocol: \"udp\", auto_correct: true\n" +
-        "  config.vm.network \"forwarded_port\", guest: 48000, host: 48000, protocol: \"udp\", auto_correct: true\n"
-      else "" end) +
-      (if ($r.bundle_packages | index("vnc")) != null then
-        "  # VNC\n" +
-        "  config.vm.network \"forwarded_port\", guest: 5901, host: 5901, auto_correct: true\n"
-      else "" end) +
-      (if ($r.bundle_packages | index("xpra")) != null then
-        "  # Xpra\n" +
-        "  config.vm.network \"forwarded_port\", guest: 14500, host: 14500, auto_correct: true\n"
-      else "" end) +
-      (if ($r.bundle_packages | index("rdp")) != null then
-        "  # RDP\n" +
-        "  config.vm.network \"forwarded_port\", guest: 3389, host: 3389, auto_correct: true\n"
-      else "" end) +
-      (if ($r.bundle_packages | index("thinlinc")) != null then
-        "  # ThinLinc Web Access\n" +
-        "  config.vm.network \"forwarded_port\", guest: 300, host: 300, auto_correct: true\n"
-      else "" end)
-    ) as $port_forwards |
-
-    # Build bundle-aware install lines (each line must be indented by 4 spaces)
-    (if $flags.docker then
-      "    # Install Docker\n" +
-      "    sudo install -m 0755 -d /etc/apt/keyrings\n" +
-      "    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --batch --yes --dearmor -o /etc/apt/keyrings/docker.gpg\n" +
-      "    echo \"deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable\" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null\n" +
-      "    sudo apt-get update -y\n" +
-      "    sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin\n" +
-      "    sudo usermod -aG docker vagrant\n"
-    else "" end) as $docker_setup |
-
-    (if $flags.dev then
-      "    sudo apt-get install -y build-essential pkg-config libssl-dev\n"
-    else "" end) as $dev_setup |
-
-    "Vagrant.configure(\"2\") do |config|\n" +
-    "  config.vm.box = \"" + $box + "\"\n" +
-    "  config.vm.box_architecture = \"" + $arch + "\"\n" +
-    "  config.vm.hostname = \"" + $name + "\"\n" +
-    "\n" +
-    (if $provider == "qemu" then
-      "  config.vm.provider \"qemu\" do |qe|\n" +
-      "    qe.arch = \"" + $qemu_arch + "\"\n" +
-      "    qe.smp = \"" + $cpus + "\"\n" +
-      "    qe.memory = \"" + $qemu_memory + "\"\n" +
-      "    qe.disk_resize = \"" + $qemu_disk + "\"\n" +
-      "  end\n"
-    else
-      "  config.vm.provider \"" + $provider + "\" do |v|\n" +
-      "    v.cpus = " + $cpus + "\n" +
-      "    v.memory = " + $memory + "\n" +
-      "    # Set VAGRANT_SHOW_CONSOLE=1 to open the hypervisor console window.\n" +
-      "    v.gui = ENV[\"VAGRANT_SHOW_CONSOLE\"] == \"1\"\n" +
-      "  end\n"
-    end) +
-    "\n" +
-    $port_forwards +
-    (if $port_forwards != "" then "\n" else "" end) +
-    "  config.vm.provision \"shell\", inline: <<-SHELL\n" +
-    "    set -e\n" +
-    "    export DEBIAN_FRONTEND=noninteractive\n" +
-    "    echo \"Bootstrapping profile: " + $name + "\"\n" +
-    "    echo \"Packages: " + $pkg_list + "\"\n" +
-    "    sudo apt-get update -y\n" +
-    "    sudo apt-get install -y curl git jq\n" +
-    $docker_setup +
-    $dev_setup +
-    "  SHELL\n" +
-    "end\n"
-  '
-}
-
-PROVIDER_FROM_RESOLVE="$(echo "$RESOLVED_JSON" | jq -r '.machine.provider // empty' 2>/dev/null || true)"
-if [ -n "$PROVIDER_FROM_RESOLVE" ]; then
-  SECRETS_EXPORT="$(python3 - "$PROVIDER_FROM_RESOLVE" <<'PY'
-import os
-import shlex
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path.cwd()))
-from eve_sdk.secrets import Secrets
-
-for key, value in Secrets.read(sys.argv[1]).items():
-    if value is None or key in os.environ:
-        continue
-    print(f"export {key}={shlex.quote(str(value))}")
-PY
-)"
-  if [ -n "$SECRETS_EXPORT" ]; then
-    eval "$SECRETS_EXPORT"
-  fi
-fi
-
-case "$EMIT" in
-  env)
-    OUT="$(emit_env)"
-    ;;
-  json)
-    OUT="$(emit_json)"
-    ;;
-  vagrant)
-    OUT="$(emit_vagrant)"
-    ;;
-  *)
-    echo "Unsupported --emit format: $EMIT" >&2
-    exit 2
-    ;;
-esac
-
-if [ -n "$OUTPUT" ]; then
-  mkdir -p "$(dirname "$OUTPUT")"
-  printf '%s\n' "$OUT" > "$OUTPUT"
-else
-  printf '%s\n' "$OUT"
-fi
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))
