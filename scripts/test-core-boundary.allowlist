@@ -57,10 +57,6 @@ scripts/remote-vnc:bash shebang - VNC launcher - port to Python or plugin comman
 scripts/remote-waypipe:bash shebang - Waypipe launcher - port to Python or plugin command
 scripts/remote-xpra:bash shebang - Xpra launcher - port to Python or plugin command
 scripts/ssh-wait:bash shebang - SSH reachability poll - port to Python or plugin command
-scripts/tf-apply:bash shebang - terraform apply dispatcher - port to Python or plugin command
-scripts/tf-destroy:bash shebang - terraform destroy dispatcher - port to Python or plugin command
-scripts/tf-init:bash shebang - terraform init dispatcher - port to Python or plugin command
-scripts/tf-plan:bash shebang - terraform plan dispatcher - port to Python or plugin command
 scripts/test:bash shebang - test runner - port to Python or plugin command
 scripts/test-catalog:bash shebang - catalog validation - port to Python or plugin command
 scripts/test-instances:bash shebang - instance validation - port to Python or plugin command

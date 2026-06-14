@@ -1,31 +1,55 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/usr/bin/env python3
+"""Run terraform destroy for a profile's stacks in reverse order.
 
-# Run terraform destroy for a profile's stacks in reverse order.
-# Usage: scripts/tf-destroy <instance>
+Usage: scripts/tf-destroy <instance>
+"""
 
-PROFILE="${1:?Usage: scripts/tf-destroy <instance>}"
-cd "$(git rev-parse --show-toplevel)"
+from __future__ import annotations
 
-RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
-ENGINE=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^ENGINE=/{print $2}')
+import subprocess
+import sys
+from pathlib import Path
 
-if [ "$ENGINE" != "terraform" ]; then
-  echo "Error: $PROFILE uses engine '$ENGINE', not terraform" >&2
-  exit 1
-fi
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
-TAGS=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^STACK_TAGS=/{print $2}')
-echo "[tf-destroy] profile=$PROFILE tags=$TAGS"
+from eve_sdk.tf_dispatch import apply_tf_env, repo_root, resolve_env  # noqa: E402
 
-TM_RUN_FLAGS=(
-  --disable-safeguards=git-untracked
-  --disable-safeguards=git-uncommitted
-  --disable-safeguards=git-out-of-sync
-  --disable-safeguards=outdated-code
-)
 
-terramate generate
+def main(argv: list[str]) -> int:
+    profile = argv[0] if argv else ""
+    if not profile:
+        print("Usage: scripts/tf-destroy <instance>", file=sys.stderr)
+        return 2
+    root = repo_root()
 
-eval "$(./scripts/tf-env "$PROFILE")"
-terramate run "${TM_RUN_FLAGS[@]}" --tags="$TAGS" --reverse -- terraform destroy -auto-approve
+    resolved = resolve_env(root, profile)
+    engine = resolved.get("ENGINE", "")
+    if engine != "terraform":
+        print(f"Error: {profile} uses engine '{engine}', not terraform", file=sys.stderr)
+        return 1
+
+    tags = resolved.get("STACK_TAGS", "")
+    print(f"[tf-destroy] profile={profile} tags={tags}")
+
+    tm_run_flags = [
+        "--disable-safeguards=git-untracked",
+        "--disable-safeguards=git-uncommitted",
+        "--disable-safeguards=git-out-of-sync",
+        "--disable-safeguards=outdated-code",
+    ]
+
+    rc = subprocess.run(["terramate", "generate"], cwd=root).returncode
+    if rc != 0:
+        return rc
+
+    apply_tf_env(root, profile)
+    return subprocess.run(
+        ["terramate", "run", *tm_run_flags, f"--tags={tags}", "--reverse", "--",
+         "terraform", "destroy", "-auto-approve"],
+        cwd=root,
+    ).returncode
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))
