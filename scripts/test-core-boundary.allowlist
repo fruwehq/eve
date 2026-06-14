@@ -29,7 +29,6 @@ scripts/vagrant-up:provider/OS reference - local-qemu Vagrant dispatch - Phase 3
 
 # --- Bash shebangs (language policy: no new bash in scripts/) ---
 scripts/doctor:bash shebang - provider-specific CLI tool checks - port to Python or plugin command
-scripts/env-require:bash shebang - env variable guard - port to Python or plugin command
 scripts/eve:bash shebang - dev convenience wrapper - port to Python or plugin command
 scripts/eve-docker:bash shebang - dev docker wrapper - port to Python or plugin command
 scripts/instance-password:bash shebang - vultr-specific password retrieval - port to Python or plugin command
@@ -57,7 +56,6 @@ scripts/remote-thinlinc-client:bash shebang - ThinLinc client launcher - port to
 scripts/remote-vnc:bash shebang - VNC launcher - port to Python or plugin command
 scripts/remote-waypipe:bash shebang - Waypipe launcher - port to Python or plugin command
 scripts/remote-xpra:bash shebang - Xpra launcher - port to Python or plugin command
-scripts/ssh-retry:bash shebang - SSH retry loop - port to Python or plugin command
 scripts/ssh-wait:bash shebang - SSH reachability poll - port to Python or plugin command
 scripts/tf-apply:bash shebang - terraform apply dispatcher - port to Python or plugin command
 scripts/tf-destroy:bash shebang - terraform destroy dispatcher - port to Python or plugin command
