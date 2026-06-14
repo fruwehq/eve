@@ -119,10 +119,10 @@ docker.runtime.slim: ## Build the slim Eve runtime container
 	./docker/build.sh slim
 
 docker.shell: ## Open a shell inside the optional Eve toolchain container
-	EVE_TOOLCHAIN_IMAGE=$(EVE_TOOLCHAIN_IMAGE) ./scripts/eve-docker bash
+	EVE_TOOLCHAIN_IMAGE=$(EVE_TOOLCHAIN_IMAGE) ./bin/eve-docker bash
 
 docker.test: ## Run make test inside the optional Eve toolchain container
-	EVE_TOOLCHAIN_IMAGE=$(EVE_TOOLCHAIN_IMAGE) ./scripts/eve-docker make test
+	EVE_TOOLCHAIN_IMAGE=$(EVE_TOOLCHAIN_IMAGE) ./bin/eve-docker make test
 
 doctor: ## Check local tools, plugins, providers, and state hints
 	./scripts/doctor
@@ -136,7 +136,7 @@ env: ## Print resolved instance data as env lines
 	./scripts/instance-run env $(INSTANCE)
 
 eve: ## Open Eve, the Textual instance manager
-	@./scripts/eve
+	@./bin/eve
 
 generate: ## Generate terraform configuration from terramate files
 	terramate generate
@@ -155,7 +155,7 @@ init.all: generate ## Init all stacks in parallel (set TM_PARALLEL=N)
 
 install-cli: ## Install eve launcher into ~/.local/bin
 	@install -d "$(HOME)/.local/bin"
-	@printf '%s\n' '#!/usr/bin/env sh' 'set -eu' 'exec "$(CURDIR)/scripts/eve" "$$@"' > "$(HOME)/.local/bin/eve"
+	@printf '%s\n' '#!/usr/bin/env sh' 'set -eu' 'exec "$(CURDIR)/bin/eve" "$$@"' > "$(HOME)/.local/bin/eve"
 	@chmod +x "$(HOME)/.local/bin/eve"
 	@echo "Installed eve to $(HOME)/.local/bin/eve"
 	@case ":$$PATH:" in *:$(HOME)/.local/bin:*) ;; *) echo "Add $(HOME)/.local/bin to PATH if eve is not found by your shell."; esac

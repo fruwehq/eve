@@ -1,5 +1,9 @@
 #!/usr/bin/env sh
+# eve launcher (env-bootstrap shim). Lives in bin/, not scripts/: it runs BEFORE
+# the poetry environment exists (it is what invokes poetry), so it cannot itself
+# be a poetry-run Python entrypoint. See bin/README.md.
 set -eu
 
 script_dir="$(CDPATH=; cd -- "$(dirname -- "$0")" && pwd)"
-exec "$script_dir/../scripts/eve" "$@"
+cd "$script_dir/.."
+exec poetry run python ./scripts/eve-tui "$@"

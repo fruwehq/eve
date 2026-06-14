@@ -29,8 +29,6 @@ scripts/remote-waypipe:provider/OS reference - raspberry-pi IP handling - Phase 
 scripts/vagrant-up:provider/OS reference - local-qemu Vagrant dispatch - Phase 3: moves into local-qemu plugin
 
 # --- Bash shebangs (language policy: no new bash in scripts/) ---
-scripts/eve:bash shebang - dev convenience wrapper - port to Python or plugin command
-scripts/eve-docker:bash shebang - dev docker wrapper - port to Python or plugin command
 scripts/test:bash shebang - test runner - port to Python or plugin command
 scripts/test-catalog:bash shebang - catalog validation - port to Python or plugin command
 scripts/test-instances:bash shebang - instance validation - port to Python or plugin command
