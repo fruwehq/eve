@@ -229,16 +229,24 @@ def lock_path() -> Path:
     return Workdir.eve_dir() / "plugins.lock"
 
 
-def write_lock(locked: list[LockedSource], path: Path | None = None) -> None:
+def write_lock(
+    locked: list[LockedSource],
+    resolved: list[dict[str, Any]] | None = None,
+    path: Path | None = None,
+) -> None:
+    """Write `.eve/plugins.lock` with the pinned sources and (optionally) the
+    resolved plugin set (each ``{id, version, source_id, required_by}``)."""
     target = path or lock_path()
     target.parent.mkdir(parents=True, exist_ok=True)
-    doc = {
+    doc: dict[str, Any] = {
         "version": 1,
         "sources": [
             {"id": item.id, "url": item.url, "subdir": item.subdir, "ref": item.ref, "sha": item.sha}
             for item in sorted(locked, key=lambda item: item.id)
         ],
     }
+    if resolved is not None:
+        doc["plugins"] = sorted(resolved, key=lambda item: str(item.get("id")))
     target.write_text(yaml.safe_dump(doc, sort_keys=False), encoding="utf-8")
 
 

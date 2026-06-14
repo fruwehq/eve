@@ -68,6 +68,24 @@ def test_unsatisfied_dependency_is_error() -> None:
         resolve(cands, CORE)
 
 
+def test_exempt_ids_satisfy_dependency_without_a_candidate() -> None:
+    # 'ubuntu' is a still-builtin provider (no synced candidate) — exempting it
+    # lets a synced package that requires it resolve instead of erroring.
+    cands = [c("desktop", "1.0.0", plugins={"ubuntu": ">=1.2"})]
+    resolved = {r.id: r.version for r in resolve(cands, CORE, exempt_ids=frozenset({"ubuntu"}))}
+    assert resolved == {"desktop": "1.0.0"}
+    with pytest.raises(DependencyConflictError, match="no source provides plugin 'ubuntu'"):
+        resolve(cands, CORE)
+
+
+def test_version_from_ref() -> None:
+    from eve_sdk.resolver import version_from_ref
+
+    assert version_from_ref("v1.4.0") == "1.4.0"
+    assert version_from_ref("2.0") == "2.0"
+    assert version_from_ref("main") == "0.0.0"  # non-semver branch/sha
+
+
 def test_candidate_from_manifest_extracts_requires() -> None:
     manifest = {"id": "pkg", "requires": {"eve": ">=4.0,<5.0", "plugins": {"ubuntu": "^1.2"}}}
     cand = candidate_from_manifest(manifest, "1.1.0", source_id="src")

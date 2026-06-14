@@ -17,6 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from eve_sdk.plugin_manifest import CORE_VERSION, PluginManifest  # noqa: E402
 from eve_sdk.registry import (  # noqa: E402
     LockedSource,
     RegistryError,
@@ -27,6 +28,13 @@ from eve_sdk.registry import (  # noqa: E402
     sync,
     write_lock,
 )
+from eve_sdk.resolver import (  # noqa: E402
+    ResolutionError,
+    candidate_from_manifest,
+    resolve,
+    version_from_ref,
+)
+from eve_sdk.workdir import Workdir  # noqa: E402
 
 
 def parser() -> argparse.ArgumentParser:
@@ -55,13 +63,46 @@ def main() -> int:
             sync(locked)
             print(f"plugins-pull: re-materialized {len(locked)} locked source(s)")
         else:
-            resolved = sync(sources)
-            write_lock(resolved)
-            print(f"plugins-pull: synced + locked {len(resolved)} source(s) -> {lock_path()}")
+            locked = sync(sources)
+            resolved = _resolve_synced(sources)
+            write_lock(locked, resolved=resolved)
+            print(
+                f"plugins-pull: synced {len(locked)} source(s), resolved "
+                f"{len(resolved)} plugin(s) -> {lock_path()}"
+            )
     except RegistryError as error:
         print(f"plugins-pull: {error}", file=sys.stderr)
         return 1
+    except ResolutionError as error:
+        print(f"plugins-pull: dependency resolution failed:\n{error}", file=sys.stderr)
+        return 1
     return 0
+
+
+def _resolve_synced(sources: list[Source]) -> list[dict]:
+    """Build candidates from the synced manifests and run the resolver.
+
+    Plugin versions come from each source's pinned tag (`version_from_ref`).
+    Still-builtin plugin ids are exempt (Phase 3 extracts them into versioned
+    sources). Returns the resolved set as lockfile dicts.
+    """
+    plugins_dir = Workdir.plugins_dir()
+    builtin_ids = frozenset(
+        plugin["id"] for plugin in PluginManifest.load_all() if plugin.get("_source") == "builtin"
+    )
+    candidates = []
+    for source in sources:
+        version = version_from_ref(source.ref)
+        for manifest_path in sorted((plugins_dir / source.id).glob("**/eve-plugin.yaml")):
+            manifest = PluginManifest.load(manifest_path)
+            PluginManifest.validate(manifest)  # schema + requires.eve core gate at load
+            candidates.append(candidate_from_manifest(manifest, version, source_id=source.id))
+
+    resolved = resolve(candidates, CORE_VERSION, exempt_ids=builtin_ids)
+    return [
+        {"id": item.id, "version": item.version, "source_id": item.source_id, "required_by": list(item.required_by)}
+        for item in resolved
+    ]
 
 
 def _frozen_sources(sources: list[Source]) -> list[Source]:

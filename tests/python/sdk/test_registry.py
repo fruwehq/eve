@@ -133,7 +133,7 @@ def test_sync_two_refs_of_same_repo_coexist(tmp_path: Path) -> None:
 def test_sync_missing_subdir_fails(tmp_path: Path) -> None:
     upstream = _make_repo(tmp_path / "up", {"a/x": "y"})
     src = Source(id="s", url=str(upstream), subdir="nope", ref="main", auth="none")
-    with pytest.raises(RegistryError, match="subdir .* not found"):
+    with pytest.raises(RegistryError, match=r"subdir .* not found"):
         sync([src], plugins_dir=tmp_path / "plugins", cache_dir=tmp_path / "cache")
 
 
@@ -143,7 +143,7 @@ def test_lock_roundtrip(tmp_path: Path) -> None:
         LockedSource(id="a", url="ua", subdir="", ref="v1", sha="a" * 40),
     ]
     path = tmp_path / "plugins.lock"
-    write_lock(locked, path)
+    write_lock(locked, path=path)
     out = read_lock(path)
     # sorted by id on write
     assert [item.id for item in out] == ["a", "b"]

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import re
 
-__all__ = ["SemverError", "satisfies", "parse_version"]
+__all__ = ["SemverError", "parse_version", "satisfies"]
 
 _CONSTRAINT_RE = re.compile(r"^(>=|<=|>|<|=|\^|~)?\s*(.+)$")
 _VERSION_RE = re.compile(r"^(\d+)(?:\.(\d+))?(?:\.(\d+))?$")
