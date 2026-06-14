@@ -30,6 +30,8 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 
 [tool.ruff.lint.per-file-ignores]
 "scripts/eve-tui" = ["E402", "E501"]
+# package-verify embeds long, single-line remote probe commands that do not wrap.
+"scripts/package-verify" = ["E501"]
 
 [tool.mypy]
 python_version = "3.12"

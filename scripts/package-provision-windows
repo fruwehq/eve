@@ -1,254 +1,280 @@
-#!/usr/bin/env bash
-# Upload Windows provisioning scripts and run the step subset for one package.
-#
-# Some Windows provisioning steps trigger reboot flags or depend on the runner
-# state machine restarting after a reboot (e.g. ViGEmBus, GPU driver, VDD).
-# Those packages stay on the explicit `make provision` fallback so the granular
-# install path never has to reason about a half-applied driver state. The
-# remaining packages map to a single self-contained step file.
+#!/usr/bin/env python3
+"""Upload Windows provisioning scripts and run the step subset for one package.
 
-set -euo pipefail
-
-usage() {
-  cat >&2 <<'USAGE'
 Usage:
   scripts/package-provision-windows --instance <name> --package <id> [--dry-run]
-  scripts/package-provision-windows --profile <name> --package <id> [--dry-run]  # compatibility alias
-USAGE
-}
+  scripts/package-provision-windows --profile <name> --package <id> [--dry-run]
 
-INSTANCE_NAME=""
-PACKAGE=""
-DRY_RUN=0
+Some Windows provisioning steps trigger reboot flags or depend on the runner
+state machine restarting after a reboot (ViGEmBus, GPU driver, VDD).  Packages
+whose manifest declares ``install.windows.fallback: true`` (or omits
+``install.windows``) fall back to full provisioning.
+"""
 
-while [ "$#" -gt 0 ]; do
-  case "$1" in
-    --instance|--profile)
-      INSTANCE_NAME="${2:-}"
-      shift 2
-      ;;
-    --package)
-      PACKAGE="${2:-}"
-      shift 2
-      ;;
-    --dry-run)
-      DRY_RUN=1
-      shift
-      ;;
-    -h|--help)
-      usage
-      exit 0
-      ;;
-    *)
-      usage
-      exit 2
-      ;;
-  esac
-done
+from __future__ import annotations
 
-if [ -z "$INSTANCE_NAME" ] || [ -z "$PACKAGE" ]; then
-  usage
-  exit 2
-fi
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
 
-cd "$(git rev-parse --show-toplevel)"
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
-RESOLVED_ENV=$(./scripts/profile-resolve --profile "$INSTANCE_NAME" --emit env)
-env_value() {
-  printf '%s\n' "$RESOLVED_ENV" | awk -F= -v key="$1" '$1 == key { print substr($0, index($0, "=") + 1) }'
-}
+from eve_sdk.package_dispatch import emit_json  # noqa: E402
+from eve_sdk.tf_dispatch import repo_root, resolve_env  # noqa: E402
 
-OS_FAMILY=$(env_value OS_FAMILY)
-OS_ID=$(env_value OS_ID)
-OS_PROVISION_DIR="oses/$OS_ID/provision"
+_USAGE = (
+    "Usage:\n"
+    "  scripts/package-provision-windows --instance <name> --package <id> [--dry-run]\n"
+    "  scripts/package-provision-windows --profile <name> --package <id> [--dry-run]  "
+    "# compatibility alias"
+)
 
-if [ "$OS_FAMILY" != "windows" ]; then
-  echo "package-provision-windows: granular package install is only implemented for windows, got $OS_FAMILY" >&2
-  exit 2
-fi
-if [ ! -d "$OS_PROVISION_DIR" ]; then
-  echo "package-provision-windows: OS provisioning directory not found: $OS_PROVISION_DIR" >&2
-  exit 2
-fi
-OS_PROVISION_DIR=$(cd "$OS_PROVISION_DIR" && pwd -P)
+_REMOTE_STEP_DIR = r"C:\Users\Administrator\provision\scripts-package"
+_REMOTE_LIB_DIR = _REMOTE_STEP_DIR + r"\lib"
+_REMOTE_STEPS_DIR = _REMOTE_STEP_DIR + r"\steps"
+_REMOTE_STATE_DIR = r"C:\Users\Administrator\provision\state"
 
-# Read install metadata from the package plugin manifest.  Packages whose
-# manifest declares install.windows.fallback: true (or omits install.windows
-# entirely) fall back to full provisioning -- that keeps reboot/driver
-# coupling (ViGEmBus, GPU driver, VDD) in the runner state machine.
-#
-# state_files lists files under provision/state that the script must upload
-# (e.g. env.json for rustdesk's rendezvous_server / key / password).  Steps
-# that don't consume state get an empty list so we never overwrite a populated
-# remote env.json with locally-blank values.
-PLUGIN_DOC=$(./scripts/plugin-list --kind package --json)
-PLUGIN_ENTRY=$(printf '%s' "$PLUGIN_DOC" | jq -c --arg id "$PACKAGE" '.plugins[] | select(.id == $id)' | head -n 1)
-PLUGIN_INSTALL=$(printf '%s' "$PLUGIN_ENTRY" | jq '.install.windows // null')
-PLUGIN_PATH=$(printf '%s' "$PLUGIN_ENTRY" | jq -r '.path // empty')
-PLUGIN_ROOT=""
-if [ -n "$PLUGIN_PATH" ]; then
-  PLUGIN_ROOT=$(dirname "$PLUGIN_PATH")
-fi
 
-steps=()
-state_files=()
-fallback=0
-if [ -z "$PLUGIN_INSTALL" ] || [ "$PLUGIN_INSTALL" = "null" ]; then
-  fallback=1
-else
-  if [ "$(printf '%s' "$PLUGIN_INSTALL" | jq -r '.fallback // false')" = "true" ]; then
-    fallback=1
-  fi
-  while IFS= read -r step; do
-    [ -n "$step" ] && steps+=("$step")
-  done < <(printf '%s' "$PLUGIN_INSTALL" | jq -r '.steps // [] | .[]')
-  while IFS= read -r state_file; do
-    [ -n "$state_file" ] && state_files+=("$state_file")
-  done < <(printf '%s' "$PLUGIN_INSTALL" | jq -r '.state_files // [] | .[]')
-fi
-if [ "$fallback" -eq 1 ]; then
-  steps=()
-  state_files=()
-fi
+def _ssh_retry(label: str, cmd: list[str]) -> int:
+    return subprocess.run(
+        [str(ROOT / "scripts/ssh-retry"), label, *cmd],
+    ).returncode
 
-if [ "$DRY_RUN" -eq 1 ]; then
-  if [ "${#steps[@]}" -eq 0 ]; then
-    steps_json='[]'
-  else
-    steps_json="$(printf '%s\n' "${steps[@]}" | jq -R . | jq -s .)"
-  fi
-  if [ "${#state_files[@]}" -eq 0 ]; then
-    state_files_json='[]'
-  else
-    state_files_json="$(printf '%s\n' "${state_files[@]}" | jq -R . | jq -s .)"
-  fi
-  jq -n \
-    --arg instance "$INSTANCE_NAME" \
-    --arg package "$PACKAGE" \
-    --arg os_family "$OS_FAMILY" \
-    --argjson steps "$steps_json" \
-    --argjson state_files "$state_files_json" \
-    --argjson fallback "$fallback" \
-    '{kind: "package-provision-windows", instance: $instance, profile: $instance, package: $package, os_family: $os_family, steps: $steps, state_files: $state_files, fallback: ($fallback == 1), dry_run: true}'
-  exit 0
-fi
 
-if [ "$fallback" -eq 1 ]; then
-  echo "[package-provision-windows] no granular mapping for package=$PACKAGE; falling back to full provisioning"
-  exec ./scripts/provision "$INSTANCE_NAME"
-fi
+def _instance_ssh(instance: str, *args: str) -> int:
+    return subprocess.run([str(ROOT / "scripts/instance-ssh"), instance, *args]).returncode
 
-./scripts/ssh-wait "$INSTANCE_NAME"
 
-# Stage scripts: keep lib/ and templates/ available because most Windows steps
-# dot-source helpers from lib/.  Upload only the requested step file so the
-# Scheduled Task runner is never tempted to walk past it.
-STAGE=$(mktemp -d)
-trap 'rm -rf "$STAGE"' EXIT
-mkdir -p "$STAGE/scripts/steps"
-cp -R "$OS_PROVISION_DIR/scripts/lib" "$STAGE/scripts/lib"
-if [ -d "$OS_PROVISION_DIR/scripts/templates" ]; then
-  cp -R "$OS_PROVISION_DIR/scripts/templates" "$STAGE/scripts/templates"
-fi
-if [ -n "$PLUGIN_ROOT" ] && [ -d "$PLUGIN_ROOT/provision/windows/lib" ]; then
-  cp -R "$PLUGIN_ROOT/provision/windows/lib/." "$STAGE/scripts/lib/"
-fi
-if [ -n "$PLUGIN_ROOT" ] && [ -d "$PLUGIN_ROOT/provision/windows/templates" ]; then
-  mkdir -p "$STAGE/scripts/templates"
-  cp -R "$PLUGIN_ROOT/provision/windows/templates/." "$STAGE/scripts/templates/"
-fi
+def _plugin_list_json() -> object:
+    result = subprocess.run(
+        [str(ROOT / "scripts/plugin-list"), "--kind", "package", "--json"],
+        capture_output=True, text=True, check=True,
+    )
+    return json.loads(result.stdout)
 
-resolve_step_path() {
-  local step="$1"
-  if [ -n "$PLUGIN_ROOT" ] && [ -f "$PLUGIN_ROOT/$step" ]; then
-    printf '%s\n' "$PLUGIN_ROOT/$step"
+
+def _merge_dir(src: Path, dst: Path) -> None:
+    """Merge the contents of ``src`` into ``dst`` (cp -R src/. dst/)."""
+    if not src.is_dir():
+        return
+    shutil.copytree(src, dst, dirs_exist_ok=True)
+
+
+def main(argv: list[str]) -> int:
+    instance_name = ""
+    package = ""
+    dry_run = False
+
+    args = list(argv)
+    while args:
+        arg = args.pop(0)
+        if arg in {"--instance", "--profile"} and args:
+            instance_name = args.pop(0)
+        elif arg == "--package" and args:
+            package = args.pop(0)
+        elif arg == "--dry-run":
+            dry_run = True
+        elif arg in {"-h", "--help"}:
+            print(_USAGE, file=sys.stderr)
+            return 0
+        else:
+            print(_USAGE, file=sys.stderr)
+            return 2
+
+    if not instance_name or not package:
+        print(_USAGE, file=sys.stderr)
+        return 2
+
+    root = repo_root()
+    resolved = resolve_env(root, instance_name)
+    os_family = resolved.get("OS_FAMILY", "")
+    os_id = resolved.get("OS_ID", "")
+    os_provision_dir = root / "oses" / os_id / "provision"
+
+    if os_family != "windows":
+        print(
+            f"package-provision-windows: granular package install is only "
+            f"implemented for windows, got {os_family}",
+            file=sys.stderr,
+        )
+        return 2
+    if not os_provision_dir.is_dir():
+        print(
+            f"package-provision-windows: OS provisioning directory not found: {os_provision_dir}",
+            file=sys.stderr,
+        )
+        return 2
+    os_provision_dir = os_provision_dir.resolve()
+
+    doc = _plugin_list_json()
+    plugins = doc["plugins"] if isinstance(doc, dict) else []
+    entry = next((p for p in plugins if isinstance(p, dict) and p.get("id") == package), None)
+    if entry is None:
+        entry = {}
+
+    plugin_path = entry.get("path") or ""
+    plugin_root = str(Path(plugin_path).parent) if plugin_path else ""
+
+    install = entry.get("install", {})
+    install_windows = install.get("windows") if isinstance(install, dict) else None
+
+    steps: list[str] = []
+    state_files: list[str] = []
+    fallback = False
+    if install_windows is None:
+        fallback = True
+    else:
+        fallback = bool(install_windows.get("fallback", False))
+        steps = list(install_windows.get("steps", []))
+        state_files = list(install_windows.get("state_files", []))
+    if fallback:
+        steps = []
+        state_files = []
+
+    if dry_run:
+        emit_json({
+            "kind": "package-provision-windows",
+            "instance": instance_name,
+            "package": package,
+            "os_family": os_family,
+            "steps": steps,
+            "state_files": state_files,
+            "fallback": fallback,
+            "dry_run": True,
+        })
+        return 0
+
+    if fallback:
+        print(
+            f"[package-provision-windows] no granular mapping for package={package}; "
+            f"falling back to full provisioning"
+        )
+        return subprocess.run([str(ROOT / "scripts/provision"), instance_name]).returncode
+
+    subprocess.run([str(ROOT / "scripts/ssh-wait"), instance_name]).check_returncode()
+
+    stage = Path(tempfile.mkdtemp())
+    try:
+        (stage / "scripts" / "steps").mkdir(parents=True, exist_ok=True)
+        _merge_dir(os_provision_dir / "scripts" / "lib", stage / "scripts" / "lib")
+        if (os_provision_dir / "scripts" / "templates").is_dir():
+            _merge_dir(os_provision_dir / "scripts" / "templates", stage / "scripts" / "templates")
+        if plugin_root:
+            _merge_dir(Path(plugin_root) / "provision" / "windows" / "lib", stage / "scripts" / "lib")
+            plugin_templates = Path(plugin_root) / "provision" / "windows" / "templates"
+            if plugin_templates.is_dir():
+                (stage / "scripts" / "templates").mkdir(parents=True, exist_ok=True)
+                _merge_dir(plugin_templates, stage / "scripts" / "templates")
+
+        def resolve_step_path(step: str) -> Path:
+            if plugin_root and (Path(plugin_root) / step).is_file():
+                return Path(plugin_root) / step
+            candidate = os_provision_dir / "scripts" / "steps" / step
+            if candidate.is_file():
+                return candidate
+            print(
+                f"package-provision-windows: step not found for package={package}: {step}",
+                file=sys.stderr,
+            )
+            raise SystemExit(2)
+
+        for step in steps:
+            step_file = Path(step).name
+            shutil.copy2(resolve_step_path(step), stage / "scripts" / "steps" / step_file)
+
+        needs_env = "env.json" in state_files
+        unsupported = [sf for sf in state_files if sf != "env.json"]
+        if unsupported:
+            print(
+                f"package-provision-windows: unsupported state_files for "
+                f"package={package}: {' '.join(unsupported)}",
+                file=sys.stderr,
+            )
+            return 2
+
+        if needs_env:
+            windows_password = os.environ.get("EPHEMERAL_WINDOWS_PASSWORD", "")
+            if not windows_password:
+                pw_result = subprocess.run(
+                    [str(ROOT / "scripts/instance-password"), instance_name],
+                    capture_output=True, text=True, check=False,
+                )
+                windows_password = pw_result.stdout.strip() if pw_result.returncode == 0 else ""
+            env_payload = {
+                "windows_password": windows_password,
+                "sunshine_password": os.environ.get("EPHEMERAL_SUNSHINE_PASSWORD", ""),
+                "display_resolution": os.environ.get("EPHEMERAL_DISPLAY_RESOLUTION", ""),
+                "rustdesk_key": os.environ.get("RUSTDESK_KEY", ""),
+                "rustdesk_password": os.environ.get("RUSTDESK_PASSWORD", ""),
+                "rustdesk_server": os.environ.get("RUSTDESK_SERVER", ""),
+                "sunshine_version": os.environ.get("SUNSHINE_VERSION", ""),
+                "nomachine_version": os.environ.get("NOMACHINE_VERSION", ""),
+                "splashtop_email": os.environ.get("SPLASHTOP_EMAIL", ""),
+                "splashtop_password": os.environ.get("SPLASHTOP_PASSWORD", ""),
+                "splashtop_streamer_url": os.environ.get("SPLASHTOP_STREAMER_URL", ""),
+            }
+            (stage / "state").mkdir(parents=True, exist_ok=True)
+            (stage / "state" / "env.json").write_text(
+                json.dumps(env_payload, indent=2, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+
+        print(f"[package-provision-windows] uploading windows step files for package={package}")
+
+        ssh = str(ROOT / "scripts/instance-ssh")
+        reset_cmd = (
+            f"if (Test-Path '{_REMOTE_STEP_DIR}') {{ Remove-Item -Recurse -Force "
+            f"'{_REMOTE_STEP_DIR}' }} ; "
+            f"New-Item -ItemType Directory -Force '{_REMOTE_LIB_DIR}' | Out-Null ; "
+            f"New-Item -ItemType Directory -Force '{_REMOTE_STEPS_DIR}' | Out-Null"
+        )
+        if needs_env:
+            reset_cmd += f" ; New-Item -ItemType Directory -Force '{_REMOTE_STATE_DIR}' | Out-Null"
+
+        uploads: list[tuple[str, list[str]]] = [
+            ("prepare windows package provision directory", [ssh, instance_name, "--", reset_cmd]),
+            ("upload windows package lib", [ssh, instance_name, "--scp",
+             str(stage / "scripts" / "lib"), "/C:/Users/Administrator/provision/scripts-package/"]),
+        ]
+        if (stage / "scripts" / "templates").is_dir():
+            uploads.append(("upload windows package templates", [ssh, instance_name, "--scp",
+                str(stage / "scripts" / "templates"),
+                "/C:/Users/Administrator/provision/scripts-package/"]))
+        for step in steps:
+            step_file = Path(step).name
+            uploads.append((f"upload windows package step {step_file}",
+                [ssh, instance_name, "--scp",
+                 str(stage / "scripts" / "steps" / step_file),
+                 f"/C:/Users/Administrator/provision/scripts-package/steps/{step_file}"]))
+        if needs_env:
+            uploads.append(("upload windows package env.json", [ssh, instance_name, "--scp",
+                str(stage / "state" / "env.json"),
+                "/C:/Users/Administrator/provision/state/env.json"]))
+
+        for label, cmd in uploads:
+            status = _ssh_retry(label, cmd)
+            if status != 0:
+                return status
+
+        for step in steps:
+            step_file = Path(step).name
+            print(f"[package-provision-windows] running step={step_file} package={package}")
+            status = _instance_ssh(
+                instance_name, "--",
+                f"& 'C:\\Users\\Administrator\\provision\\scripts-package\\steps\\{step_file}'",
+            )
+            if status != 0:
+                return status
+    finally:
+        shutil.rmtree(stage, ignore_errors=True)
+
     return 0
-  fi
-  if [ -f "$OS_PROVISION_DIR/scripts/steps/$step" ]; then
-    printf '%s\n' "$OS_PROVISION_DIR/scripts/steps/$step"
-    return 0
-  fi
-  echo "package-provision-windows: step not found for package=$PACKAGE: $step" >&2
-  exit 2
-}
 
-for step in "${steps[@]}"; do
-  step_file=$(basename "$step")
-  cp "$(resolve_step_path "$step")" "$STAGE/scripts/steps/$step_file"
-done
 
-remote_step_dir='C:\Users\Administrator\provision\scripts-package'
-remote_lib_dir="$remote_step_dir\\lib"
-remote_steps_dir="$remote_step_dir\\steps"
-remote_state_dir='C:\Users\Administrator\provision\state'
-
-# state_files in the manifest is authoritative for what gets uploaded.  Today
-# only env.json is consumed -- mirror scripts/provision's shape there.
-needs_env=0
-for state_file in "${state_files[@]}"; do
-  if [ "$state_file" = "env.json" ]; then
-    needs_env=1
-  fi
-done
-unsupported_state_files=()
-for state_file in "${state_files[@]}"; do
-  if [ "$state_file" != "env.json" ]; then
-    unsupported_state_files+=("$state_file")
-  fi
-done
-if [ "${#unsupported_state_files[@]}" -gt 0 ]; then
-  echo "package-provision-windows: unsupported state_files for package=$PACKAGE: ${unsupported_state_files[*]}" >&2
-  exit 2
-fi
-
-if [ "$needs_env" -eq 1 ]; then
-  # Mirror scripts/provision's env.json shape so steps that consume it see
-  # the same configuration surface as full provisioning.
-  WINDOWS_PASSWORD="${EPHEMERAL_WINDOWS_PASSWORD:-}"
-  if [ -z "$WINDOWS_PASSWORD" ]; then
-    if ! WINDOWS_PASSWORD="$(./scripts/instance-password "$INSTANCE_NAME" 2>/dev/null)"; then
-      WINDOWS_PASSWORD=""
-    fi
-  fi
-
-  mkdir -p "$STAGE/state"
-  jq -n \
-    --arg wp "$WINDOWS_PASSWORD" \
-    --arg sp "${EPHEMERAL_SUNSHINE_PASSWORD:-}" \
-    --arg dr "${EPHEMERAL_DISPLAY_RESOLUTION:-}" \
-    --arg rk "${RUSTDESK_KEY:-}" \
-    --arg rp "${RUSTDESK_PASSWORD:-}" \
-    --arg rs "${RUSTDESK_SERVER:-}" \
-    --arg sv "${SUNSHINE_VERSION:-}" \
-    --arg nv "${NOMACHINE_VERSION:-}" \
-    --arg se "${SPLASHTOP_EMAIL:-}" \
-    --arg spw "${SPLASHTOP_PASSWORD:-}" \
-    --arg su "${SPLASHTOP_STREAMER_URL:-}" \
-    '{windows_password: $wp, sunshine_password: $sp, display_resolution: $dr, rustdesk_key: $rk, rustdesk_password: $rp, rustdesk_server: $rs, sunshine_version: $sv, nomachine_version: $nv, splashtop_email: $se, splashtop_password: $spw, splashtop_streamer_url: $su}' \
-    > "$STAGE/state/env.json"
-fi
-
-echo "[package-provision-windows] uploading windows step files for package=$PACKAGE"
-
-reset_cmd="if (Test-Path '$remote_step_dir') { Remove-Item -Recurse -Force '$remote_step_dir' } ; New-Item -ItemType Directory -Force '$remote_lib_dir' | Out-Null ; New-Item -ItemType Directory -Force '$remote_steps_dir' | Out-Null"
-if [ "$needs_env" -eq 1 ]; then
-  reset_cmd="$reset_cmd ; New-Item -ItemType Directory -Force '$remote_state_dir' | Out-Null"
-fi
-./scripts/ssh-retry "prepare windows package provision directory" ./scripts/instance-ssh "$INSTANCE_NAME" -- "$reset_cmd"
-./scripts/ssh-retry "upload windows package lib" ./scripts/instance-ssh "$INSTANCE_NAME" --scp "$STAGE/scripts/lib" "/C:/Users/Administrator/provision/scripts-package/"
-if [ -d "$STAGE/scripts/templates" ]; then
-  ./scripts/ssh-retry "upload windows package templates" ./scripts/instance-ssh "$INSTANCE_NAME" --scp "$STAGE/scripts/templates" "/C:/Users/Administrator/provision/scripts-package/"
-fi
-for step in "${steps[@]}"; do
-  step_file=$(basename "$step")
-  ./scripts/ssh-retry "upload windows package step $step_file" ./scripts/instance-ssh "$INSTANCE_NAME" --scp "$STAGE/scripts/steps/$step_file" "/C:/Users/Administrator/provision/scripts-package/steps/$step_file"
-done
-if [ "$needs_env" -eq 1 ]; then
-  ./scripts/ssh-retry "upload windows package env.json" ./scripts/instance-ssh "$INSTANCE_NAME" --scp "$STAGE/state/env.json" "/C:/Users/Administrator/provision/state/env.json"
-fi
-
-for step in "${steps[@]}"; do
-  step_file=$(basename "$step")
-  echo "[package-provision-windows] running step=$step_file package=$PACKAGE"
-  ./scripts/instance-ssh "$INSTANCE_NAME" -- "& 'C:\\Users\\Administrator\\provision\\scripts-package\\steps\\$step_file'"
-done
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

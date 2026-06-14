@@ -1,78 +1,100 @@
-#!/usr/bin/env bash
-# Emit package status by checking common Windows install paths.
+#!/usr/bin/env python3
+"""Emit package status by checking common Windows install paths.
 
-set -euo pipefail
-cd "$(git rev-parse --show-toplevel)"
+Usage: scripts/package-status-windows <package> <path> [path...]
 
-PACKAGE="${1:?Usage: scripts/package-status-windows <package> <path> [path...]}"
-shift
+Builds a PowerShell probe (Test-Path + optional Get-Process / Get-Service),
+encodes it as a ``-EncodedCommand`` so SSH shell expansion cannot corrupt the
+``$`` variables, runs it via ``EVE_PACKAGE_STATUS_SSH``, and emits the
+package-status JSON contract.
+"""
 
-if [ "$#" -eq 0 ]; then
-  echo "package-status-windows: at least one path is required" >&2
-  exit 2
-fi
+from __future__ import annotations
 
-quote_ps_string() {
-  # PowerShell single-quoted strings escape a literal single quote by doubling it.
-  printf "'%s'" "$(printf '%s' "$1" | sed "s/'/''/g")"
-}
+import os
+import sys
+from pathlib import Path
 
-ps_paths=""
-for path in "$@"; do
-  if [ -n "$ps_paths" ]; then
-    ps_paths="$ps_paths,"
-  fi
-  ps_paths="${ps_paths}$(quote_ps_string "$path")"
-done
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
-process_name="${EVE_PACKAGE_STATUS_PROCESS:-}"
-service_pattern="${EVE_PACKAGE_STATUS_SERVICE_PATTERN:-}"
-ps_process="$(quote_ps_string "$process_name")"
-ps_service_pattern="$(quote_ps_string "$service_pattern")"
-ps_script="\$paths = @($ps_paths); \$processName = $ps_process; \$servicePattern = $ps_service_pattern; \$installed = [bool](\$paths | Where-Object { Test-Path \$_ }); \$running = \$false; if (\$installed -and \$processName) { \$running = [bool](Get-Process -Name \$processName -ErrorAction SilentlyContinue | Select-Object -First 1) }; if (\$installed -and -not \$running -and \$servicePattern) { \$running = [bool](Get-Service -ErrorAction SilentlyContinue | Where-Object { (\$_.Name -match \$servicePattern -or \$_.DisplayName -match \$servicePattern) -and \$_.Status -eq 'Running' } | Select-Object -First 1) }; if (\$running) { 'running' } elseif (\$installed) { 'installed' } else { 'missing' }"
-encoded_command="$(printf '%s' "$ps_script" | iconv -f UTF-8 -t UTF-16LE | base64 | tr -d '\n')"
-remote_command="powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand $encoded_command"
-PROFILE="${EVE_INSTANCE_NAME:?EVE_INSTANCE_NAME is required}"
-SSH_HELPER="${EVE_PACKAGE_STATUS_SSH:-./scripts/instance-ssh}"
+from eve_sdk.package_dispatch import (  # noqa: E402
+    emit_json,
+    encode_ps_command,
+    first_status,
+    quote_ps_single,
+    run_status_probe,
+)
 
-set +e
-output="$("$SSH_HELPER" "$PROFILE" -- "$remote_command" 2>&1)"
-exit_status=$?
-set -e
+_USAGE = "Usage: scripts/package-status-windows <package> <path> [path...]"
 
-clean_details() {
-  printf '%s\n' "$1" |
-    tr -d '\r' |
-    awk '
-      /^#< CLIXML/ { next }
-      /^<Objs / { next }
-      /^<Obj / { next }
-      /^<\/Objs>/ { next }
-      /_x000D__/ { next }
-      { print }
-    '
-}
+_PS_SCRIPT = (
+    "$paths = @({paths}); "
+    "$processName = {process}; "
+    "$servicePattern = {service}; "
+    "$installed = [bool]($paths | Where-Object {{ Test-Path $_ }}); "
+    "$running = $false; "
+    "if ($installed -and $processName) {{ "
+    "$running = [bool](Get-Process -Name $processName -ErrorAction SilentlyContinue | Select-Object -First 1) }}; "
+    "if ($installed -and -not $running -and $servicePattern) {{ "
+    "$running = [bool](Get-Service -ErrorAction SilentlyContinue | "
+    "Where-Object {{ ($_.Name -match $servicePattern -or $_.DisplayName -match $servicePattern) "
+    "-and $_.Status -eq 'Running' }} | Select-Object -First 1) }}; "
+    "if ($running) {{ 'running' }} elseif ($installed) {{ 'installed' }} else {{ 'missing' }}"
+)
 
-details="$(clean_details "$output")"
+_VALID = {"running", "installed", "missing", "unknown"}
 
-if [ "$exit_status" -eq 0 ]; then
-  status="$(printf '%s\n' "$details" | awk '/^(running|installed|missing|unknown)$/ { print; exit }')"
-  status="${status:-unknown}"
-  case "$status" in
-    running) status="installed" ;;
-    installed|missing|unknown) ;;
-    *) status="unknown" ;;
-  esac
-else
-  status="failed"
-fi
 
-jq -n \
-  --arg kind "package-status" \
-  --arg package "$PACKAGE" \
-  --arg command "status" \
-  --arg instance "$PROFILE" \
-  --arg os_family "windows" \
-  --arg status "$status" \
-  --arg details "$details" \
-  '{kind: $kind, package: $package, command: $command, instance: $instance, os_family: $os_family, status: $status, details: $details}'
+def main(argv: list[str]) -> int:
+    if len(argv) < 1:
+        print(_USAGE, file=sys.stderr)
+        return 1
+    package = argv[0]
+    paths = argv[1:]
+    if not paths:
+        print("package-status-windows: at least one path is required", file=sys.stderr)
+        return 2
+
+    ps_paths = ",".join(quote_ps_single(p) for p in paths)
+    process_name = os.environ.get("EVE_PACKAGE_STATUS_PROCESS", "")
+    service_pattern = os.environ.get("EVE_PACKAGE_STATUS_SERVICE_PATTERN", "")
+    ps_script = _PS_SCRIPT.format(
+        paths=ps_paths,
+        process=quote_ps_single(process_name),
+        service=quote_ps_single(service_pattern),
+    )
+    encoded = encode_ps_command(ps_script)
+    remote_command = f"powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand {encoded}"
+
+    profile = os.environ.get("EVE_INSTANCE_NAME", "")
+    if not profile:
+        print("EVE_INSTANCE_NAME is required", file=sys.stderr)
+        return 1
+    ssh_helper = os.environ.get("EVE_PACKAGE_STATUS_SSH", str(ROOT / "scripts/instance-ssh"))
+
+    exit_status, details = run_status_probe(ssh_helper, profile, remote_command)
+
+    if exit_status == 0:
+        status = first_status(details, _VALID) or "unknown"
+        if status == "running":
+            status = "installed"
+        elif status not in {"installed", "missing", "unknown"}:
+            status = "unknown"
+    else:
+        status = "failed"
+
+    emit_json({
+        "kind": "package-status",
+        "package": package,
+        "command": "status",
+        "instance": profile,
+        "os_family": "windows",
+        "status": status,
+        "details": details,
+    })
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

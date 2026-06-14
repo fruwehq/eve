@@ -1,89 +1,73 @@
-#!/usr/bin/env bash
-# Run a remote package status probe and emit the package status JSON contract.
+#!/usr/bin/env python3
+"""Run a remote package status probe and emit the package status JSON contract.
 
-set -euo pipefail
-cd "$(git rev-parse --show-toplevel)"
+Usage: scripts/package-status-command <package> <remote-command>
 
-PACKAGE="${1:?Usage: scripts/package-status-command <package> <remote-command>}"
-REMOTE_COMMAND="${2:?Usage: scripts/package-status-command <package> <remote-command>}"
-PROFILE="${EVE_INSTANCE_NAME:?EVE_INSTANCE_NAME is required}"
-OS_FAMILY="${EVE_PACKAGE_OS_FAMILY:-ubuntu}"
-SSH_HELPER="${EVE_PACKAGE_STATUS_SSH:-./scripts/instance-ssh}"
+Wraps the remote command in the human-user bash context (with ``.cargo/bin`` in
+PATH, matching the original), runs it via ``EVE_PACKAGE_STATUS_SSH``, and emits
+the package-status JSON. ``EVE_PACKAGE_OS_FAMILY`` selects the reported family
+(default ``ubuntu``).
+"""
 
-if RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env 2>/dev/null); then
-  SSH_USER=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^SSH_USER=/{print $2}')
-  VM_USER_NAME=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^VM_USER_NAME=/{print $2}')
-else
-  SSH_USER=""
-  VM_USER_NAME=""
-fi
-HUMAN_USER="${VM_USER_NAME:-$SSH_USER}"
-HUMAN_USER="${HUMAN_USER:-$(id -un)}"
-case "$HUMAN_USER" in
-  *[!a-zA-Z0-9._-]*)
-    echo "package-status-command: unsupported VM user name: $HUMAN_USER" >&2
-    exit 2
-    ;;
-esac
+from __future__ import annotations
 
-REMOTE_COMMAND_WITH_CONTEXT=$(cat <<EOF
-set -eu
-EVE_HUMAN_USER="$HUMAN_USER"
-EVE_HUMAN_HOME=\$(getent passwd "\$EVE_HUMAN_USER" | cut -d: -f6)
-EVE_HUMAN_UID=\$(id -u "\$EVE_HUMAN_USER")
-export EVE_HUMAN_USER EVE_HUMAN_HOME EVE_HUMAN_UID
-export HOME="\$EVE_HUMAN_HOME"
-export PATH="\$EVE_HUMAN_HOME/.local/bin:\$EVE_HUMAN_HOME/.cargo/bin:\$PATH"
-eve_human_run() {
-  sudo -H -u "\$EVE_HUMAN_USER" env \
-    HOME="\$EVE_HUMAN_HOME" \
-    USER="\$EVE_HUMAN_USER" \
-    LOGNAME="\$EVE_HUMAN_USER" \
-    PATH="\$EVE_HUMAN_HOME/.local/bin:\$EVE_HUMAN_HOME/.cargo/bin:\$PATH" \
-    XDG_RUNTIME_DIR="/run/user/\$EVE_HUMAN_UID" \
-    "\$@"
-}
-$REMOTE_COMMAND
-EOF
+import os
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from eve_sdk.package_dispatch import (  # noqa: E402
+    build_linux_human_context,
+    emit_json,
+    first_status,
+    resolve_human_user,
+    run_status_probe,
 )
 
-set +e
-output="$("$SSH_HELPER" "$PROFILE" -- "$REMOTE_COMMAND_WITH_CONTEXT" 2>&1)"
-exit_status=$?
-set -e
+_USAGE = "Usage: scripts/package-status-command <package> <remote-command>"
+_VALID = {"installed", "missing", "unknown"}
 
-clean_details() {
-  printf '%s\n' "$1" |
-    tr -d '\r' |
-    awk '
-      /^#< CLIXML/ { next }
-      /^<Objs / { next }
-      /^<Obj / { next }
-      /^<\/Objs>/ { next }
-      /_x000D__/ { next }
-      { print }
-    '
-}
 
-details="$(clean_details "$output")"
+def main(argv: list[str]) -> int:
+    if len(argv) < 2:
+        print(_USAGE, file=sys.stderr)
+        return 1
+    package = argv[0]
+    remote_command = argv[1]
+    profile = os.environ.get("EVE_INSTANCE_NAME", "")
+    if not profile:
+        print("EVE_INSTANCE_NAME is required", file=sys.stderr)
+        return 1
+    os_family = os.environ.get("EVE_PACKAGE_OS_FAMILY", "ubuntu")
+    ssh_helper = os.environ.get("EVE_PACKAGE_STATUS_SSH", str(ROOT / "scripts/instance-ssh"))
 
-if [ "$exit_status" -eq 0 ]; then
-  status="$(printf '%s\n' "$details" | awk '/^(installed|missing|unknown)$/ { print; exit }')"
-  status="${status:-unknown}"
-  case "$status" in
-    installed|missing|unknown) ;;
-    *) status="unknown" ;;
-  esac
-else
-  status="failed"
-fi
+    human_user = resolve_human_user(ROOT, profile, "package-status-command")
+    remote_command_with_context = build_linux_human_context(
+        human_user, remote_command, include_cargo=True,
+    )
 
-jq -n \
-  --arg kind "package-status" \
-  --arg package "$PACKAGE" \
-  --arg command "status" \
-  --arg instance "$PROFILE" \
-  --arg os_family "$OS_FAMILY" \
-  --arg status "$status" \
-  --arg details "$details" \
-  '{kind: $kind, package: $package, command: $command, instance: $instance, os_family: $os_family, status: $status, details: $details}'
+    exit_status, details = run_status_probe(ssh_helper, profile, remote_command_with_context)
+
+    if exit_status == 0:
+        status = first_status(details, _VALID) or "unknown"
+        if status not in _VALID:
+            status = "unknown"
+    else:
+        status = "failed"
+
+    emit_json({
+        "kind": "package-status",
+        "package": package,
+        "command": "status",
+        "instance": profile,
+        "os_family": os_family,
+        "status": status,
+        "details": details,
+    })
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

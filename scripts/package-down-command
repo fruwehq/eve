@@ -1,60 +1,74 @@
-#!/usr/bin/env sh
-# Run or describe a Linux package removal command for a package plugin.
+#!/usr/bin/env python3
+"""Run or describe a Linux package removal command for a package plugin.
 
-set -eu
+Usage: scripts/package-down-command <package> <remote-command>
 
-package="${1:?Usage: package-down-command <package> <remote-command>}"
-remote_command="${2:?Usage: package-down-command <package> <remote-command>}"
-profile="${EVE_INSTANCE_NAME:?EVE_INSTANCE_NAME is required}"
-ssh_cmd="${EVE_PACKAGE_DOWN_SSH:-./scripts/instance-ssh}"
+Mirrors the original sh script: positional args (exit 1 with the Usage message
+when missing), ``EVE_INSTANCE_NAME`` required, ``EVE_PACKAGE_DOWN_SSH`` selects
+the SSH helper, and ``EVE_PLUGIN_DRY_RUN=1`` emits the dry-run contract. The
+remote command is wrapped in the human-user bash context (without ``.cargo/bin``
+in PATH, matching the original).
+"""
 
-if resolved_env=$(./scripts/profile-resolve --profile "$profile" --emit env 2>/dev/null); then
-  ssh_user=$(printf "%s\n" "$resolved_env" | awk -F= '/^SSH_USER=/{print $2}')
-  vm_user_name=$(printf "%s\n" "$resolved_env" | awk -F= '/^VM_USER_NAME=/{print $2}')
-else
-  ssh_user=""
-  vm_user_name=""
-fi
-human_user="${vm_user_name:-$ssh_user}"
-human_user="${human_user:-$(id -un)}"
-case "$human_user" in
-  *[!a-zA-Z0-9._-]*)
-    echo "package-down-command: unsupported VM user name: $human_user" >&2
-    exit 2
-    ;;
-esac
+from __future__ import annotations
 
-remote_command_with_context=$(cat <<EOF
-set -eu
-EVE_HUMAN_USER="$human_user"
-EVE_HUMAN_HOME=\$(getent passwd "\$EVE_HUMAN_USER" | cut -d: -f6)
-EVE_HUMAN_UID=\$(id -u "\$EVE_HUMAN_USER")
-export EVE_HUMAN_USER EVE_HUMAN_HOME EVE_HUMAN_UID
-export HOME="\$EVE_HUMAN_HOME"
-export PATH="\$EVE_HUMAN_HOME/.local/bin:\$PATH"
-eve_human_run() {
-  sudo -H -u "\$EVE_HUMAN_USER" env \
-    HOME="\$EVE_HUMAN_HOME" \
-    USER="\$EVE_HUMAN_USER" \
-    LOGNAME="\$EVE_HUMAN_USER" \
-    XDG_RUNTIME_DIR="/run/user/\$EVE_HUMAN_UID" \
-    "\$@"
-}
-$remote_command
-EOF
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from eve_sdk.package_dispatch import (  # noqa: E402
+    build_linux_human_context,
+    emit_json,
+    resolve_human_user,
 )
 
-if [ "${EVE_PLUGIN_DRY_RUN:-0}" = "1" ]; then
-  jq -n \
-    --arg package "$package" \
-    --arg instance "$profile" \
-    --arg command "$remote_command" \
-    '{kind: "package-down", package: $package, instance: $instance, os_family: "ubuntu", command: $command, dry_run: true}'
-  exit 0
-fi
+_USAGE = "Usage: package-down-command <package> <remote-command>"
 
-"$ssh_cmd" "$profile" -- "$remote_command_with_context"
-jq -n \
-  --arg package "$package" \
-  --arg instance "$profile" \
-  '{kind: "package-down", package: $package, instance: $instance, os_family: "ubuntu", status: "removed"}'
+
+def main(argv: list[str]) -> int:
+    if len(argv) < 2:
+        print(_USAGE, file=sys.stderr)
+        return 1
+    package = argv[0]
+    remote_command = argv[1]
+    profile = os.environ.get("EVE_INSTANCE_NAME", "")
+    if not profile:
+        print("EVE_INSTANCE_NAME is required", file=sys.stderr)
+        return 1
+    ssh_cmd = os.environ.get("EVE_PACKAGE_DOWN_SSH", str(ROOT / "scripts/instance-ssh"))
+
+    human_user = resolve_human_user(ROOT, profile, "package-down-command")
+    remote_command_with_context = build_linux_human_context(
+        human_user, remote_command, include_cargo=False,
+    )
+
+    if os.environ.get("EVE_PLUGIN_DRY_RUN", "0") == "1":
+        emit_json({
+            "kind": "package-down",
+            "package": package,
+            "instance": profile,
+            "os_family": "ubuntu",
+            "command": remote_command,
+            "dry_run": True,
+        })
+        return 0
+
+    status = subprocess.run([ssh_cmd, profile, "--", remote_command_with_context]).returncode
+    if status != 0:
+        return status
+    emit_json({
+        "kind": "package-down",
+        "package": package,
+        "instance": profile,
+        "os_family": "ubuntu",
+        "status": "removed",
+    })
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))
