@@ -71,7 +71,4 @@ scripts/test-tf-isolation:bash shebang - tf-env isolation tests - port to Python
 scripts/test-tui:bash shebang - TUI tests - port to Python or plugin command
 scripts/update-tools:bash shebang - tool version updater - port to Python or plugin command
 scripts/upload:bash shebang - file upload helper - port to Python or plugin command
-scripts/vagrant-destroy:bash shebang - vagrant destroy dispatcher - port to Python or plugin command
-scripts/vagrant-stop:bash shebang - vagrant stop dispatcher - port to Python or plugin command
-scripts/vagrant-up:bash shebang - vagrant up dispatcher - port to Python or plugin command
 scripts/wait-for-provision:bash shebang - provision completion poll - port to Python or plugin command
