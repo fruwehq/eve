@@ -19,3 +19,6 @@ env: []
 install:
   ubuntu:
     steps: [base.sh, timezone.sh, provision/ubuntu/xfce-desktop.sh]
+bundles:
+  - id: desktop-xfce
+    includes: [xfce-desktop, rdp]

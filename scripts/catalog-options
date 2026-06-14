@@ -16,22 +16,29 @@ from eve_sdk.catalog import load_catalog
 from eve_sdk.plugin_manifest import PluginManifest
 
 
-def os_available_for_provider(os_entry: dict[str, Any], provider: str) -> bool:
-    match provider:
-        case "aws":
-            return any(key in os_entry for key in ("aws_ami_name_pattern", "aws_ami_id", "aws_ssm_parameter"))
-        case "gcp":
-            return "gcp_image_project" in os_entry and "gcp_image_family" in os_entry
-        case "vultr":
-            return "vultr_os_id" in os_entry
-        case "local-qemu":
-            return "cloud_image_url" in os_entry
-        case "truenas":
-            return "cloud_image_url" in os_entry
-        case "raspberry-pi":
-            return "metal_image" in os_entry
-        case _:
-            return False
+def provider_os_support() -> dict[str, set[str]]:
+    """Build provider → set of supported OS ids from contributed catalog.oses."""
+    support: dict[str, set[str]] = {}
+    for plugin in PluginManifest.load_all("provider"):
+        catalog = plugin.get("catalog")
+        if not isinstance(catalog, dict):
+            continue
+        oses = catalog.get("oses")
+        if not isinstance(oses, list):
+            continue
+        support[plugin["id"]] = {
+            entry["id"]
+            for entry in oses
+            if isinstance(entry, dict) and entry.get("id")
+        }
+    return support
+
+
+def os_available_for_provider(
+    os_entry: dict[str, Any], provider: str, support: dict[str, set[str]]
+) -> bool:
+    """Check if an OS is available for a provider via contributed catalog.oses."""
+    return os_entry.get("id") in support.get(provider, set())
 
 
 def init_available_for_provider(init: dict[str, Any], provider: str) -> bool:
@@ -43,6 +50,7 @@ def init_available_for_provider(init: dict[str, Any], provider: str) -> bool:
 
 def build_doc() -> dict[str, Any]:
     catalog = load_catalog()
+    os_support = provider_os_support()
     package_plugins = PluginManifest.load_all("package")
     package_plugin_by_id = {plugin["id"]: plugin for plugin in package_plugins}
     providers = sorted({machine.get("provider") for machine in catalog["machines"] if machine.get("provider")})
@@ -60,7 +68,7 @@ def build_doc() -> dict[str, Any]:
                 continue
             if os_ids and os_entry.get("id") not in os_ids:
                 continue
-            if not os_available_for_provider(os_entry, provider):
+            if not os_available_for_provider(os_entry, provider, os_support):
                 continue
             for init in catalog["inits"]:
                 if init.get("os_family") and init.get("os_family") != os_entry.get("family"):

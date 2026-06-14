@@ -19,3 +19,6 @@ env: []
 install:
   ubuntu:
     steps: [base.sh, timezone.sh, provision/ubuntu/kde-desktop.sh]
+bundles:
+  - id: desktop-kde
+    includes: [kde-desktop, rdp]

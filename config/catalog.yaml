@@ -1,167 +1,32 @@
 # v2 catalog
-# Single source of truth for machine composition:
-# machine + os + init + packages/bundles + location
+# Central catalog: shared OS identity rows, inits, packages, and locations.
+# Provider-owned rows (machines, provider-specific OS image fields) live in
+# provider manifests under plugins/providers/*/eve-plugin.yaml.
+# Bundle definitions live in package manifests under
+# plugins/packages/*/eve-plugin.yaml.
+# The aggregator (eve_sdk/catalog.py) reconstructs the effective catalog by
+# unioning these contributions with this central file.
 version: 1
 
 # -----------------------------------------------------------------------------
-# Reusable YAML anchors (to reduce repetition)
-# -----------------------------------------------------------------------------
-x-local-qemu-medium: &local_qemu_medium
-  cpus: 2
-  memory_mb: 4096
-  # QEMU/cloud-image boxes start with a small root disk. The full local dev
-  # desktop smoke stack may need more room via an explicit override, but the
-  # default should stay small enough that local experiments are cheap.
-  disk_gb: 20
-
-x-ttl-default: &ttl_default
-  ttl_hours: 168
-  reminder_hours: [24, 6, 1]
-  on_expiry: stop_then_destroy
-  grace_hours: 24
-
-# -----------------------------------------------------------------------------
-# Machine catalog (provider/runtime layer)
-# -----------------------------------------------------------------------------
-machines:
-  - name: aws-cheap-x86
-    provider: aws
-    kind: vm
-    supports:
-      arches: [amd64]
-    defaults:
-      instance_type: t3.large
-      disk_gb: 80
-      root_volume_type: gp3
-      use_spot: false
-
-  - name: aws-gpu-g4dn-spot # 4 vCPUs, 16 GiB RAM, 125 GB NVMe, 1 NVIDIA T4 GPU (16 GB VRAM), spot
-    provider: aws
-    kind: vm
-    supports:
-      arches: [amd64]
-    defaults:
-      instance_type: g4dn.xlarge
-      disk_gb: 180
-      root_volume_type: gp3
-      use_spot: true
-
-  - name: aws-gpu-g5
-    provider: aws
-    kind: vm
-    supports:
-      arches: [amd64]
-    defaults:
-      instance_type: g5.2xlarge
-      disk_gb: 200
-      use_spot: false
-
-  - name: gcp-cheap-x86
-    provider: gcp
-    kind: vm
-    supports:
-      arches: [amd64]
-    defaults:
-      machine_type: e2-small
-      disk_gb: 20
-      disk_type: pd-balanced
-
-  - name: vultr-vcg-a40-1c # 1 vCPU, 5 GB RAM, 90 GB NVMe, 3 TB/mo, $0.075/hr, 1/24 NVIDIA A40 (2 GB VRAM)
-    provider: vultr
-    kind: vm
-    supports:
-      arches: [amd64]
-    defaults:
-      plan: vcg-a40-1c-5g-2vram
-
-  - name: vultr-vcg-a40-2c # 2 vCPUs, 10 GB RAM, 180 GB NVMe, 4 TB/mo, $0.144/hr, 1/12 NVIDIA A40 (4 GB VRAM)
-    provider: vultr
-    kind: vm
-    supports:
-      arches: [amd64]
-    defaults:
-      plan: vcg-a40-2c-10g-4vram
-
-  - name: vultr-vcg-a40-4c # 4 vCPUs, 20 GB RAM, 360 GB NVMe, 5 TB/mo, $0.288/hr, 1/6 NVIDIA A40 (8 GB VRAM)
-    provider: vultr
-    kind: vm
-    supports:
-      arches: [amd64]
-    defaults:
-      plan: vcg-a40-4c-20g-8vram
-
-  - name: vultr-vcg-a40-6c # 6 vCPUs, 30 GB RAM, 550 GB NVMe, 6 TB/mo, $0.432/hr, 1/4 NVIDIA A40 (12 GB VRAM)
-    provider: vultr
-    kind: vm
-    supports:
-      arches: [amd64]
-    defaults:
-      plan: vcg-a40-6c-30g-12vram
-
-  - name: local-qemu-medium
-    provider: local-qemu
-    kind: vm
-    supports:
-      arches: [arm64]
-    defaults: *local_qemu_medium
-
-  - name: raspberry-pi-5
-    provider: raspberry-pi
-    kind: metal
-    supports:
-      arches: [arm64]
-    defaults:
-      # CPU / memory / disk are physical attributes of the Pi, not knobs this
-      # repo can set. Only architecture is recorded so provisioning can pick
-      # arm64 binaries.
-      architecture: arm64
-
-  - name: truenas-scale-medium
-    provider: truenas
-    kind: vm
-    supports:
-      arches: [amd64]
-    defaults:
-      cpu_cores: 4
-      cpu_mode: HOST-PASSTHROUGH
-      # TrueNAS `vcpus` is socket count, while `cpu_cores` is cores per socket.
-      # Keep the default topology at 1 socket * 4 cores so QEMU/KVM exposes 4
-      # CPUs instead of the previous 2 * 4 = 8 CPU topology.
-      vcpus: 1
-      memory_mb: 8192
-      disk_gb: 30
-      network: br0
-      autostart: true
-      state: RUNNING
-
-# -----------------------------------------------------------------------------
-# OS catalog (explicit image/version/flavor)
+# OS identity catalog (shared across providers)
+# Provider-specific image fields merge onto these rows via the aggregator.
 # -----------------------------------------------------------------------------
 oses:
   - id: ubuntu-26.04-amd64
     family: ubuntu
     version: "26.04"
     arch: amd64
-    vagrant_box: cloud-image/ubuntu-26.04
-    cloud_image_url: https://cloud-images.ubuntu.com/releases/26.04/release/ubuntu-26.04-server-cloudimg-amd64.img
-    aws_ami_name_pattern: ubuntu/images/hvm-ssd-gp3/ubuntu-resolute-26.04-amd64-server-*
-    gcp_image_project: ubuntu-os-cloud
-    gcp_image_family: ubuntu-2604-lts-amd64
 
   - id: ubuntu-26.04-arm64
     family: ubuntu
     version: "26.04"
     arch: arm64
-    cloud_image_url: https://cloud-images.ubuntu.com/releases/26.04/release/ubuntu-26.04-server-cloudimg-arm64.img
-    cloud_image_sha256: 5e091e27d60116efbb0c743b8dd5cb2d15618e414ef04db0817ed43c8e2d7c7b
-    metal_image: ubuntu-26.04-arm64
 
   - id: windows-server-2025
     family: windows
     version: "2025"
     arch: amd64
-    aws_ami_name_pattern: Windows_Server-2025-English-Full-Base-*
-    vultr_os_id: 2514 # Windows 2025 Standard x64
 
 # -----------------------------------------------------------------------------
 # Init catalog (first-boot access + baseline hardening)
@@ -209,43 +74,6 @@ packages:
   - id: xfce-desktop
   - id: xfce-desktop-headless
   - id: xpra
-
-# -----------------------------------------------------------------------------
-# Bundle catalog (composable package groups)
-# -----------------------------------------------------------------------------
-bundles:
-  - id: desktop-xfce
-    includes: [xfce-desktop, rdp]
-
-  - id: desktop-xfce-headless
-    includes: [xfce-desktop-headless, rdp]
-
-  - id: desktop-gnome
-    includes: [gnome-desktop, rdp]
-
-  - id: desktop-gnome-headless
-    includes: [gnome-desktop-headless, rdp]
-
-  - id: desktop-gnome-mac
-    includes: [gnome-desktop, macos-desktop-theme, rdp]
-
-  - id: desktop-kde
-    includes: [kde-desktop, rdp]
-
-  - id: desktop-kde-headless
-    includes: [kde-desktop-headless, rdp]
-
-  - id: desktop-streaming
-    includes: [sunshine, rustdesk, vnc, rdp, waypipe]
-
-  - id: remote-xpra
-    includes: [xpra]
-
-  - id: dev-ai
-    includes: [docker, dev-toolchain, goose, claude, codex-cli, hermes, opencode, vscode]
-
-  - id: gaming-streaming
-    includes: [sunshine, steam, rustdesk]
 
 # -----------------------------------------------------------------------------
 # Location mapping (provider-specific region/AZ translation)

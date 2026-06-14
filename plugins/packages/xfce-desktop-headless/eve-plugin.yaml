@@ -19,3 +19,6 @@ env: []
 install:
   ubuntu:
     steps: [base.sh, timezone.sh, provision/ubuntu/xfce-desktop-headless.sh]
+bundles:
+  - id: desktop-xfce-headless
+    includes: [xfce-desktop-headless, rdp]

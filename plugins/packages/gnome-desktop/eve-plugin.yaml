@@ -19,3 +19,9 @@ env: []
 install:
   ubuntu:
     steps: [base.sh, timezone.sh, provision/ubuntu/gnome-desktop.sh]
+bundles:
+  - id: desktop-gnome
+    includes: [gnome-desktop, rdp]
+
+  - id: desktop-gnome-mac
+    includes: [gnome-desktop, macos-desktop-theme, rdp]

@@ -59,3 +59,6 @@ install:
       - provision/windows/31_virtual_audio.ps1
     state_files: []
     fallback: true
+bundles:
+  - id: desktop-streaming
+    includes: [sunshine, rustdesk, vnc, rdp, waypipe]

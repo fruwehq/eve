@@ -46,3 +46,39 @@ supports:
   engines: [terraform]
   kinds: [vm]
 env: [VULTR_API_KEY]
+catalog:
+  machines:
+    - name: vultr-vcg-a40-1c # 1 vCPU, 5 GB RAM, 90 GB NVMe, 3 TB/mo, $0.075/hr, 1/24 NVIDIA A40 (2 GB VRAM)
+      provider: vultr
+      kind: vm
+      supports:
+        arches: [amd64]
+      defaults:
+        plan: vcg-a40-1c-5g-2vram
+
+    - name: vultr-vcg-a40-2c # 2 vCPUs, 10 GB RAM, 180 GB NVMe, 4 TB/mo, $0.144/hr, 1/12 NVIDIA A40 (4 GB VRAM)
+      provider: vultr
+      kind: vm
+      supports:
+        arches: [amd64]
+      defaults:
+        plan: vcg-a40-2c-10g-4vram
+
+    - name: vultr-vcg-a40-4c # 4 vCPUs, 20 GB RAM, 360 GB NVMe, 5 TB/mo, $0.288/hr, 1/6 NVIDIA A40 (8 GB VRAM)
+      provider: vultr
+      kind: vm
+      supports:
+        arches: [amd64]
+      defaults:
+        plan: vcg-a40-4c-20g-8vram
+
+    - name: vultr-vcg-a40-6c # 6 vCPUs, 30 GB RAM, 550 GB NVMe, 6 TB/mo, $0.432/hr, 1/4 NVIDIA A40 (12 GB VRAM)
+      provider: vultr
+      kind: vm
+      supports:
+        arches: [amd64]
+      defaults:
+        plan: vcg-a40-6c-30g-12vram
+  oses:
+    - id: windows-server-2025
+      vultr_os_id: 2514 # Windows 2025 Standard x64

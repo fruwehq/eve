@@ -53,3 +53,18 @@ supports:
   engines: [metal]
   kinds: [metal]
 env: [RASPBERRY_PI_HOST, RASPBERRY_PI_IP, RASPBERRY_PI_USER_PASSWORD, VM_USER_NAME]
+catalog:
+  machines:
+    - name: raspberry-pi-5
+      provider: raspberry-pi
+      kind: metal
+      supports:
+        arches: [arm64]
+      defaults:
+        # CPU / memory / disk are physical attributes of the Pi, not knobs this
+        # repo can set. Only architecture is recorded so provisioning can pick
+        # arm64 binaries.
+        architecture: arm64
+  oses:
+    - id: ubuntu-26.04-arm64
+      metal_image: ubuntu-26.04-arm64

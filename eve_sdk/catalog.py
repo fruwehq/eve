@@ -16,6 +16,7 @@ aggregator seamlessly recombines them.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -141,9 +142,22 @@ def aggregate(
 
 
 def load_catalog() -> dict[str, list[dict[str, Any]]]:
-    """Load the effective catalog: central config + plugin contributions."""
-    central_docs = [
-        _load_yaml(Workdir.repo_root() / "config/catalog.yaml"),
-        _load_yaml(Workdir.repo_root() / "config/catalog.local.yaml"),
-    ]
-    return aggregate(central_docs, PluginManifest.load_all())
+    """Load the effective catalog: central config + plugin contributions.
+
+    Merge order is: central base → plugin contributions → local overlay.
+    This ensures user-level overrides (catalog.local.yaml / EVE_CATALOG_LOCAL)
+    take precedence over plugin-contributed rows.
+    """
+    local_value = os.environ.get("EVE_CATALOG_LOCAL")
+    local_path = (
+        Path(local_value).expanduser().resolve()
+        if local_value
+        else Workdir.repo_root() / "config/catalog.local.yaml"
+    )
+    base_doc = _load_yaml(Workdir.repo_root() / "config/catalog.yaml")
+    overlay_doc = _load_yaml(local_path)
+    result = aggregate([base_doc], PluginManifest.load_all())
+    if overlay_doc:
+        for section in CATALOG_SECTIONS:
+            _merge_section(result[section], overlay_doc.get(section), section)
+    return result

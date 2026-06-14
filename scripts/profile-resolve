@@ -92,64 +92,33 @@ fi
 if [ -n "$RESOLVED_JSON_INPUT" ]; then
   CATALOG_JSON=""
 else
-  CATALOG_JSON="$(python3 - "$CATALOG_PATH" "$LOCAL_CATALOG_PATH" <<'PY'
+  CATALOG_JSON="$(EVE_CATALOG_LOCAL="$LOCAL_CATALOG_PATH" python3 - <<'PY'
 import json
+import os
 import sys
 from pathlib import Path
 
 import yaml
 
+sys.path.insert(0, ".")
+from eve_sdk.catalog import load_catalog
 
-def load_any(raw_path):
+catalog = load_catalog()
+
+# Profiles are a profile-resolve concept not handled by the aggregator.
+# Include them from the local overlay or base catalog if present.
+profiles = []
+for raw_path in [os.environ.get("EVE_CATALOG_LOCAL", ""), "config/catalog.yaml"]:
+    if not raw_path:
+        continue
     path = Path(raw_path)
     if not path.exists():
-        return {}
-    if path.suffix.lower() in {".yaml", ".yml"}:
-        return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    if path.suffix.lower() == ".json":
-        return json.loads(path.read_text(encoding="utf-8"))
-    raise SystemExit(f"Unsupported catalog format: {path} (expected .yaml/.yml/.json)")
-
-
-def deep_merge(base, override):
-    if base is None:
-        return override
-    if override is None:
-        return base
-    if isinstance(base, dict) and isinstance(override, dict):
-        merged = dict(base)
-        for key, value in override.items():
-            merged[key] = deep_merge(merged.get(key), value)
-        return merged
-    return override
-
-
-def merge_by_key(base_items, override_items, key):
-    merged = [dict(item) if isinstance(item, dict) else item for item in (base_items or [])]
-    for entry in override_items or []:
-        if not isinstance(entry, dict):
-            continue
-        index = next((i for i, item in enumerate(merged) if isinstance(item, dict) and item.get(key) == entry.get(key)), None)
-        if index is None:
-            merged.append(entry)
-        else:
-            merged[index] = deep_merge(merged[index], entry)
-    return merged
-
-
-base = load_any(sys.argv[1])
-override = load_any(sys.argv[2])
-catalog = deep_merge(base, override)
-for section, key in {
-    "machines": "name",
-    "oses": "id",
-    "inits": "id",
-    "packages": "id",
-    "bundles": "id",
-    "locations": "name",
-    "profiles": "name",
-}.items():
-    catalog[section] = merge_by_key(base.get(section), override.get(section), key)
+        continue
+    doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    if isinstance(doc, dict) and isinstance(doc.get("profiles"), list):
+        profiles = doc["profiles"]
+        break
+catalog["profiles"] = profiles
 print(json.dumps(catalog))
 PY
 )"

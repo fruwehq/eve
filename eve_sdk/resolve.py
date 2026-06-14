@@ -9,6 +9,7 @@ from typing import Any
 
 import yaml
 
+from eve_sdk.catalog import load_catalog as _load_aggregated_catalog
 from eve_sdk.dispatch import command_vector, run_json, support_allowed
 from eve_sdk.workdir import Workdir
 
@@ -77,13 +78,14 @@ def default_registry_path() -> Path:
 
 
 def load_catalog() -> dict[str, Any]:
-    base = load_any(catalog_path())
-    over = load_any(local_catalog_path())
-    merged = deep_merge(base, over)
-    for section in ["machines", "oses", "inits", "packages", "bundles", "locations"]:
-        key = "id" if section in {"oses", "inits", "packages", "bundles"} else "name"
-        merged[section] = merge_by_key(base.get(section), over.get(section), key)
-    return merged
+    """Load the effective catalog via the aggregator.
+
+    Delegates to ``eve_sdk.catalog.load_catalog`` so that resolution sees
+    plugin-contributed machines, OS image fields (field-level merged onto shared
+    identity rows), inits, and bundles. Honors ``EVE_CATALOG_LOCAL`` for the
+    local catalog overlay path.
+    """
+    return dict(_load_aggregated_catalog())
 
 
 def by_key(root: dict[str, Any], section: str, key: str, value: str) -> dict[str, Any] | None:

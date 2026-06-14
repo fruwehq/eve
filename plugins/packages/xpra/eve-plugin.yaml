@@ -38,3 +38,6 @@ install:
     steps: [provision/windows/xpra.ps1]
     state_files: []
     fallback: false
+bundles:
+  - id: remote-xpra
+    includes: [xpra]

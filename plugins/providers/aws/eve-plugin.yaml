@@ -68,3 +68,42 @@ supports:
   engines: [terraform]
   kinds: [vm]
 env: [AWS_CONFIG_FILE, AWS_PROFILE, AWS_REGION, AWS_SHARED_CREDENTIALS_FILE]
+catalog:
+  machines:
+    - name: aws-cheap-x86
+      provider: aws
+      kind: vm
+      supports:
+        arches: [amd64]
+      defaults:
+        instance_type: t3.large
+        disk_gb: 80
+        root_volume_type: gp3
+        use_spot: false
+
+    - name: aws-gpu-g4dn-spot # 4 vCPUs, 16 GiB RAM, 125 GB NVMe, 1 NVIDIA T4 GPU (16 GB VRAM), spot
+      provider: aws
+      kind: vm
+      supports:
+        arches: [amd64]
+      defaults:
+        instance_type: g4dn.xlarge
+        disk_gb: 180
+        root_volume_type: gp3
+        use_spot: true
+
+    - name: aws-gpu-g5
+      provider: aws
+      kind: vm
+      supports:
+        arches: [amd64]
+      defaults:
+        instance_type: g5.2xlarge
+        disk_gb: 200
+        use_spot: false
+  oses:
+    - id: ubuntu-26.04-amd64
+      aws_ami_name_pattern: ubuntu/images/hvm-ssd-gp3/ubuntu-resolute-26.04-amd64-server-*
+
+    - id: windows-server-2025
+      aws_ami_name_pattern: Windows_Server-2025-English-Full-Base-*

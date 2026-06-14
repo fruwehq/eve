@@ -19,3 +19,6 @@ env: [VIRTUAL_MONITOR_WIDTH, VIRTUAL_MONITOR_HEIGHT]
 install:
   ubuntu:
     steps: [base.sh, timezone.sh, provision/ubuntu/gnome-desktop-headless.sh]
+bundles:
+  - id: desktop-gnome-headless
+    includes: [gnome-desktop-headless, rdp]

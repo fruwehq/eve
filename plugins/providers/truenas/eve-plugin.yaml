@@ -81,3 +81,29 @@ env:
   - TRUENAS_SSH_PORT
   - TRUENAS_SSH_PRIVATE_KEY_FILE
   - TRUENAS_SSH_USER
+catalog:
+  machines:
+    - name: truenas-scale-medium
+      provider: truenas
+      kind: vm
+      supports:
+        arches: [amd64]
+      defaults:
+        cpu_cores: 4
+        cpu_mode: HOST-PASSTHROUGH
+        # TrueNAS `vcpus` is socket count, while `cpu_cores` is cores per socket.
+        # Keep the default topology at 1 socket * 4 cores so QEMU/KVM exposes 4
+        # CPUs instead of the previous 2 * 4 = 8 CPU topology.
+        vcpus: 1
+        memory_mb: 8192
+        disk_gb: 30
+        network: br0
+        autostart: true
+        state: RUNNING
+  oses:
+    - id: ubuntu-26.04-amd64
+      cloud_image_url: https://cloud-images.ubuntu.com/releases/26.04/release/ubuntu-26.04-server-cloudimg-amd64.img
+
+    - id: ubuntu-26.04-arm64
+      cloud_image_url: https://cloud-images.ubuntu.com/releases/26.04/release/ubuntu-26.04-server-cloudimg-arm64.img
+      cloud_image_sha256: 5e091e27d60116efbb0c743b8dd5cb2d15618e414ef04db0817ed43c8e2d7c7b

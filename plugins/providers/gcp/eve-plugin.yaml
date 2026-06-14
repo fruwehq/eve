@@ -49,3 +49,18 @@ supports:
   engines: [terraform]
   kinds: [vm]
 env: [GOOGLE_APPLICATION_CREDENTIALS, GOOGLE_CLOUD_PROJECT, MY_IP, SSH_PUBLIC_KEY_FILE]
+catalog:
+  machines:
+    - name: gcp-cheap-x86
+      provider: gcp
+      kind: vm
+      supports:
+        arches: [amd64]
+      defaults:
+        machine_type: e2-small
+        disk_gb: 20
+        disk_type: pd-balanced
+  oses:
+    - id: ubuntu-26.04-amd64
+      gcp_image_project: ubuntu-os-cloud
+      gcp_image_family: ubuntu-2604-lts-amd64
