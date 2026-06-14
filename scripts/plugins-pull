@@ -1,0 +1,80 @@
+#!/usr/bin/env python3
+"""Pull external plugin sources: sync, pin to SHA, and write the lockfile.
+
+Backs `eve pull` (the gcloud-style CLI tree lands in Phase 4). Modes:
+- (default)        sync each source at its ref, resolve to SHA, write .eve/plugins.lock
+- --frozen         re-materialize the exact locked SHAs without re-resolving
+- --if-stale <ttl> no-op if the lockfile is younger than <ttl> seconds
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+import time
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from eve_sdk.registry import (  # noqa: E402
+    LockedSource,
+    RegistryError,
+    Source,
+    load_sources,
+    lock_path,
+    read_lock,
+    sync,
+    write_lock,
+)
+
+
+def parser() -> argparse.ArgumentParser:
+    arg_parser = argparse.ArgumentParser(prog="scripts/plugins-pull", description=__doc__)
+    arg_parser.add_argument("--frozen", action="store_true", help="re-materialize locked SHAs without re-resolving")
+    arg_parser.add_argument("--if-stale", type=float, metavar="TTL", help="skip if lockfile younger than TTL seconds")
+    return arg_parser
+
+
+def _is_fresh(ttl: float) -> bool:
+    path = lock_path()
+    return path.exists() and (time.time() - path.stat().st_mtime) < ttl
+
+
+def main() -> int:
+    args = parser().parse_args()
+
+    if args.if_stale is not None and _is_fresh(args.if_stale):
+        print(f"plugins-pull: lockfile is fresh (< {args.if_stale}s); skipping")
+        return 0
+
+    try:
+        sources = load_sources()
+        if args.frozen:
+            locked = _frozen_sources(sources)
+            sync(locked)
+            print(f"plugins-pull: re-materialized {len(locked)} locked source(s)")
+        else:
+            resolved = sync(sources)
+            write_lock(resolved)
+            print(f"plugins-pull: synced + locked {len(resolved)} source(s) -> {lock_path()}")
+    except RegistryError as error:
+        print(f"plugins-pull: {error}", file=sys.stderr)
+        return 1
+    return 0
+
+
+def _frozen_sources(sources: list[Source]) -> list[Source]:
+    """Build Sources pinned to the locked SHA (auth carried from the live sources)."""
+    auth_by_id = {source.id: source.auth for source in sources}
+    locked: list[LockedSource] = read_lock()
+    if not locked:
+        raise RegistryError("--frozen requires an existing .eve/plugins.lock")
+    return [
+        Source(id=item.id, url=item.url, subdir=item.subdir, ref=item.sha, auth=auth_by_id.get(item.id, "ssh"))
+        for item in locked
+    ]
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
