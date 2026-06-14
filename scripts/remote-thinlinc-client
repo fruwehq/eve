@@ -1,44 +1,68 @@
-#!/usr/bin/env bash
-set -euo pipefail
-cd "$(git rev-parse --show-toplevel)"
+#!/usr/bin/env python3
+"""Open the native ThinLinc Client for an instance.
 
-INSTANCE="${1:-}"
-if [ -z "$INSTANCE" ]; then
-  echo "Usage: scripts/remote-thinlinc-client <instance>" >&2
-  exit 2
-fi
+Usage: scripts/remote-thinlinc-client <instance>
+"""
 
-RESOLVED_ENV=$(./scripts/profile-resolve --profile "$INSTANCE" --emit env)
-USER_NAME=$(printf '%s\n' "$RESOLVED_ENV" | awk -F= '/^VM_USER_NAME=/{print $2}')
-IP=$(./scripts/instance-ip "$INSTANCE")
+from __future__ import annotations
 
-if [ -z "$IP" ]; then
-  echo "remote-thinlinc-client: could not resolve IP for $INSTANCE" >&2
-  exit 1
-fi
+import platform
+import subprocess
+import sys
+from pathlib import Path
 
-ARGS=()
-if [ -n "$USER_NAME" ]; then
-  ARGS+=("-u" "$USER_NAME")
-fi
-ARGS+=("$IP")
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
-if [ "$(uname -s)" = "Darwin" ]; then
-  if [ -d "/Applications/ThinLinc Client.app" ]; then
-    exec open -a "ThinLinc Client" --args "${ARGS[@]}"
-  fi
-  if [ -f "/Users/chris/src/personal/thinlinc/tl-4.20.0_4284-client-macos.dmg" ]; then
-    open "/Users/chris/src/personal/thinlinc/tl-4.20.0_4284-client-macos.dmg"
-    echo "remote-thinlinc-client: ThinLinc Client is not installed in /Applications; opened the local DMG." >&2
-    exit 1
-  fi
-  echo "remote-thinlinc-client: install ThinLinc Client.app, then retry." >&2
-  exit 2
-fi
+from eve_sdk.remote_launch import (  # noqa: E402
+    exec_replace,
+    has_command,
+    instance_ip,
+    repo_root,
+    resolve_env,
+    thinlinc_client_args,
+    thinlinc_client_linux_command,
+    thinlinc_client_macos_command,
+)
 
-if command -v tlclient >/dev/null 2>&1; then
-  exec tlclient "${ARGS[@]}"
-fi
+_THINLINC_APP = "/Applications/ThinLinc Client.app"
+_THINLINC_DMG = "/Users/chris/src/personal/thinlinc/tl-4.20.0_4284-client-macos.dmg"
 
-echo "remote-thinlinc-client: tlclient not found" >&2
-exit 2
+
+def main(argv: list[str]) -> int:
+    instance = argv[0] if argv else ""
+    if not instance:
+        print("Usage: scripts/remote-thinlinc-client <instance>", file=sys.stderr)
+        return 2
+    root = repo_root()
+    resolved = resolve_env(root, instance)
+    user_name = resolved.get("VM_USER_NAME", "")
+    ip = instance_ip(root, instance)
+    if not ip:
+        print(f"remote-thinlinc-client: could not resolve IP for {instance}", file=sys.stderr)
+        return 1
+    args = thinlinc_client_args(ip, user_name)
+
+    if platform.system() == "Darwin":
+        if Path(_THINLINC_APP).is_dir():
+            exec_replace(thinlinc_client_macos_command(args))
+        if Path(_THINLINC_DMG).is_file():
+            subprocess.run(["open", _THINLINC_DMG], check=False)
+            print(
+                "remote-thinlinc-client: ThinLinc Client is not installed in "
+                "/Applications; opened the local DMG.",
+                file=sys.stderr,
+            )
+            return 1
+        print("remote-thinlinc-client: install ThinLinc Client.app, then retry.", file=sys.stderr)
+        return 2
+
+    if has_command("tlclient"):
+        exec_replace(thinlinc_client_linux_command(args))
+
+    print("remote-thinlinc-client: tlclient not found", file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

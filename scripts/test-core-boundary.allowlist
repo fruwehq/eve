@@ -32,17 +32,6 @@ scripts/eve:bash shebang - dev convenience wrapper - port to Python or plugin co
 scripts/eve-docker:bash shebang - dev docker wrapper - port to Python or plugin command
 scripts/profile-resolve:bash shebang - catalog resolution and env emission - port to Python or plugin command
 scripts/provision:bash shebang - provision upload and bootstrap - port to Python or plugin command
-scripts/remote-console:bash shebang - remote console helper - port to Python or plugin command
-scripts/remote-moonlight:bash shebang - moonlight launcher - port to Python or plugin command
-scripts/remote-moonlight-pair:bash shebang - moonlight pairing - port to Python or plugin command
-scripts/remote-rdp:bash shebang - RDP launcher - port to Python or plugin command
-scripts/remote-rustdesk:bash shebang - RustDesk launcher - port to Python or plugin command
-scripts/remote-sunshine-wait:bash shebang - Sunshine readiness check - port to Python or plugin command
-scripts/remote-thinlinc:bash shebang - ThinLinc launcher - port to Python or plugin command
-scripts/remote-thinlinc-client:bash shebang - ThinLinc client launcher - port to Python or plugin command
-scripts/remote-vnc:bash shebang - VNC launcher - port to Python or plugin command
-scripts/remote-waypipe:bash shebang - Waypipe launcher - port to Python or plugin command
-scripts/remote-xpra:bash shebang - Xpra launcher - port to Python or plugin command
 scripts/ssh-wait:bash shebang - SSH reachability poll - port to Python or plugin command
 scripts/test:bash shebang - test runner - port to Python or plugin command
 scripts/test-catalog:bash shebang - catalog validation - port to Python or plugin command

@@ -1,46 +1,73 @@
-#!/usr/bin/env bash
-# Pair Moonlight with Sunshine via a fixed PIN.
-set -euo pipefail
+#!/usr/bin/env python3
+"""Pair Moonlight with Sunshine via a fixed PIN.
 
-PROFILE="${1:?Usage: scripts/remote-moonlight-pair <instance>}"
-cd "$(git rev-parse --show-toplevel)"
+Usage: scripts/remote-moonlight-pair <instance>
+"""
 
-PKGS=$(./scripts/profile-resolve --profile "$PROFILE" --emit env | awk -F= '/^BUNDLE_PACKAGES/{print $2}')
-echo "$PKGS" | tr ',' '\n' | grep -qx sunshine || { echo "sunshine not in bundle — skipping"; exit 0; }
+from __future__ import annotations
 
-IP=$(./scripts/instance-ip "$PROFILE")
-PIN=1234
-PAIR_RESPONSE_FILE=./tmp/moonlight-pair-response.json
+import subprocess
+import sys
+import time
+from pathlib import Path
 
-mkdir -p ./tmp
-rm -f "$PAIR_RESPONSE_FILE"
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
-printf '%s\n' "Starting Moonlight pairing against $IP with PIN $PIN..."
-/Applications/Moonlight.app/Contents/MacOS/Moonlight pair --pin "$PIN" "$IP" &
-MOONLIGHT_PID=$!
-sleep 2
+from eve_sdk.remote_launch import (  # noqa: E402
+    has_package,
+    instance_ip,
+    moonlight_pair_command,
+    repo_root,
+    resolve_env,
+    sunshine_pair_curl_command,
+)
 
-printf '%s\n' "Submitting pairing PIN to Sunshine..."
-HTTP_CODE=$(curl -sS -i -k \
-  -u "sunshine:${EPHEMERAL_SUNSHINE_PASSWORD}" \
-  -H "Content-Type: application/json" \
-  --data-binary "{\"pin\":\"$PIN\",\"name\":\"ephemeral-client\"}" \
-  -o "$PAIR_RESPONSE_FILE" \
-  -w "%{http_code}" \
-  "https://$IP:47990/api/pin") || {
-  kill $MOONLIGHT_PID >/dev/null 2>&1 || true
-  wait $MOONLIGHT_PID >/dev/null 2>&1 || true
-  echo "Sunshine pairing API call failed."
-  exit 1
-}
 
-if ! printf '%s' "$HTTP_CODE" | grep -q '^2'; then
-  kill $MOONLIGHT_PID >/dev/null 2>&1 || true
-  wait $MOONLIGHT_PID >/dev/null 2>&1 || true
-  echo "Sunshine pairing API returned HTTP $HTTP_CODE."
-  [ -f "$PAIR_RESPONSE_FILE" ] && cat "$PAIR_RESPONSE_FILE"
-  exit 1
-fi
+def main(argv: list[str]) -> int:
+    profile = argv[0] if argv else ""
+    if not profile:
+        print("Usage: scripts/remote-moonlight-pair <instance>", file=sys.stderr)
+        return 2
+    root = repo_root()
+    resolved = resolve_env(root, profile)
+    if not has_package(resolved, "sunshine"):
+        print("sunshine not in bundle — skipping")
+        return 0
+    ip = instance_ip(root, profile)
+    pin = "1234"
+    pair_response_file = str(root / "tmp" / "moonlight-pair-response.json")
 
-printf '%s\n' "Sunshine pairing API accepted the PIN. Waiting for Moonlight to finish..."
-wait $MOONLIGHT_PID
+    (root / "tmp").mkdir(parents=True, exist_ok=True)
+    Path(pair_response_file).unlink(missing_ok=True)
+
+    print(f"Starting Moonlight pairing against {ip} with PIN {pin}...")
+    moonlight = subprocess.Popen(moonlight_pair_command(ip, pin))
+    time.sleep(2)
+
+    print("Submitting pairing PIN to Sunshine...")
+    curl = subprocess.run(
+        sunshine_pair_curl_command(ip, pin, pair_response_file),
+        capture_output=True, text=True, check=False,
+    )
+    http_code = curl.stdout
+    if curl.returncode != 0:
+        moonlight.terminate()
+        moonlight.wait()
+        print("Sunshine pairing API call failed.")
+        return 1
+
+    if not http_code.startswith("2"):
+        moonlight.terminate()
+        moonlight.wait()
+        print(f"Sunshine pairing API returned HTTP {http_code}.")
+        if Path(pair_response_file).is_file():
+            print(Path(pair_response_file).read_text(), end="")
+        return 1
+
+    print("Sunshine pairing API accepted the PIN. Waiting for Moonlight to finish...")
+    return moonlight.wait()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

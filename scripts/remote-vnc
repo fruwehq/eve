@@ -1,156 +1,186 @@
-#!/usr/bin/env bash
-# Open a VNC session to a profile's VM.
-# Usage: scripts/remote-vnc <instance>
-#
-# For vagrant profiles: tunnels VNC (5901) through SSH via vagrant
-# For terraform profiles: tunnels VNC (5901) through SSH via instance-ssh
+#!/usr/bin/env python3
+"""Open a VNC session to a profile's VM.
 
-set -euo pipefail
+Usage: scripts/remote-vnc <instance>
 
-PROFILE="${1:?Usage: scripts/remote-vnc <instance>}"
-cd "$(git rev-parse --show-toplevel)"
-# shellcheck source=lib/instance-workdir.sh
-. ./scripts/lib/instance-workdir.sh
+For vagrant profiles: tunnels VNC (5901) through SSH via vagrant.
+For terraform profiles: tunnels VNC (5901) through SSH via instance-ssh.
+"""
 
-VNC_PORT="${VNC_PORT:-5901}"
-LOCAL_PORT="${VNC_LOCAL_PORT:-15900}"
-VNC_VIEWER="${VNC_VIEWER:-auto}"
+from __future__ import annotations
 
-case "$VNC_VIEWER" in
-    auto|system|tigervnc) ;;
-    *)
-        echo "remote-vnc: invalid VNC_VIEWER='$VNC_VIEWER' (valid: auto, system, tigervnc)" >&2
-        exit 2
-        ;;
-esac
+import contextlib
+import os
+import shlex
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
 
-RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
-ENGINE=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^ENGINE=/{print $2}')
-SSH_USER=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^SSH_USER=/{print $2}')
-VM_USER_NAME=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^VM_USER_NAME=/{print $2}')
-VNC_USER="${VM_USER_NAME:-$SSH_USER}"
-case "$VNC_USER" in
-    *[!a-zA-Z0-9._-]*)
-        echo "remote-vnc: unsupported VM user name: $VNC_USER" >&2
-        exit 2
-        ;;
-esac
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
-echo "[remote-vnc] Checking that remote VNC server is listening on port $VNC_PORT..."
-set +e
-VNC_CHECK_OUTPUT=$(./scripts/instance-ssh "$PROFILE" -- "ss -tln 2>/dev/null | grep -q ':$VNC_PORT '" 2>&1)
-VNC_CHECK_STATUS=$?
-set -e
-if [ "$VNC_CHECK_STATUS" -ne 0 ]; then
-    if [ -n "$VNC_CHECK_OUTPUT" ]; then
-        printf '%s\n' "$VNC_CHECK_OUTPUT" >&2
-        echo "[remote-vnc] Could not verify the remote VNC server because SSH failed." >&2
-        echo "[remote-vnc] Check that the instance is running and reachable, then retry." >&2
-        exit "$VNC_CHECK_STATUS"
-    fi
-    echo "[remote-vnc] Nothing listening on remote port $VNC_PORT." >&2
-    echo "[remote-vnc] Run: make provision INSTANCE=$PROFILE" >&2
-    exit 1
-fi
+from eve_sdk.remote_launch import (  # noqa: E402
+    has_command,
+    instance_ip,
+    instance_workdir,
+    repo_root,
+    resolve_env,
+    resolve_private_key,
+    ssh_config_field,
+    vagrant_ssh_config,
+    validate_unix_user,
+    vnc_passwd_fetch_command,
+    vnc_system_open_command,
+    vnc_tunnel_command,
+    vnc_tunnel_opts_terraform,
+    vnc_tunnel_opts_vagrant,
+    vnc_viewer_args,
+    vncviewer_command,
+)
 
-echo "[remote-vnc] Setting up SSH tunnel for VNC (local:$LOCAL_PORT -> remote:$VNC_PORT)"
 
-if lsof -ti ":$LOCAL_PORT" >/dev/null 2>&1; then
-    echo "[remote-vnc] Local port $LOCAL_PORT is already in use. Closing existing tunnel." >&2
-    lsof -ti ":$LOCAL_PORT" | xargs kill 2>/dev/null || true
-    sleep 1
-fi
+def _instance_ssh(root: Path, profile: str, remote_cmd: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [str(root / "scripts/instance-ssh"), profile, "--", remote_cmd],
+        cwd=root, text=True, capture_output=True, check=False,
+    )
 
-if [ "$ENGINE" = "vagrant" ]; then
-    IP=$(./scripts/instance-ip "$PROFILE")
-    WORKDIR="$(eve_instance_workdir "$PROFILE")"
-    SSH_PORT=$(cd "$WORKDIR" && vagrant ssh-config | awk '/Port/ {print $2; exit}')
-    PRIV_KEY=$(cd "$WORKDIR" && vagrant ssh-config | awk '/IdentityFile/ {print $2; exit}')
 
-    ssh -f -N -L "$LOCAL_PORT:127.0.0.1:$VNC_PORT" \
-        -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-        -p "$SSH_PORT" -i "$PRIV_KEY" \
-        "vagrant@$IP"
-else
-    IP=$(./scripts/instance-ip "$PROFILE")
-    [ -n "$IP" ] || { echo "remote-vnc: could not resolve IP" >&2; exit 1; }
+def _instance_ssh_bytes(root: Path, profile: str, remote_cmd: str) -> subprocess.CompletedProcess[bytes]:
+    return subprocess.run(
+        [str(root / "scripts/instance-ssh"), profile, "--", remote_cmd],
+        cwd=root, capture_output=True, check=False,
+    )
 
-    KEY_FILE="${SSH_PUBLIC_KEY_FILE:-}"
-    if [ -n "$KEY_FILE" ] && [ "${KEY_FILE%.pub}" != "$KEY_FILE" ]; then
-        PRIV_KEY="${KEY_FILE%.pub}"
-    else
-        PRIV_KEY="${SSH_PRIVATE_KEY_FILE:-}"
-    fi
 
-    SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=10)
-    [ -n "$PRIV_KEY" ] && SSH_OPTS+=(-i "$PRIV_KEY")
+def main(argv: list[str]) -> int:
+    profile = argv[0] if argv else ""
+    if not profile:
+        print("Usage: scripts/remote-vnc <instance>", file=sys.stderr)
+        return 2
+    root = repo_root()
 
-    ssh -f -N -L "$LOCAL_PORT:127.0.0.1:$VNC_PORT" \
-        "${SSH_OPTS[@]}" "$SSH_USER@$IP"
-fi
+    vnc_port = os.environ.get("VNC_PORT", "5901")
+    local_port = os.environ.get("VNC_LOCAL_PORT", "15900")
+    vnc_viewer = os.environ.get("VNC_VIEWER", "auto")
+    if vnc_viewer not in ("auto", "system", "tigervnc"):
+        print(f"remote-vnc: invalid VNC_VIEWER='{vnc_viewer}' (valid: auto, system, tigervnc)", file=sys.stderr)
+        return 2
 
-VNC_PASSWORD="${VNC_PASSWORD:-vagrant}"
+    resolved = resolve_env(root, profile)
+    engine = resolved.get("ENGINE", "")
+    ssh_user = resolved.get("SSH_USER", "")
+    vm_user_name = resolved.get("VM_USER_NAME", "")
+    vnc_user = vm_user_name or ssh_user
+    validate_unix_user(vnc_user, "remote-vnc")
 
-echo "[remote-vnc] Tunnel active on localhost:$LOCAL_PORT"
-echo "[remote-vnc] Opening VNC viewer..."
+    print(f"[remote-vnc] Checking that remote VNC server is listening on port {vnc_port}...")
+    check = _instance_ssh(root, profile, f"ss -tln 2>/dev/null | grep -q ':{vnc_port} '")
+    if check.returncode != 0:
+        if check.stdout or check.stderr:
+            sys.stderr.write(check.stdout)
+            sys.stderr.write(check.stderr)
+            print("[remote-vnc] Could not verify the remote VNC server because SSH failed.", file=sys.stderr)
+            print("[remote-vnc] Check that the instance is running and reachable, then retry.", file=sys.stderr)
+            return check.returncode
+        print(f"[remote-vnc] Nothing listening on remote port {vnc_port}.", file=sys.stderr)
+        print(f"[remote-vnc] Run: make provision INSTANCE={profile}", file=sys.stderr)
+        return 1
 
-VNC_AUTH_ARGS=()
-VNC_PASSWD_FILE=""
-if [ "$VNC_VIEWER" != "system" ] && command -v mktemp >/dev/null 2>&1; then
-    VNC_PASSWD_FILE=$(mktemp "${TMPDIR:-/tmp}/eve-vnc-passwd.XXXXXX")
-    chmod 600 "$VNC_PASSWD_FILE"
-    if ./scripts/instance-ssh "$PROFILE" -- "home=\$(getent passwd '$VNC_USER' | cut -d: -f6); if [ -f \"\$home/.config/tigervnc/passwd\" ]; then sudo cat \"\$home/.config/tigervnc/passwd\"; elif [ -f \"\$home/.vnc/passwd\" ]; then sudo cat \"\$home/.vnc/passwd\"; else exit 1; fi" > "$VNC_PASSWD_FILE"; then
-        VNC_AUTH_ARGS=(-passwd "$VNC_PASSWD_FILE")
-    else
-        rm -f "$VNC_PASSWD_FILE"
-        VNC_PASSWD_FILE=""
-        echo "[remote-vnc] Could not fetch VNC password file; enter password '${VNC_PASSWORD}' if prompted."
-    fi
-fi
+    print(f"[remote-vnc] Setting up SSH tunnel for VNC (local:{local_port} -> remote:{vnc_port})")
 
-cleanup() {
-    [ -z "$VNC_PASSWD_FILE" ] || rm -f "$VNC_PASSWD_FILE"
-}
-trap cleanup EXIT
+    # Close any existing tunnel on the local port.
+    free = subprocess.run(["lsof", "-ti", f":{local_port}"], capture_output=True, text=True, check=False)
+    if free.stdout.strip():
+        print(f"[remote-vnc] Local port {local_port} is already in use. Closing existing tunnel.", file=sys.stderr)
+        for pid in free.stdout.split():
+            subprocess.run(["kill", pid], check=False)
+        time.sleep(1)
 
-VNC_VIEWER_ARGS=(-Shared -AcceptClipboard -SendClipboard -RemoteResize=0 -AlwaysCursor=1 -CursorType=System)
-if [ -n "${VNC_DESKTOP_SIZE:-}" ]; then
-    VNC_VIEWER_ARGS+=(-DesktopSize "$VNC_DESKTOP_SIZE")
-fi
+    if engine == "vagrant":
+        ip = instance_ip(root, profile)
+        workdir = instance_workdir(root, profile)
+        config = vagrant_ssh_config(workdir)
+        ssh_port = ssh_config_field(config, "Port")
+        priv_key = ssh_config_field(config, "IdentityFile")
+        target = f"vagrant@{ip}"
+        opts = vnc_tunnel_opts_vagrant(ssh_port, priv_key)
+    else:
+        ip = instance_ip(root, profile)
+        if not ip:
+            print("remote-vnc: could not resolve IP", file=sys.stderr)
+            return 1
+        priv_key = resolve_private_key()
+        target = f"{ssh_user}@{ip}"
+        opts = vnc_tunnel_opts_terraform(priv_key)
 
-open_system_vnc() {
-    if command -v open >/dev/null 2>&1; then
-        open "vnc://:${VNC_PASSWORD}@127.0.0.1:${LOCAL_PORT}"
-        echo "[remote-vnc] Using macOS Screen Sharing. Clipboard support is limited compared with TigerVNC."
-        echo "[remote-vnc] Tunnel will stay open. Run: kill \$(lsof -ti :$LOCAL_PORT) to close."
+    tunnel = subprocess.run(vnc_tunnel_command(local_port, vnc_port, target, opts), check=False)
+    if tunnel.returncode != 0:
+        return tunnel.returncode
+
+    vnc_password = os.environ.get("VNC_PASSWORD", "vagrant")
+
+    print(f"[remote-vnc] Tunnel active on localhost:{local_port}")
+    print("[remote-vnc] Opening VNC viewer...")
+
+    auth_args: list[str] = []
+    passwd_file = ""
+    if vnc_viewer != "system" and has_command("mktemp"):
+        fd, passwd_file = tempfile.mkstemp(prefix="eve-vnc-passwd.", dir=os.environ.get("TMPDIR", "/tmp"))
+        os.close(fd)
+        os.chmod(passwd_file, 0o600)
+        fetch = _instance_ssh_bytes(root, profile, vnc_passwd_fetch_command(vnc_user))
+        if fetch.returncode == 0:
+            Path(passwd_file).write_bytes(fetch.stdout)
+            auth_args = ["-passwd", passwd_file]
+        else:
+            Path(passwd_file).unlink(missing_ok=True)
+            passwd_file = ""
+            print(
+                f"[remote-vnc] Could not fetch VNC password file; enter password '{vnc_password}' if prompted."
+            )
+
+    viewer_args = vnc_viewer_args()
+
+    def open_system_vnc() -> int:
+        if has_command("open"):
+            subprocess.run(vnc_system_open_command(vnc_password, local_port), check=False)
+            print("[remote-vnc] Using macOS Screen Sharing. Clipboard support is limited compared with TigerVNC.")
+            print(f"[remote-vnc] Tunnel will stay open. Run: kill $(lsof -ti :{local_port}) to close.")
+            return 0
+        print("remote-vnc: system viewer requested but macOS open is not available", file=sys.stderr)
+        return 1
+
+    def open_tigervnc() -> int:
+        if has_command("vncviewer"):
+            return subprocess.run(vncviewer_command(viewer_args, auth_args, local_port), check=False).returncode
+        print("remote-vnc: TigerVNC requested but vncviewer is not installed", file=sys.stderr)
+        return 1
+
+    try:
+        vnc_viewer_cmd = os.environ.get("VNC_VIEWER_CMD", "")
+        if vnc_viewer_cmd:
+            cmd = shlex.split(vnc_viewer_cmd) + viewer_args + auth_args + [f"127.0.0.1::{local_port}"]
+            return subprocess.run(cmd, check=False).returncode
+        if vnc_viewer == "system":
+            return open_system_vnc()
+        if vnc_viewer == "tigervnc":
+            return open_tigervnc()
+        if has_command("vncviewer"):
+            return open_tigervnc()
+        if has_command("open"):
+            return open_system_vnc()
+        print(f"No VNC viewer found. Connect manually to: 127.0.0.1:{local_port}")
+        print("Press Ctrl+C to close the tunnel.")
+        with contextlib.suppress(EOFError):
+            input()
         return 0
-    fi
-    echo "remote-vnc: system viewer requested but macOS open is not available" >&2
-    return 1
-}
+    finally:
+        if passwd_file:
+            Path(passwd_file).unlink(missing_ok=True)
 
-open_tigervnc() {
-    if command -v vncviewer >/dev/null 2>&1; then
-        vncviewer "${VNC_VIEWER_ARGS[@]}" "${VNC_AUTH_ARGS[@]}" "127.0.0.1::$LOCAL_PORT"
-        return 0
-    fi
-    echo "remote-vnc: TigerVNC requested but vncviewer is not installed" >&2
-    return 1
-}
 
-if [ -n "${VNC_VIEWER_CMD:-}" ]; then
-    # shellcheck disable=SC2086
-    $VNC_VIEWER_CMD "${VNC_VIEWER_ARGS[@]}" "${VNC_AUTH_ARGS[@]}" "127.0.0.1::$LOCAL_PORT"
-elif [ "$VNC_VIEWER" = "system" ]; then
-    open_system_vnc
-elif [ "$VNC_VIEWER" = "tigervnc" ]; then
-    open_tigervnc
-elif command -v vncviewer >/dev/null 2>&1; then
-    open_tigervnc
-elif command -v open >/dev/null 2>&1; then
-    open_system_vnc
-else
-    echo "No VNC viewer found. Connect manually to: 127.0.0.1:$LOCAL_PORT"
-    echo "Press Ctrl+C to close the tunnel."
-    read -r
-fi
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

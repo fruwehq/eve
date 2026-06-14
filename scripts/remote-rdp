@@ -1,132 +1,150 @@
-#!/usr/bin/env bash
-# Open an RDP session to an instance.
-set -euo pipefail
+#!/usr/bin/env python3
+"""Open an RDP session to an instance.
 
-PROFILE="${1:?Usage: scripts/remote-rdp <instance>}"
-cd "$(git rev-parse --show-toplevel)"
+Usage: scripts/remote-rdp <instance>
+"""
 
-RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
-OS_FAMILY=$(printf '%s\n' "$RESOLVED_ENV" | awk -F= '/^OS_FAMILY=/{print $2}')
-BUNDLE_PACKAGES=$(printf '%s\n' "$RESOLVED_ENV" | awk -F= '/^BUNDLE_PACKAGES=/{print $2}')
-IP=$(./scripts/instance-ip "$PROFILE")
-is_selected() {
-  case ",$BUNDLE_PACKAGES," in
-    *,"$1",*) return 0 ;;
-    *) return 1 ;;
-  esac
-}
+from __future__ import annotations
 
-case "$OS_FAMILY" in
-  windows)
-    USERNAME="Administrator"
-    PW=$(./scripts/instance-password "$PROFILE")
-    ADMIN_SESSION=1
-    ;;
-  ubuntu)
-    VM_USERNAME=$(printf '%s\n' "$RESOLVED_ENV" | awk -F= '/^VM_USER_NAME=/{print $2}')
-    if is_selected gnome-desktop || is_selected gnome-desktop-headless; then
-      USERNAME="${RDP_GATE_USER:-rdpuser}"
-      PW="${RDP_GATE_PASSWORD:-${VM_USER_PASSWORD:-}}"
-      CREDSSP=0
-      REDIRECT=0
-      FREERDP_EXTRA=()
-      WINDOWS_APP_OK=1
-    elif is_selected kde-desktop || is_selected kde-desktop-headless; then
-      USERNAME="$VM_USERNAME"
-      PW="${VM_USER_PASSWORD:-}"
-      CREDSSP=1
-      REDIRECT=1
-      FREERDP_EXTRA=(/gfx:AVC444)
-      WINDOWS_APP_OK=0
-    else
-      USERNAME="$VM_USERNAME"
-      PW="${VM_USER_PASSWORD:-}"
-      CREDSSP=1
-      REDIRECT=1
-      FREERDP_EXTRA=()
-      WINDOWS_APP_OK=1
-    fi
-    if [ -z "$USERNAME" ]; then
-      USERNAME="${VM_USER_NAME:-}"
-    fi
-    if [ -z "$USERNAME" ]; then
-      echo "remote-rdp: VM_USER_NAME is required for Ubuntu RDP" >&2
-      exit 2
-    fi
-    if [ -z "$PW" ]; then
-      echo "remote-rdp: VM_USER_PASSWORD or RDP_GATE_PASSWORD is required for Ubuntu RDP login" >&2
-      echo "remote-rdp: RustDesk uses RUSTDESK_PASSWORD; Linux login/RDP uses VM_USER_PASSWORD by default." >&2
-      exit 2
-    fi
-    ADMIN_SESSION=0
-    ;;
-  *)
-    echo "remote-rdp: unsupported OS family '$OS_FAMILY'" >&2
-    exit 2
-    ;;
-esac
-: "${CREDSSP:=1}"
-: "${REDIRECT:=0}"
-: "${WINDOWS_APP_OK:=1}"
-: "${FREERDP_EXTRA:=}"
+import os
+import platform
+import subprocess
+import sys
+import time
+from pathlib import Path
 
-mkdir -p ./tmp
-printf '%s\n' \
-  "full address:s:$IP" \
-  "username:s:$USERNAME" \
-  "prompt for credentials on client:i:1" \
-  "enablecredsspsupport:i:$CREDSSP" \
-  "use redirection server name:i:$REDIRECT" \
-  "administrative session:i:$ADMIN_SESSION" \
-  "screen mode id:i:2" \
-  "session bpp:i:32" \
-  "redirectclipboard:i:1" \
-  "audiomode:i:0" \
-  > ./tmp/windows.rdp
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
-HOST_OS="$(uname -s)"
+from eve_sdk.remote_launch import (  # noqa: E402
+    exec_replace,
+    has_command,
+    has_package,
+    instance_ip,
+    msrdp_open_command,
+    msrdp_paste_command,
+    rdp_file_lines,
+    repo_root,
+    resolve_env,
+    xfreerdp_command,
+)
 
-if [ "$WINDOWS_APP_OK" = "0" ]; then
-  if command -v xfreerdp >/dev/null 2>&1; then
-    exec xfreerdp /v:"$IP" /u:"$USERNAME" /p:"$PW" +clipboard /cert:ignore "${FREERDP_EXTRA[@]}"
-  fi
-  case "$HOST_OS" in
-    Darwin)
-      echo "remote-rdp: this KDE/krdp profile is not compatible with macOS Windows App; install xfreerdp." >&2
-      ;;
-    Linux)
-      echo "remote-rdp: xfreerdp is required on Linux. Install with: apt install freerdp2-x11" >&2
-      ;;
-    *)
-      echo "remote-rdp: unsupported host OS: $HOST_OS" >&2
-      ;;
-  esac
-  exit 2
-fi
 
-case "$HOST_OS" in
-  Darwin)
-    if ! command -v pbcopy >/dev/null 2>&1; then
-      echo "remote-rdp: pbcopy is required on macOS" >&2
-      exit 2
-    fi
-    printf '%s' "$PW" | pbcopy
-    if ! open -a "Microsoft Remote Desktop" ./tmp/windows.rdp; then
-      echo "remote-rdp: Microsoft Remote Desktop is required on macOS" >&2
-      exit 2
-    fi
-    sleep 3
-    osascript -e 'tell application "System Events" to keystroke "v" using command down' -e 'tell application "System Events" to key code 36'
-    ;;
-  Linux)
-    if command -v xfreerdp >/dev/null 2>&1; then
-      exec xfreerdp /v:"$IP" /u:"$USERNAME" /p:"$PW" +clipboard /cert:ignore "${FREERDP_EXTRA[@]}"
-    fi
-    echo "remote-rdp: xfreerdp is required on Linux. Install with: apt install freerdp2-x11" >&2
-    exit 2
-    ;;
-  *)
-    echo "remote-rdp: unsupported host OS: $HOST_OS" >&2
-    exit 2
-    ;;
-esac
+def _instance_password(root: Path, profile: str) -> str:
+    result = subprocess.run(
+        [str(root / "scripts/instance-password"), profile],
+        cwd=root, text=True, capture_output=True, check=False,
+    )
+    sys.stderr.write(result.stderr)
+    if result.returncode != 0:
+        raise SystemExit(result.returncode)
+    return result.stdout.strip()
+
+
+def main(argv: list[str]) -> int:
+    profile = argv[0] if argv else ""
+    if not profile:
+        print("Usage: scripts/remote-rdp <instance>", file=sys.stderr)
+        return 2
+    root = repo_root()
+    resolved = resolve_env(root, profile)
+    os_family = resolved.get("OS_FAMILY", "")
+    ip = instance_ip(root, profile)
+    host_os = platform.system()
+
+    credssp = 1
+    redirect = 0
+    windows_app_ok = 1
+    freerdp_extra: list[str] = []
+
+    if os_family == "windows":
+        username = "Administrator"
+        pw = _instance_password(root, profile)
+        admin_session = 1
+    elif os_family == "ubuntu":
+        vm_username = resolved.get("VM_USER_NAME", "")
+        if has_package(resolved, "gnome-desktop") or has_package(resolved, "gnome-desktop-headless"):
+            username = os.environ.get("RDP_GATE_USER", "rdpuser")
+            pw = os.environ.get("RDP_GATE_PASSWORD") or os.environ.get("VM_USER_PASSWORD", "")
+            credssp = 0
+            redirect = 0
+            freerdp_extra = []
+            windows_app_ok = 1
+        elif has_package(resolved, "kde-desktop") or has_package(resolved, "kde-desktop-headless"):
+            username = vm_username
+            pw = os.environ.get("VM_USER_PASSWORD", "")
+            credssp = 1
+            redirect = 1
+            freerdp_extra = ["/gfx:AVC444"]
+            windows_app_ok = 0
+        else:
+            username = vm_username
+            pw = os.environ.get("VM_USER_PASSWORD", "")
+            credssp = 1
+            redirect = 1
+            freerdp_extra = []
+            windows_app_ok = 1
+        if not username:
+            username = os.environ.get("VM_USER_NAME", "")
+        if not username:
+            print("remote-rdp: VM_USER_NAME is required for Ubuntu RDP", file=sys.stderr)
+            return 2
+        if not pw:
+            print(
+                "remote-rdp: VM_USER_PASSWORD or RDP_GATE_PASSWORD is required for Ubuntu RDP login",
+                file=sys.stderr,
+            )
+            print(
+                "remote-rdp: RustDesk uses RUSTDESK_PASSWORD; "
+                "Linux login/RDP uses VM_USER_PASSWORD by default.",
+                file=sys.stderr,
+            )
+            return 2
+        admin_session = 0
+    else:
+        print(f"remote-rdp: unsupported OS family '{os_family}'", file=sys.stderr)
+        return 2
+
+    (root / "tmp").mkdir(parents=True, exist_ok=True)
+    rdp_file = root / "tmp" / "windows.rdp"
+    rdp_file.write_text("\n".join(rdp_file_lines(ip, username, credssp, redirect, admin_session)) + "\n")
+
+    if windows_app_ok == 0:
+        if has_command("xfreerdp"):
+            exec_replace(xfreerdp_command(ip, username, pw, freerdp_extra))
+        if host_os == "Darwin":
+            print(
+                "remote-rdp: this KDE/krdp profile is not compatible with macOS "
+                "Windows App; install xfreerdp.",
+                file=sys.stderr,
+            )
+        elif host_os == "Linux":
+            print("remote-rdp: xfreerdp is required on Linux. Install with: apt install freerdp2-x11", file=sys.stderr)
+        else:
+            print(f"remote-rdp: unsupported host OS: {host_os}", file=sys.stderr)
+        return 2
+
+    if host_os == "Darwin":
+        if not has_command("pbcopy"):
+            print("remote-rdp: pbcopy is required on macOS", file=sys.stderr)
+            return 2
+        subprocess.run(["pbcopy"], input=pw, text=True, check=False)
+        result = subprocess.run(msrdp_open_command(str(rdp_file)), check=False)
+        if result.returncode != 0:
+            print("remote-rdp: Microsoft Remote Desktop is required on macOS", file=sys.stderr)
+            return 2
+        time.sleep(3)
+        return subprocess.run(msrdp_paste_command(), check=False).returncode
+
+    if host_os == "Linux":
+        if has_command("xfreerdp"):
+            exec_replace(xfreerdp_command(ip, username, pw, freerdp_extra))
+        print("remote-rdp: xfreerdp is required on Linux. Install with: apt install freerdp2-x11", file=sys.stderr)
+        return 2
+
+    print(f"remote-rdp: unsupported host OS: {host_os}", file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))
