@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import re
 
-__all__ = ["SemverError", "satisfies"]
+__all__ = ["SemverError", "satisfies", "parse_version"]
 
 _CONSTRAINT_RE = re.compile(r"^(>=|<=|>|<|=|\^|~)?\s*(.+)$")
 _VERSION_RE = re.compile(r"^(\d+)(?:\.(\d+))?(?:\.(\d+))?$")
@@ -23,7 +23,8 @@ class SemverError(ValueError):
     """Raised when a version or range string cannot be parsed."""
 
 
-def _parse_version(text: str) -> tuple[int, int, int]:
+def parse_version(text: str) -> tuple[int, int, int]:
+    """Parse ``"1.2.3"`` / ``"1.2"`` / ``"1"`` into a ``(major, minor, patch)`` tuple."""
     match = _VERSION_RE.match(text.strip())
     if not match:
         raise SemverError(f"invalid version: {text!r}")
@@ -31,6 +32,10 @@ def _parse_version(text: str) -> tuple[int, int, int]:
     minor = int(match.group(2)) if match.group(2) is not None else 0
     patch = int(match.group(3)) if match.group(3) is not None else 0
     return (major, minor, patch)
+
+
+# Backwards-compatible private alias (the matcher uses this name internally).
+_parse_version = parse_version
 
 
 def _expand_caret(ver: tuple[int, int, int]) -> list[tuple[str, tuple[int, int, int]]]:
