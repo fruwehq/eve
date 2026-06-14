@@ -13,6 +13,7 @@ Two layers:
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -20,6 +21,22 @@ from pathlib import Path
 import pytest
 
 from eve_sdk import remote_launch as rl
+
+
+@pytest.fixture(autouse=True)
+def _scrub_ephemeral_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make every command-vector test hermetic.
+
+    The launcher builders read EPHEMERAL_* env knobs. Under the full `make test`
+    run these can be present in the inherited environment (e.g. config-derived
+    vars from `config-env --shell`, or a prior suite that exports
+    EPHEMERAL_DISPLAY_RESOLUTION), which would non-deterministically perturb the
+    "base" command-vector assertions. Clear them up front; tests that exercise a
+    specific knob set it themselves afterwards via monkeypatch.
+    """
+    for key in list(os.environ):
+        if key.startswith("EPHEMERAL_"):
+            monkeypatch.delenv(key, raising=False)
 
 ROOT = Path(__file__).resolve().parents[3]
 
