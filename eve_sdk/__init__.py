@@ -1,6 +1,7 @@
 """Shared Python SDK for Eve orchestration commands."""
 
 from eve_sdk.atomic_yaml import AtomicYaml
+from eve_sdk.catalog import CATALOG_SECTIONS, aggregate, load_catalog, merge_entries, merge_os_fields
 from eve_sdk.config import ConfigEnv
 from eve_sdk.plugin_manifest import CORE_VERSION, PluginManifest
 from eve_sdk.schema import SchemaValidationError
@@ -9,6 +10,7 @@ from eve_sdk.state import State, StateError
 from eve_sdk.workdir import Workdir
 
 __all__ = [
+    "CATALOG_SECTIONS",
     "CORE_VERSION",
     "AtomicYaml",
     "ConfigEnv",
@@ -19,4 +21,8 @@ __all__ = [
     "State",
     "StateError",
     "Workdir",
+    "aggregate",
+    "load_catalog",
+    "merge_entries",
+    "merge_os_fields",
 ]

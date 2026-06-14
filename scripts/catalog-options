@@ -9,48 +9,11 @@ import sys
 from pathlib import Path
 from typing import Any
 
-import yaml
-
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from eve_sdk.catalog import load_catalog
 from eve_sdk.plugin_manifest import PluginManifest
-from eve_sdk.workdir import Workdir
-
-CATALOG_SECTIONS = {
-    "machines": "name",
-    "oses": "id",
-    "inits": "id",
-    "bundles": "id",
-    "packages": "id",
-    "locations": "name",
-}
-
-
-def load_any(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        return {}
-    loaded = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    if not isinstance(loaded, dict):
-        raise ValueError(f"{path}: expected a mapping")
-    return loaded
-
-
-def merge_entries(target: list[dict[str, Any]], entries: Any, key: str) -> None:
-    if not isinstance(entries, list):
-        return
-    for entry in entries:
-        if not isinstance(entry, dict):
-            continue
-        entry_id = entry.get(key)
-        if entry_id is None or str(entry_id) == "":
-            continue
-        for index, candidate in enumerate(target):
-            if candidate.get(key) == entry_id:
-                target[index] = entry
-                break
-        else:
-            target.append(entry)
 
 
 def os_available_for_provider(os_entry: dict[str, Any], provider: str) -> bool:
@@ -76,15 +39,6 @@ def init_available_for_provider(init: dict[str, Any], provider: str) -> bool:
     if providers:
         return provider in providers
     return init.get("provider") is None or init.get("provider") == provider
-
-
-def load_catalog() -> dict[str, list[dict[str, Any]]]:
-    catalog: dict[str, list[dict[str, Any]]] = {section: [] for section in CATALOG_SECTIONS}
-    for path in (Workdir.repo_root() / "config/catalog.yaml", Workdir.repo_root() / "config/catalog.local.yaml"):
-        doc = load_any(path)
-        for section, key in CATALOG_SECTIONS.items():
-            merge_entries(catalog[section], doc.get(section), key)
-    return catalog
 
 
 def build_doc() -> dict[str, Any]:
