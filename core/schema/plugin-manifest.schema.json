@@ -90,7 +90,7 @@
     },
 
     "config_schema": {
-      "description": "Provider config and secret field declarations. Only valid on provider manifests.",
+      "description": "Config and secret field declarations. Valid on both provider and package manifests. On packages, values are namespaced under the package id (e.g. mypkg.my_field).",
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -132,6 +132,39 @@
       "type": "array",
       "items": { "type": "string" },
       "uniqueItems": true
+    },
+
+    "catalog": {
+      "description": "Provider-contributed catalog rows (machines, provider-specific OS image fields, inits). Only meaningful on provider manifests. The aggregator merges these onto shared OS identity rows to produce the effective catalog.",
+      "type": "object",
+      "additionalProperties": true
+    },
+
+    "bundles": {
+      "description": "Bundle definitions contributed by this package manifest. Each bundle composes a set of included package ids. Only meaningful on package manifests.",
+      "type": "array"
+    },
+
+    "artifacts": {
+      "description": "Declared build outputs for this package. Phase 0: declaration only — no execution wiring.",
+      "type": "array"
+    },
+
+    "requires": {
+      "description": "Compatibility requirements. The eve range is enforced at load as a core gate (reject if the running core version is outside the range). The plugins map is validated for shape only; full graph resolution is deferred to Phase 1.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "eve": {
+          "type": "string",
+          "description": "Semver range string for the required eve core version (e.g. \">=4.0,<5.0\" or \"^4.0\")."
+        },
+        "plugins": {
+          "type": "object",
+          "description": "Map of plugin id to required semver range string.",
+          "additionalProperties": { "type": "string" }
+        }
+      }
     }
   },
 
@@ -144,7 +177,8 @@
           "commands": {
             "required": ["resolve", "init", "plan", "up", "down", "start", "stop", "status", "ip", "ssh", "validate"]
           },
-          "supports": { "$ref": "#/$defs/provider_supports" }
+          "supports": { "$ref": "#/$defs/provider_supports" },
+          "catalog": { "$ref": "#/$defs/catalog_contribution" }
         }
       }
     },
@@ -156,7 +190,15 @@
           "commands": {
             "required": ["install", "status", "down"]
           },
-          "supports": { "$ref": "#/$defs/package_supports" }
+          "supports": { "$ref": "#/$defs/package_supports" },
+          "bundles": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/bundle_entry" }
+          },
+          "artifacts": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/artifact_entry" }
+          }
         }
       }
     }
@@ -232,7 +274,7 @@
     },
 
     "package_supports": {
-      "description": "Package plugin compatibility constraints.",
+      "description": "Package plugin compatibility constraints. Contract rule: the same package id may exist in multiple sources iff their supports are disjoint (e.g. one for ubuntu, one for windows). Overlapping supports for one id is a conflict and requires explicit EVE_PLUGIN_ALLOW_OVERRIDE. Enforcement is deferred to the Phase 1/3 resolver; today load_all already rejects duplicate kind:id pairs without that override.",
       "type": "object",
       "properties": {
         "os_families": {
@@ -464,6 +506,105 @@
         },
         "fallback": {
           "type": "boolean"
+        }
+      }
+    },
+
+    "catalog_contribution": {
+      "description": "Provider catalog contribution block: machines, provider-specific OS image/compatibility rows, and inits.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "machines": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/catalog_machine" }
+        },
+        "oses": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/catalog_os" }
+        },
+        "inits": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/catalog_init" }
+        }
+      }
+    },
+
+    "catalog_machine": {
+      "description": "A machine row contributed by a provider manifest, mirroring config/catalog.yaml machine shapes.",
+      "type": "object",
+      "required": ["name", "kind"],
+      "additionalProperties": true,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "provider": { "type": "string" },
+        "kind": { "type": "string", "enum": ["vm", "metal"] },
+        "supports": { "type": "object", "additionalProperties": true },
+        "defaults": { "type": "object", "additionalProperties": true }
+      }
+    },
+
+    "catalog_os": {
+      "description": "A provider-specific OS image/compatibility contribution. Only the provider's own fields are declared here (e.g. aws_ami_name_pattern, vultr_os_id, cloud_image_url); shared identity (family/version/arch) is merged by the aggregator.",
+      "type": "object",
+      "required": ["id"],
+      "additionalProperties": true,
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "description": "OS identifier matching a shared OS identity row." },
+        "family": { "type": "string" },
+        "version": { "type": "string" },
+        "arch": { "type": "string", "enum": ["amd64", "arm64"] },
+        "vagrant_box": { "type": "string" },
+        "cloud_image_url": { "type": "string" },
+        "cloud_image_sha256": { "type": "string" },
+        "aws_ami_name_pattern": { "type": "string" },
+        "gcp_image_project": { "type": "string" },
+        "gcp_image_family": { "type": "string" },
+        "vultr_os_id": { "type": ["string", "integer"] },
+        "metal_image": { "type": "string" }
+      }
+    },
+
+    "catalog_init": {
+      "description": "An init row contributed by a provider manifest, mirroring config/catalog.yaml init shapes.",
+      "type": "object",
+      "required": ["id"],
+      "additionalProperties": true,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "os_family": { "type": "string" },
+        "providers": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+
+    "bundle_entry": {
+      "description": "A bundle composes a set of included package ids.",
+      "type": "object",
+      "required": ["id", "includes"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+        "includes": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1,
+          "uniqueItems": true
+        }
+      }
+    },
+
+    "artifact_entry": {
+      "description": "A declared build output for a package. Phase 0: declaration only — no execution wiring.",
+      "type": "object",
+      "required": ["id"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "path": { "type": "string", "minLength": 1 },
+        "download": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Action target for downloading this artifact."
         }
       }
     }

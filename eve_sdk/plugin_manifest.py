@@ -8,7 +8,10 @@ from typing import Any, ClassVar
 import yaml
 
 from eve_sdk.schema import SchemaValidationError, validate_json_schema_fragment, validate_schema
+from eve_sdk.semver import SemverError, satisfies
 from eve_sdk.workdir import Workdir
+
+CORE_VERSION = "4.0"
 
 
 class PluginManifest:
@@ -101,11 +104,12 @@ class PluginManifest:
         if missing:
             raise ValueError(f"{path}: missing {kind} commands: {', '.join(missing)}")
         cls._validate_command_execs(plugin)
-        if kind == "provider" and "config_schema" in plugin:
+        if "config_schema" in plugin:
             config_schema = plugin["config_schema"]
             if not isinstance(config_schema, dict):
                 raise ValueError(f"{path}: config_schema must be a map")
             validate_json_schema_fragment(config_schema, f"{path}: config_schema")
+        cls._validate_requires(plugin, path)
 
     @staticmethod
     def public(plugin: dict[str, Any]) -> dict[str, Any]:
@@ -131,6 +135,23 @@ class PluginManifest:
                 candidate = plugin_exec if plugin_exec.exists() else root_exec
             if not candidate.is_file():
                 raise ValueError(f"{path}: command {name} exec not found: {exec_path}")
+
+    @classmethod
+    def _validate_requires(cls, plugin: dict[str, Any], path: str) -> None:
+        requires = plugin.get("requires")
+        if not isinstance(requires, dict):
+            return
+        eve_range = requires.get("eve")
+        if not isinstance(eve_range, str):
+            return
+        try:
+            ok = satisfies(CORE_VERSION, eve_range)
+        except SemverError as error:
+            raise ValueError(f"{path}: requires.eve has invalid range {eve_range!r}: {error}") from error
+        if not ok:
+            raise ValueError(
+                f"{path}: requires.eve {eve_range!r} excludes running core version {CORE_VERSION}"
+            )
 
     @staticmethod
     def _compat_schema_error(path: str, message: str) -> str:
