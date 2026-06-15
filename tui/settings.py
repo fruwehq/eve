@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 from typing import Any, cast
 
+from eve_sdk.engine import default_engine
 from eve_sdk.secrets import Secrets, SecretsError
 
 
@@ -61,17 +62,19 @@ def load_structured() -> dict[str, dict[str, dict[str, Any]]]:
 
 
 def load_provider_schema(provider_id: str) -> dict[str, Any]:
+    """Provider ``config_schema``, served from the warm Engine's plugin set.
+
+    Subprocess-ing ``plugin-list`` per settings-screen open re-parsed every
+    provider manifest; the Engine memoizes them once per TUI process. The 5s
+    TTL cache is preserved so repeated opens stay instant.
+    """
     cache_key = ("load_provider_schema", (provider_id,))
     now = time.monotonic()
     if cache_key in _cache:
         ts, cached = _cache[cache_key]
         if now - ts < _CACHE_TTL:
             return cast("dict[str, Any]", cached)
-    code, stdout, stderr = _run(["./scripts/plugin-list", "--kind", "provider", "--json"])
-    if code != 0:
-        raise RuntimeError(stderr.strip() or "plugin-list failed")
-    plugins: list[Any] = json.loads(stdout).get("plugins", [])
-    for plugin in plugins:
+    for plugin in default_engine().plugin_list(kind="provider"):
         if plugin.get("id") == provider_id:
             schema: dict[str, Any] = plugin.get("config_schema", {})
             _cache[cache_key] = (now, schema)

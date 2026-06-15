@@ -20,11 +20,25 @@ resolve, state); the Engine reuses them so behavior stays identical to the scrip
 
 from __future__ import annotations
 
+import os
+import subprocess
+from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from eve_sdk import catalog as _catalog
 from eve_sdk.catalog_view import build_catalog_options
+from eve_sdk.instance_view import (
+    build_aggregate,
+    build_instance_rows,
+    build_instance_view,
+    build_statuses,
+)
+from eve_sdk.package_dispatch import dispatch_package
 from eve_sdk.plugin_manifest import PluginManifest
+from eve_sdk.provider_command import dispatch_instance_command, dispatch_provider_command
+from eve_sdk.resolve import default_registry_path, resolve_instance
+from eve_sdk.workdir import Workdir
 
 
 class Engine:
@@ -88,6 +102,122 @@ class Engine:
         """
         return [PluginManifest.public(plugin) for plugin in self.plugins(kind=kind)]
 
+    def instance_rows(self, registry_path: str | os.PathLike[str] | None = None) -> list[dict[str, Any]]:
+        """Concrete instances from the registry (== `instance-list --json` ``instances``)."""
+        return build_instance_rows(registry_path)
+
+    def instance_view(
+        self,
+        name: str,
+        *,
+        registry_path: str | os.PathLike[str] | None = None,
+        observe: bool = False,
+    ) -> dict[str, Any]:
+        """Full instance view (== `instance-view --instance <name> [--observe]`).
+
+        Reuses the memoized catalog + plugin set for resolve + assembly, so an
+        N-read session parses catalog/plugins exactly once. When ``observe`` is
+        set, the live ``provider.status`` subprocess boundary is run first (it
+        has to — it shells to the provider plugin); everything else stays warm.
+        """
+        if observe:
+            self._run_observe(name, registry_path)
+        # resolve + dispatch consume the public projection (it carries `path`),
+        # matching the cold path's plugin-list --json input; catalog aggregation
+        # stays on the raw self.plugins() set.
+        resolved = resolve_instance(name, registry_path, catalog=self.catalog(), plugins=self.plugin_list())
+        return build_instance_view(
+            name,
+            resolved=resolved,
+            package_plugins=self.plugin_list(kind="package"),
+            provider_plugins=self.plugin_list(kind="provider"),
+        )
+
+    def instance_statuses(
+        self, registry_path: str | os.PathLike[str] | None = None
+    ) -> dict[str, dict[str, Any]]:
+        """Last-known status for every instance (== `instance-view --statuses`).
+
+        A fast registry+state sweep; no catalog or plugin parse happens here.
+        """
+        return build_statuses(registry_path)
+
+    def instance_aggregate(
+        self, registry_path: str | os.PathLike[str] | None = None
+    ) -> dict[str, int]:
+        """Aggregate status counts (== `instance-view --aggregate`)."""
+        return build_aggregate(registry_path)
+
+    # ---- op methods (in-process; reuse the dispatchers) ---------------- #
+
+    def package(
+        self,
+        instance: str,
+        package_id: str,
+        command: str,
+        *,
+        registry_path: str | None = None,
+        dry_run: bool = False,
+        yes: bool = False,
+        on_output: Callable[[str], None] | None = None,
+    ) -> int:
+        """Run a package command via the in-process dispatcher (== `package-dispatch`).
+
+        Resolve + plugin lookup reuse the memoized catalog/plugins; the plugin
+        command itself still runs as a subprocess (that is the plugin command
+        boundary). ``on_output`` (if given) receives each output line for a UI
+        to render progress; otherwise output flows to stdout/stderr as the cold
+        script's does. Returns the exit code (0 on success).
+        """
+        return dispatch_package(
+            instance,
+            package_id,
+            command,
+            registry_path=registry_path,
+            dry_run=dry_run,
+            yes=yes,
+            plugins=self.plugin_list(),
+            catalog=self.catalog(),
+            on_output=on_output,
+        )
+
+    def provider(
+        self,
+        target: str,
+        command: str,
+        *,
+        registry_path: str | None = None,
+        dry_run: bool = False,
+        extra_args: tuple[str, ...] | list[str] = (),
+        on_output: Callable[[str], None] | None = None,
+    ) -> int:
+        """Run a provider command via the in-process dispatcher (== `provider-dispatch`).
+
+        ``target`` is an instance name (instance-scoped commands) or a provider
+        id (provider-level commands like ``login``). Resolve + plugin lookup
+        reuse the memoized catalog/plugins; the provider command itself still
+        runs as a subprocess. Returns the exit code (0 on success).
+        """
+        if self._is_provider_id(target):
+            return dispatch_provider_command(
+                target,
+                command,
+                dry_run=dry_run,
+                extra_args=extra_args,
+                plugins=self.plugin_list(),
+                on_output=on_output,
+            )
+        return dispatch_instance_command(
+            target,
+            command,
+            registry_path=registry_path,
+            dry_run=dry_run,
+            extra_args=extra_args,
+            plugins=self.plugin_list(),
+            catalog=self.catalog(),
+            on_output=on_output,
+        )
+
     def reload(self) -> None:
         """Drop all memoized state so the next access re-parses from disk."""
         self._catalog = None
@@ -110,6 +240,36 @@ class Engine:
             self._catalog = None
             self._plugins = None
             self._fingerprint = current
+
+    # ---- helpers ------------------------------------------------------- #
+
+    def _is_provider_id(self, target: str) -> bool:
+        """True when ``target`` matches a known provider plugin id."""
+        return any(
+            plugin.get("kind") == "provider" and plugin.get("id") == target
+            for plugin in self.plugins()
+        )
+
+    def _run_observe(
+        self,
+        instance_name: str,
+        registry_path: str | os.PathLike[str] | None,
+    ) -> None:
+        """Invoke ``scripts/instance-observe`` (the live provider.status boundary)."""
+        env: dict[str, str] = {}
+        if Path(registry_path or default_registry_path()) != default_registry_path():
+            env["EVE_INSTANCE_REGISTRY"] = str(Path(registry_path).resolve())  # type: ignore[arg-type]
+        result = subprocess.run(
+            [str(Workdir.repo_root() / "scripts/instance-observe"), "--instance", instance_name],
+            cwd=Workdir.repo_root(),
+            env=os.environ | env,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            details = result.stderr if result.stderr else result.stdout
+            raise RuntimeError(f"observe failed for {instance_name}: {details.strip()}")
 
 
 _DEFAULT: Engine | None = None

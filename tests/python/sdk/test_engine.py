@@ -120,3 +120,147 @@ def test_plugin_list_parses_once() -> None:
     engine.plugin_list(kind="package")
     engine.plugin_list()
     assert pm.load_count() == 1
+
+
+def test_session_parses_once_across_mixed_ops() -> None:
+    # The Phase 5 acceptance: an N-op session (the mix a TUI/batch run makes)
+    # parses catalog + plugins exactly once.
+    engine = Engine()
+    engine.catalog_options()
+    engine.plugin_list(kind="provider")
+    engine.plugin_list(kind="package")
+    for row in engine.instance_rows():
+        engine.instance_view(row["name"])
+    engine.instance_statuses()
+    engine.instance_aggregate()
+    assert catalog_mod.load_count() == 1
+    assert pm.load_count() == 1
+
+
+def test_instance_view_cold_equals_warm() -> None:
+    import json
+    import subprocess
+
+    engine = Engine()
+    rows = engine.instance_rows()
+    if not rows:
+        pytest.skip("no instances in registry")
+    name = str(rows[0]["name"])
+    result = subprocess.run(
+        ["poetry", "run", "python", "scripts/instance-view", "--instance", name],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert engine.instance_view(name) == json.loads(result.stdout)
+
+
+def test_instance_statuses_cold_equals_warm() -> None:
+    # The --statuses path never parses catalog/plugins (a fast registry+state
+    # sweep), so the warm Engine and the cold script must agree byte-for-byte.
+    import json
+    import subprocess
+
+    engine = Engine()
+    result = subprocess.run(
+        ["poetry", "run", "python", "scripts/instance-view", "--statuses"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert engine.instance_statuses() == json.loads(result.stdout)["statuses"]
+    # Statuses sweep must not bump either parse counter.
+    assert catalog_mod.load_count() == 0
+    assert pm.load_count() == 0
+
+
+def test_tui_startup_parses_once() -> None:
+    # The Phase 5 TUI acceptance: simulate the data calls a fresh TUI makes on
+    # startup (catalog_options + provider_pane_data + provider capabilities +
+    # instance list + statuses + aggregate + one instance_view) and assert that
+    # the catalog and plugin manifests are parsed exactly once across all of it.
+    #
+    # These helpers are imported from the TUI package directly so the test
+    # exercises the actual code path the TUI walks on startup.
+    import tui.commands as tui_commands
+    import tui.state as tui_state
+
+    # Reset the per-process module-level capability cache so this test's first
+    # call is the TUI's first call.
+    tui_commands._provider_capabilities_cache = None
+
+    tui_commands.catalog_options()
+    tui_commands.provider_capabilities_map()
+    tui_commands.provider_pane_data()
+    tui_commands.instance_rows()
+    tui_commands.instance_statuses()
+    tui_state.aggregate_summary()
+    rows = tui_commands.instance_rows()
+    if rows:
+        tui_commands.instance_view(str(rows[0]["name"]))
+
+    assert catalog_mod.load_count() == 1
+    assert pm.load_count() == 1
+
+
+# --- batch mode: line->op translation (pure, no execution) ---------------- #
+
+def test_parse_batch_line_splits_shell_style() -> None:
+    import runpy
+
+    cli = runpy.run_path("scripts/eve-cli")
+    parse = cli["parse_batch_line"]
+
+    assert parse("") == []
+    assert parse("   ") == []
+    assert parse("# a comment") == []
+    assert parse("catalog list --json") == ["catalog", "list", "--json"]
+    # shlex semantics: quoted args survive as one token.
+    assert parse('instance view "name with spaces"') == ["instance", "view", "name with spaces"]
+    # Inline comments after tokens are NOT stripped (shlex does not see # specially).
+    assert parse("plugin list --kind provider") == ["plugin", "list", "--kind", "provider"]
+
+
+def test_warm_batch_ops_table_covers_read_verbs() -> None:
+    import runpy
+
+    cli = runpy.run_path("scripts/eve-cli")
+    warm = cli["_WARM_BATCH_OPS"]
+
+    # Every read-only verb the TUI / scripted pipelines hammer lives here, so a
+    # batch session serves them from the warm Engine rather than subprocessing.
+    for expected in {("catalog", "list"), ("plugin", "list"), ("instance", "list"),
+                     ("instance", "view"), ("instance", "statuses")}:
+        assert expected in warm
+
+
+def test_batch_session_parses_once() -> None:
+    # An N-op batch through the warm Engine must parse catalog + plugins exactly
+    # once. Read verbs dispatch in-process; the test does not execute mutating
+    # verbs (no instance/cloud).
+    import runpy
+
+    cli = runpy.run_path("scripts/eve-cli")
+    run_batch = cli["run_batch"]
+
+    engine = Engine()
+    rows = engine.instance_rows()
+    instance_line = f"instance view {rows[0]['name']}" if rows else "instance statuses"
+    ops = [
+        "catalog list --json",
+        "plugin list --kind provider",
+        "plugin list --kind package",
+        "instance list",
+        "instance statuses",
+        instance_line,
+        "instance statuses",
+        "# comment skipped",
+        "",
+    ]
+    captured: list[str] = []
+    code = run_batch(ops, engine=engine, out=captured.append)
+    assert code == 0
+    # The batch emitted one block of output per non-empty op.
+    assert len(captured) >= 6
+    assert catalog_mod.load_count() == 1
+    assert pm.load_count() == 1

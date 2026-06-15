@@ -5,7 +5,7 @@ import os
 import subprocess
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import yaml
 
@@ -95,12 +95,26 @@ def by_key(root: dict[str, Any], section: str, key: str, value: str) -> dict[str
     return None
 
 
-def provider_plugins() -> list[dict[str, Any]]:
-    return run_json(str(Workdir.repo_root() / "scripts/plugin-list"), "--kind", "provider", "--json")["plugins"]
+def provider_plugins(plugins: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+    """Return provider plugin manifests.
+
+    With ``plugins`` (a pre-parsed set carrying ``kind`` tags, as
+    ``PluginManifest.load_all()`` returns), filter it in-process — the warm
+    Engine path that avoids re-parsing per call. Without it, subprocess to
+    ``scripts/plugin-list`` (the cold path).
+    """
+    if plugins is not None:
+        return [plugin for plugin in plugins if plugin.get("kind") == "provider"]
+    doc = run_json(str(Workdir.repo_root() / "scripts/plugin-list"), "--kind", "provider", "--json")
+    return cast("list[dict[str, Any]]", doc["plugins"])
 
 
-def package_plugins() -> list[dict[str, Any]]:
-    return run_json(str(Workdir.repo_root() / "scripts/plugin-list"), "--kind", "package", "--json")["plugins"]
+def package_plugins(plugins: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+    """Return package plugin manifests (see ``provider_plugins`` for the ``plugins`` arg)."""
+    if plugins is not None:
+        return [plugin for plugin in plugins if plugin.get("kind") == "package"]
+    doc = run_json(str(Workdir.repo_root() / "scripts/plugin-list"), "--kind", "package", "--json")
+    return cast("list[dict[str, Any]]", doc["plugins"])
 
 
 def provider_config_for(instance: dict[str, Any], provider: str) -> dict[str, Any]:
@@ -240,7 +254,8 @@ def validate_catalog_selection(
     provider = machine["provider"]
     if not location.get(provider):
         raise ResolveError(f"Location {location['name']} has no mapping for provider {provider}")
-    supports = machine.get("supports") if isinstance(machine.get("supports"), dict) else {}
+    supports_raw = machine.get("supports")
+    supports = supports_raw if isinstance(supports_raw, dict) else {}
     if supports.get("arches") and os_doc.get("arch") not in supports["arches"]:
         raise ResolveError(
             f"Machine/OS mismatch: machine {machine['name']} does not support architecture {os_doc.get('arch')}"
@@ -264,9 +279,12 @@ def engine_for(machine: dict[str, Any]) -> str:
     return "terraform"
 
 
-def validate_provider_plugin(machine: dict[str, Any], engine: str) -> dict[str, Any]:
+def validate_provider_plugin(
+    machine: dict[str, Any], engine: str, plugins: list[dict[str, Any]] | None = None
+) -> dict[str, Any]:
     provider = machine["provider"]
-    plugin = next((entry for entry in provider_plugins() if entry["id"] == provider), None)
+    candidates = provider_plugins(plugins)
+    plugin = next((entry for entry in candidates if entry["id"] == provider), None)
     if not plugin:
         raise ResolveError(f"Provider plugin not found: {provider}")
     supports = plugin.get("supports") or {}
@@ -307,9 +325,13 @@ def resolve_access(provider_plugin: dict[str, Any], os_family: str, location: di
     return resolved
 
 
-def validate_package_plugins(bundle_packages: list[str], os_doc: dict[str, Any]) -> None:
-    plugins = package_plugins()
-    plugin_by_id = {entry["id"]: entry for entry in plugins}
+def validate_package_plugins(
+    bundle_packages: list[str],
+    os_doc: dict[str, Any],
+    plugins: list[dict[str, Any]] | None = None,
+) -> None:
+    plugins_set = package_plugins(plugins)
+    plugin_by_id = {entry["id"]: entry for entry in plugins_set}
     os_family = os_doc["family"]
     for package_id in bundle_packages:
         plugin = plugin_by_id.get(package_id)
@@ -326,18 +348,23 @@ def validate_package_plugins(bundle_packages: list[str], os_doc: dict[str, Any])
         for field, value, label in checks:
             if not support_allowed(supports, field, value):
                 raise ResolveError(f"Package plugin {package_id} does not support {label} {value}")
-        conflicts = plugin.get("conflicts_with") if isinstance(plugin.get("conflicts_with"), list) else []
+        conflicts_raw = plugin.get("conflicts_with")
+        conflicts = conflicts_raw if isinstance(conflicts_raw, list) else []
         conflict = next((candidate for candidate in conflicts if candidate in bundle_packages), None)
         if conflict:
             raise ResolveError(f"Package conflict: {package_id} conflicts with {conflict}")
-        depends = plugin.get("depends_on") if isinstance(plugin.get("depends_on"), list) else []
+        depends_raw = plugin.get("depends_on")
+        depends = depends_raw if isinstance(depends_raw, list) else []
         missing = [dep for dep in depends if dep not in bundle_packages]
         if missing:
             raise ResolveError(f"Package {package_id} depends_on {', '.join(missing)} but none are selected")
 
 
-def order_packages_by_dependency(package_ids: list[str]) -> list[str]:
-    plugin_by_id = {entry["id"]: entry for entry in package_plugins()}
+def order_packages_by_dependency(
+    package_ids: list[str], plugins: list[dict[str, Any]] | None = None
+) -> list[str]:
+    plugins_set = package_plugins(plugins)
+    plugin_by_id = {entry["id"]: entry for entry in plugins_set}
     selected = list(package_ids)
     selected_set = set(selected)
     deps = {
@@ -365,7 +392,13 @@ def order_packages_by_dependency(package_ids: list[str]) -> list[str]:
     return ordered
 
 
-def resolve_instance(instance_name: str, registry_path: str | os.PathLike[str] | None = None) -> dict[str, Any]:
+def resolve_instance(
+    instance_name: str,
+    registry_path: str | os.PathLike[str] | None = None,
+    *,
+    catalog: dict[str, list[dict[str, Any]]] | None = None,
+    plugins: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     registry = load_any(registry_path or default_registry_path())
     instance = next(
         (
@@ -378,25 +411,27 @@ def resolve_instance(instance_name: str, registry_path: str | os.PathLike[str] |
     if not instance:
         registry_label = registry_path or default_registry_path()
         raise ResolveError(f"Instance not found: {instance_name} (registry: {registry_label})")
-    catalog = load_catalog()
+    # Warm path: a pre-aggregated catalog (the Engine's memo) avoids a fresh
+    # disk parse per resolve. Cold path: aggregate from disk now.
+    catalog_data = catalog if catalog is not None else load_catalog()
     ignored_keys = {"name", "overrides", "provider_config", "created_at", "updated_at", "state"}
     composition = {key: value for key, value in instance.items() if key not in ignored_keys}
     composition["name"] = instance["name"]
-    machine = by_key(catalog, "machines", "name", composition.get("machine", ""))
-    os_doc = by_key(catalog, "oses", "id", composition.get("os", ""))
-    location = by_key(catalog, "locations", "name", composition.get("location", ""))
+    machine = by_key(catalog_data, "machines", "name", composition.get("machine", ""))
+    os_doc = by_key(catalog_data, "oses", "id", composition.get("os", ""))
+    location = by_key(catalog_data, "locations", "name", composition.get("location", ""))
     if machine:
         machine = deep_merge(
             machine,
             {"defaults": deep_merge((machine.get("defaults") or {}), instance.get("overrides") or {})},
         )
-    init = resolve_init(catalog, composition, machine, os_doc)
+    init = resolve_init(catalog_data, composition, machine, os_doc)
     direct_packages = composition.get("packages") or []
-    package_sources = resolve_package_sources(catalog, composition.get("bundles") or [], direct_packages)
+    package_sources = resolve_package_sources(catalog_data, composition.get("bundles") or [], direct_packages)
     bundle_packages = sorted(
-        set([*resolve_bundle_packages(catalog, composition.get("bundles") or []), *direct_packages])
+        set([*resolve_bundle_packages(catalog_data, composition.get("bundles") or []), *direct_packages])
     )
-    validate_catalog_selection(catalog, composition, machine, os_doc, init, location, bundle_packages)
+    validate_catalog_selection(catalog_data, composition, machine, os_doc, init, location, bundle_packages)
     assert machine is not None
     assert os_doc is not None
     assert init is not None
@@ -404,9 +439,9 @@ def resolve_instance(instance_name: str, registry_path: str | os.PathLike[str] |
     provider = machine["provider"]
     provider_config = provider_config_for(instance, provider)
     engine = engine_for(machine)
-    provider_plugin = validate_provider_plugin(machine, engine)
-    validate_package_plugins(bundle_packages, os_doc)
-    bundle_packages = order_packages_by_dependency(bundle_packages)
+    provider_plugin = validate_provider_plugin(machine, engine, plugins)
+    validate_package_plugins(bundle_packages, os_doc, plugins)
+    bundle_packages = order_packages_by_dependency(bundle_packages, plugins)
     resolved = {
         "instance": instance,
         "access": resolve_access(provider_plugin, os_doc["family"], location.get(provider, {})),

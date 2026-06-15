@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Any
 
-from tui.commands import load_json, provider_has_capability, ROOT
+from eve_sdk.engine import default_engine
+from tui.commands import provider_has_capability
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def status_instance_name(status: dict[str, Any] | None) -> str | None:
@@ -23,8 +27,8 @@ def provider_actions_available(state: dict[str, Any]) -> bool:
 
 
 def aggregate_summary() -> dict[str, int]:
-    doc = load_json([str(ROOT / "scripts/instance-view"), "--aggregate"])
-    return {k: int(v) for k, v in doc.get("aggregate", {}).items()}
+    """Aggregate status counts, served from the warm Engine (== ``instance-view --aggregate``)."""
+    return default_engine().instance_aggregate()
 
 
 def action_allowed_for_instance(action: dict[str, Any], package_id: str, os_family: str) -> bool:

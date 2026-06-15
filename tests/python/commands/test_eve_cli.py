@@ -42,7 +42,7 @@ def _ns(**kwargs: object) -> argparse.Namespace:
 
 TOP_LEVEL_GROUPS = [
     "instance", "package", "provider", "bundle", "plugin",
-    "catalog", "config", "doctor", "tui", "pull",
+    "catalog", "config", "doctor", "tui", "pull", "batch",
 ]
 
 # Verbs that must appear in each verb-based group's --help output.
@@ -78,7 +78,7 @@ def test_group_help_lists_verbs(group: str) -> None:
         assert verb in result.stdout, f"{group} --help missing verb {verb!r}"
 
 
-@pytest.mark.parametrize("group", ["doctor", "tui", "pull"])
+@pytest.mark.parametrize("group", ["doctor", "tui", "pull", "batch"])
 def test_single_action_group_help_exits_zero(group: str) -> None:
     # These groups take no <verb>; --help must still succeed.
     assert _run(group, "--help").returncode == 0

@@ -13,24 +13,36 @@ unit-tested without instances, clouds, or network. ``main`` parses argv, builds
 the underlying command vector, and execs it with inherited stdin/stdout/stderr,
 preserving the wrapped script's exit code.
 
+``eve batch`` (v4.0 Phase 5) loads ONE warm Engine and runs N ops from stdin
+(one per line) or ``--file``, reusing the single memoized parse across every
+op. Read-only verbs (catalog/plugin/instance reads) are dispatched in-process
+through the Engine; mutating verbs fall back to the underlying script subprocess
+so an N-op batch parses catalog/plugins exactly once for the read portion.
+
 Usage:
   eve <group> <verb> [args...]
   eve <group> --help
   eve --help
-  eve                  # no args (or `eve tui`) opens the Textual TUI
+  eve                   # no args (or `eve tui`) opens the Textual TUI
+  eve batch [--file <path>]   # read ops from stdin or --file, one per line
 
 Groups: instance, package, provider, bundle, plugin, catalog, config,
-        doctor, tui, pull
+        doctor, tui, pull, batch
 """
 
 from __future__ import annotations
 
 import argparse
+import json
+import shlex
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 # Verbs routed through ``scripts/instance-run <target> <instance>``.
 # CLI verb -> instance-run target.
@@ -296,6 +308,133 @@ def _config_cmd(verb: str | None, ns: argparse.Namespace) -> list[str]:
     raise SystemExit(2)
 
 
+# ============================ batch / session mode ========================= #
+# v4.0 Phase 5: load ONE warm Engine and stream N ops through it. Read-only
+# verbs run in-process via the Engine (parse-once); mutating verbs fall back to
+# the underlying script subprocess so behavior stays identical to `eve <group>
+# <verb>` run by hand.
+
+# (group, verb) pairs the batch runner serves from the warm Engine directly.
+# Every entry avoids re-parsing catalog/plugins per op — the Phase 5 invariant.
+_WARM_BATCH_OPS: frozenset[tuple[str, str]] = frozenset({
+    ("catalog", "list"),
+    ("plugin", "list"),
+    ("instance", "list"),
+    ("instance", "view"),
+    ("instance", "statuses"),  # convenience alias for `instance-view --statuses`
+})
+
+
+def parse_batch_line(line: str) -> list[str]:
+    """Split one batch input line into tokens (PURE: no execution).
+
+    Shell-styles the line via ``shlex.split`` so quoted args survive. ``#`` starts
+    a comment to the end of line; blank/whitespace-only lines return ``[]``
+    (skipped by the runner).
+    """
+    stripped = line.strip()
+    if not stripped or stripped.startswith("#"):
+        return []
+    return shlex.split(stripped)
+
+
+def _run_warm_op(
+    engine: Any,
+    group: str,
+    verb: str | None,
+    tokens: list[str],
+    out: Any,
+) -> int:
+    """Dispatch a read-only (group, verb) through the warm Engine. Returns exit code."""
+    if group == "catalog" and verb == "list":
+        out(json.dumps(engine.catalog_options(), indent=2))
+        return 0
+    if group == "plugin" and verb == "list":
+        kind: str | None = None
+        if "--kind" in tokens:
+            idx = tokens.index("--kind")
+            if idx + 1 < len(tokens):
+                kind = tokens[idx + 1]
+        plugins = engine.plugin_list(kind=kind)
+        if "--json" in tokens:
+            out(json.dumps({"plugins": plugins}, indent=2))
+        else:
+            for plugin in plugins:
+                out(f"{plugin.get('kind', '-'):<10} {plugin.get('id', '-'):<24} "
+                    f"{plugin.get('display_name', '-')}")
+        return 0
+    if group == "instance" and verb == "list":
+        rows = engine.instance_rows()
+        if "--json" in tokens:
+            out(json.dumps({"instances": rows}, indent=2))
+        else:
+            for row in rows:
+                out(f"{row.get('name', '-'):<28} {row.get('machine', '-'):<32} "
+                    f"{row.get('os', '-'):<24} {row.get('location', '-')}")
+        return 0
+    if group == "instance" and verb == "view":
+        name = tokens[0] if tokens else ""
+        if not name:
+            print("eve batch: instance view requires an instance name", file=sys.stderr)
+            return 2
+        out(json.dumps(engine.instance_view(name), indent=2))
+        return 0
+    if group == "instance" and verb == "statuses":
+        out(json.dumps({"statuses": engine.instance_statuses()}, indent=2))
+        return 0
+    # Not a warm op — caller should fall back to subprocess.
+    return -1
+
+
+def run_batch(
+    lines: list[str],
+    *,
+    engine: Any | None = None,
+    out: Any = print,
+) -> int:
+    """Run a sequence of batch ops against a single warm Engine.
+
+    Returns the first non-zero exit code, or 0 if every op succeeded. Each line
+    is parsed by ``parse_batch_line``; warm (group, verb) pairs dispatch through
+    the Engine in-process, everything else falls back to the underlying script
+    (preserving today's `eve <group> <verb>` semantics). The Engine parses
+    catalog/plugins exactly once across the whole batch.
+    """
+    if engine is None:
+        from eve_sdk.engine import default_engine
+        engine = default_engine()
+    exit_code = 0
+    for raw in lines:
+        tokens = parse_batch_line(raw)
+        if not tokens:
+            continue
+        group, verb = tokens[0], (tokens[1] if len(tokens) > 1 else None)
+        if (group, verb) in _WARM_BATCH_OPS:
+            code = _run_warm_op(engine, group, verb, tokens[2:], out)
+            if code != -1:
+                if code != 0 and exit_code == 0:
+                    exit_code = code
+                continue
+        # Cold fallback: dispatch to the underlying script via build_command.
+        code = _exec_subprocess(tokens)
+        if code != 0 and exit_code == 0:
+            exit_code = code
+    return exit_code
+
+
+def _exec_subprocess(tokens: list[str]) -> int:
+    """Run a non-warm batch op as the underlying script subprocess."""
+    parser, _ = make_parser()
+    args = parser.parse_args(tokens)
+    if args.group is None:
+        return 2
+    try:
+        cmd = build_command(args)
+    except SystemExit as exit_err:
+        return int(exit_err.code) if isinstance(exit_err.code, int) else 2
+    return subprocess.run(cmd, cwd=str(ROOT), check=False).returncode
+
+
 # ============================ argparse tree =============================== #
 
 def _add_instance_subparser(verbs: argparse._SubParsersAction,
@@ -476,6 +615,19 @@ def make_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.ArgumentP
     group_parsers["doctor"] = doc
     doc.add_argument("--json", action="store_true")
 
+    # --- batch (v4.0 Phase 5: warm session mode over stdin/--file) ---
+    batch = groups.add_parser(
+        "batch",
+        help="run N ops from stdin (or --file) against ONE warm Engine",
+    )
+    group_parsers["batch"] = batch
+    batch.add_argument(
+        "--file",
+        metavar="PATH",
+        default=None,
+        help="read batch ops from PATH instead of stdin (one op per line)",
+    )
+
     # --- tui ---
     group_parsers["tui"] = groups.add_parser("tui", help="open the Textual instance manager")
 
@@ -511,6 +663,17 @@ def main(argv: list[str] | None = None) -> int:
     if args.group is None:
         parser.print_help()
         return 0
+
+    # `eve batch` runs the warm session: read ops from stdin or --file and
+    # dispatch them through one Engine so an N-op batch parses once.
+    if args.group == "batch":
+        source = Path(args.file) if args.file else None
+        lines = (
+            source.read_text(encoding="utf-8").splitlines()
+            if source is not None
+            else sys.stdin.read().splitlines()
+        )
+        return run_batch(lines)
 
     # Verb-based groups with no verb: print that group's help and exit cleanly.
     if args.group not in _SINGLE_ACTION_GROUPS and args.verb is None:
