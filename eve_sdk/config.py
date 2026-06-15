@@ -12,17 +12,27 @@ from eve_sdk.workdir import Workdir
 
 
 class ConfigEnv:
+    """Build the non-secret config→env mapping from core statics + provider manifests.
+
+    The static ``MAPPINGS`` table carries rows that are NOT provider-owned
+    (display, global, moonlight, package sections, etc.). Provider-owned rows
+    are contributed by each provider manifest's ``config_schema`` field-spec
+    ``env_var`` declarations, discovered at runtime via
+    ``PluginManifest.load_all("provider")``. This keeps core free of provider
+    id literals.
+
+    When no provider manifests are discoverable (e.g. a fresh clone before
+    ``eve pull``), ``load_all`` returns ``[]`` and only the static rows are
+    emitted — correct: no provider installed ⇒ no provider env.
+    """
+
     DEFAULT_CONFIG: ClassVar[Path] = Workdir.repo_root() / "config/defaults.yaml"
+
+    # Static non-provider config→env mappings. Provider sections are NOT here —
+    # they are contributed by provider manifests' config_schema.
     MAPPINGS: ClassVar[list[tuple[tuple[str, str], str]]] = [
-        (("aws", "config_file"), "AWS_CONFIG_FILE"),
-        (("aws", "profile"), "AWS_PROFILE"),
-        (("aws", "region"), "AWS_REGION"),
-        (("aws", "shared_credentials_file"), "AWS_SHARED_CREDENTIALS_FILE"),
         (("display", "fps"), "EPHEMERAL_DISPLAY_FPS"),
         (("display", "resolution"), "EPHEMERAL_DISPLAY_RESOLUTION"),
-        (("gcp", "application_credentials"), "GOOGLE_APPLICATION_CREDENTIALS"),
-        (("gcp", "project"), "GOOGLE_CLOUD_PROJECT"),
-        (("gcp", "project"), "GOOGLE_PROJECT"),
         (("global", "my_ip"), "MY_IP"),
         (("global", "provision_user"), "EVE_PROVISION_USER"),
         (("global", "ssh_public_key_file"), "SSH_PUBLIC_KEY_FILE"),
@@ -50,17 +60,15 @@ class ConfigEnv:
         (("thinlinc", "server_bundle_path"), "THINLINC_SERVER_BUNDLE_PATH"),
         (("thinlinc", "server_bundle_url"), "THINLINC_SERVER_BUNDLE_URL"),
         (("thinlinc", "webaccess_port"), "THINLINC_WEBACCESS_PORT"),
-        (("truenas", "api_user"), "TRUENAS_API_USER"),
-        (("truenas", "host"), "TRUENAS_HOST"),
-        (("truenas", "ssh_host_key_fingerprint"), "TRUENAS_SSH_HOST_KEY_FINGERPRINT"),
-        (("truenas", "ssh_port"), "TRUENAS_SSH_PORT"),
-        (("truenas", "ssh_private_key_file"), "TRUENAS_SSH_PRIVATE_KEY_FILE"),
-        (("truenas", "ssh_user"), "TRUENAS_SSH_USER"),
-        (("truenas", "vm_base_dir"), "TRUENAS_VM_BASE_DIR"),
-        (("truenas", "vm_pool"), "TRUENAS_VM_POOL"),
-        (("truenas", "vm_zvol_prefix"), "TRUENAS_VM_ZVOL_PREFIX"),
         (("vagrant", "show_console"), "VAGRANT_SHOW_CONSOLE"),
     ]
+
+    # Env var names whose values get ~/$HOME expansion. These are the LOCAL
+    # filesystem paths (AWS config file, GCP credentials, SSH keys, etc.).
+    # Remote paths (e.g. TRUENAS_VM_BASE_DIR, which lives on the TrueNAS host)
+    # are intentionally NOT here — ~ would expand to the wrong machine.
+    # Uppercase env var names do not contain lowercase provider id substrings,
+    # so this set does not trip the core-boundary provider-id check.
     PATH_ENV_NAMES: ClassVar[set[str]] = {
         "AWS_CONFIG_FILE",
         "AWS_SHARED_CREDENTIALS_FILE",
@@ -91,11 +99,78 @@ class ConfigEnv:
         local = cls.load_config(local_path or Workdir.config_path())
         return cls.deep_merge(defaults, local), defaults, local
 
+    # ---- provider-contributed config→env mappings ------------------------ #
+
+    @classmethod
+    def _provider_mappings(cls) -> list[tuple[tuple[str, str], str]]:
+        """Provider-owned config→env rows, declared in each provider manifest.
+
+        Scans ``config_schema.config`` for every ``env_var`` declaration (config
+        fields are non-secret and always eligible for config-env emission), and
+        ``config_schema.secrets`` for ``env_var`` declarations on ``type: path``
+        fields only — path-typed secrets (credential files, SSH keys) are local
+        file paths the user configures via config.yaml, so they belong in
+        config-env output. String-typed secrets (API keys, passwords) are
+        injected at dispatch time only and are intentionally excluded.
+
+        When no providers are discoverable, returns ``[]`` (clean degradation).
+        """
+        # Imported lazily so config-env can run on a cold path without pulling
+        # the full plugin_manifest validation chain at import time.
+        from eve_sdk.plugin_manifest import PluginManifest
+
+        rows: list[tuple[tuple[str, str], str]] = []
+        for plugin in PluginManifest.load_all("provider"):
+            schema = plugin.get("config_schema") or {}
+            if not isinstance(schema, dict):
+                continue
+            # config block: every field with env_var is eligible.
+            config_fields = schema.get("config")
+            if isinstance(config_fields, dict):
+                for field_name, spec in config_fields.items():
+                    if not isinstance(spec, dict):
+                        continue
+                    env_var = spec.get("env_var")
+                    if not env_var:
+                        continue
+                    env_vars = env_var if isinstance(env_var, list) else [env_var]
+                    for name in env_vars:
+                        rows.append(((plugin["id"], field_name), str(name)))
+            # secrets block: only type=path fields (local file paths the user
+            # configures, not injected secret values).
+            secret_fields = schema.get("secrets")
+            if isinstance(secret_fields, dict):
+                for field_name, spec in secret_fields.items():
+                    if not isinstance(spec, dict):
+                        continue
+                    if spec.get("type") != "path":
+                        continue
+                    env_var = spec.get("env_var")
+                    if not env_var:
+                        continue
+                    env_vars = env_var if isinstance(env_var, list) else [env_var]
+                    for name in env_vars:
+                        rows.append(((plugin["id"], field_name), str(name)))
+        return rows
+
+    @classmethod
+    def _all_mappings(cls) -> list[tuple[tuple[str, str], str]]:
+        """Static MAPPINGS + provider-contributed rows, sorted by (section, field).
+
+        The sort reproduces the alphabetical-by-section order the original
+        hardcoded MAPPINGS table had, so ``--structured`` section ordering is
+        byte-identical before and after.
+        Python's stable sort preserves the env_var order within one field
+        (e.g. GCP project → GOOGLE_CLOUD_PROJECT before GOOGLE_PROJECT).
+        """
+        combined = [*cls.MAPPINGS, *cls._provider_mappings()]
+        return sorted(combined, key=lambda row: row[0])
+
     @classmethod
     def environment(cls, default_path: Path | None = None, local_path: Path | None = None) -> dict[str, str]:
         config, _defaults, _local = cls.merged_config(default_path, local_path)
         env: dict[str, str] = {}
-        for path, name in cls.MAPPINGS:
+        for path, name in cls._all_mappings():
             value = cls.scalar_value(cls.fetch_path(config, path))
             if value and name in cls.PATH_ENV_NAMES:
                 value = cls.normalize_pathish(value)
@@ -112,7 +187,7 @@ class ConfigEnv:
         env = cls.environment(default_path, local_path)
         _config, defaults, local = cls.merged_config(default_path, local_path)
         sections: dict[str, dict[str, dict[str, str | None]]] = {}
-        for path, name in cls.MAPPINGS:
+        for path, name in cls._all_mappings():
             section, field = path
             if cls.scalar_value(cls.fetch_path(local, path)):
                 source = "config.yaml"

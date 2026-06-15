@@ -13,7 +13,6 @@
 # boundary check fails.
 
 # --- Provider/OS coupling (Phase 3 extraction debt) ---
-eve_sdk/config.py:provider/OS reference - provider-keyed env-var table - Phase 3: provider env table extraction
 eve_sdk/profile_resolve.py:provider/OS reference - provider-specific env emission (faithful port of bash jq emit_env) - Phase 3: provider env emission extraction
 eve_sdk/resolve.py:provider/OS reference - provider branches and image-field env emission - Phase 3: provider env emission extraction
 scripts/doctor:provider/OS reference - provider-specific CLI tool checks - Phase 3: moves into provider plugins
