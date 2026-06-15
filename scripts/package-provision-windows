@@ -117,7 +117,10 @@ def main(argv: list[str]) -> int:
     if entry is None:
         entry = {}
 
-    plugin_path = entry.get("path") or ""
+    # For a merged dual-OS package the record's `path` is the ubuntu half; use the
+    # windows half's path (os_paths) for windows provision/command resolution.
+    os_paths = entry.get("os_paths") if isinstance(entry.get("os_paths"), dict) else {}
+    plugin_path = os_paths.get("windows") or entry.get("path") or ""
     plugin_root = str(Path(plugin_path).parent) if plugin_path else ""
 
     install = entry.get("install", {})

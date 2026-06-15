@@ -80,10 +80,16 @@ def run_plugin(plugin: dict[str, object], command: str, resolved: dict[str, obje
     if not isinstance(spec, dict):
         raise DispatchError(f"package plugin {plugin['id']} has no command: {command}")
 
+    # For a merged dual-OS package, select the half matching the instance OS so the
+    # command-hook/provision resolution finds commands/<os>/ in the right repo.
+    os_obj = resolved.get("os")
+    os_family = str(os_obj.get("family", "")) if isinstance(os_obj, dict) else ""
+    os_paths = plugin.get("os_paths") if isinstance(plugin.get("os_paths"), dict) else {}
+    manifest_path = os_paths.get(os_family) or plugin["path"]
     env = os.environ | {
         "EVE_INSTANCE_NAME": resolved["instance"]["name"],  # type: ignore[index]
         "EVE_PACKAGE_PLUGIN": str(plugin["id"]),
-        "EVE_PACKAGE_PLUGIN_ROOT": str(Path(str(plugin["path"])).parent),
+        "EVE_PACKAGE_PLUGIN_ROOT": str(Path(str(manifest_path)).parent),
         "EVE_RESOLVED_JSON": json.dumps(resolved, separators=(",", ":")),
     }
     if dry_run:

@@ -701,7 +701,7 @@ fi
 
 windows_down_missing=0
 for package in rustdesk steam sunshine xpra; do
-  if [ ! -x ".eve/plugins/eve-packages-linux/$package/commands/windows/down" ]; then
+  if [ ! -x ".eve/plugins/eve-packages-windows/$package/commands/windows/down" ]; then
     printf '  [FAIL] built-in package missing windows down hook: %s\n' "$package" >&2
     windows_down_missing=$((windows_down_missing + 1))
   fi
@@ -714,7 +714,7 @@ fi
 
 windows_status_missing=0
 for package in rustdesk steam sunshine xpra; do
-  if [ ! -x ".eve/plugins/eve-packages-linux/$package/commands/windows/status" ]; then
+  if [ ! -x ".eve/plugins/eve-packages-windows/$package/commands/windows/status" ]; then
     printf '  [FAIL] built-in package missing windows status hook: %s\n' "$package" >&2
     windows_status_missing=$((windows_status_missing + 1))
   fi

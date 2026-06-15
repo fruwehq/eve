@@ -88,13 +88,56 @@ class PluginManifest:
         by_key: dict[str, dict[str, Any]] = {}
         for plugin in plugins:
             key = f"{plugin['kind']}:{plugin['id']}"
-            if key in by_key and os.environ.get("EVE_PLUGIN_ALLOW_OVERRIDE") != "1":
-                raise ValueError(f"duplicate plugin {key}: {by_key[key]['_path']} and {plugin['_path']}")
+            existing = by_key.get(key)
+            if existing is not None:
+                # Same package id from different sources with DISJOINT supports
+                # (e.g. a ubuntu half in eve-packages-linux + a windows half in
+                # eve-packages-windows) is the sanctioned dual-OS case: merge the
+                # halves back into one record. Anything else is a real duplicate.
+                if plugin["kind"] == "package" and cls._supports_disjoint(existing, plugin):
+                    by_key[key] = cls._merge_package_halves(existing, plugin)
+                    continue
+                if os.environ.get("EVE_PLUGIN_ALLOW_OVERRIDE") != "1":
+                    raise ValueError(f"duplicate plugin {key}: {existing['_path']} and {plugin['_path']}")
             by_key[key] = plugin
         result = list(by_key.values())
         if kind:
             result = [plugin for plugin in result if plugin["kind"] == kind]
         return result
+
+    @staticmethod
+    def _os_families(plugin: dict[str, Any]) -> list[str]:
+        raw = plugin.get("supports")
+        supports = raw if isinstance(raw, dict) else {}
+        fams = supports.get("os_families")
+        return [str(f) for f in fams] if isinstance(fams, list) else []
+
+    @classmethod
+    def _supports_disjoint(cls, a: dict[str, Any], b: dict[str, Any]) -> bool:
+        fa, fb = set(cls._os_families(a)), set(cls._os_families(b))
+        return bool(fa) and bool(fb) and fa.isdisjoint(fb)
+
+    @classmethod
+    def _merge_package_halves(cls, a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any]:
+        """Merge two disjoint-OS package halves into the whole-manifest equivalent.
+        `a` was discovered first (sorted paths → ubuntu/linux before windows), so
+        its OS-agnostic fields and ordering win, reproducing the pre-split record.
+        `_os_paths` records each OS family's source dir for OS-specific dispatch."""
+        merged = dict(a)
+        a_fams, b_fams = cls._os_families(a), cls._os_families(b)
+        supports = dict(a.get("supports") or {})
+        supports["os_families"] = a_fams + [f for f in b_fams if f not in a_fams]
+        merged["supports"] = supports
+        ai, bi = a.get("install"), b.get("install")
+        a_install = ai if isinstance(ai, dict) else {}
+        b_install = bi if isinstance(bi, dict) else {}
+        if a_install or b_install:
+            merged["install"] = {**a_install, **b_install}
+        os_paths = dict(a.get("_os_paths") or {fam: a["_path"] for fam in a_fams})
+        b_paths = b.get("_os_paths") or {fam: b["_path"] for fam in b_fams}
+        os_paths.update(b_paths)
+        merged["_os_paths"] = os_paths
+        return merged
 
     @classmethod
     def validate(cls, plugin: dict[str, Any]) -> None:
@@ -128,9 +171,13 @@ class PluginManifest:
 
     @staticmethod
     def public(plugin: dict[str, Any]) -> dict[str, Any]:
-        output = dict(plugin)
-        output["path"] = output.pop("_path")
-        output["source"] = output.pop("_source")
+        output = {key: value for key, value in plugin.items() if not key.startswith("_")}
+        output["path"] = plugin["_path"]
+        output["source"] = plugin["_source"]
+        # Per-OS source dirs for a merged dual-OS package (used by the OS-specific
+        # provisioner to locate its half's provision tree).
+        if "_os_paths" in plugin:
+            output["os_paths"] = plugin["_os_paths"]
         return output
 
     @classmethod
