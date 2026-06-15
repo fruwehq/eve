@@ -131,15 +131,16 @@ def main(argv: list[str]) -> int:
                         if observed_status != "absent":
                             suffix = " PURGE=1" if purge else ""
                             print(
-                                f"""instance-delete: refusing to delete {instance_name}; provider_state={provider_state}.
-Provider resources may still exist (cloud VM, terraform state, etc.).
-
-Recommended:
-  make down INSTANCE={instance_name}     # destroys provider resources
-  make instance.delete INSTANCE={instance_name}{suffix}
-
-Or bypass this check if you have already destroyed the cloud side:
-  make instance.delete INSTANCE={instance_name}{suffix} FORCE=1""",
+                                f"instance-delete: refusing to delete {instance_name}; "
+                                f"provider_state={provider_state}.\n"
+                                "Provider resources may still exist (cloud VM, terraform state, etc.).\n"
+                                "\n"
+                                "Recommended:\n"
+                                f"  make down INSTANCE={instance_name}     # destroys provider resources\n"
+                                f"  make instance.delete INSTANCE={instance_name}{suffix}\n"
+                                "\n"
+                                "Or bypass this check if you have already destroyed the cloud side:\n"
+                                f"  make instance.delete INSTANCE={instance_name}{suffix} FORCE=1",
                                 file=sys.stderr,
                             )
                             return 1

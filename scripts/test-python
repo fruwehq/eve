@@ -7,7 +7,20 @@ cd "$(git rev-parse --show-toplevel)"
 cache_dir="$(mktemp -d "${TMPDIR:-/tmp}/eve-python-cache.XXXXXX")"
 trap 'rm -rf "$cache_dir"' EXIT
 
-RUFF_CACHE_DIR="$cache_dir/ruff" poetry run ruff check eve_sdk scripts/eve-tui
+# Lint the package plus every executable Python script in scripts/. Scripts have
+# no .py extension, so select them by their `#!/usr/bin/env python3` shebang
+# rather than blanket-including scripts/ (which also holds bash/pwsh helpers).
+python_scripts=()
+while IFS= read -r script; do
+	python_scripts+=("$script")
+done < <(find scripts -maxdepth 1 -type f -exec grep -lE '^#!/usr/bin/env python3' {} + | sort)
+
+RUFF_CACHE_DIR="$cache_dir/ruff" poetry run ruff check eve_sdk "${python_scripts[@]}"
+# mypy is intentionally NOT expanded to every script the way ruff is: mypy treats
+# each extensionless entrypoint as module `__main__`, so passing more than one at
+# once collides ("source file found twice"), and the scripts are not annotated to
+# strict-typing standards. eve_sdk (the typed core) is checked transitively via
+# eve-tui's imports. Broad script typing is a separate effort, not a lint gate.
 MYPY_CACHE_DIR="$cache_dir/mypy" poetry run mypy scripts/eve-tui
 
 poetry run pytest tests/python

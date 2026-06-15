@@ -12,8 +12,8 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from eve_sdk.catalog import load_catalog
-from eve_sdk.plugin_manifest import PluginManifest
+from eve_sdk.catalog import load_catalog  # noqa: E402
+from eve_sdk.plugin_manifest import PluginManifest  # noqa: E402
 
 
 def provider_os_support() -> dict[str, set[str]]:
@@ -114,12 +114,13 @@ def build_doc() -> dict[str, Any]:
         actions = plugin.get("actions") if isinstance(plugin.get("actions"), list) else []
         compatibility = plugin.get("compatibility") if isinstance(plugin.get("compatibility"), list) else []
         install = plugin.get("install") if isinstance(plugin.get("install"), dict) else None
+        conflicts_with = plugin.get("conflicts_with") if isinstance(plugin.get("conflicts_with"), list) else []
         packages.append(
             {
                 "id": package.get("id"),
                 "display_name": plugin.get("display_name") or package.get("id"),
                 "supports": supports,
-                "conflicts_with": plugin.get("conflicts_with") if isinstance(plugin.get("conflicts_with"), list) else [],
+                "conflicts_with": conflicts_with,
                 "installable": install is not None,
                 "installable_os_families": list(install.keys()) if install else [],
                 "actions": actions,
@@ -168,7 +169,10 @@ def main() -> int:
         print()
         print("PLATFORMS")
         for platform in doc["platforms"]:
-            print(f"  {platform['provider']} {platform['machine']} {platform['os']} {platform['location']} {platform['init']}")
+            print(
+                f"  {platform['provider']} {platform['machine']} {platform['os']} "
+                f"{platform['location']} {platform['init']}"
+            )
     return 0
 
 
