@@ -8,7 +8,9 @@ bash allowlist inside `scripts/`, the bootstrap shims live here, out of the
 `core-boundary` scan.
 
 - **`eve`** — the user launcher: `cd` to the repo root and `exec poetry run python
-  scripts/eve-tui`. (`scripts/eve-tui` is the real TUI entrypoint and *does* run
-  under poetry, so it stays in `scripts/`.)
+  scripts/eve-cli`. With no args (or `eve tui`) the CLI opens the Textual TUI;
+  otherwise it dispatches the `eve <group> <verb>` tree to the existing scripts.
+  (`scripts/eve-cli` is the real CLI entrypoint and *does* run under poetry, so
+  it stays in `scripts/`; `scripts/eve-tui` remains the TUI it shells out to.)
 
 Everything that runs *after* the environment is up belongs in `scripts/` as Python.
