@@ -13,6 +13,22 @@ from eve_sdk.workdir import Workdir
 
 CORE_VERSION = "4.0"
 
+# Number of times load_all() has actually parsed manifests from disk. The warm
+# Engine (eve_sdk.engine) memoizes the result, so a multi-op session should leave
+# this at 1 — the Phase 5 "parse once" invariant is asserted against this counter.
+LOAD_COUNT = 0
+
+
+def load_count() -> int:
+    """Return how many times load_all() has parsed manifests from disk."""
+    return LOAD_COUNT
+
+
+def reset_load_count() -> None:
+    """Reset the disk-parse counter (test helper)."""
+    global LOAD_COUNT
+    LOAD_COUNT = 0
+
 
 class PluginManifest:
     API_VERSION = "eve.plugin/v1"
@@ -81,7 +97,29 @@ class PluginManifest:
         return loaded
 
     @classmethod
+    def fingerprint(cls) -> tuple[tuple[str, int], ...]:
+        """Cheap change-detector for the discovered manifest set.
+
+        A tuple of (path, mtime_ns) over every discovered manifest plus the
+        plugins lockfile. The warm Engine compares this between operations to
+        decide whether its memoized parse is still valid (e.g. after `eve pull`
+        re-materializes plugins under a long-lived TUI session).
+        """
+        entries: list[tuple[str, int]] = []
+        for path in cls.plugin_paths():
+            try:
+                entries.append((str(path), path.stat().st_mtime_ns))
+            except OSError:
+                entries.append((str(path), -1))
+        lock = Workdir.eve_dir() / "plugins.lock"
+        if lock.exists():
+            entries.append((str(lock), lock.stat().st_mtime_ns))
+        return tuple(entries)
+
+    @classmethod
     def load_all(cls, kind: str | None = None) -> list[dict[str, Any]]:
+        global LOAD_COUNT
+        LOAD_COUNT += 1
         plugins = [cls.load(path) for path in cls.plugin_paths()]
         for plugin in plugins:
             cls.validate(plugin)

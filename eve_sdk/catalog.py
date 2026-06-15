@@ -25,6 +25,22 @@ import yaml
 from eve_sdk.plugin_manifest import PluginManifest
 from eve_sdk.workdir import Workdir
 
+# Times load_catalog() has aggregated from disk. The warm Engine memoizes the
+# result; a multi-op session should leave this at 1 (Phase 5 "parse once").
+LOAD_COUNT = 0
+
+
+def load_count() -> int:
+    """Return how many times load_catalog() has aggregated from disk."""
+    return LOAD_COUNT
+
+
+def reset_load_count() -> None:
+    """Reset the catalog aggregation counter (test helper)."""
+    global LOAD_COUNT
+    LOAD_COUNT = 0
+
+
 CATALOG_SECTIONS: dict[str, str] = {
     "bundles": "id",
     "inits": "id",
@@ -141,13 +157,19 @@ def aggregate(
     return result
 
 
-def load_catalog() -> dict[str, list[dict[str, Any]]]:
+def load_catalog(plugins: list[dict[str, Any]] | None = None) -> dict[str, list[dict[str, Any]]]:
     """Load the effective catalog: central config + plugin contributions.
 
     Merge order is: central base → plugin contributions → local overlay.
     This ensures user-level overrides (catalog.local.yaml / EVE_CATALOG_LOCAL)
     take precedence over plugin-contributed rows.
+
+    ``plugins`` lets a warm caller (the Engine) pass an already-parsed manifest
+    set so the catalog can be aggregated without re-reading every manifest from
+    disk. When omitted (the cold script path) manifests are parsed here.
     """
+    global LOAD_COUNT
+    LOAD_COUNT += 1
     local_value = os.environ.get("EVE_CATALOG_LOCAL")
     local_path = (
         Path(local_value).expanduser().resolve()
@@ -156,7 +178,8 @@ def load_catalog() -> dict[str, list[dict[str, Any]]]:
     )
     base_doc = _load_yaml(Workdir.repo_root() / "config/catalog.yaml")
     overlay_doc = _load_yaml(local_path)
-    result = aggregate([base_doc], PluginManifest.load_all())
+    manifests = PluginManifest.load_all() if plugins is None else plugins
+    result = aggregate([base_doc], manifests)
     if overlay_doc:
         for section in CATALOG_SECTIONS:
             _merge_section(result[section], overlay_doc.get(section), section)
