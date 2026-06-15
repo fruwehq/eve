@@ -23,6 +23,7 @@ from __future__ import annotations
 from typing import Any
 
 from eve_sdk import catalog as _catalog
+from eve_sdk.catalog_view import build_catalog_options
 from eve_sdk.plugin_manifest import PluginManifest
 
 
@@ -64,6 +65,28 @@ class Engine:
         if self._catalog is None:
             self._catalog = _catalog.load_catalog(plugins=self.plugins())
         return self._catalog
+
+    # ---- derived read views (served from the memo) --------------------- #
+
+    def catalog_options(self) -> dict[str, Any]:
+        """The providers/platforms/bundles/packages view (== `catalog-options --json`).
+
+        Assembled from the memoized catalog + plugin set, so repeated calls within
+        a session add no disk parses.
+        """
+        return build_catalog_options(
+            self.catalog(),
+            self.plugins(kind="provider"),
+            self.plugins(kind="package"),
+        )
+
+    def plugin_list(self, kind: str | None = None) -> list[dict[str, Any]]:
+        """Public manifest views (== `plugin-list [--kind K] --json` `plugins`).
+
+        The same `PluginManifest.public` projection the script emits, served from
+        the memoized parse instead of a fresh disk read + file cache.
+        """
+        return [PluginManifest.public(plugin) for plugin in self.plugins(kind=kind)]
 
     def reload(self) -> None:
         """Drop all memoized state so the next access re-parses from disk."""

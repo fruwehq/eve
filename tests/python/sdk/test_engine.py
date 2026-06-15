@@ -81,3 +81,42 @@ def test_fingerprint_change_invalidates_cache(monkeypatch: pytest.MonkeyPatch) -
 
 def test_default_engine_is_shared() -> None:
     assert default_engine() is default_engine()
+
+
+def test_catalog_options_parses_once() -> None:
+    engine = Engine()
+    for _ in range(3):
+        engine.catalog_options()
+    assert catalog_mod.load_count() == 1
+    assert pm.load_count() == 1
+
+
+def test_catalog_options_matches_cold_assembly() -> None:
+    # The Engine view must equal the cold path's assembly exactly (same inputs,
+    # same shared builder), guaranteeing parity with `catalog-options --json`.
+    from eve_sdk.catalog import load_catalog
+    from eve_sdk.catalog_view import build_catalog_options
+    from eve_sdk.plugin_manifest import PluginManifest
+
+    cold = build_catalog_options(
+        load_catalog(),
+        PluginManifest.load_all("provider"),
+        PluginManifest.load_all("package"),
+    )
+    assert Engine().catalog_options() == cold
+
+
+def test_plugin_list_matches_public_projection() -> None:
+    from eve_sdk.plugin_manifest import PluginManifest
+
+    engine = Engine()
+    expected = [PluginManifest.public(p) for p in PluginManifest.load_all("provider")]
+    assert engine.plugin_list(kind="provider") == expected
+
+
+def test_plugin_list_parses_once() -> None:
+    engine = Engine()
+    engine.plugin_list(kind="provider")
+    engine.plugin_list(kind="package")
+    engine.plugin_list()
+    assert pm.load_count() == 1
