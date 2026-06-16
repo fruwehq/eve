@@ -11,13 +11,13 @@ from __future__ import annotations
 from eve_sdk.catalog import load_catalog
 from eve_sdk.plugin_manifest import PluginManifest
 
-
 # ---------------------------------------------------------------------------
 # Provider catalog.oses support sets
 # ---------------------------------------------------------------------------
 
 EXPECTED_PROVIDER_OS_SUPPORT: dict[str, set[str]] = {
     "aws": {"ubuntu-26.04-amd64", "windows-server-2025"},
+    "docker": {"ubuntu-26.04-amd64", "ubuntu-26.04-arm64"},
     "gcp": {"ubuntu-26.04-amd64"},
     "local-qemu": {"ubuntu-26.04-amd64", "ubuntu-26.04-arm64"},
     "raspberry-pi": {"ubuntu-26.04-arm64"},
@@ -148,6 +148,7 @@ class TestMachinesRelocated:
             "aws-cheap-x86",
             "aws-gpu-g4dn-spot",
             "aws-gpu-g5",
+            "docker-ubuntu-medium",
             "gcp-cheap-x86",
             "local-qemu-medium",
             "raspberry-pi-5",
