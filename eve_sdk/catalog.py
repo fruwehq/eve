@@ -158,11 +158,14 @@ def aggregate(
 
 
 def load_catalog(plugins: list[dict[str, Any]] | None = None) -> dict[str, list[dict[str, Any]]]:
-    """Load the effective catalog: central config + plugin contributions.
+    """Load the effective catalog: central config + catalog-base + plugin contributions.
 
-    Merge order is: central base → plugin contributions → local overlay.
-    This ensures user-level overrides (catalog.local.yaml / EVE_CATALOG_LOCAL)
-    take precedence over plugin-contributed rows.
+    Merge order is: central base → catalog-base contributions (shared OS
+    identity rows + inits from ``_catalog-base/*.yaml`` discovered in plugin
+    roots) → plugin contributions (provider catalog + package bundles) → local
+    overlay. This ensures user-level overrides take precedence, and provider
+    image-field overlays merge onto the catalog-base identity rows exactly as
+    they did when the identity rows lived in config/catalog.yaml.
 
     ``plugins`` lets a warm caller (the Engine) pass an already-parsed manifest
     set so the catalog can be aggregated without re-reading every manifest from
@@ -177,10 +180,43 @@ def load_catalog(plugins: list[dict[str, Any]] | None = None) -> dict[str, list[
         else Workdir.repo_root() / "config/catalog.local.yaml"
     )
     base_doc = _load_yaml(Workdir.repo_root() / "config/catalog.yaml")
+    catalog_base_docs = _load_catalog_base_docs()
     overlay_doc = _load_yaml(local_path)
     manifests = PluginManifest.load_all() if plugins is None else plugins
-    result = aggregate([base_doc], manifests)
+    result = aggregate([base_doc, *catalog_base_docs], manifests)
     if overlay_doc:
         for section in CATALOG_SECTIONS:
             _merge_section(result[section], overlay_doc.get(section), section)
     return result
+
+
+def _load_catalog_base_docs() -> list[dict[str, Any]]:
+    """Load catalog-base contributions (shared OS identity + init definitions).
+
+    Scans plugin roots and their immediate subdirectories for
+    ``_catalog-base/*.yaml`` files. These hold catalog data that doesn't
+    belong to any single provider (OS identity rows, init definitions) but
+    lives outside core's config/catalog.yaml. Discovered alongside plugin
+    manifests but NOT a plugin itself (no eve-plugin.yaml). Lives inside
+    source repos (e.g. ``eve-providers/_catalog-base/``) mirroring the
+    ``_common/`` shared-directory convention.
+    """
+    docs: list[dict[str, Any]] = []
+
+    def _scan_dir(base_dir: Path) -> None:
+        if base_dir.is_dir():
+            for yaml_file in sorted(base_dir.glob("*.yaml")):
+                doc = _load_yaml(yaml_file)
+                if doc:
+                    docs.append(doc)
+
+    for root in PluginManifest.plugin_roots():
+        if not root.exists():
+            continue
+        # Check the root itself (e.g. <repo>/.eve/plugins/_catalog-base/).
+        _scan_dir(root / "_catalog-base")
+        # Check each plugin subdirectory (e.g. <repo>/.eve/plugins/eve-providers/_catalog-base/).
+        for entry in sorted(root.iterdir()):
+            if entry.is_dir() or entry.is_symlink():
+                _scan_dir(entry / "_catalog-base")
+    return docs

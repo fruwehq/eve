@@ -1,5 +1,7 @@
 # v2 catalog
-# Central catalog: shared OS identity rows, inits, packages, and locations.
+# Central catalog: packages and locations.
+# OS identity rows and inits live in the catalog-base contribution
+# (eve-providers/_catalog-base/) discovered at runtime by the aggregator.
 # Provider-owned rows (machines, provider-specific OS image fields) live in
 # provider manifests under plugins/providers/*/eve-plugin.yaml.
 # Bundle definitions live in package manifests under
@@ -7,42 +9,6 @@
 # The aggregator (eve_sdk/catalog.py) reconstructs the effective catalog by
 # unioning these contributions with this central file.
 version: 1
-
-# -----------------------------------------------------------------------------
-# OS identity catalog (shared across providers)
-# Provider-specific image fields merge onto these rows via the aggregator.
-# -----------------------------------------------------------------------------
-oses:
-  - id: ubuntu-26.04-amd64
-    family: ubuntu
-    version: "26.04"
-    arch: amd64
-
-  - id: ubuntu-26.04-arm64
-    family: ubuntu
-    version: "26.04"
-    arch: arm64
-
-  - id: windows-server-2025
-    family: windows
-    version: "2025"
-    arch: amd64
-
-# -----------------------------------------------------------------------------
-# Init catalog (first-boot access + baseline hardening)
-# -----------------------------------------------------------------------------
-inits:
-  - id: ssh-ubuntu-cloud-init
-    os_family: ubuntu
-    providers: [aws, gcp, local-qemu, truenas]
-
-  - id: ssh-ubuntu-metal
-    os_family: ubuntu
-    providers: [raspberry-pi]
-
-  - id: ssh-windows-powershell7
-    os_family: windows
-    providers: [aws, vultr]
 
 # -----------------------------------------------------------------------------
 # Workload package catalog
