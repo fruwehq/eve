@@ -16,6 +16,4 @@
 # (empty — all provider/OS literals have been extracted from core)
 
 # --- Bash shebangs (language policy: no new bash in scripts/) ---
-# Remaining: one large test suite still in bash;
-# port deferred — needs faithful 1:1 translation of ~1500 checks.
-scripts/test-instances:bash shebang - instance validation - port to Python (large; ~1500 checks)
+# (empty — all test runners ported to Python)
