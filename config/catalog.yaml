@@ -1,38 +1,5 @@
 # v2 catalog
-# Central catalog: locations only.
-# OS identity rows, inits, and package identity live in the catalog-base
-# contribution (eve-providers/_catalog-base/) discovered at runtime by the
-# aggregator. Provider-owned rows (machines, provider-specific OS image fields)
-# live in provider manifests. Bundle definitions live in package manifests.
-# The aggregator (eve_sdk/catalog.py) reconstructs the effective catalog by
-# unioning these contributions with this central file.
+# Locations are now contributed by provider manifests (each provider declares
+# its per-location data in its catalog.locations block). This file holds
+# only the version marker.
 version: 1
-
-# -----------------------------------------------------------------------------
-# Location mapping (provider-specific region/AZ translation)
-# -----------------------------------------------------------------------------
-locations:
-  - name: tokyo
-    aws:
-      region: ap-northeast-1
-      availability_zone: ap-northeast-1b
-    gcp:
-      region: asia-northeast1
-      zone: asia-northeast1-b
-    vultr:
-      region: nrt
-    local-qemu:
-      host: local
-    raspberry-pi:
-      # Host comes from RASPBERRY_PI_HOST env var (required at runtime).
-      ssh_port: 22
-    truenas:
-      # Canonical TrueNAS endpoint for this catalog.
-      # Override in .env.local (TRUENAS_HOST) if needed.
-      host: truenas.home.arpa
-      ssh_port: 22
-      # ssh_user comes from TRUENAS_SSH_USER (required at runtime).
-      # Used by module defaults if machine.network is omitted
-      bridge: br0
-      pool: main
-      provision_user: eve-provision

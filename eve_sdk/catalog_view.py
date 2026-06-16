@@ -79,32 +79,27 @@ def build_catalog_options(
                     continue
                 if not _init_available_for_provider(init, provider):
                     continue
-                for location in catalog["locations"]:
-                    if not location.get(provider):
-                        continue
-                    defaults = machine.get("defaults") if isinstance(machine.get("defaults"), dict) else {}
-                    platforms.append(
-                        {
-                            "id": ":".join(
-                                [
-                                    str(provider),
-                                    str(machine.get("name")),
-                                    str(os_entry.get("id")),
-                                    str(init.get("id")),
-                                    str(location.get("name")),
-                                ]
-                            ),
-                            "provider": provider,
-                            "machine": machine.get("name"),
-                            "os": os_entry.get("id"),
-                            "os_family": os_entry.get("family"),
-                            "os_version": os_entry.get("version"),
-                            "arch": os_entry.get("arch"),
-                            "init": init.get("id"),
-                            "location": location.get("name"),
-                            "defaults": defaults,
-                        }
-                    )
+                defaults = machine.get("defaults") if isinstance(machine.get("defaults"), dict) else {}
+                platforms.append(
+                    {
+                        "id": ":".join(
+                            [
+                                str(provider),
+                                str(machine.get("name")),
+                                str(os_entry.get("id")),
+                                str(init.get("id")),
+                            ]
+                        ),
+                        "provider": provider,
+                        "machine": machine.get("name"),
+                        "os": os_entry.get("id"),
+                        "os_family": os_entry.get("family"),
+                        "os_version": os_entry.get("version"),
+                        "arch": os_entry.get("arch"),
+                        "init": init.get("id"),
+                        "defaults": defaults,
+                    }
+                )
 
     bundles: list[dict[str, Any]] = [
         {"id": bundle.get("id"), "includes": bundle.get("includes") if isinstance(bundle.get("includes"), list) else []}
@@ -142,7 +137,6 @@ def build_catalog_options(
                 str(platform["provider"]),
                 str(platform["machine"]),
                 str(platform["os"]),
-                str(platform["location"]),
                 str(platform["init"]),
             ),
         ),

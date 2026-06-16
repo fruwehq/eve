@@ -527,7 +527,7 @@
     },
 
     "catalog_contribution": {
-      "description": "Provider catalog contribution block: machines, provider-specific OS image/compatibility rows, and inits.",
+      "description": "Provider catalog contribution block: machines, provider-specific OS image/compatibility rows, inits, and locations.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -542,7 +542,21 @@
         "inits": {
           "type": "array",
           "items": { "$ref": "#/$defs/catalog_init" }
+        },
+        "locations": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/catalog_location" }
         }
+      }
+    },
+
+    "catalog_location": {
+      "description": "A location row contributed by a provider manifest. Field-merged by name across providers so each provider contributes its own per-location data (region, host, etc.).",
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": true,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 }
       }
     },
 

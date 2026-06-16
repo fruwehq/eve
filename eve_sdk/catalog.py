@@ -121,8 +121,39 @@ def _merge_section(
     key = CATALOG_SECTIONS[section]
     if section == _OSES:
         merge_os_fields(target, entries, key)
+    elif section == "locations":
+        merge_location_fields(target, entries, key)
     else:
         merge_entries(target, entries, key)
+
+
+def merge_location_fields(target: list[dict[str, Any]], entries: Any, key: str) -> None:
+    """Field-level union keyed on ``key`` for location rows.
+
+    Each provider contributes its own per-location data (region, host, etc.)
+    under its provider ID key. Deep-merge so multiple providers' data combine
+    into one location row with all providers' sections present.
+    """
+    if not isinstance(entries, list):
+        return
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        entry_id = entry.get(key)
+        if entry_id is None or str(entry_id) == "":
+            continue
+        for index, candidate in enumerate(target):
+            if candidate.get(key) == entry_id:
+                merged = dict(candidate)
+                for k, v in entry.items():
+                    if isinstance(merged.get(k), dict) and isinstance(v, dict):
+                        merged[k] = {**merged[k], **v}
+                    else:
+                        merged[k] = v
+                target[index] = merged
+                break
+        else:
+            target.append(dict(entry))
 
 
 def aggregate(
@@ -147,7 +178,7 @@ def aggregate(
         if kind == "provider":
             contribution = plugin.get("catalog")
             if isinstance(contribution, dict):
-                for section in ("machines", "oses", "inits"):
+                for section in ("machines", "oses", "inits", "locations"):
                     _merge_section(result[section], contribution.get(section), section)
         elif kind == "package":
             bundles = plugin.get("bundles")

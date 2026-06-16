@@ -10,7 +10,7 @@
   ],
   "platforms": [
     {
-      "id": "aws:aws-cheap-x86:ubuntu-26.04-amd64:ssh-ubuntu-cloud-init:tokyo",
+      "id": "aws:aws-cheap-x86:ubuntu-26.04-amd64:ssh-ubuntu-cloud-init",
       "provider": "aws",
       "machine": "aws-cheap-x86",
       "os": "ubuntu-26.04-amd64",
@@ -18,7 +18,6 @@
       "os_version": "26.04",
       "arch": "amd64",
       "init": "ssh-ubuntu-cloud-init",
-      "location": "tokyo",
       "defaults": {
         "instance_type": "t3.large",
         "disk_gb": 80,
@@ -27,7 +26,7 @@
       }
     },
     {
-      "id": "aws:aws-cheap-x86:windows-server-2025:ssh-windows-powershell7:tokyo",
+      "id": "aws:aws-cheap-x86:windows-server-2025:ssh-windows-powershell7",
       "provider": "aws",
       "machine": "aws-cheap-x86",
       "os": "windows-server-2025",
@@ -35,7 +34,6 @@
       "os_version": "2025",
       "arch": "amd64",
       "init": "ssh-windows-powershell7",
-      "location": "tokyo",
       "defaults": {
         "instance_type": "t3.large",
         "disk_gb": 80,
@@ -44,7 +42,7 @@
       }
     },
     {
-      "id": "aws:aws-gpu-g4dn-spot:ubuntu-26.04-amd64:ssh-ubuntu-cloud-init:tokyo",
+      "id": "aws:aws-gpu-g4dn-spot:ubuntu-26.04-amd64:ssh-ubuntu-cloud-init",
       "provider": "aws",
       "machine": "aws-gpu-g4dn-spot",
       "os": "ubuntu-26.04-amd64",
@@ -52,7 +50,6 @@
       "os_version": "26.04",
       "arch": "amd64",
       "init": "ssh-ubuntu-cloud-init",
-      "location": "tokyo",
       "defaults": {
         "instance_type": "g4dn.xlarge",
         "disk_gb": 180,
@@ -61,7 +58,7 @@
       }
     },
     {
-      "id": "aws:aws-gpu-g4dn-spot:windows-server-2025:ssh-windows-powershell7:tokyo",
+      "id": "aws:aws-gpu-g4dn-spot:windows-server-2025:ssh-windows-powershell7",
       "provider": "aws",
       "machine": "aws-gpu-g4dn-spot",
       "os": "windows-server-2025",
@@ -69,7 +66,6 @@
       "os_version": "2025",
       "arch": "amd64",
       "init": "ssh-windows-powershell7",
-      "location": "tokyo",
       "defaults": {
         "instance_type": "g4dn.xlarge",
         "disk_gb": 180,
@@ -78,7 +74,7 @@
       }
     },
     {
-      "id": "aws:aws-gpu-g5:ubuntu-26.04-amd64:ssh-ubuntu-cloud-init:tokyo",
+      "id": "aws:aws-gpu-g5:ubuntu-26.04-amd64:ssh-ubuntu-cloud-init",
       "provider": "aws",
       "machine": "aws-gpu-g5",
       "os": "ubuntu-26.04-amd64",
@@ -86,7 +82,6 @@
       "os_version": "26.04",
       "arch": "amd64",
       "init": "ssh-ubuntu-cloud-init",
-      "location": "tokyo",
       "defaults": {
         "instance_type": "g5.2xlarge",
         "disk_gb": 200,
@@ -94,7 +89,7 @@
       }
     },
     {
-      "id": "aws:aws-gpu-g5:windows-server-2025:ssh-windows-powershell7:tokyo",
+      "id": "aws:aws-gpu-g5:windows-server-2025:ssh-windows-powershell7",
       "provider": "aws",
       "machine": "aws-gpu-g5",
       "os": "windows-server-2025",
@@ -102,7 +97,6 @@
       "os_version": "2025",
       "arch": "amd64",
       "init": "ssh-windows-powershell7",
-      "location": "tokyo",
       "defaults": {
         "instance_type": "g5.2xlarge",
         "disk_gb": 200,
@@ -110,7 +104,7 @@
       }
     },
     {
-      "id": "gcp:gcp-cheap-x86:ubuntu-26.04-amd64:ssh-ubuntu-cloud-init:tokyo",
+      "id": "gcp:gcp-cheap-x86:ubuntu-26.04-amd64:ssh-ubuntu-cloud-init",
       "provider": "gcp",
       "machine": "gcp-cheap-x86",
       "os": "ubuntu-26.04-amd64",
@@ -118,7 +112,6 @@
       "os_version": "26.04",
       "arch": "amd64",
       "init": "ssh-ubuntu-cloud-init",
-      "location": "tokyo",
       "defaults": {
         "machine_type": "e2-small",
         "disk_gb": 20,
@@ -126,7 +119,7 @@
       }
     },
     {
-      "id": "local-qemu:local-qemu-medium:ubuntu-26.04-arm64:ssh-ubuntu-cloud-init:tokyo",
+      "id": "local-qemu:local-qemu-medium:ubuntu-26.04-arm64:ssh-ubuntu-cloud-init",
       "provider": "local-qemu",
       "machine": "local-qemu-medium",
       "os": "ubuntu-26.04-arm64",
@@ -134,7 +127,6 @@
       "os_version": "26.04",
       "arch": "arm64",
       "init": "ssh-ubuntu-cloud-init",
-      "location": "tokyo",
       "defaults": {
         "cpus": 2,
         "memory_mb": 4096,
@@ -142,7 +134,7 @@
       }
     },
     {
-      "id": "raspberry-pi:raspberry-pi-5:ubuntu-26.04-arm64:ssh-ubuntu-metal:tokyo",
+      "id": "raspberry-pi:raspberry-pi-5:ubuntu-26.04-arm64:ssh-ubuntu-metal",
       "provider": "raspberry-pi",
       "machine": "raspberry-pi-5",
       "os": "ubuntu-26.04-arm64",
@@ -150,13 +142,12 @@
       "os_version": "26.04",
       "arch": "arm64",
       "init": "ssh-ubuntu-metal",
-      "location": "tokyo",
       "defaults": {
         "architecture": "arm64"
       }
     },
     {
-      "id": "truenas:truenas-scale-medium:ubuntu-26.04-amd64:ssh-ubuntu-cloud-init:tokyo",
+      "id": "truenas:truenas-scale-medium:ubuntu-26.04-amd64:ssh-ubuntu-cloud-init",
       "provider": "truenas",
       "machine": "truenas-scale-medium",
       "os": "ubuntu-26.04-amd64",
@@ -164,7 +155,6 @@
       "os_version": "26.04",
       "arch": "amd64",
       "init": "ssh-ubuntu-cloud-init",
-      "location": "tokyo",
       "defaults": {
         "cpu_cores": 4,
         "cpu_mode": "HOST-PASSTHROUGH",
@@ -177,7 +167,7 @@
       }
     },
     {
-      "id": "vultr:vultr-vcg-a40-1c:windows-server-2025:ssh-windows-powershell7:tokyo",
+      "id": "vultr:vultr-vcg-a40-1c:windows-server-2025:ssh-windows-powershell7",
       "provider": "vultr",
       "machine": "vultr-vcg-a40-1c",
       "os": "windows-server-2025",
@@ -185,13 +175,12 @@
       "os_version": "2025",
       "arch": "amd64",
       "init": "ssh-windows-powershell7",
-      "location": "tokyo",
       "defaults": {
         "plan": "vcg-a40-1c-5g-2vram"
       }
     },
     {
-      "id": "vultr:vultr-vcg-a40-2c:windows-server-2025:ssh-windows-powershell7:tokyo",
+      "id": "vultr:vultr-vcg-a40-2c:windows-server-2025:ssh-windows-powershell7",
       "provider": "vultr",
       "machine": "vultr-vcg-a40-2c",
       "os": "windows-server-2025",
@@ -199,13 +188,12 @@
       "os_version": "2025",
       "arch": "amd64",
       "init": "ssh-windows-powershell7",
-      "location": "tokyo",
       "defaults": {
         "plan": "vcg-a40-2c-10g-4vram"
       }
     },
     {
-      "id": "vultr:vultr-vcg-a40-4c:windows-server-2025:ssh-windows-powershell7:tokyo",
+      "id": "vultr:vultr-vcg-a40-4c:windows-server-2025:ssh-windows-powershell7",
       "provider": "vultr",
       "machine": "vultr-vcg-a40-4c",
       "os": "windows-server-2025",
@@ -213,13 +201,12 @@
       "os_version": "2025",
       "arch": "amd64",
       "init": "ssh-windows-powershell7",
-      "location": "tokyo",
       "defaults": {
         "plan": "vcg-a40-4c-20g-8vram"
       }
     },
     {
-      "id": "vultr:vultr-vcg-a40-6c:windows-server-2025:ssh-windows-powershell7:tokyo",
+      "id": "vultr:vultr-vcg-a40-6c:windows-server-2025:ssh-windows-powershell7",
       "provider": "vultr",
       "machine": "vultr-vcg-a40-6c",
       "os": "windows-server-2025",
@@ -227,7 +214,6 @@
       "os_version": "2025",
       "arch": "amd64",
       "init": "ssh-windows-powershell7",
-      "location": "tokyo",
       "defaults": {
         "plan": "vcg-a40-6c-30g-12vram"
       }
