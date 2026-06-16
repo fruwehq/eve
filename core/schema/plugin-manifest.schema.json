@@ -272,7 +272,7 @@
           "type": "array",
           "items": {
             "type": "string",
-            "enum": ["terraform", "vagrant", "qemu", "metal"]
+            "enum": ["terraform", "vagrant", "qemu", "metal", "docker"]
           }
         },
         "kinds": {

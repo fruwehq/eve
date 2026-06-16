@@ -1,6 +1,7 @@
 {
   "providers": [
     "aws",
+    "docker",
     "gcp",
     "local-qemu",
     "raspberry-pi",
