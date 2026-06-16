@@ -58,9 +58,7 @@ def main(argv: list[str]) -> int:
             print(f"unknown suite: {suite}", file=sys.stderr)
             return 2
         script_args = SUITE_SCRIPTS[suite]
-        cmd = [str(ROOT / script_args[0])] if not script_args[0].startswith("poetry") else script_args
-        if script_args[0].startswith("scripts"):
-            cmd = [sys.executable, str(ROOT / script_args[0]), *script_args[1:]]
+        cmd = script_args if script_args[0].startswith("poetry") else [str(ROOT / script_args[0]), *script_args[1:]]
         print(f"\n== {suite} ==")
         code = subprocess.run(cmd, cwd=str(ROOT), check=False).returncode
         if code == 0:

@@ -51,23 +51,34 @@ def main() -> int:
         profile = "aws-ubuntu-dev-headless"
         fail = 0
 
+        def _run_with_files(cmd, e):
+            """Run a subprocess, capturing output via temp files (avoids pipe-deadlock
+            when grandchild processes inherit stdout/stderr FDs)."""
+            with tempfile.NamedTemporaryFile(mode="w+") as outf, tempfile.NamedTemporaryFile(mode="w+") as errf:
+                subprocess.run(
+                    cmd, cwd=str(ROOT), env=e,
+                    stdout=outf, stderr=errf, stdin=subprocess.DEVNULL,
+                    start_new_session=True, check=False,
+                )
+                outf.seek(0)
+                errf.seek(0)
+                return outf.read() + errf.read()
+
         def run_tf_env(extra_env=None, profile_arg=None):
             e = {**env, **(extra_env or {})}
-            e.pop("EVE_INSTANCE_NAME", None)
-            r = subprocess.run(
-                [sys.executable, str(ROOT / "scripts/tf-env"), profile_arg or profile],
-                cwd=str(ROOT), env=e, capture_output=True, text=True, check=False,
+            if not (extra_env and "EVE_INSTANCE_NAME" in extra_env):
+                e.pop("EVE_INSTANCE_NAME", None)
+            return _run_with_files(
+                [sys.executable, str(ROOT / "scripts/tf-env"), profile_arg or profile], e,
             )
-            return r.stdout
 
         def run_tf_init(extra_env=None):
             e = {**env, "EVE_TF_PRINT": "1", **(extra_env or {})}
-            e.pop("EVE_INSTANCE_NAME", None)
-            r = subprocess.run(
-                [sys.executable, str(ROOT / "scripts/tf-init"), profile],
-                cwd=str(ROOT), env=e, capture_output=True, text=True, check=False,
+            if not (extra_env and "EVE_INSTANCE_NAME" in extra_env):
+                e.pop("EVE_INSTANCE_NAME", None)
+            return _run_with_files(
+                [sys.executable, str(ROOT / "scripts/tf-init"), profile], e,
             )
-            return r.stdout + r.stderr
 
         # 1. tf-env without instance: no TF_WORKSPACE export.
         out = run_tf_env()
@@ -126,11 +137,10 @@ def main() -> int:
         for norm_val in ["~/foo", "$HOME/foo", "$(HOME)/foo"]:
             e = {**env, "SSH_PUBLIC_KEY_FILE": norm_val, "EVE_RUNTIME_ENV_LOADED": "1"}
             e.pop("EVE_INSTANCE_NAME", None)
-            r = subprocess.run(
-                [sys.executable, str(ROOT / "scripts/tf-env"), profile],
-                cwd=str(ROOT), env=e, capture_output=True, text=True, check=False,
+            norm_out = _run_with_files(
+                [sys.executable, str(ROOT / "scripts/tf-env"), profile], e,
             )
-            m = re.search(r"^export TF_VAR_ssh_public_key_file='(.*)';$", r.stdout, re.M)
+            m = re.search(r"^export TF_VAR_ssh_public_key_file='(.*)';$", norm_out, re.M)
             norm_actual = m.group(1) if m else ""
             if norm_actual == norm_expected:
                 print(f"  [OK] tf-env normalizes SSH_PUBLIC_KEY_FILE={norm_val} to {norm_expected}")
@@ -141,14 +151,16 @@ def main() -> int:
         # 7. tf-env preserves child exit status.
         e = {**env, "EVE_RUNTIME_ENV_LOADED": "1"}
         e.pop("EVE_INSTANCE_NAME", None)
-        r = subprocess.run(
+        bad_rc = subprocess.run(
             [sys.executable, str(ROOT / "scripts/tf-env"), "definitely-not-a-profile"],
-            cwd=str(ROOT), env=e, capture_output=True, check=False,
-        )
-        if r.returncode == 5:
+            cwd=str(ROOT), env=e, stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            start_new_session=True, check=False,
+        ).returncode
+        if bad_rc == 5:
             print("  [OK] tf-env preserves profile-resolve exit status 5")
         else:
-            print(f"  [FAIL] tf-env exit status: expected 5, got {r.returncode}", file=sys.stderr)
+            print(f"  [FAIL] tf-env exit status: expected 5, got {bad_rc}", file=sys.stderr)
             fail += 1
 
         return 1 if fail else 0
