@@ -9,8 +9,8 @@ categories of checks:
 2. **requires core gate** — validates the ``requires`` shape and enforces
    ``requires.eve`` against :data:`~eve_sdk.plugin_manifest.CORE_VERSION`
    (rejects out-of-range with a readable message).
-3. **SSH-readiness boundary** (roadmap 204-222) - a provider must be able to
-   reach an SSH-ready host on its own (declares access rules + owns bring-up
+3. **manageable boundary** (roadmap 204-222) - a provider must be able to
+   reach an manageable host on its own (declares access rules + owns bring-up
    commands incl. ``ssh``, ``up``, ``status``); a package must assume an
    already-reachable host (no ``access``, no ``catalog.inits``, no provider
    capabilities, no bring-up commands).
@@ -37,7 +37,7 @@ __all__ = [
 ]
 
 # Provider-exclusive commands that represent bring-up / infrastructure
-# ownership.  A package declaring any of these violates the SSH-readiness
+# ownership.  A package declaring any of these violates the manageability
 # boundary.  ``down`` and ``status`` appear in both kinds, so they are excluded.
 _PROVIDER_EXCLUSIVE_COMMANDS: frozenset[str] = frozenset({
     "resolve", "init", "plan", "up", "start", "stop", "ssh", "ip", "validate",
@@ -115,13 +115,13 @@ def run_plugin_test(plugin_path: str | os.PathLike[str]) -> PluginTestResult:
     # -- requires.eve core gate (explicit) ----------------------------------
     checks.append(_check_requires_core_gate(manifest))
 
-    # -- SSH-readiness boundary ---------------------------------------------
+    # -- manageable boundary ---------------------------------------------
     checks.extend(_check_ssh_readiness(manifest))
 
     # TODO(phase-1): Add dry-run dispatch checks once the fake-provider
     # substrate exists.  These will exercise ``up --dry-run``, ``status``,
     # and ``ssh --dry-run`` through the dispatch layer to verify the provider
-    # actually reaches SSH-ready without real cloud credentials.
+    # actually reaches manageable without real cloud credentials.
 
     return result
 
@@ -162,7 +162,7 @@ def _check_requires_core_gate(manifest: dict[str, Any]) -> CheckResult:
 
 
 def _check_ssh_readiness(manifest: dict[str, Any]) -> list[CheckResult]:
-    """Assert the SSH-readiness boundary (roadmap 204-222)."""
+    """Assert the manageable boundary (roadmap 204-222)."""
     kind = manifest.get("kind")
     if kind == "provider":
         return _check_provider_boundary(manifest)
@@ -176,7 +176,7 @@ def _check_ssh_readiness(manifest: dict[str, Any]) -> list[CheckResult]:
 
 
 def _check_provider_boundary(manifest: dict[str, Any]) -> list[CheckResult]:
-    """A provider must reach SSH-ready on its own — access rules + bring-up commands."""
+    """A provider must reach manageable on its own — access rules + bring-up commands."""
     checks: list[CheckResult] = []
     commands = manifest.get("commands")
     command_names: set[str] = set(commands.keys()) if isinstance(commands, dict) else set()
@@ -195,7 +195,7 @@ def _check_provider_boundary(manifest: dict[str, Any]) -> list[CheckResult]:
             "boundary:provider-access-rules",
             False,
             "provider must declare access rules (bootstrap/provision/human users) "
-            "to reach an SSH-ready host without depending on a package",
+            "to reach an manageable host without depending on a package",
         ))
 
     # Must own the core bring-up commands.
@@ -209,7 +209,7 @@ def _check_provider_boundary(manifest: dict[str, Any]) -> list[CheckResult]:
         else:
             checks.append(CheckResult(
                 name, False,
-                f"provider must own '{required}' command to deliver an SSH-ready host",
+                f"provider must own '{required}' command to deliver an manageable host",
             ))
 
     return checks
@@ -232,7 +232,7 @@ def _check_package_boundary(manifest: dict[str, Any]) -> list[CheckResult]:
         checks.append(CheckResult(
             "boundary:package-no-access",
             True,
-            "package does not declare access rules (assumes SSH-ready host)",
+            "package does not declare access rules (assumes manageable host)",
         ))
 
     # Must NOT contribute catalog.inits — init/bootstrap is pre-SSH, provider-owned.
