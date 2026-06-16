@@ -31,6 +31,11 @@ TOOL_CHECKS = [
     tool("core", "shellcheck", "command -v shellcheck", "brew install shellcheck", "apt install shellcheck"),
     tool("core", "ssh", "command -v ssh", "xcode-select --install", "apt install openssh-client"),
     tool("core", "yq", "command -v yq", "brew install yq", "apt install yq"),
+    # OS-specific tools
+    tool("os", "dscacheutil", "command -v dscacheutil", "bundled with macOS", "", ["darwin"]),
+    tool("os", "getent", "command -v getent", "", "apt install libc-bin", ["linux"]),
+    tool("os", "pbcopy", "command -v pbcopy", "bundled with macOS", "", ["darwin"]),
+    tool("os", "xfreerdp", "command -v xfreerdp", "", "apt install freerdp2-x11", ["linux"]),
 ]
 
 # Engine → host tools mapping. Doctor derives which engine tools to check from

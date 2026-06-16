@@ -12,6 +12,21 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def _pkg(doc, pkg_id, **expected):
+    """Check that package pkg_id has the given nested key=value pairs."""
+    for p in doc["packages"]:
+        if p["id"] != pkg_id:
+            continue
+        for key, val in expected.items():
+            current = p
+            for part in key.split("."):
+                current = current.get(part, {}) if isinstance(current, dict) else {}
+            if current != val:
+                return False
+        return True
+    return False
+
+
 def main() -> int:
     fail = 0
     result = subprocess.run(
@@ -23,76 +38,50 @@ def main() -> int:
         return 1
     doc = json.loads(result.stdout)
 
-    # Check 1: provider/platform/content choices with package support metadata.
-    def has_platform(provider, machine, os_id):
+    def has_plat(provider, machine=None, os_id=None):
         return any(
-            p["provider"] == provider and p["machine"] == machine and p["os"] == os_id
+            p["provider"] == provider and (machine is None or p["machine"] == machine) and (os_id is None or p["os"] == os_id)
             for p in doc["platforms"]
         )
 
-    def has_bundle(bundle_id, **kwargs):
-        for b in doc["bundles"]:
-            if b["id"] != bundle_id:
-                continue
-            for k, v in kwargs.items():
-                if v is None:
-                    if k in b.get("includes", []):
-                        return False
-                elif v not in b.get("includes", []):
-                    return False
-            return True
-        return False
+    # Bundle helper
+    def bundle_includes(bundle_id):
+        return next((b.get("includes", []) for b in doc["bundles"] if b["id"] == bundle_id), None)
 
-    def has_pkg(pkg_id, **kwargs):
-        for p in doc["packages"]:
-            if p["id"] != pkg_id:
-                continue
-            for k, v in kwargs.items():
-                # Navigate dotted keys into nested dicts.
-                parts = k.split(".")
-                current = p
-                for part in parts:
-                    current = current.get(part, {}) if isinstance(current, dict) else {}
-                if current != v:
-                    return False
-            return True
-        return False
+    ds_inc = bundle_includes("desktop-streaming")
+    gs_inc = bundle_includes("gaming-streaming")
+    retired = {"desktop-rustdesk-vnc", "desktop-vnc", "remote-rdp", "remote-waypipe", "dev-ai-arm64"}
 
     check1 = (
         "vultr" in doc["providers"] and
         "truenas" in doc["providers"] and
         "gcp" in doc["providers"] and
-        has_platform("aws", "aws-gpu-g4dn-spot", "ubuntu-26.04-amd64") and
-        has_platform("aws", "aws-gpu-g4dn-spot", "windows-server-2025") and
-        has_platform("vultr", "vultr-vcg-a40-2c", "windows-server-2025") and
-        has_platform("truenas", "truenas-scale-medium", "ubuntu-26.04-amd64") and
-        has_platform("gcp", "gcp-cheap-x86", "ubuntu-26.04-amd64") and
-        has_bundle("desktop-streaming", sunshine=True, rustdesk=True, vnc=True, rdp=True, waypipe=True) and
-        "gnome-desktop" not in next((b["includes"] for b in doc["bundles"] if b["id"] == "desktop-streaming"), []) and
-        has_bundle("gaming-streaming", steam=True) and
-        not any(b["id"] in {"desktop-rustdesk-vnc", "desktop-vnc", "remote-rdp", "remote-waypipe", "dev-ai-arm64"} for b in doc["bundles"]) and
-        has_pkg("codex-cli", **{"supports.os_families": ["ubuntu"]}) and
-        has_pkg("xpra", **{"supports.ubuntu_versions": ["22.04", "24.04"]}) and
-        has_pkg("rdp", **{"supports.os_families": ["ubuntu", "windows"], "installable_os_families": ["ubuntu"]}) and
-        has_pkg("thinlinc", **{"supports.os_families": ["ubuntu"], "supports.arches": ["amd64"], "installable_os_families": ["ubuntu"]}) and
-        has_pkg("nomachine", **{"supports.os_families": ["ubuntu", "windows"], "installable_os_families": ["ubuntu", "windows"]}) and
-        has_pkg("splashtop", **{"supports.os_families": ["ubuntu", "windows"], "supports.arches": ["amd64"]}) and
-        has_pkg("steam", **{"supports.arches": ["amd64"]})
+        has_plat("aws", "aws-gpu-g4dn-spot", "ubuntu-26.04-amd64") and
+        has_plat("aws", "aws-gpu-g4dn-spot", "windows-server-2025") and
+        has_plat("vultr", "vultr-vcg-a40-2c", "windows-server-2025") and
+        has_plat("truenas", "truenas-scale-medium", "ubuntu-26.04-amd64") and
+        has_plat("gcp", "gcp-cheap-x86", "ubuntu-26.04-amd64") and
+        ds_inc is not None and "gnome-desktop" not in ds_inc and
+        all(x in ds_inc for x in ["sunshine", "rustdesk", "vnc", "rdp", "waypipe"]) and
+        gs_inc is not None and "steam" in gs_inc and
+        not any(b["id"] in retired for b in doc["bundles"]) and
+        _pkg(doc, "codex-cli", **{"supports.os_families": ["ubuntu"]}) and
+        _pkg(doc, "xpra", **{"supports.ubuntu_versions": ["22.04", "24.04"]}) and
+        _pkg(doc, "rdp", **{"supports.os_families": ["ubuntu", "windows"], "installable_os_families": ["ubuntu"]}) and
+        _pkg(doc, "thinlinc", **{"supports.os_families": ["ubuntu"], "supports.arches": ["amd64"], "installable_os_families": ["ubuntu"]}) and
+        _pkg(doc, "nomachine", **{"supports.os_families": ["ubuntu", "windows"], "installable_os_families": ["ubuntu", "windows"]}) and
+        _pkg(doc, "splashtop", **{"supports.os_families": ["ubuntu", "windows"], "supports.arches": ["amd64"]}) and
+        _pkg(doc, "steam", **{"supports.arches": ["amd64"]})
     )
     if check1:
         print("  [OK] catalog-options emits provider/platform/content choices with package support metadata")
     else:
         print("  [FAIL] catalog-options emits provider/platform/content choices with package support metadata", file=sys.stderr)
-        print(json.dumps(doc, indent=2), file=sys.stderr)
         fail += 1
 
     # Check 2: hide invalid provider/OS pairs.
-    no_vultr_ubuntu = not has_platform("vultr", None, "ubuntu-26.04-amd64") if False else all(
-        not (p["provider"] == "vultr" and p["os"] == "ubuntu-26.04-amd64") for p in doc["platforms"]
-    )
-    has_aws_windows = has_platform("aws", None, "windows-server-2025") if False else any(
-        p["provider"] == "aws" and p["os"] == "windows-server-2025" for p in doc["platforms"]
-    )
+    no_vultr_ubuntu = all(not (p["provider"] == "vultr" and p["os"] == "ubuntu-26.04-amd64") for p in doc["platforms"])
+    has_aws_windows = any(p["provider"] == "aws" and p["os"] == "windows-server-2025" for p in doc["platforms"])
     if no_vultr_ubuntu and has_aws_windows:
         print("  [OK] catalog-options hides invalid provider/OS pairs and exposes AWS Windows with image metadata")
     else:
