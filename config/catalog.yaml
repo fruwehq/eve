@@ -1,45 +1,12 @@
 # v2 catalog
-# Central catalog: packages and locations.
-# OS identity rows and inits live in the catalog-base contribution
-# (eve-providers/_catalog-base/) discovered at runtime by the aggregator.
-# Provider-owned rows (machines, provider-specific OS image fields) live in
-# provider manifests under plugins/providers/*/eve-plugin.yaml.
-# Bundle definitions live in package manifests under
-# plugins/packages/*/eve-plugin.yaml.
+# Central catalog: locations only.
+# OS identity rows, inits, and package identity live in the catalog-base
+# contribution (eve-providers/_catalog-base/) discovered at runtime by the
+# aggregator. Provider-owned rows (machines, provider-specific OS image fields)
+# live in provider manifests. Bundle definitions live in package manifests.
 # The aggregator (eve_sdk/catalog.py) reconstructs the effective catalog by
 # unioning these contributions with this central file.
 version: 1
-
-# -----------------------------------------------------------------------------
-# Workload package catalog
-# -----------------------------------------------------------------------------
-packages:
-  - id: claude
-  - id: codex-cli
-  - id: dev-toolchain
-  - id: discord
-  - id: docker
-  - id: gnome-desktop
-  - id: gnome-desktop-headless
-  - id: goose
-  - id: hermes
-  - id: kde-desktop
-  - id: kde-desktop-headless
-  - id: macos-desktop-theme
-  - id: nomachine
-  - id: opencode
-  - id: rdp
-  - id: rustdesk
-  - id: splashtop
-  - id: steam
-  - id: sunshine
-  - id: thinlinc
-  - id: vscode
-  - id: vnc
-  - id: waypipe
-  - id: xfce-desktop
-  - id: xfce-desktop-headless
-  - id: xpra
 
 # -----------------------------------------------------------------------------
 # Location mapping (provider-specific region/AZ translation)

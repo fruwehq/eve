@@ -16,14 +16,7 @@
 # (empty — all provider/OS literals have been extracted from core)
 
 # --- Bash shebangs (language policy: no new bash in scripts/) ---
-scripts/test:bash shebang - test runner - port to Python or plugin command
-scripts/test-catalog:bash shebang - catalog validation - port to Python or plugin command
-scripts/test-instances:bash shebang - instance validation - port to Python or plugin command
-scripts/test-lint:bash shebang - lint checks - port to Python or plugin command
-scripts/test-plugins:bash shebang - plugin validation - port to Python or plugin command
-scripts/test-plugins-sync:bash shebang - plugin sync validation - port to Python or plugin command
-scripts/test-python:bash shebang - Python lint - port to Python or plugin command
-scripts/test-shellcheck:bash shebang - shellcheck runner - port to Python or plugin command
-scripts/test-terraform:bash shebang - terraform validation - port to Python or plugin command
-scripts/test-tf-isolation:bash shebang - tf-env isolation tests - port to Python or plugin command
-scripts/test-tui:bash shebang - TUI tests - port to Python or plugin command
+# Remaining: two large test suites still in bash (1000+ lines each);
+# port deferred — they need faithful 1:1 translation of hundreds of checks.
+scripts/test-instances:bash shebang - instance validation - port to Python (large; ~1500 checks)
+scripts/test-plugins:bash shebang - plugin validation - port to Python (large; ~1200 checks)

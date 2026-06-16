@@ -1,28 +1,54 @@
-#!/usr/bin/env bash
-# Run strict Python linting and type checks.
+#!/usr/bin/env python3
+"""Run strict Python linting and type checks."""
 
-set -euo pipefail
-cd "$(git rev-parse --show-toplevel)"
+from __future__ import annotations
 
-cache_dir="$(mktemp -d "${TMPDIR:-/tmp}/eve-python-cache.XXXXXX")"
-trap 'rm -rf "$cache_dir"' EXIT
+import subprocess
+import tempfile
+from pathlib import Path
 
-# Lint the package plus every executable Python script in scripts/. Scripts have
-# no .py extension, so select them by their `#!/usr/bin/env python3` shebang
-# rather than blanket-including scripts/ (which also holds bash/pwsh helpers).
-python_scripts=()
-while IFS= read -r script; do
-	python_scripts+=("$script")
-done < <(find scripts -maxdepth 1 -type f -exec grep -lE '^#!/usr/bin/env python3' {} + | sort)
+ROOT = Path(__file__).resolve().parents[1]
 
-RUFF_CACHE_DIR="$cache_dir/ruff" poetry run ruff check eve_sdk "${python_scripts[@]}"
-# mypy is intentionally NOT expanded to every script the way ruff is: mypy treats
-# each extensionless entrypoint as module `__main__`, so passing more than one at
-# once collides ("source file found twice"), and the scripts are not annotated to
-# strict-typing standards. eve_sdk (the typed core) is checked transitively via
-# eve-tui's imports. Broad script typing is a separate effort, not a lint gate.
-MYPY_CACHE_DIR="$cache_dir/mypy" poetry run mypy scripts/eve-tui
 
-poetry run pytest tests/python
+def main() -> int:
+    cache_dir = tempfile.mkdtemp(prefix="eve-python-cache.")
+    try:
+        # Select Python scripts by shebang (same logic as the bash version).
+        python_scripts = sorted(
+            str(p)
+            for p in (ROOT / "scripts").iterdir()
+            if p.is_file() and p.read_text(encoding="utf-8", errors="replace").startswith("#!/usr/bin/env python3")
+        )
 
-printf '  [OK] python lint, type checks, and tests pass\n'
+        env_ruff = {"RUFF_CACHE_DIR": f"{cache_dir}/ruff", "PATH": __import__("os").environ["PATH"]}
+        code = subprocess.run(
+            ["poetry", "run", "ruff", "check", "eve_sdk", *python_scripts],
+            cwd=str(ROOT), env={**__import__("os").environ, **env_ruff}, check=False,
+        ).returncode
+        if code != 0:
+            return code
+
+        env_mypy = {"MYPY_CACHE_DIR": f"{cache_dir}/mypy", "PATH": __import__("os").environ["PATH"]}
+        code = subprocess.run(
+            ["poetry", "run", "mypy", "scripts/eve-tui"],
+            cwd=str(ROOT), env={**__import__("os").environ, **env_mypy}, check=False,
+        ).returncode
+        if code != 0:
+            return code
+
+        code = subprocess.run(
+            ["poetry", "run", "pytest", "tests/python"],
+            cwd=str(ROOT), check=False,
+        ).returncode
+        if code != 0:
+            return code
+
+        print("  [OK] python lint, type checks, and tests pass")
+        return 0
+    finally:
+        import shutil
+        shutil.rmtree(cache_dir, ignore_errors=True)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

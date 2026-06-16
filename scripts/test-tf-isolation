@@ -1,127 +1,163 @@
-#!/usr/bin/env bash
-# Verify per-instance Terraform state isolation:
-#   - tf-env emits TF_WORKSPACE and per-instance Terraform roots only when
-#     EVE_INSTANCE_NAME is set.
-#   - tf-init schedules per-instance backend config plus a
-#     `workspace select -or-create <instance>` step in instance mode and skips
-#     it in PROFILE= mode.
-#   - Two different instance names produce two different workspace names and
-#     backend paths.
-# Uses tf-init's EVE_TF_PRINT=1 mode so no real terraform/terramate runs.
+#!/usr/bin/env python3
+# ruff: noqa: E501
+"""Verify per-instance Terraform state isolation.
 
-set -euo pipefail
-cd "$(git rev-parse --show-toplevel)"
+Uses tf-init's EVE_TF_PRINT=1 mode so no real terraform/terramate runs.
+"""
 
-# tf-env requires SSH_PUBLIC_KEY_FILE to exist for terraform-engine profiles.
-TMPKEY=$(mktemp)
-printf 'ssh-rsa AAAAB3NzaC1yc2EAAAA_test_only test@test\n' > "$TMPKEY"
-TMPWORK=$(mktemp -d)
-TMPSTATE=$(mktemp -d)
-TMPCATALOG_DIR=$(mktemp -d "${TMPDIR:-/tmp}/eve-tf-profile.XXXXXX")
-TMPCATALOG="$TMPCATALOG_DIR/catalog.local.yaml"
-trap 'rm -f "$TMPKEY"; rm -rf "$TMPWORK" "$TMPSTATE" "$TMPCATALOG_DIR"' EXIT
-cat >"$TMPCATALOG" <<'YAML'
-profiles:
-  - name: aws-ubuntu-dev-headless
-    machine: aws-cheap-x86
-    os: ubuntu-26.04-amd64
-    init: ssh-ubuntu-cloud-init
-    bundles: [dev-ai]
-    location: tokyo
-YAML
-export SSH_PUBLIC_KEY_FILE="$TMPKEY"
-export EVE_CATALOG_LOCAL="$TMPCATALOG"
-export EVE_INSTANCE_REGISTRY="tests/fixtures/instances.yaml"
-export EVE_INSTANCE_WORKDIR="$TMPWORK/work"
-export EVE_STATE_DIR="$TMPSTATE/state"
-export VM_USER_NAME="eve-test"
+from __future__ import annotations
 
-PROFILE="aws-ubuntu-dev-headless"
-FAIL=0
+import os
+import re
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
 
-# 1. tf-env without instance: no TF_WORKSPACE export.
-env_profile_only=$(unset EVE_INSTANCE_NAME; ./scripts/tf-env "$PROFILE")
-if printf '%s\n' "$env_profile_only" | grep -q 'TF_WORKSPACE'; then
-  printf '  [FAIL] tf-env emitted TF_WORKSPACE in PROFILE= mode\n' >&2
-  FAIL=$((FAIL + 1))
-else
-  printf '  [OK] tf-env omits TF_WORKSPACE without EVE_INSTANCE_NAME\n'
-fi
+ROOT = Path(__file__).resolve().parents[1]
 
-# 2. tf-env with instance: emits TF_WORKSPACE.
-env_instance=$(EVE_INSTANCE_NAME=aws-gpu-a ./scripts/tf-env "$PROFILE")
-if printf '%s\n' "$env_instance" | grep -qE "^export TF_WORKSPACE='aws-gpu-a';\$" &&
-  printf '%s\n' "$env_instance" | grep -qE "^export EVE_TF_DATA_BASE='$TMPWORK/work/aws-gpu-a/tf/data';\$" &&
-  printf '%s\n' "$env_instance" | grep -qE "^export EVE_TF_STATE_BASE='$TMPWORK/work/aws-gpu-a/tf/state';\$"; then
-  printf '  [OK] tf-env emits isolated Terraform env for EVE_INSTANCE_NAME=aws-gpu-a\n'
-else
-  printf '  [FAIL] tf-env did not emit expected isolated Terraform exports\n' >&2
-  printf '%s\n' "$env_instance" >&2
-  FAIL=$((FAIL + 1))
-fi
 
-# 3. tf-init in print mode without instance: no workspace step.
-init_profile=$(EVE_TF_PRINT=1 ./scripts/tf-init "$PROFILE" 2>&1)
-if printf '%s\n' "$init_profile" | grep -q 'terraform init -reconfigure' &&
-  ! printf '%s\n' "$init_profile" | grep -q 'terraform workspace'; then
-  printf '  [OK] tf-init skips workspace step in PROFILE= mode\n'
-else
-  printf '  [FAIL] tf-init PROFILE= output unexpected\n' >&2
-  printf '%s\n' "$init_profile" >&2
-  FAIL=$((FAIL + 1))
-fi
+def main() -> int:
+    tmpkey = tempfile.NamedTemporaryFile(mode="w", suffix="_key", delete=False)  # noqa: SIM115
+    tmpkey.write("ssh-rsa AAAAB3NzaC1yc2EAAAA_test_only test@test\n")
+    tmpkey.close()
 
-# 4. tf-init in print mode with instance: includes workspace step naming the instance.
-init_a=$(EVE_TF_PRINT=1 EVE_INSTANCE_NAME=aws-gpu-a ./scripts/tf-init "$PROFILE" 2>&1)
-if printf '%s\n' "$init_a" | grep -q 'terraform init -reconfigure' &&
-  printf '%s\n' "$init_a" | grep -q "backend-config=path=$TMPWORK/work/aws-gpu-a/tf/state" &&
-  printf '%s\n' "$init_a" | grep -q "backend-config=workspace_dir=$TMPWORK/work/aws-gpu-a/tf/state" &&
-  printf '%s\n' "$init_a" | grep -q "terraform workspace select -or-create aws-gpu-a"; then
-  printf '  [OK] tf-init schedules isolated backend and workspace for instance aws-gpu-a\n'
-else
-  printf '  [FAIL] tf-init instance-mode output missing isolated backend/workspace setup\n' >&2
-  printf '%s\n' "$init_a" >&2
-  FAIL=$((FAIL + 1))
-fi
+    tmpwork = tempfile.mkdtemp()
+    tmpstate = tempfile.mkdtemp()
+    tmpcatalog_dir = tempfile.mkdtemp(prefix="eve-tf-profile.")
+    tmpcatalog = Path(tmpcatalog_dir) / "catalog.local.yaml"
+    tmpcatalog.write_text(
+        "profiles:\n"
+        "  - name: aws-ubuntu-dev-headless\n"
+        "    machine: aws-cheap-x86\n"
+        "    os: ubuntu-26.04-amd64\n"
+        "    init: ssh-ubuntu-cloud-init\n"
+        "    bundles: [dev-ai]\n"
+        "    location: tokyo\n",
+        encoding="utf-8",
+    )
 
-# 5. Two different instances → two different workspace names and backend roots.
-init_b=$(EVE_TF_PRINT=1 EVE_INSTANCE_NAME=truenas-all-a ./scripts/tf-init "$PROFILE" 2>&1)
-if printf '%s\n' "$init_b" | grep -q "terraform workspace select -or-create truenas-all-a" &&
-  printf '%s\n' "$init_b" | grep -q "backend-config=path=$TMPWORK/work/truenas-all-a/tf/state" &&
-  ! printf '%s\n' "$init_b" | grep -q "backend-config=path=$TMPWORK/work/aws-gpu-a/tf/state" &&
-  ! printf '%s\n' "$init_b" | grep -q "terraform workspace select -or-create aws-gpu-a"; then
-  printf '  [OK] distinct instance names produce distinct Terraform roots\n'
-else
-  printf '  [FAIL] second instance did not produce distinct Terraform roots\n' >&2
-  printf '%s\n' "$init_b" >&2
-  FAIL=$((FAIL + 1))
-fi
+    import shutil
+    try:
+        env = {
+            **os.environ,
+            "SSH_PUBLIC_KEY_FILE": tmpkey.name,
+            "EVE_CATALOG_LOCAL": str(tmpcatalog),
+            "EVE_INSTANCE_REGISTRY": "tests/fixtures/instances.yaml",
+            "EVE_INSTANCE_WORKDIR": f"{tmpwork}/work",
+            "EVE_STATE_DIR": f"{tmpstate}/state",
+            "VM_USER_NAME": "eve-test",
+        }
+        profile = "aws-ubuntu-dev-headless"
+        fail = 0
 
-# 6. Path normalization: ~/foo, $HOME/foo, $(HOME)/foo all resolve to $HOME/foo.
-#    Set EVE_RUNTIME_ENV_LOADED=1 so the loader does not override our test value.
-NORM_EXPECTED="${HOME}/foo"
-# shellcheck disable=SC2088,SC2016
-for norm_val in '~/foo' "\$HOME/foo" '$(HOME)/foo'; do
-  export SSH_PUBLIC_KEY_FILE="$norm_val"
-  norm_out=$(EVE_RUNTIME_ENV_LOADED=1 ./scripts/tf-env "$PROFILE" 2>/dev/null)
-  norm_actual=$(printf '%s\n' "$norm_out" | sed -n "s/^export TF_VAR_ssh_public_key_file='\\(.*\\)';$/\\1/p")
-  if [ "$norm_actual" = "$NORM_EXPECTED" ]; then
-    printf '  [OK] tf-env normalizes SSH_PUBLIC_KEY_FILE=%s to %s\n' "$norm_val" "$NORM_EXPECTED"
-  else
-    printf '  [FAIL] tf-env SSH_PUBLIC_KEY_FILE=%s: expected %s, got %s\n' "$norm_val" "$NORM_EXPECTED" "$norm_actual" >&2
-    FAIL=$((FAIL + 1))
-  fi
-done
-export SSH_PUBLIC_KEY_FILE="$TMPKEY"
+        def run_tf_env(extra_env=None, profile_arg=None):
+            e = {**env, **(extra_env or {})}
+            e.pop("EVE_INSTANCE_NAME", None)
+            r = subprocess.run(
+                [sys.executable, str(ROOT / "scripts/tf-env"), profile_arg or profile],
+                cwd=str(ROOT), env=e, capture_output=True, text=True, check=False,
+            )
+            return r.stdout
 
-# 7. tf-env preserves child exit status (e.g. profile-resolve exits 5 for bad profile).
-bad_rc=0
-EVE_RUNTIME_ENV_LOADED=1 ./scripts/tf-env definitely-not-a-profile >/dev/null 2>&1 || bad_rc=$?
-if [ "$bad_rc" -eq 5 ]; then
-  printf '  [OK] tf-env preserves profile-resolve exit status 5\n'
-else
-  printf '  [FAIL] tf-env exit status: expected 5, got %s\n' "$bad_rc" >&2
-  FAIL=$((FAIL + 1))
-fi
+        def run_tf_init(extra_env=None):
+            e = {**env, "EVE_TF_PRINT": "1", **(extra_env or {})}
+            e.pop("EVE_INSTANCE_NAME", None)
+            r = subprocess.run(
+                [sys.executable, str(ROOT / "scripts/tf-init"), profile],
+                cwd=str(ROOT), env=e, capture_output=True, text=True, check=False,
+            )
+            return r.stdout + r.stderr
 
-[ "$FAIL" -eq 0 ]
+        # 1. tf-env without instance: no TF_WORKSPACE export.
+        out = run_tf_env()
+        if "TF_WORKSPACE" in out:
+            print("  [FAIL] tf-env emitted TF_WORKSPACE in PROFILE= mode", file=sys.stderr)
+            fail += 1
+        else:
+            print("  [OK] tf-env omits TF_WORKSPACE without EVE_INSTANCE_NAME")
+
+        # 2. tf-env with instance: emits TF_WORKSPACE.
+        out = run_tf_env({"EVE_INSTANCE_NAME": "aws-gpu-a"})
+        if (re.search(r"^export TF_WORKSPACE='aws-gpu-a';$", out, re.M) and
+            f"export EVE_TF_DATA_BASE='{tmpwork}/work/aws-gpu-a/tf/data';" in out and
+            f"export EVE_TF_STATE_BASE='{tmpwork}/work/aws-gpu-a/tf/state';" in out):
+            print("  [OK] tf-env emits isolated Terraform env for EVE_INSTANCE_NAME=aws-gpu-a")
+        else:
+            print("  [FAIL] tf-env did not emit expected isolated Terraform exports", file=sys.stderr)
+            print(out, file=sys.stderr)
+            fail += 1
+
+        # 3. tf-init in print mode without instance: no workspace step.
+        out = run_tf_init()
+        if "terraform init -reconfigure" in out and "terraform workspace" not in out:
+            print("  [OK] tf-init skips workspace step in PROFILE= mode")
+        else:
+            print("  [FAIL] tf-init PROFILE= output unexpected", file=sys.stderr)
+            print(out, file=sys.stderr)
+            fail += 1
+
+        # 4. tf-init with instance: includes workspace step.
+        out = run_tf_init({"EVE_INSTANCE_NAME": "aws-gpu-a"})
+        if ("terraform init -reconfigure" in out and
+            f"backend-config=path={tmpwork}/work/aws-gpu-a/tf/state" in out and
+            f"backend-config=workspace_dir={tmpwork}/work/aws-gpu-a/tf/state" in out and
+            "terraform workspace select -or-create aws-gpu-a" in out):
+            print("  [OK] tf-init schedules isolated backend and workspace for instance aws-gpu-a")
+        else:
+            print("  [FAIL] tf-init instance-mode output missing isolated backend/workspace setup", file=sys.stderr)
+            print(out, file=sys.stderr)
+            fail += 1
+
+        # 5. Two different instances → different workspace names.
+        out_b = run_tf_init({"EVE_INSTANCE_NAME": "truenas-all-a"})
+        if ("terraform workspace select -or-create truenas-all-a" in out_b and
+            f"backend-config=path={tmpwork}/work/truenas-all-a/tf/state" in out_b and
+            f"backend-config=path={tmpwork}/work/aws-gpu-a/tf/state" not in out_b and
+            "terraform workspace select -or-create aws-gpu-a" not in out_b):
+            print("  [OK] distinct instance names produce distinct Terraform roots")
+        else:
+            print("  [FAIL] second instance did not produce distinct Terraform roots", file=sys.stderr)
+            print(out_b, file=sys.stderr)
+            fail += 1
+
+        # 6. Path normalization.
+        norm_expected = f"{os.environ['HOME']}/foo"
+        for norm_val in ["~/foo", "$HOME/foo", "$(HOME)/foo"]:
+            e = {**env, "SSH_PUBLIC_KEY_FILE": norm_val, "EVE_RUNTIME_ENV_LOADED": "1"}
+            e.pop("EVE_INSTANCE_NAME", None)
+            r = subprocess.run(
+                [sys.executable, str(ROOT / "scripts/tf-env"), profile],
+                cwd=str(ROOT), env=e, capture_output=True, text=True, check=False,
+            )
+            m = re.search(r"^export TF_VAR_ssh_public_key_file='(.*)';$", r.stdout, re.M)
+            norm_actual = m.group(1) if m else ""
+            if norm_actual == norm_expected:
+                print(f"  [OK] tf-env normalizes SSH_PUBLIC_KEY_FILE={norm_val} to {norm_expected}")
+            else:
+                print(f"  [FAIL] tf-env SSH_PUBLIC_KEY_FILE={norm_val}: expected {norm_expected}, got {norm_actual}", file=sys.stderr)
+                fail += 1
+
+        # 7. tf-env preserves child exit status.
+        e = {**env, "EVE_RUNTIME_ENV_LOADED": "1"}
+        e.pop("EVE_INSTANCE_NAME", None)
+        r = subprocess.run(
+            [sys.executable, str(ROOT / "scripts/tf-env"), "definitely-not-a-profile"],
+            cwd=str(ROOT), env=e, capture_output=True, check=False,
+        )
+        if r.returncode == 5:
+            print("  [OK] tf-env preserves profile-resolve exit status 5")
+        else:
+            print(f"  [FAIL] tf-env exit status: expected 5, got {r.returncode}", file=sys.stderr)
+            fail += 1
+
+        return 1 if fail else 0
+    finally:
+        Path(tmpkey.name).unlink(missing_ok=True)
+        shutil.rmtree(tmpwork, ignore_errors=True)
+        shutil.rmtree(tmpstate, ignore_errors=True)
+        shutil.rmtree(tmpcatalog_dir, ignore_errors=True)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

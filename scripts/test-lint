@@ -1,58 +1,75 @@
-#!/usr/bin/env bash
-# Run non-Python lint and syntax checks.
+#!/usr/bin/env python3
+"""Run non-Python lint and syntax checks."""
 
-set -euo pipefail
-cd "$(git rev-parse --show-toplevel)"
+from __future__ import annotations
 
-FAIL=0
-
-printf '  -- yaml syntax --\n'
-YAML_FILES=()
-while IFS= read -r file; do
-  YAML_FILES+=("$file")
-done < <(find .github config plugins tests -type f \( -name '*.yaml' -o -name '*.yml' \) | sort)
-if ! python3 - "${YAML_FILES[@]}" <<'PY'; then
+import shutil
+import subprocess
 import sys
+import tempfile
+from pathlib import Path
 
-import yaml
+ROOT = Path(__file__).resolve().parents[1]
 
-for path in sys.argv[1:]:
+
+def main() -> int:
+    fail = 0
+
+    # -- yaml syntax --
+    print("  -- yaml syntax --")
+    yaml_files = sorted(
+        str(p)
+        for pattern in [".github", "config", "plugins", "tests"]
+        for p in (ROOT / pattern).rglob("*")
+        if p.is_file() and p.suffix in (".yaml", ".yml")
+    )
     try:
-        with open(path, encoding="utf-8") as handle:
-            yaml.safe_load(handle)
-    except Exception as error:
-        print(f"{path}: {error.__class__.__name__}: {error}", file=sys.stderr)
-        raise SystemExit(1) from error
-PY
-  FAIL=$((FAIL + 1))
-fi
+        import yaml
+        for path in yaml_files:
+            try:
+                with open(path, encoding="utf-8") as handle:
+                    yaml.safe_load(handle)
+            except Exception as error:
+                print(f"{path}: {error.__class__.__name__}: {error}", file=sys.stderr)
+                raise
+    except Exception:
+        fail += 1
 
-printf '  -- terraform fmt --\n'
-TF_FMT_DIRS=()
-for dir in modules stacks plugins/providers; do
-  [ -d "$dir" ] && TF_FMT_DIRS+=("$dir")
-done
-if [ "${#TF_FMT_DIRS[@]}" -gt 0 ] && ! terraform fmt -check -recursive -no-color "${TF_FMT_DIRS[@]}" >/dev/null; then
-  terraform fmt -check -recursive -no-color "${TF_FMT_DIRS[@]}" >&2 || true
-  FAIL=$((FAIL + 1))
-fi
+    # -- terraform fmt --
+    print("  -- terraform fmt --")
+    tf_dirs = [str(ROOT / d) for d in ("modules", "stacks", "plugins/providers") if (ROOT / d).is_dir()]
+    if tf_dirs:
+        result = subprocess.run(
+            ["terraform", "fmt", "-check", "-recursive", "-no-color", *tf_dirs],
+            cwd=str(ROOT), capture_output=True, check=False,
+        )
+        if result.returncode != 0:
+            print(result.stderr.decode(errors="replace"), file=sys.stderr)
+            fail += 1
 
-printf '  -- terramate fmt --\n'
-tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/eve-terramate-fmt.XXXXXX")"
-trap 'rm -rf "$tmp_dir"' EXIT
-while IFS= read -r file; do
-  tmp_file="$tmp_dir/${file//\//__}"
-  cp "$file" "$tmp_file"
-  terramate fmt --quiet "$tmp_file"
-  if ! cmp -s "$file" "$tmp_file"; then
-    printf '  [FAIL] terramate fmt: %s\n' "$file" >&2
-    diff -u "$file" "$tmp_file" >&2 || true
-    FAIL=$((FAIL + 1))
-  fi
-done < <(find . -type f -name '*.tm.hcl' -not -path './.terraform-cache-dir/*' | sort)
+    # -- terramate fmt --
+    print("  -- terramate fmt --")
+    tmp_dir = tempfile.mkdtemp(prefix="eve-terramate-fmt.")
+    try:
+        tm_files = sorted(
+            p for p in ROOT.rglob("*.tm.hcl")
+            if ".terraform-cache-dir" not in str(p)
+        )
+        for f in tm_files:
+            tmp_file = Path(tmp_dir) / str(f.relative_to(ROOT)).replace("/", "__")
+            shutil.copy2(f, tmp_file)
+            subprocess.run(["terramate", "fmt", "--quiet", str(tmp_file)], check=False)
+            if Path(f).read_bytes() != tmp_file.read_bytes():
+                print(f"  [FAIL] terramate fmt: {f.relative_to(ROOT)}", file=sys.stderr)
+                fail += 1
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
-if [ "$FAIL" -ne 0 ]; then
-  exit 1
-fi
+    if fail:
+        return 1
+    print("  [OK] non-Python lint and syntax checks pass")
+    return 0
 
-printf '  [OK] non-Python lint and syntax checks pass\n'
+
+if __name__ == "__main__":
+    raise SystemExit(main())

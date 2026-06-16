@@ -1,63 +1,116 @@
-#!/usr/bin/env bash
-# Validate catalog-backed provider/platform/content choices.
+#!/usr/bin/env python3
+# ruff: noqa: E501
+"""Validate catalog-backed provider/platform/content choices."""
 
-set -euo pipefail
-cd "$(git rev-parse --show-toplevel)"
+from __future__ import annotations
 
-FAIL=0
+import json
+import subprocess
+import sys
+from pathlib import Path
 
-catalog_options_json="$(./scripts/catalog-options --json)"
-if printf '%s\n' "$catalog_options_json" |
-  jq -e '
-    (.providers | index("vultr")) and
-    (.providers | index("truenas")) and
-    (.providers | index("gcp")) and
-    any(.platforms[]; .provider == "aws" and .machine == "aws-gpu-g4dn-spot" and .os == "ubuntu-26.04-amd64") and
-    any(.platforms[]; .provider == "aws" and .machine == "aws-gpu-g4dn-spot" and .os == "windows-server-2025") and
-    any(.platforms[]; .provider == "vultr" and .machine == "vultr-vcg-a40-2c" and .os == "windows-server-2025") and
-    any(.platforms[]; .provider == "truenas" and .machine == "truenas-scale-medium" and .os == "ubuntu-26.04-amd64") and
-    any(.platforms[]; .provider == "gcp" and .machine == "gcp-cheap-x86" and .os == "ubuntu-26.04-amd64") and
-    any(.bundles[]; .id == "desktop-streaming" and (.includes | index("gnome-desktop") | not) and (.includes | index("sunshine")) and (.includes | index("rustdesk")) and (.includes | index("vnc")) and (.includes | index("rdp")) and (.includes | index("waypipe"))) and
-    any(.bundles[]; .id == "gaming-streaming" and (.includes | index("steam"))) and
-    all(.bundles[]; .id != "desktop-rustdesk-vnc" and .id != "desktop-vnc" and .id != "remote-rdp" and .id != "remote-waypipe" and .id != "dev-ai-arm64") and
-    any(.packages[]; .id == "codex-cli" and .supports.os_families == ["ubuntu"]) and
-    any(.packages[]; .id == "xpra" and .supports.ubuntu_versions == ["22.04", "24.04"]) and
-    any(.packages[]; .id == "rdp" and .supports.os_families == ["ubuntu", "windows"] and .installable_os_families == ["ubuntu"]) and
-    any(.packages[]; .id == "thinlinc" and .supports.os_families == ["ubuntu"] and .supports.arches == ["amd64"] and .installable_os_families == ["ubuntu"]) and
-    any(.packages[]; .id == "nomachine" and .supports.os_families == ["ubuntu", "windows"] and .installable_os_families == ["ubuntu", "windows"]) and
-    any(.packages[]; .id == "splashtop" and .supports.os_families == ["ubuntu", "windows"] and .supports.arches == ["amd64"]) and
-    any(.packages[]; .id == "steam" and .supports.arches == ["amd64"])
-  ' >/dev/null; then
-  printf '  [OK] catalog-options emits provider/platform/content choices with package support metadata\n'
-else
-  printf '  [FAIL] catalog-options emits provider/platform/content choices with package support metadata\n' >&2
-  printf '%s\n' "$catalog_options_json" >&2
-  FAIL=$((FAIL + 1))
-fi
+ROOT = Path(__file__).resolve().parents[1]
 
-if printf '%s\n' "$catalog_options_json" |
-  jq -e '
-    all(.platforms[]; .provider != "vultr" or .os != "ubuntu-26.04-amd64") and
-    any(.platforms[]; .provider == "aws" and .os == "windows-server-2025")
-  ' >/dev/null; then
-  printf '  [OK] catalog-options hides invalid provider/OS pairs and exposes AWS Windows with image metadata\n'
-else
-  printf '  [FAIL] catalog-options provider/OS image metadata gating regressed\n' >&2
-  printf '%s\n' "$catalog_options_json" | jq '.platforms[] | select((.provider == "vultr" and .os == "ubuntu-26.04-amd64") or (.provider == "aws" and .os == "windows-server-2025"))' >&2
-  FAIL=$((FAIL + 1))
-fi
 
-if printf '%s\n' "$catalog_options_json" |
-  jq -e '
-    any(.platforms[]; .provider == "raspberry-pi" and .init == "ssh-ubuntu-metal") and
-    all(.platforms[]; .provider != "raspberry-pi" or .init == "ssh-ubuntu-metal") and
-    all(.platforms[]; .provider == "raspberry-pi" or .init != "ssh-ubuntu-metal")
-  ' >/dev/null; then
-  printf '  [OK] catalog-options gates init choices by provider\n'
-else
-  printf '  [FAIL] catalog-options exposes invalid provider/init pairs\n' >&2
-  printf '%s\n' "$catalog_options_json" | jq '.platforms[] | select(.init == "ssh-ubuntu-metal" or .provider == "raspberry-pi")' >&2
-  FAIL=$((FAIL + 1))
-fi
+def main() -> int:
+    fail = 0
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "scripts/catalog-options"), "--json"],
+        cwd=str(ROOT), capture_output=True, text=True, check=False,
+    )
+    if result.returncode != 0:
+        print(f"  [FAIL] catalog-options exited {result.returncode}", file=sys.stderr)
+        return 1
+    doc = json.loads(result.stdout)
 
-[ "$FAIL" -eq 0 ]
+    # Check 1: provider/platform/content choices with package support metadata.
+    def has_platform(provider, machine, os_id):
+        return any(
+            p["provider"] == provider and p["machine"] == machine and p["os"] == os_id
+            for p in doc["platforms"]
+        )
+
+    def has_bundle(bundle_id, **kwargs):
+        for b in doc["bundles"]:
+            if b["id"] != bundle_id:
+                continue
+            for k, v in kwargs.items():
+                if v is None:
+                    if k in b.get("includes", []):
+                        return False
+                elif v not in b.get("includes", []):
+                    return False
+            return True
+        return False
+
+    def has_pkg(pkg_id, **kwargs):
+        for p in doc["packages"]:
+            if p["id"] != pkg_id:
+                continue
+            for k, v in kwargs.items():
+                # Navigate dotted keys into nested dicts.
+                parts = k.split(".")
+                current = p
+                for part in parts:
+                    current = current.get(part, {}) if isinstance(current, dict) else {}
+                if current != v:
+                    return False
+            return True
+        return False
+
+    check1 = (
+        "vultr" in doc["providers"] and
+        "truenas" in doc["providers"] and
+        "gcp" in doc["providers"] and
+        has_platform("aws", "aws-gpu-g4dn-spot", "ubuntu-26.04-amd64") and
+        has_platform("aws", "aws-gpu-g4dn-spot", "windows-server-2025") and
+        has_platform("vultr", "vultr-vcg-a40-2c", "windows-server-2025") and
+        has_platform("truenas", "truenas-scale-medium", "ubuntu-26.04-amd64") and
+        has_platform("gcp", "gcp-cheap-x86", "ubuntu-26.04-amd64") and
+        has_bundle("desktop-streaming", sunshine=True, rustdesk=True, vnc=True, rdp=True, waypipe=True) and
+        "gnome-desktop" not in next((b["includes"] for b in doc["bundles"] if b["id"] == "desktop-streaming"), []) and
+        has_bundle("gaming-streaming", steam=True) and
+        not any(b["id"] in {"desktop-rustdesk-vnc", "desktop-vnc", "remote-rdp", "remote-waypipe", "dev-ai-arm64"} for b in doc["bundles"]) and
+        has_pkg("codex-cli", **{"supports.os_families": ["ubuntu"]}) and
+        has_pkg("xpra", **{"supports.ubuntu_versions": ["22.04", "24.04"]}) and
+        has_pkg("rdp", **{"supports.os_families": ["ubuntu", "windows"], "installable_os_families": ["ubuntu"]}) and
+        has_pkg("thinlinc", **{"supports.os_families": ["ubuntu"], "supports.arches": ["amd64"], "installable_os_families": ["ubuntu"]}) and
+        has_pkg("nomachine", **{"supports.os_families": ["ubuntu", "windows"], "installable_os_families": ["ubuntu", "windows"]}) and
+        has_pkg("splashtop", **{"supports.os_families": ["ubuntu", "windows"], "supports.arches": ["amd64"]}) and
+        has_pkg("steam", **{"supports.arches": ["amd64"]})
+    )
+    if check1:
+        print("  [OK] catalog-options emits provider/platform/content choices with package support metadata")
+    else:
+        print("  [FAIL] catalog-options emits provider/platform/content choices with package support metadata", file=sys.stderr)
+        print(json.dumps(doc, indent=2), file=sys.stderr)
+        fail += 1
+
+    # Check 2: hide invalid provider/OS pairs.
+    no_vultr_ubuntu = not has_platform("vultr", None, "ubuntu-26.04-amd64") if False else all(
+        not (p["provider"] == "vultr" and p["os"] == "ubuntu-26.04-amd64") for p in doc["platforms"]
+    )
+    has_aws_windows = has_platform("aws", None, "windows-server-2025") if False else any(
+        p["provider"] == "aws" and p["os"] == "windows-server-2025" for p in doc["platforms"]
+    )
+    if no_vultr_ubuntu and has_aws_windows:
+        print("  [OK] catalog-options hides invalid provider/OS pairs and exposes AWS Windows with image metadata")
+    else:
+        print("  [FAIL] catalog-options provider/OS image metadata gating regressed", file=sys.stderr)
+        fail += 1
+
+    # Check 3: init choices gated by provider.
+    rpi_has_metal = any(p["provider"] == "raspberry-pi" and p["init"] == "ssh-ubuntu-metal" for p in doc["platforms"])
+    rpi_only_metal = all(p["init"] == "ssh-ubuntu-metal" for p in doc["platforms"] if p["provider"] == "raspberry-pi")
+    metal_only_rpi = all(p["provider"] == "raspberry-pi" for p in doc["platforms"] if p["init"] == "ssh-ubuntu-metal")
+    if rpi_has_metal and rpi_only_metal and metal_only_rpi:
+        print("  [OK] catalog-options gates init choices by provider")
+    else:
+        print("  [FAIL] catalog-options exposes invalid provider/init pairs", file=sys.stderr)
+        fail += 1
+
+    return 1 if fail else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

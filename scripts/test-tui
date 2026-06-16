@@ -1,24 +1,54 @@
-#!/usr/bin/env bash
-# Validate the optional Textual TUI entrypoint without requiring Textual.
+#!/usr/bin/env python3
+# ruff: noqa: E501
+"""Validate the optional Textual TUI entrypoint without requiring Textual."""
 
-set -euo pipefail
-cd "$(git rev-parse --show-toplevel)"
+from __future__ import annotations
 
-cache_dir="$(mktemp -d "${TMPDIR:-/tmp}/eve-tui-pycache.XXXXXX")"
-trap 'rm -rf "$cache_dir"' EXIT
+import os
+import subprocess
+import tempfile
+from pathlib import Path
 
-PYTHONPYCACHEPREFIX="$cache_dir" poetry run python -m py_compile scripts/eve-tui
-poetry run python ./scripts/eve-tui --check
-poetry run python - <<'PY'
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def main() -> int:
+    cache_dir = tempfile.mkdtemp(prefix="eve-tui-pycache.")
+    try:
+        env = {**os.environ, "PYTHONPYCACHEPREFIX": cache_dir}
+        code = subprocess.run(
+            ["poetry", "run", "python", "-m", "py_compile", "scripts/eve-tui"],
+            cwd=str(ROOT), env=env, check=False,
+        ).returncode
+        if code != 0:
+            return code
+        code = subprocess.run(
+            ["poetry", "run", "python", "./scripts/eve-tui", "--check"],
+            cwd=str(ROOT), check=False,
+        ).returncode
+        if code != 0:
+            return code
+        # Inline assertions (same as the bash heredoc).
+        result = subprocess.run(
+            ["poetry", "run", "python", "-c", """
 import runpy
-
 module = runpy.run_path("scripts/eve-tui")
 options = module["catalog_options"]()
 assert "vultr" in options["providers"]
 assert any(platform["provider"] == "vultr" and platform["os"] == "windows-server-2025" for platform in options["platforms"])
-
 format_aggregate = module["format_aggregate"]
 assert "running" in format_aggregate({"running": 0, "stopped": 0, "failed": 0, "other": 0})
-PY
+"""],
+            cwd=str(ROOT), check=False,
+        )
+        if result.returncode != 0:
+            return result.returncode
+        print("  [OK] eve-tui compiles without importing optional Textual dependency")
+        return 0
+    finally:
+        import shutil
+        shutil.rmtree(cache_dir, ignore_errors=True)
 
-printf '  [OK] eve-tui compiles without importing optional Textual dependency\n'
+
+if __name__ == "__main__":
+    raise SystemExit(main())
