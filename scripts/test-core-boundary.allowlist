@@ -13,7 +13,7 @@
 # boundary check fails.
 
 # --- Provider/OS coupling (Phase 3 extraction debt) ---
-scripts/providers-status:provider/OS reference - per-provider connectivity probes need a provider-level connectivity command declaration; deferred to a later chunk — too deep a design to genericize without a connectivity-contract extension
+# (empty — all provider/OS literals have been extracted from core)
 
 # --- Bash shebangs (language policy: no new bash in scripts/) ---
 scripts/test:bash shebang - test runner - port to Python or plugin command

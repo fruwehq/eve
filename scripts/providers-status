@@ -5,184 +5,73 @@ Usage:
   scripts/providers-status                    # show all providers (table)
   scripts/providers-status <provider>         # check one provider (table row)
   scripts/providers-status <provider> <field> # print single field (configured|reachable|notes)
+
+The provider list is derived dynamically from PluginManifest: every provider
+that declares a ``connectivity`` command appears. Each connectivity command
+runs on the HOST (probes local CLIs/creds, not an instance) and prints one
+JSON object: {"configured","reachable","notes"}.
 """
 from __future__ import annotations
 
-import os
-import shutil
+import json
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from eve_sdk.tf_dispatch import repo_root  # noqa: E402
+from eve_sdk.dispatch import command_vector  # noqa: E402
+from eve_sdk.plugin_manifest import PluginManifest  # noqa: E402
 
-PROVIDERS = ["aws", "gcp", "local-qemu", "truenas", "vultr"]
 HEADER = "Provider           Configured  Reachable  Notes"
 SEPARATOR = "-----------------  ----------  ---------  -------------------------------------------"
 
-_DEVNULL = subprocess.DEVNULL
+
+def _connectivity_providers() -> list[dict[str, Any]]:
+    """Return provider plugins that declare a connectivity command, sorted by id."""
+    return sorted(
+        (
+            PluginManifest.public(p)
+            for p in PluginManifest.load_all("provider")
+            if "connectivity" in (p.get("commands") or {})
+        ),
+        key=lambda p: p["id"],
+    )
 
 
-def check_aws() -> tuple[str, str, str]:
-    configured = "no"
-    reachable = "no"
-
-    if shutil.which("aws") is None:
-        return configured, reachable, "aws cli not found"
-
-    # Always probe the AWS credential chain - a logged-in default profile (SSO),
-    # ambient env vars, or an instance role are all valid even when AWS_PROFILE
-    # is unset. Gating the probe on AWS_PROFILE hid working SSO sessions.
-    args = ["sts", "get-caller-identity"]
-    aws_profile = os.environ.get("AWS_PROFILE", "")
-    aws_region = os.environ.get("AWS_REGION", "")
-    if aws_profile:
-        args = ["--profile", aws_profile, *args]
-    if aws_region:
-        args = ["--region", aws_region, *args]
-
-    if subprocess.run(["aws", *args], stdout=_DEVNULL, stderr=_DEVNULL, check=False).returncode == 0:
-        suffix = f" (profile {aws_profile})" if aws_profile else ""
-        return "yes", "yes", f"aws sts ok{suffix}"
-    if aws_profile or os.environ.get("AWS_ACCESS_KEY_ID", ""):
-        return ("yes", "no",
-                "configured but aws sts failed - run the AWS Login provider action "
-                "(SSO session may be expired)")
-    return "no", "no", "no working AWS credentials; run AWS Login (SSO) or set aws.profile in settings"
+def _run_connectivity(plugin: dict[str, Any]) -> tuple[str, str, str]:
+    """Run a provider's connectivity command, parse JSON → (configured, reachable, notes)."""
+    spec = plugin["commands"]["connectivity"]
+    cmd = command_vector(plugin, spec)
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        return "no", "no", f"connectivity check failed (exit {result.returncode})"
+    try:
+        data = json.loads(result.stdout)
+        return str(data.get("configured", "no")), str(data.get("reachable", "no")), str(data.get("notes", ""))
+    except (json.JSONDecodeError, ValueError):
+        return "no", "no", "connectivity check returned invalid JSON"
 
 
-def check_local_qemu() -> tuple[str, str, str]:
-    if shutil.which("qemu-system-aarch64") or shutil.which("qemu-system-x86_64"):
-        return "yes", "yes", "qemu available"
-    return "no", "no", "qemu not found"
-
-
-def check_gcp() -> tuple[str, str, str]:
-    notes = "missing GOOGLE_CLOUD_PROJECT/GOOGLE_PROJECT or gcloud config project"
-    project = os.environ.get("GOOGLE_CLOUD_PROJECT", "") or os.environ.get("GOOGLE_PROJECT", "")
-    if not project and shutil.which("gcloud"):
-        result = subprocess.run(
-            ["gcloud", "config", "get-value", "project"],
-            capture_output=True, text=True, check=False,
-        )
-        project = result.stdout.strip()
-
-    if not project:
-        return "no", "no", notes
-    configured = "yes"
-    if shutil.which("gcloud") is None:
-        return configured, "no", "configured, but gcloud not found"
-    if os.environ.get("GOOGLE_OAUTH_ACCESS_TOKEN", ""):
-        return configured, "yes", f"GOOGLE_OAUTH_ACCESS_TOKEN set; project={project}"
-    if subprocess.run(
-        ["gcloud", "auth", "application-default", "print-access-token"],
-        stdout=_DEVNULL, stderr=_DEVNULL, check=False,
-    ).returncode == 0:
-        return configured, "yes", f"gcloud application-default auth ok; project={project}"
-    if subprocess.run(
-        ["gcloud", "auth", "print-access-token"],
-        stdout=_DEVNULL, stderr=_DEVNULL, check=False,
-    ).returncode == 0:
-        return (configured, "yes",
-                f"gcloud user auth ok; project={project}; Terraform may need GOOGLE_OAUTH_ACCESS_TOKEN")
-    return configured, "no", f"configured, but gcloud auth failed; project={project}"
-
-
-def check_truenas(root: Path) -> tuple[str, str, str]:
-    host = os.environ.get("TRUENAS_HOST", "")
-    port = os.environ.get("TRUENAS_SSH_PORT", "22")
-    user = os.environ.get("TRUENAS_SSH_USER", "")
-    key_file = os.environ.get("TRUENAS_SSH_PRIVATE_KEY_FILE", "")
-    configured = "no"
-    reachable = "no"
-    notes = "missing TRUENAS_HOST"
-
-    if not host:
-        return configured, reachable, notes
-
-    configured = "yes"
-    notes = f"host={host}"
-    if subprocess.run(
-        ["nc", "-z", "-w", "2", host, port], stdout=_DEVNULL, stderr=_DEVNULL, check=False,
-    ).returncode == 0:
-        reachable = "yes"
-        notes = f"ssh port {port} reachable"
-    else:
-        notes = f"ssh port {port} unreachable"
-
-    if user and key_file and Path(key_file).is_file():
-        tmp_dir = root / "tmp"
-        tmp_dir.mkdir(parents=True, exist_ok=True)
-        known_hosts = tmp_dir / "known_hosts"
-        probe = subprocess.run(
-            ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
-             "-o", "StrictHostKeyChecking=accept-new",
-             "-o", f"UserKnownHostsFile={known_hosts}",
-             "-p", port, "-i", key_file, f"{user}@{host}",
-             "midclt call system.version >/dev/null 2>&1 && echo ok"],
-            capture_output=True, text=True, check=False,
-        )
-        if "ok" in probe.stdout:
-            reachable = "yes"
-            notes = "ssh auth ok; midclt reachable"
-        else:
-            notes = "host reachable; ssh auth or permissions failed"
-
-    api_key = os.environ.get("TRUENAS_API_KEY", "")
-    if api_key and subprocess.run(
-        ["curl", "-ksS", "--connect-timeout", "3", "--max-time", "8",
-         "-H", f"Authorization: Bearer {api_key}",
-         f"https://{host}/api/v2.0/system/version"],
-        stdout=_DEVNULL, stderr=_DEVNULL, check=False,
-    ).returncode == 0:
-        reachable = "yes"
-        notes = "api key accepted"
-
-    return configured, reachable, notes
-
-
-def check_vultr() -> tuple[str, str, str]:
-    api_key = os.environ.get("VULTR_API_KEY", "")
-    if not api_key:
-        return "no", "no", "missing VULTR_API_KEY"
-    if subprocess.run(
-        ["curl", "-fsS", "-H", f"Authorization: Bearer {api_key}",
-         "https://api.vultr.com/v2/account"],
-        stdout=_DEVNULL, stderr=_DEVNULL, check=False,
-    ).returncode == 0:
-        return "yes", "yes", "api ok"
-    return "yes", "no", "configured, but api call failed"
-
-
-def print_row(name: str, configured: str, reachable: str, notes: str) -> None:
+def _print_row(name: str, configured: str, reachable: str, notes: str) -> None:
     print(f"{name:<17}  {configured:<10}  {reachable:<9}  {notes}")
 
 
-def _run_check(name: str, root: Path) -> tuple[str, str, str]:
-    if name == "aws":
-        return check_aws()
-    if name == "gcp":
-        return check_gcp()
-    if name == "local-qemu":
-        return check_local_qemu()
-    if name == "truenas":
-        return check_truenas(root)
-    return check_vultr()
-
-
 def main(argv: list[str]) -> int:
-    provider = argv[0] if len(argv) > 0 else ""
+    provider_name = argv[0] if len(argv) > 0 else ""
     field = argv[1] if len(argv) > 1 else ""
-    root = repo_root()
 
-    if provider:
-        if provider not in PROVIDERS:
-            print(f"Unknown provider: {provider} (valid: {' '.join(PROVIDERS)})", file=sys.stderr)
+    providers = _connectivity_providers()
+    provider_ids = [p["id"] for p in providers]
+
+    if provider_name:
+        if provider_name not in provider_ids:
+            print(f"Unknown provider: {provider_name} (valid: {' '.join(provider_ids)})", file=sys.stderr)
             return 1
-        configured, reachable, notes = _run_check(provider, root)
+        plugin = next(p for p in providers if p["id"] == provider_name)
+        configured, reachable, notes = _run_connectivity(plugin)
         if field:
             if field == "configured":
                 print(configured)
@@ -199,13 +88,13 @@ def main(argv: list[str]) -> int:
         else:
             print(HEADER)
             print(SEPARATOR)
-            print_row(provider, configured, reachable, notes)
+            _print_row(provider_name, configured, reachable, notes)
     else:
         print(HEADER)
         print(SEPARATOR)
-        for name in PROVIDERS:
-            configured, reachable, notes = _run_check(name, root)
-            print_row(name, configured, reachable, notes)
+        for plugin in providers:
+            configured, reachable, notes = _run_connectivity(plugin)
+            _print_row(plugin["id"], configured, reachable, notes)
     return 0
 
 
