@@ -176,7 +176,12 @@ def resolve_profile(catalog: dict[str, Any], profile_name: str) -> dict[str, Any
         provider_plugins = PluginManifest.load_all("provider")
         pp = next((p for p in provider_plugins if p["id"] == machine_provider), None)
         engines = ((pp or {}).get("supports") or {}).get("engines") or []
-        engine = str(engines[0]) if engines else "terraform"
+        if engines:
+            engine = str(engines[0])
+        elif machine_provider.startswith("local-"):
+            engine = "vagrant"
+        else:
+            engine = "terraform"
 
     return {
         "profile": profile,
@@ -236,29 +241,37 @@ def emit_env(resolved: dict[str, Any]) -> str:
     os_doc = resolved["os"]
     bundle_packages = resolved.get("bundle_packages") or []
 
-    # Resolve access identities from the provider manifest's access rules
-    # (generic — no provider id literal in core).
+    # Resolve provision/human user from the provider manifest's access rules.
+    # Profile-resolve only uses the env-var name from the rule (not the full
+    # value/location/fallback chain that resolve_access evaluates) — this
+    # preserves the legacy emission exactly.
     from eve_sdk.plugin_manifest import PluginManifest
-    from eve_sdk.resolve import ResolveError, resolve_access
 
     provider_plugins = PluginManifest.load_all("provider")
     pp = next((p for p in provider_plugins if p["id"] == provider), None)
     os_family = os_doc.get("family") or ""
-    try:
-        access = resolve_access(pp, os_family, locp) if pp else {
-            "bootstrap_user": _env_or("VM_USER_NAME", ""),
-            "provision_user": _env_or("VM_USER_NAME", ""),
-            "human_user": _env_or("VM_USER_NAME", ""),
-        }
-    except ResolveError:
-        access = {
-            "bootstrap_user": _env_or("VM_USER_NAME", ""),
-            "provision_user": _env_or("VM_USER_NAME", ""),
-            "human_user": _env_or("VM_USER_NAME", ""),
-        }
 
-    provision_user_value = access["provision_user"]
-    human_user_value = access["human_user"]
+    def _access_rule(field: str) -> dict[str, Any] | None:
+        access = (pp or {}).get("access") or {}
+        rules = access.get(os_family) or access.get("default") or {}
+        rule = rules.get(field)
+        return rule if isinstance(rule, dict) else None
+
+    def _provision_user_value() -> str:
+        rule = _access_rule("provision_user")
+        if rule and "value" in rule and "env" not in rule:
+            return str(rule["value"])  # windows: {value: Administrator}
+        env_name = str((rule or {}).get("env") or "VM_USER_NAME")
+        return _env_or(env_name, "")
+
+    def _human_user_value() -> str:
+        rule = _access_rule("human_user")
+        env_name = str((rule or {}).get("env") or "VM_USER_NAME")
+        human = _env_or(env_name, "")
+        return human if human else _provision_user_value()
+
+    provision_user_value = _provision_user_value()
+    human_user_value = _human_user_value()
 
     # Provider-specific keys from provider-declared env_emission entries.
     from eve_sdk.env_emission import evaluate_provider_env
@@ -298,17 +311,23 @@ def emit_env(resolved: dict[str, Any]) -> str:
         ("VM_INSTANCE_TYPE", _jq_coalesce(machine_defaults.get("instance_type"), "")),
         ("VM_ROOT_VOLUME_TYPE", _jq_coalesce(machine_defaults.get("root_volume_type"), "")),
         ("VM_USE_SPOT", use_spot_value),
+        ("GCP_IMAGE_FAMILY", provider_env.get("GCP_IMAGE_FAMILY", "")),
+        ("GCP_IMAGE_PROJECT", provider_env.get("GCP_IMAGE_PROJECT", "")),
+        ("VULTR_OS_ID", provider_env.get("VULTR_OS_ID", "0")),
         ("LOCATION_REGION", _jq_coalesce(locp.get("region"), "")),
         ("LOCATION_AVAILABILITY_ZONE", _jq_coalesce(locp.get("availability_zone"), "")),
         ("LOCATION_ZONE", _jq_coalesce(locp.get("zone"), "")),
         ("SSH_USER", provision_user_value),
+        ("CLOUD_IMAGE_URL", provider_env.get("CLOUD_IMAGE_URL", "")),
         ("HUMAN_USER_NAME", human_user_value),
         ("PROVISION_USER_NAME", provision_user_value),
+        ("RASPBERRY_PI_HOST", provider_env.get("RASPBERRY_PI_HOST", "")),
+        ("RASPBERRY_PI_IP", provider_env.get("RASPBERRY_PI_IP", "")),
+        ("TRUENAS_HOST", provider_env.get("TRUENAS_HOST", "")),
+        ("TRUENAS_SSH_PORT", provider_env.get("TRUENAS_SSH_PORT", "22")),
+        ("TRUENAS_SSH_USER", provider_env.get("TRUENAS_SSH_USER", "")),
         ("VM_USER_NAME", _env_or("VM_USER_NAME", "")),
     ]
-    # Merge provider-specific keys (GCP_*, VULTR_*, CLOUD_IMAGE_URL, RASPBERRY_PI_*,
-    # TRUENAS_*) from the shared helper.
-    lines.extend(provider_env.items())
     return "".join(f"{key}={value}\n" for key, value in lines)
 
 

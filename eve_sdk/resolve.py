@@ -291,6 +291,9 @@ def engine_for(
             if engines:
                 return str(engines[0])
             break
+    # Fallback for providers not in the manifest set (e.g. test profiles).
+    if provider.startswith("local-"):
+        return "vagrant"
     return "terraform"
 
 
