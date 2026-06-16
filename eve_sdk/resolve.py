@@ -268,14 +268,29 @@ def validate_catalog_selection(
         raise ResolveError(f"Bundle references unknown package id: {unknown_package}")
 
 
-def engine_for(machine: dict[str, Any]) -> str:
-    provider = machine["provider"]
+def engine_for(
+    machine: dict[str, Any], plugins: list[dict[str, Any]] | None = None
+) -> str:
+    """Determine the engine from the machine kind + provider's ``supports.engines``.
+
+    Metal-kind machines always use ``metal``. For VMs, the engine comes from
+    the provider manifest's ``supports.engines[0]`` declaration (each provider
+    declares exactly one engine). When ``plugins`` is None the provider
+    manifests are loaded on demand.
+    """
     if machine.get("kind") == "metal":
         return "metal"
-    if provider == "local-qemu":
-        return "qemu"
-    if str(provider).startswith("local-"):
-        return "vagrant"
+    provider = machine["provider"]
+    if plugins is None:
+        from eve_sdk.plugin_manifest import PluginManifest
+
+        plugins = PluginManifest.load_all("provider")
+    for plugin in plugins:
+        if plugin.get("id") == provider:
+            engines = (plugin.get("supports") or {}).get("engines") or []
+            if engines:
+                return str(engines[0])
+            break
     return "terraform"
 
 
@@ -438,7 +453,7 @@ def resolve_instance(
     assert location is not None
     provider = machine["provider"]
     provider_config = provider_config_for(instance, provider)
-    engine = engine_for(machine)
+    engine = engine_for(machine, plugins)
     provider_plugin = validate_provider_plugin(machine, engine, plugins)
     validate_package_plugins(bundle_packages, os_doc, plugins)
     bundle_packages = order_packages_by_dependency(bundle_packages, plugins)
@@ -465,16 +480,15 @@ def resolve_instance(
 def emit_env(resolved: dict[str, Any]) -> str:
     provider = resolved["machine"]["provider"]
     locp = resolved["location"].get(provider) or {}
-    provider_config = resolved.get("provider_config") or {}
-    pi_host = (
-        provider_config.get("host")
-        or provider_config.get("ip")
-        or env_or("RASPBERRY_PI_HOST", locp.get("host", ""))
-    )
-    pi_ip = provider_config.get("ip") or env_or("RASPBERRY_PI_IP", locp.get("ip", ""))
     os_doc = resolved["os"]
     machine_defaults = resolved.get("machine", {}).get("defaults") or {}
     access = resolved["access"]
+    # Provider-specific keys come from provider-declared env_emission entries,
+    # evaluated generically — no provider id literal in core.
+    from eve_sdk.env_emission import evaluate_provider_env
+    from eve_sdk.plugin_manifest import PluginManifest
+
+    provider_env = evaluate_provider_env(resolved, PluginManifest.load_all("provider"))
     lines = {
         "ACCESS_BOOTSTRAP_USER": access["bootstrap_user"],
         "ACCESS_HUMAN_USER": access["human_user"],
@@ -504,21 +518,13 @@ def emit_env(resolved: dict[str, Any]) -> str:
         "VM_INSTANCE_TYPE": str(machine_defaults.get("instance_type") or ""),
         "VM_ROOT_VOLUME_TYPE": str(machine_defaults.get("root_volume_type") or ""),
         "VM_USE_SPOT": str(machine_defaults["use_spot"]).lower() if "use_spot" in machine_defaults else "",
-        "GCP_IMAGE_FAMILY": str(os_doc.get("gcp_image_family") or ""),
-        "GCP_IMAGE_PROJECT": str(os_doc.get("gcp_image_project") or ""),
-        "VULTR_OS_ID": str(os_doc.get("vultr_os_id") or 0),
         "LOCATION_REGION": str(locp.get("region") or ""),
         "LOCATION_AVAILABILITY_ZONE": str(locp.get("availability_zone") or ""),
         "LOCATION_ZONE": str(locp.get("zone") or ""),
         "SSH_USER": access["bootstrap_user"],
-        "CLOUD_IMAGE_URL": str(os_doc.get("cloud_image_url") or "") if provider in ("local-qemu", "truenas") else "",
         "HUMAN_USER_NAME": access["human_user"],
         "PROVISION_USER_NAME": access["provision_user"],
-        "RASPBERRY_PI_HOST": str(pi_host),
-        "RASPBERRY_PI_IP": str(pi_ip),
-        "TRUENAS_HOST": env_or("TRUENAS_HOST", locp.get("host", "")),
-        "TRUENAS_SSH_PORT": env_or("TRUENAS_SSH_PORT", locp.get("ssh_port", 22)),
-        "TRUENAS_SSH_USER": env_or("TRUENAS_SSH_USER", locp.get("ssh_user", "")),
         "VM_USER_NAME": env_or("VM_USER_NAME", ""),
     }
+    lines.update(provider_env)
     return "".join(f"{key}={value}\n" for key, value in lines.items())

@@ -169,12 +169,14 @@ def resolve_profile(catalog: dict[str, Any], profile_name: str) -> dict[str, Any
     machine_kind = machine.get("kind") or ""
     if machine_kind == "metal":
         engine = "metal"
-    elif machine_provider == "local-qemu":
-        engine = "qemu"
-    elif machine_provider.startswith("local-"):
-        engine = "vagrant"
     else:
-        engine = "terraform"
+        # Engine from the provider manifest's supports.engines declaration.
+        from eve_sdk.plugin_manifest import PluginManifest
+
+        provider_plugins = PluginManifest.load_all("provider")
+        pp = next((p for p in provider_plugins if p["id"] == machine_provider), None)
+        engines = ((pp or {}).get("supports") or {}).get("engines") or []
+        engine = str(engines[0]) if engines else "terraform"
 
     return {
         "profile": profile,
@@ -234,40 +236,43 @@ def emit_env(resolved: dict[str, Any]) -> str:
     os_doc = resolved["os"]
     bundle_packages = resolved.get("bundle_packages") or []
 
-    def provision_user() -> str:
-        if os_doc.get("family") == "windows":
-            return "Administrator"
-        if provider == "truenas":
-            return _env_or("EVE_PROVISION_USER", _jq_coalesce(locp.get("provision_user"), ""))
-        return _env_or("VM_USER_NAME", "")
+    # Resolve access identities from the provider manifest's access rules
+    # (generic — no provider id literal in core).
+    from eve_sdk.plugin_manifest import PluginManifest
+    from eve_sdk.resolve import ResolveError, resolve_access
 
-    def human_user() -> str:
-        human = _env_or("VM_USER_NAME", "")
-        if human != "":
-            return human
-        return provision_user()
+    provider_plugins = PluginManifest.load_all("provider")
+    pp = next((p for p in provider_plugins if p["id"] == provider), None)
+    os_family = os_doc.get("family") or ""
+    try:
+        access = resolve_access(pp, os_family, locp) if pp else {
+            "bootstrap_user": _env_or("VM_USER_NAME", ""),
+            "provision_user": _env_or("VM_USER_NAME", ""),
+            "human_user": _env_or("VM_USER_NAME", ""),
+        }
+    except ResolveError:
+        access = {
+            "bootstrap_user": _env_or("VM_USER_NAME", ""),
+            "provision_user": _env_or("VM_USER_NAME", ""),
+            "human_user": _env_or("VM_USER_NAME", ""),
+        }
 
-    pi_host = locp.get("host")
-    pi_ip = locp.get("ip")
+    provision_user_value = access["provision_user"]
+    human_user_value = access["human_user"]
 
-    def rpi_host_value() -> str:
-        if provider == "raspberry-pi" and _jq_coalesce(pi_host, "") != "":
-            return pi_host
-        return _env_or("RASPBERRY_PI_HOST", _jq_coalesce(pi_host, ""))
+    # Provider-specific keys from provider-declared env_emission entries.
+    from eve_sdk.env_emission import evaluate_provider_env
 
-    def rpi_ip_value() -> str:
-        if provider == "raspberry-pi" and _jq_coalesce(pi_ip, "") != "":
-            return pi_ip
-        return _env_or("RASPBERRY_PI_IP", _jq_coalesce(pi_ip, ""))
+    provider_env = evaluate_provider_env(resolved, provider_plugins)
 
     use_spot_value = (
         _jq_tostring(machine_defaults["use_spot"]) if "use_spot" in machine_defaults else ""
     )
 
     lines: list[tuple[str, str]] = [
-        ("ACCESS_BOOTSTRAP_USER", provision_user()),
-        ("ACCESS_HUMAN_USER", human_user()),
-        ("ACCESS_PROVISION_USER", provision_user()),
+        ("ACCESS_BOOTSTRAP_USER", provision_user_value),
+        ("ACCESS_HUMAN_USER", human_user_value),
+        ("ACCESS_PROVISION_USER", provision_user_value),
         ("PROFILE_NAME", resolved["profile"]["name"]),
         ("ENGINE", resolved["engine"]),
         ("PROVIDER", provider),
@@ -293,23 +298,17 @@ def emit_env(resolved: dict[str, Any]) -> str:
         ("VM_INSTANCE_TYPE", _jq_coalesce(machine_defaults.get("instance_type"), "")),
         ("VM_ROOT_VOLUME_TYPE", _jq_coalesce(machine_defaults.get("root_volume_type"), "")),
         ("VM_USE_SPOT", use_spot_value),
-        ("GCP_IMAGE_FAMILY", _jq_coalesce(os_doc.get("gcp_image_family"), "")),
-        ("GCP_IMAGE_PROJECT", _jq_coalesce(os_doc.get("gcp_image_project"), "")),
-        ("VULTR_OS_ID", _jq_tostring(_jq_coalesce(os_doc.get("vultr_os_id"), 0))),
         ("LOCATION_REGION", _jq_coalesce(locp.get("region"), "")),
         ("LOCATION_AVAILABILITY_ZONE", _jq_coalesce(locp.get("availability_zone"), "")),
         ("LOCATION_ZONE", _jq_coalesce(locp.get("zone"), "")),
-        ("SSH_USER", provision_user()),
-        ("CLOUD_IMAGE_URL", (os_doc.get("cloud_image_url") or "") if provider in ("local-qemu", "truenas") else ""),
-        ("HUMAN_USER_NAME", human_user()),
-        ("PROVISION_USER_NAME", provision_user()),
-        ("RASPBERRY_PI_HOST", rpi_host_value()),
-        ("RASPBERRY_PI_IP", rpi_ip_value()),
-        ("TRUENAS_HOST", _env_or("TRUENAS_HOST", _jq_coalesce(locp.get("host"), ""))),
-        ("TRUENAS_SSH_PORT", _env_or("TRUENAS_SSH_PORT", _jq_tostring(_jq_coalesce(locp.get("ssh_port"), 22)))),
-        ("TRUENAS_SSH_USER", _env_or("TRUENAS_SSH_USER", _jq_coalesce(locp.get("ssh_user"), ""))),
+        ("SSH_USER", provision_user_value),
+        ("HUMAN_USER_NAME", human_user_value),
+        ("PROVISION_USER_NAME", provision_user_value),
         ("VM_USER_NAME", _env_or("VM_USER_NAME", "")),
     ]
+    # Merge provider-specific keys (GCP_*, VULTR_*, CLOUD_IMAGE_URL, RASPBERRY_PI_*,
+    # TRUENAS_*) from the shared helper.
+    lines.extend(provider_env.items())
     return "".join(f"{key}={value}\n" for key, value in lines)
 
 
@@ -321,7 +320,7 @@ def emit_json(resolved: dict[str, Any]) -> str:
 def emit_vagrant(resolved: dict[str, Any]) -> str:
     """Produce a Vagrantfile for the resolved profile.
 
-    Only ``os.family=ubuntu`` and ``machine.provider=local-qemu`` are supported;
+    Only ``os.family=ubuntu`` and the ``qemu`` engine are supported;
     any other combination raises ``ProfileResolveError`` (exit 5) — except
     non-ubuntu which exits 2 (usage error), mirroring the legacy guard.
     """
@@ -331,9 +330,9 @@ def emit_vagrant(resolved: dict[str, Any]) -> str:
         raise SystemExit(2)
 
     machine = resolved["machine"]
-    provider_name = machine.get("provider") or ""
-    if provider_name != "local-qemu":
-        raise ProfileResolveError(f"Vagrant emit only supports local-qemu, got {provider_name}")
+    engine = resolved.get("engine") or ""
+    if engine != "qemu":
+        raise ProfileResolveError(f"Vagrant emit only supports the qemu engine, got {engine}")
 
     defaults = machine.get("defaults") or {}
     bundle_packages = resolved.get("bundle_packages") or []

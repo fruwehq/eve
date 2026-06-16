@@ -40,9 +40,9 @@ USAGE = (
     "  - EVE_CATALOG_LOCAL can point at a generated overlay for INSTANCE workflows.\n"
     "\n"
     "Examples:\n"
-    "  scripts/profile-resolve --profile aws-ubuntu-dev-headless --validate\n"
-    "  scripts/profile-resolve --profile aws-ubuntu-dev-headless --emit env\n"
-    "  scripts/profile-resolve --profile local-vbox-ubuntu-dev --emit vagrant"
+    "  scripts/profile-resolve --profile my-profile --validate\n"
+    "  scripts/profile-resolve --profile my-profile --emit env\n"
+    "  scripts/profile-resolve --profile my-profile --emit vagrant"
     " --output ./.generated/Vagrantfile\n"
 )
 

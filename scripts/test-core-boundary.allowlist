@@ -13,14 +13,11 @@
 # boundary check fails.
 
 # --- Provider/OS coupling (Phase 3 extraction debt) ---
-eve_sdk/profile_resolve.py:provider/OS reference - provider-specific env emission (faithful port of bash jq emit_env) - Phase 3: provider env emission extraction
-eve_sdk/resolve.py:provider/OS reference - provider branches and image-field env emission - Phase 3: provider env emission extraction
 scripts/doctor:provider/OS reference - provider-specific CLI tool checks - Phase 3: moves into provider plugins
 scripts/instance-create:provider/OS reference - provider-specific CLI usage hints - Phase 3: derives from provider manifests
 scripts/instance-password:provider/OS reference - vultr-specific password retrieval - Phase 3: moves into vultr plugin
 scripts/instance-profile-overlay:provider/OS reference - raspberry-pi host validation - Phase 3: moves into raspberry-pi plugin
 scripts/package-provision:provider/OS reference - raspberry-pi password handling - Phase 3: moves into raspberry-pi plugin
-scripts/profile-resolve:provider/OS reference - provider-specific env emission - Phase 3: moves into provider plugins
 scripts/providers-status:provider/OS reference - provider-specific connectivity checks - Phase 3: moves into provider plugins
 scripts/provision:provider/OS reference - vultr-specific password retrieval - Phase 3: moves into vultr plugin
 scripts/remote-console:provider/OS reference - local-qemu not-implemented guard - Phase 3: moves into local-qemu plugin

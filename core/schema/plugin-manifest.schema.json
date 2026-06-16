@@ -140,6 +140,12 @@
       "additionalProperties": true
     },
 
+    "env_emission": {
+      "description": "Provider-declared env-var emission rules. Core evaluates the union of all provider entries against each resolved instance to produce the provider-specific portion of the resolved env, keeping core free of provider id literals.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/env_emission_entry" }
+    },
+
     "bundles": {
       "description": "Bundle definitions contributed by this package manifest. Each bundle composes a set of included package ids. Only meaningful on package manifests.",
       "type": "array"
@@ -178,7 +184,8 @@
             "required": ["resolve", "init", "plan", "up", "down", "start", "stop", "status", "ip", "ssh", "validate"]
           },
           "supports": { "$ref": "#/$defs/provider_supports" },
-          "catalog": { "$ref": "#/$defs/catalog_contribution" }
+          "catalog": { "$ref": "#/$defs/catalog_contribution" },
+          "env_emission": { "$ref": "#/$defs/env_emission_array" }
         }
       }
     },
@@ -529,6 +536,42 @@
         "inits": {
           "type": "array",
           "items": { "$ref": "#/$defs/catalog_init" }
+        }
+      }
+    },
+
+    "env_emission_array": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/env_emission_entry" }
+    },
+
+    "env_emission_entry": {
+      "description": "One provider-declared env-var emission rule.",
+      "type": "object",
+      "required": ["name", "from"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Environment variable name to emit."
+        },
+        "from": {
+          "description": "Source ref(s) into the resolved context, tried in order (coalesce — first non-empty wins). Refs: os.<field>, location.<field>, provider_config.<field>, machine.defaults.<field>, env:<ENV_VAR>.",
+          "oneOf": [
+            { "type": "string" },
+            { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+          ]
+        },
+        "default": {
+          "description": "Value emitted when all sources are empty/null."
+        },
+        "tostring": {
+          "type": "boolean",
+          "description": "JSON-encode the value (mirror jq tostring)."
+        },
+        "match_provider": {
+          "type": "boolean",
+          "description": "Only emit the derived value when the declaring provider IS the instance's provider; otherwise emit empty string."
         }
       }
     },
