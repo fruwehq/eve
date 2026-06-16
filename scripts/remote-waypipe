@@ -87,10 +87,7 @@ def main(argv: list[str]) -> int:
 
     ssh_user = resolved.get("SSH_USER", "")
     raspberry_pi_ip = resolved.get("RASPBERRY_PI_IP", "")
-    if engine == "metal" and raspberry_pi_ip:
-        ip = raspberry_pi_ip
-    else:
-        ip = instance_ip(root, profile)
+    ip = raspberry_pi_ip if engine == "metal" and raspberry_pi_ip else instance_ip(root, profile)
     if not ip:
         print(f"remote-waypipe: could not resolve IP for {profile}", file=sys.stderr)
         return 1
