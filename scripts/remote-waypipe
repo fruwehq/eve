@@ -64,7 +64,6 @@ def main(argv: list[str]) -> int:
 
     resolved = resolve_env(root, profile)
     engine = resolved.get("ENGINE", "")
-    provider = resolved.get("PROVIDER", "")
     os_family = resolved.get("OS_FAMILY", "")
 
     if os_family != "ubuntu":

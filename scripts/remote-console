@@ -25,7 +25,6 @@ def main(argv: list[str]) -> int:
     root = repo_root()
     resolved = resolve_env(root, profile)
     engine = resolved.get("ENGINE", "")
-    provider = resolved.get("PROVIDER", "")
     if engine != "vagrant":
         print(
             f"remote.console is only supported for local (vagrant) profiles. "
