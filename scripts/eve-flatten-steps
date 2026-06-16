@@ -1,0 +1,107 @@
+#!/usr/bin/env python3
+"""eve-flatten-steps — host-side step bundle generator for eve-local-install.
+
+Resolves an instance's package provision steps, flattens them into a single
+JSON bundle, and optionally uploads to the instance. The bundle is what
+``eve-local-install`` consumes on the instance side.
+
+Usage:
+  scripts/eve-flatten-steps --instance <name> [--output PATH] [--upload]
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(prog="scripts/eve-flatten-steps")
+    parser.add_argument("--instance", required=True)
+    parser.add_argument("--registry", default=None)
+    parser.add_argument("--output", default=None, help="write bundle to PATH (default: stdout)")
+    parser.add_argument("--upload", action="store_true", help="upload bundle to the instance via SSH")
+    args = parser.parse_args()
+
+    # Resolve the instance to get its provisioning steps + env config.
+    from eve_sdk.resolve import default_registry_path, resolve_instance
+
+    registry = args.registry or str(default_registry_path())
+    resolved = resolve_instance(args.instance, registry)
+
+    os_family = resolved["os"]["family"]
+    bundle_packages = resolved.get("bundle_packages", [])
+
+    # Collect provision steps from the package manifests.
+    from eve_sdk.plugin_manifest import PluginManifest
+
+    plugins = {p["id"]: p for p in PluginManifest.load_all("package")}
+    steps: list[dict[str, Any]] = []
+
+    for pkg_id in bundle_packages:
+        plugin = plugins.get(pkg_id)
+        if not plugin:
+            continue
+        install = plugin.get("install") or {}
+        os_install = install.get(os_family) or {}
+        step_files = os_install.get("steps") or []
+        plugin_path = Path(str(plugin.get("_path") or plugin.get("path", ""))).parent
+
+        for step_file in step_files:
+            step_path = plugin_path / step_file
+            if not step_path.exists():
+                continue
+            steps.append({
+                "name": step_file,
+                "script": step_path.read_text(encoding="utf-8"),
+            })
+
+    # Collect the env config (from emit_env, minus provider-specific values).
+    from eve_sdk.resolve import emit_env
+
+    env_lines = emit_env(resolved)
+    config: dict[str, str] = {}
+    for line in env_lines.splitlines():
+        if "=" in line:
+            key, value = line.split("=", 1)
+            config[key] = value
+
+    bundle = {
+        "instance": args.instance,
+        "os_family": os_family,
+        "steps": steps,
+        "config": config,
+    }
+
+    output = json.dumps(bundle, indent=2)
+
+    if args.output:
+        Path(args.output).write_text(output + "\n", encoding="utf-8")
+        print(f"Wrote {len(steps)} steps to {args.output}", file=sys.stderr)
+    else:
+        print(output)
+
+    if args.upload:
+        ssh_cmd = [
+            str(ROOT / "scripts/instance-ssh"),
+            "--instance", args.instance,
+            "--", "mkdir -p ~/.eve/install && cat > ~/.eve/install/steps.json",
+        ]
+        result = subprocess.run(ssh_cmd, input=output, text=True, check=False)
+        if result.returncode == 0:
+            print(f"Uploaded {len(steps)} steps to {args.instance}:~/.eve/install/steps.json", file=sys.stderr)
+        else:
+            print(f"Upload failed (exit {result.returncode})", file=sys.stderr)
+            return 1
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
