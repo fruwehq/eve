@@ -31,60 +31,61 @@ TOOL_CHECKS = [
     tool("core", "shellcheck", "command -v shellcheck", "brew install shellcheck", "apt install shellcheck"),
     tool("core", "ssh", "command -v ssh", "xcode-select --install", "apt install openssh-client"),
     tool("core", "yq", "command -v yq", "brew install yq", "apt install yq"),
-    tool("provider", "curl", "command -v curl", "brew install curl", "apt install curl"),
-    tool("provider", "docker", "docker --version", "install Docker Desktop", "apt install docker.io"),
-    tool("provider", "gcloud", "command -v gcloud", "brew install --cask google-cloud-sdk", "install google-cloud-cli"),
-    tool("provider", "nc", "command -v nc", "xcode-select --install", "apt install netcat-openbsd"),
-    tool(
-        "provider",
-        "qemu-system-aarch64",
-        "command -v qemu-system-aarch64",
-        "brew install qemu",
-        "apt install qemu-system-arm",
-    ),
-    tool(
-        "provider",
-        "qemu-system-x86_64",
-        "command -v qemu-system-x86_64",
-        "brew install qemu",
-        "apt install qemu-system-x86",
-    ),
-    tool(
-        "provider",
-        "terraform",
-        "terraform -version",
-        "brew tap hashicorp/tap && brew install hashicorp/tap/terraform",
-        "apt install terraform",
-    ),
-    tool(
-        "provider",
-        "terramate",
-        "terramate version",
-        "install Terramate release tarball",
-        "install Terramate release tarball",
-    ),
-
-    tool("os", "dscacheutil", "command -v dscacheutil", "bundled with macOS", "", ["darwin"]),
-    tool("os", "getent", "command -v getent", "", "apt install libc-bin", ["linux"]),
-    tool("os", "pbcopy", "command -v pbcopy", "bundled with macOS", "", ["darwin"]),
-    tool("os", "xfreerdp", "command -v xfreerdp", "", "apt install freerdp2-x11", ["linux"]),
 ]
 
-# Provider-declared host tools (loaded from provider manifests so core has no
-# provider id literals). Each provider may declare a ``host_tools`` list; doctor
-# reads and checks them generically.
+# Engine → host tools mapping. Doctor derives which engine tools to check from
+# the engines declared by the pulled providers, rather than a static list.
+ENGINE_TOOLS: dict[str, list[dict[str, Any]]] = {
+    "terraform": [
+        tool("provider", "terraform", "terraform -version",
+             "brew tap hashicorp/tap && brew install hashicorp/tap/terraform", "apt install terraform"),
+        tool("provider", "terramate", "terramate version",
+             "install Terramate release tarball", "install Terramate release tarball"),
+    ],
+    "qemu": [
+        tool("provider", "qemu-system-aarch64", "command -v qemu-system-aarch64",
+             "brew install qemu", "apt install qemu-system-arm"),
+        tool("provider", "qemu-system-x86_64", "command -v qemu-system-x86_64",
+             "brew install qemu", "apt install qemu-system-x86"),
+    ],
+    "vagrant": [
+        tool("provider", "vagrant", "vagrant --version",
+             "brew install vagrant", "install Vagrant"),
+    ],
+    "metal": [],
+    "docker": [
+        tool("provider", "docker", "docker --version",
+             "install Docker Desktop", "apt install docker.io"),
+    ],
+}
+
+# Provider-declared host tools + engine-derived tools (loaded from provider
+# manifests so doctor checks only what the pulled providers actually need).
 try:
     from eve_sdk.plugin_manifest import PluginManifest as _PM
 
+    _seen_engines: set[str] = set()
+    _seen_tools: set[str] = set()
     for _plugin in _PM.load_all("provider"):
+        # Engine-derived tools.
+        for _eng in ((_plugin.get("supports") or {}).get("engines") or []):
+            if _eng not in _seen_engines:
+                _seen_engines.add(_eng)
+                for _t in ENGINE_TOOLS.get(str(_eng), []):
+                    if _t["tool"] not in _seen_tools:
+                        TOOL_CHECKS.append(_t)
+                        _seen_tools.add(_t["tool"])
+        # Provider-declared host_tools.
         for _ht in _plugin.get("host_tools") or []:
-            TOOL_CHECKS.append(tool(
-                "provider",
-                str(_ht.get("name", "")),
-                str(_ht.get("check", "")),
-                str(_ht.get("brew", "")),
-                str(_ht.get("apt", "")),
-            ))
+            if str(_ht.get("name", "")) not in _seen_tools:
+                TOOL_CHECKS.append(tool(
+                    "provider",
+                    str(_ht.get("name", "")),
+                    str(_ht.get("check", "")),
+                    str(_ht.get("brew", "")),
+                    str(_ht.get("apt", "")),
+                ))
+                _seen_tools.add(str(_ht.get("name", "")))
 except Exception:
     pass
 
