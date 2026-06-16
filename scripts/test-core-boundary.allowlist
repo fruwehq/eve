@@ -16,7 +16,6 @@
 # (empty — all provider/OS literals have been extracted from core)
 
 # --- Bash shebangs (language policy: no new bash in scripts/) ---
-# Remaining: two large test suites still in bash (1000+ lines each);
-# port deferred — they need faithful 1:1 translation of hundreds of checks.
+# Remaining: one large test suite still in bash;
+# port deferred — needs faithful 1:1 translation of ~1500 checks.
 scripts/test-instances:bash shebang - instance validation - port to Python (large; ~1500 checks)
-scripts/test-plugins:bash shebang - plugin validation - port to Python (large; ~1200 checks)
