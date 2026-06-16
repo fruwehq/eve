@@ -31,7 +31,6 @@ TOOL_CHECKS = [
     tool("core", "shellcheck", "command -v shellcheck", "brew install shellcheck", "apt install shellcheck"),
     tool("core", "ssh", "command -v ssh", "xcode-select --install", "apt install openssh-client"),
     tool("core", "yq", "command -v yq", "brew install yq", "apt install yq"),
-    tool("provider", "aws", "command -v aws", "brew install awscli", "apt install awscli"),
     tool("provider", "curl", "command -v curl", "brew install curl", "apt install curl"),
     tool("provider", "docker", "docker --version", "install Docker Desktop", "apt install docker.io"),
     tool("provider", "gcloud", "command -v gcloud", "brew install --cask google-cloud-sdk", "install google-cloud-cli"),
@@ -70,6 +69,24 @@ TOOL_CHECKS = [
     tool("os", "pbcopy", "command -v pbcopy", "bundled with macOS", "", ["darwin"]),
     tool("os", "xfreerdp", "command -v xfreerdp", "", "apt install freerdp2-x11", ["linux"]),
 ]
+
+# Provider-declared host tools (loaded from provider manifests so core has no
+# provider id literals). Each provider may declare a ``host_tools`` list; doctor
+# reads and checks them generically.
+try:
+    from eve_sdk.plugin_manifest import PluginManifest as _PM
+
+    for _plugin in _PM.load_all("provider"):
+        for _ht in _plugin.get("host_tools") or []:
+            TOOL_CHECKS.append(tool(
+                "provider",
+                str(_ht.get("name", "")),
+                str(_ht.get("check", "")),
+                str(_ht.get("brew", "")),
+                str(_ht.get("apt", "")),
+            ))
+except Exception:
+    pass
 
 
 def host_os() -> str:

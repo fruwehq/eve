@@ -146,6 +146,12 @@
       "items": { "$ref": "#/$defs/env_emission_entry" }
     },
 
+    "host_tools": {
+      "description": "Host-side CLI tools this provider requires. ``doctor`` reads these generically to check tool availability.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/host_tool_entry" }
+    },
+
     "bundles": {
       "description": "Bundle definitions contributed by this package manifest. Each bundle composes a set of included package ids. Only meaningful on package manifests.",
       "type": "array"
@@ -543,6 +549,19 @@
     "env_emission_array": {
       "type": "array",
       "items": { "$ref": "#/$defs/env_emission_entry" }
+    },
+
+    "host_tool_entry": {
+      "description": "One host-side CLI tool a provider requires (checked by ``doctor``).",
+      "type": "object",
+      "required": ["name", "check"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "description": "Display name for the tool." },
+        "check": { "type": "string", "description": "Shell command to verify the tool is installed." },
+        "brew": { "type": "string", "description": "macOS install hint." },
+        "apt": { "type": "string", "description": "Debian/Ubuntu install hint." }
+      }
     },
 
     "env_emission_entry": {

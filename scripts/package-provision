@@ -143,6 +143,7 @@ def main(argv: list[str]) -> int:
     os_id = resolved.get("OS_ID", "")
     profile_name = resolved.get("PROFILE_NAME", "")
     provider = resolved.get("PROVIDER", "")
+    engine = resolved.get("ENGINE", "")
     bundle_packages = resolved.get("BUNDLE_PACKAGES", "")
     os_provision_dir = root / "oses" / os_id / "provision"
 
@@ -233,7 +234,7 @@ def main(argv: list[str]) -> int:
 
     if not sudo_ok():
         pi_password = os.environ.get("RASPBERRY_PI_USER_PASSWORD", "")
-        if provider == "raspberry-pi" and pi_password:
+        if engine == "metal" and pi_password:
             print("[package-provision] configuring passwordless sudo for Raspberry Pi provisioning")
             sudo_setup = (
                 'tmp=$(mktemp); printf "%s ALL=(ALL) NOPASSWD:ALL\\n" "$USER" > "$tmp"; '

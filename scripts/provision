@@ -108,6 +108,7 @@ def provision_ubuntu(profile: str, env: dict[str, str], root: Path) -> int:
     bundle_packages = env.get("BUNDLE_PACKAGES", "")
     profile_name = env.get("PROFILE_NAME", "")
     provider = env.get("PROVIDER", "")
+    engine = env.get("ENGINE", "")
     os_provision_dir = root / "oses" / os_id / "provision"
 
     if not os_provision_dir.is_dir():
@@ -128,7 +129,7 @@ def provision_ubuntu(profile: str, env: dict[str, str], root: Path) -> int:
 
     if not check_sudo():
         rpi_password = os.environ.get("RASPBERRY_PI_USER_PASSWORD", "")
-        if provider == "raspberry-pi" and rpi_password:
+        if engine == "metal" and rpi_password:
             print("[provision] configuring passwordless sudo for Raspberry Pi provisioning")
             remote_cmd = (
                 'tmp=$(mktemp); printf "%s ALL=(ALL) NOPASSWD:ALL\\n" "$USER" > "$tmp"; '
@@ -354,27 +355,23 @@ def provision_windows(profile: str, env: dict[str, str], root: Path) -> int:
     os_id = env.get("OS_ID", "")
     bundle_packages = env.get("BUNDLE_PACKAGES", "")
     provider = env.get("PROVIDER", "")
-    tags = env.get("STACK_TAGS", "")
+    engine = env.get("ENGINE", "")
     os_provision_dir = root / "oses" / os_id / "provision"
 
     windows_password = os.environ.get("EPHEMERAL_WINDOWS_PASSWORD", "")
     if not windows_password:
-        if provider == "vultr":
-            apply_tf_env(root, profile)
-            windows_password = subprocess.run(
-                ["terramate", "run", "--quiet",
-                 "--disable-safeguards=git-untracked",
-                 "--disable-safeguards=git-uncommitted",
-                 "--disable-safeguards=git-out-of-sync",
-                 "--disable-safeguards=outdated-code",
-                 f"--tags={tags}-services", "--",
-                 "terraform", "output", "-raw", "vultr_instance_default_password"],
-                cwd=root, capture_output=True, text=True, check=False,
-            ).stdout
+        # Dispatch to the provider's password command generically.
+        pw_result = subprocess.run(
+            [str(root / "scripts/provider-dispatch"),
+             "--instance", profile, "--command", "password"],
+            cwd=root, capture_output=True, text=True, check=False,
+        )
+        if pw_result.returncode == 0:
+            windows_password = pw_result.stdout
         else:
             print(
-                f"[provision] set EPHEMERAL_WINDOWS_PASSWORD"
-                f" (no terraform output available for provider={provider})",
+                f"[provision] could not retrieve Windows password via provider "
+                f"command (exit {pw_result.returncode})",
                 file=sys.stderr,
             )
             return 1

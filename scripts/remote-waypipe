@@ -88,7 +88,7 @@ def main(argv: list[str]) -> int:
 
     ssh_user = resolved.get("SSH_USER", "")
     raspberry_pi_ip = resolved.get("RASPBERRY_PI_IP", "")
-    if engine == "metal" and provider == "raspberry-pi" and raspberry_pi_ip:
+    if engine == "metal" and raspberry_pi_ip:
         ip = raspberry_pi_ip
     else:
         ip = instance_ip(root, profile)

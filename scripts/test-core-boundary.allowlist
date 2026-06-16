@@ -13,16 +13,7 @@
 # boundary check fails.
 
 # --- Provider/OS coupling (Phase 3 extraction debt) ---
-scripts/doctor:provider/OS reference - provider-specific CLI tool checks - Phase 3: moves into provider plugins
-scripts/instance-create:provider/OS reference - provider-specific CLI usage hints - Phase 3: derives from provider manifests
-scripts/instance-password:provider/OS reference - vultr-specific password retrieval - Phase 3: moves into vultr plugin
-scripts/instance-profile-overlay:provider/OS reference - raspberry-pi host validation - Phase 3: moves into raspberry-pi plugin
-scripts/package-provision:provider/OS reference - raspberry-pi password handling - Phase 3: moves into raspberry-pi plugin
-scripts/providers-status:provider/OS reference - provider-specific connectivity checks - Phase 3: moves into provider plugins
-scripts/provision:provider/OS reference - vultr-specific password retrieval - Phase 3: moves into vultr plugin
-scripts/remote-console:provider/OS reference - local-qemu not-implemented guard - Phase 3: moves into local-qemu plugin
-scripts/remote-waypipe:provider/OS reference - raspberry-pi IP handling - Phase 3: moves into raspberry-pi plugin
-scripts/vagrant-up:provider/OS reference - local-qemu Vagrant dispatch - Phase 3: moves into local-qemu plugin
+scripts/providers-status:provider/OS reference - per-provider connectivity probes need a provider-level connectivity command declaration; deferred to a later chunk — too deep a design to genericize without a connectivity-contract extension
 
 # --- Bash shebangs (language policy: no new bash in scripts/) ---
 scripts/test:bash shebang - test runner - port to Python or plugin command

@@ -37,10 +37,13 @@ def main(argv: list[str]) -> int:
         return 1
 
     provider = resolved.get("PROVIDER", "")
-    if provider == "local-qemu":
+    engine = resolved.get("ENGINE", "")
+    # The qemu engine uses the qemu Vagrant provider;
+    # other local engines (e.g. vagrant) are not wired here.
+    if engine == "qemu":
         vagrant_provider = "qemu"
     else:
-        print(f"[vagrant-up] unsupported local provider={provider}", file=sys.stderr)
+        print(f"[vagrant-up] unsupported engine={engine}", file=sys.stderr)
         return 2
     print(f"[vagrant-up] profile={profile} provider={vagrant_provider}")
 
