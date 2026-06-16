@@ -58,10 +58,6 @@ ENGINE_TOOLS: dict[str, list[dict[str, Any]]] = {
              "brew install vagrant", "install Vagrant"),
     ],
     "metal": [],
-    "docker": [
-        tool("provider", "docker", "docker --version",
-             "install Docker Desktop", "apt install docker.io"),
-    ],
 }
 
 # Provider-declared host tools + engine-derived tools (loaded from provider
@@ -164,14 +160,6 @@ def check_required_report() -> dict[str, Any]:
     return data
 
 
-def docker_report(tool_results: list[dict[str, str]]) -> dict[str, Any]:
-    docker = next((tool for tool in tool_results if tool["tool"] == "docker"), None)
-    if not docker or docker["status"] != "ok":
-        return {"checked": False, "status": "missing"}
-    daemon = command_output("docker info")
-    return {"checked": True, "status": "ready" if daemon["ok"] else "daemon-unreachable"}
-
-
 def build_report() -> dict[str, Any]:
     os_name = host_os()
     tools = tool_report(os_name)
@@ -184,7 +172,6 @@ def build_report() -> dict[str, Any]:
             runnable_check("catalog-options", "./scripts/catalog-options --json"),
             runnable_check("plugins.validate", "./scripts/plugin-list --validate"),
         ],
-        "docker": docker_report(tools),
         "providers_status_available": (ROOT / "scripts/providers-status").is_file()
         and os.access(ROOT / "scripts/providers-status", os.X_OK),
         "state": {"dir": str(state_dir)},
@@ -216,14 +203,6 @@ def print_tool_table(tools: list[dict[str, str]]) -> None:
 def print_report(report: dict[str, Any]) -> None:
     print(f"Host OS: {report['os']['name']}")
     print_tool_table(report["tools"])
-    print_section("docker")
-    match report["docker"]["status"]:
-        case "missing":
-            print("  [INFO] Docker CLI missing")
-        case "daemon-unreachable":
-            print("  [INFO] Docker daemon not reachable")
-        case "ready":
-            print("  [OK] Docker available")
     print_section("catalog")
     for check in report["checks"]:
         print(f"  {'[OK]' if check['ok'] else '[FAIL]'} {check['name']}")

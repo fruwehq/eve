@@ -126,6 +126,28 @@ def is_bash_shebang(line: str) -> bool:
     return line in BASH_SHEBANGS
 
 
+import re  # noqa: E402
+
+# Provider/OS IDs that are also common tool/package/host names. For these,
+# the substring scan produces false positives (e.g. "docker" the CLI tool
+# vs "docker" the provider ID). For these IDs, use context-aware matching:
+# only flag comparison/branching patterns (== "id", != "id"),
+# not bare mentions (CLI commands, package names, example strings).
+COMMON_TOKEN_IDS: set[str] = {"docker"}
+
+
+def _has_comparison(content: str, identifier: str) -> bool:
+    """Check if content has a comparison/branching on ``identifier``.
+
+    Matches ``== "id"`` and ``!= "id"`` — patterns where core DISPATCHES on
+    the provider/engine identity (the real coupling this check targets).
+    Does NOT match bare mentions like CLI commands or package names.
+    """
+    escaped = re.escape(identifier)
+    pattern = rf'==\s*["\']{escaped}["\']|!=\s*["\']{escaped}["\']'
+    return bool(re.search(pattern, content))
+
+
 def find_provider_os_violations(
     files: list[tuple[str, str]],
     ids: list[str],
@@ -133,17 +155,24 @@ def find_provider_os_violations(
 ) -> list[str]:
     """Return violation messages for unallowed provider/OS id references.
 
-    ``files`` is a list of ``(rel_path, content)`` pairs. A file violates if any
-    id appears as a substring (parity with the legacy ``grep -F`` semantics) and
-    the rel_path is not in ``allowed``.
+    For most IDs: substring match (parity with the legacy ``grep -F``).
+    For IDs in ``COMMON_TOKEN_IDS``: only flag comparison/branching patterns
+    so legitimate tool/package/CLI references are not false-positive'd.
     """
     violations: list[str] = []
     for rel_path, content in files:
-        hit = next((identifier for identifier in ids if identifier in content), None)
-        if hit is not None and rel_path not in allowed:
-            violations.append(
-                f"FAIL: {rel_path} (references {hit}) not in allowlist"
-            )
+        for identifier in ids:
+            if identifier in COMMON_TOKEN_IDS:
+                if _has_comparison(content, identifier) and rel_path not in allowed:
+                    violations.append(
+                        f"FAIL: {rel_path} (branches on {identifier}) not in allowlist"
+                    )
+                    break
+            elif identifier in content and rel_path not in allowed:
+                violations.append(
+                    f"FAIL: {rel_path} (references {identifier}) not in allowlist"
+                )
+                break
     return violations
 
 
@@ -204,7 +233,7 @@ def run() -> int:
 # --- self-test -------------------------------------------------------------
 
 def self_test() -> int:
-    """Shebang detection logic parity with the legacy bash --self-test."""
+    """Shebang detection + context-aware provider-id matching self-tests."""
     neg_shebangs = (
         "#!/usr/bin/env python",
         "#!/usr/bin/env python3",
@@ -220,8 +249,32 @@ def self_test() -> int:
         if is_bash_shebang(shebang):
             print(f"SELF-TEST FAIL: {shebang} false positive")
             fail = 1
+
+    # Context-aware matching: common-token IDs should only flag comparisons.
+    # A planted comparison should be caught; a bare mention should NOT.
+    for identifier in COMMON_TOKEN_IDS:
+        # PLANTED real coupling — must be caught.
+        planted = 'if provider == "docker":\n    return "docker-engine"'
+        if not _has_comparison(planted, identifier):
+            print(f"SELF-TEST FAIL: planted == \"{identifier}\" not detected")
+            fail = 1
+        planted_ne = 'if engine != "docker":\n    raise'
+        if not _has_comparison(planted_ne, identifier):
+            print(f"SELF-TEST FAIL: planted != \"{identifier}\" not detected")
+            fail = 1
+        # Bare mentions — must NOT be caught (false positives).
+        for bare in [
+            'subprocess.run(["docker", "run", name])',
+            '"docker" in bundle_packages',
+            'print("Run docker --version to check")',
+            'docker_setup = "apt-get install docker-ce"',
+        ]:
+            if _has_comparison(bare, identifier):
+                print(f"SELF-TEST FAIL: bare mention false-positive: {bare}")
+                fail = 1
+
     if fail == 0:
-        print("[OK] core-boundary self-test: shebang detection passes")
+        print("[OK] core-boundary self-test: shebang + context-aware matching passes")
     return fail
 
 

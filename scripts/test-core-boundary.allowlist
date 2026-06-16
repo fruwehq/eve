@@ -12,14 +12,10 @@
 # Phase 3. No silent passes — if the scan finds a literal not listed here, the
 # boundary check fails.
 
-# --- Provider/OS coupling (Phase 3 extraction debt) ---
-# These files reference the Docker CLI tool / Docker installation, not the
-# "docker" provider ID. The substring match is a false positive (docker the
-# tool name coincides with docker the provider id, added in v4.1 WS5).
-eve_sdk/profile_resolve.py:provider/OS reference - Vagrant emit installs Docker as a package (not the docker provider)
-scripts/doctor:provider/OS reference - ENGINE_TOOLS + docker_report reference the Docker CLI daemon check
-scripts/eve-local-install:provider/OS reference - example step bundle mentions docker.sh
-scripts/update-tools:provider/OS reference - updates the Docker CLI tool on the host
+# --- Provider/OS coupling ---
+# (empty — the boundary check is now context-aware for common-token IDs like
+# "docker" so tool/package/CLI references don't false-positive; genuine
+# provider-identity branching would still be caught)
 
 # --- Bash shebangs (language policy: no new bash in scripts/) ---
 # (empty — all test runners ported to Python)
