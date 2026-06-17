@@ -567,6 +567,16 @@ class EveTui(App[None]):
         except Exception as exc:
             self.log_line(f"[warning]catalog-options failed:[/] {exc}")
             self.catalog_options = {"providers": [], "platforms": [], "bundles": [], "packages": []}
+        # Footer lifecycle keys depend on whether providers are installed.
+        self.refresh_bindings()
+
+    def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
+        # Hide provider-lifecycle keys from the footer when no provider plugins
+        # are installed — nothing can be created or operated. Local actions
+        # (refresh, delete-local-entry, settings, plugins, quit) stay available.
+        if action in ("queue_provider", "queue_provision", "down_instance"):
+            return True if self.catalog_options.get("providers") else None
+        return True
 
     def trigger_blink(self) -> None:
         if self.current_instance is not None:
@@ -2000,6 +2010,10 @@ class EveTui(App[None]):
         provision_state = str(state.get("provision_state", "unknown"))
         display_provider_state = str(state.get("effective_provider_state", "unknown"))
         provider_available = provider_actions_available(cast(dict[str, Any], state))
+        # No provider plugins pulled ⇒ nothing can be created/operated. Gate all
+        # lifecycle controls on this so we don't offer up/stop/down/provision/
+        # recover for instances whose provider isn't installed.
+        providers_installed = bool(self.catalog_options.get("providers"))
         provider_busy = display_provider_state == "changing"
         self.current_provider_actions = self.provider_manifest_actions()
         self.current_remote_actions = self.installed_package_actions()
@@ -2025,13 +2039,20 @@ class EveTui(App[None]):
         provider_up.label = "Start" if display_provider_state == "stopped" else "Up"
         self.set_button(
             "provider-up",
-            disabled=busy or not has_instance or provider_busy or display_provider_state == "running",
+            disabled=(
+                busy
+                or not has_instance
+                or not providers_installed
+                or provider_busy
+                or display_provider_state == "running"
+            ),
         )
         self.set_button(
             "provider-stop",
             disabled=(
                 busy
                 or not has_instance
+                or not providers_installed
                 or provider_busy
                 or display_provider_state in {"unknown", "stopped", "absent"}
             ),
@@ -2045,6 +2066,7 @@ class EveTui(App[None]):
             disabled=(
                 busy
                 or not has_instance
+                or not providers_installed
                 or provider_busy
                 or provision_state == "provisioning"
             ),
@@ -2058,9 +2080,15 @@ class EveTui(App[None]):
         )
         self.set_button(
             "provider-down",
-            disabled=busy or not has_instance or provider_busy or display_provider_state in {"absent", "unknown"},
+            disabled=(
+                busy
+                or not has_instance
+                or not providers_installed
+                or provider_busy
+                or display_provider_state in {"absent", "unknown"}
+            ),
         )
-        self.set_button("instance-recover", disabled=busy or not has_instance)
+        self.set_button("instance-recover", disabled=busy or not has_instance or not providers_installed)
         self.set_button("delete-instance", disabled=busy or not has_instance)
         self.set_button("connect-ssh", disabled=busy or not has_instance or not provider_available)
         for index in range(PACKAGE_ACTION_BUTTONS):
