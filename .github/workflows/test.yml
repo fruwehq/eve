@@ -26,10 +26,13 @@ jobs:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+          git config --global credential.helper store
+          echo "https://x-access-token:${TOKEN}@github.com" > ~/.git-credentials
+          chmod 600 ~/.git-credentials
           cd "$(dirname "$GITHUB_WORKSPACE")"
           for repo in eve-providers eve-packages-linux eve-packages-windows; do
             if [ ! -d "$repo" ]; then
-              git clone --depth 1 "https://x-access-token:${TOKEN}@github.com/fruwehq/${repo}.git" "$repo"
+              git clone --depth 1 "https://github.com/fruwehq/${repo}.git" "$repo"
             fi
           done
 
