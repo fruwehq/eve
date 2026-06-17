@@ -1838,6 +1838,87 @@ class ProviderConfigScreen(ModalScreen[None]):
         self.dismiss(None)
 
 
+class TextPromptScreen(ModalScreen[str | None]):
+    """Minimal single-line text prompt. Dismisses with the entered text or None."""
+
+    CSS = """
+    TextPromptScreen {
+        align: center middle;
+    }
+
+    #prompt-dialog {
+        width: 72;
+        height: auto;
+        border: round $primary;
+        background: $surface;
+        padding: 1 2;
+    }
+
+    #prompt-label {
+        margin-bottom: 1;
+    }
+
+    #prompt-detail {
+        margin-bottom: 1;
+        color: $text-muted;
+    }
+
+    #prompt-input {
+        width: 100%;
+        margin-bottom: 1;
+    }
+
+    #prompt-actions {
+        height: 3;
+        align-horizontal: center;
+        background: transparent;
+    }
+
+    #prompt-actions Button {
+        margin: 0 1;
+    }
+    """
+
+    BINDINGS = [
+        Binding("escape", "dismiss_cancel", "Cancel"),
+    ]
+
+    def __init__(self, title: str, *, placeholder: str = "", detail: str = "") -> None:
+        super().__init__()
+        self._title = title
+        self._placeholder = placeholder
+        self._detail = detail
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="prompt-dialog"):
+            yield Label(f"[b]{self._title}[/b]", id="prompt-label")
+            if self._detail:
+                yield Static(self._detail, id="prompt-detail")
+            yield Input(placeholder=self._placeholder, id="prompt-input")
+            with Horizontal(id="prompt-actions"):
+                yield Button("Cancel", id="cancel")
+                yield Button("OK", id="ok", variant="primary")
+
+    def on_mount(self) -> None:
+        self.query_one("#prompt-input", Input).focus()
+
+    def _submit(self) -> None:
+        self.dismiss(self.query_one("#prompt-input", Input).value.strip() or None)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "ok":
+            self._submit()
+        else:
+            self.dismiss(None)
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        event.stop()
+        self._submit()
+
+    def action_dismiss_cancel(self) -> None:
+        self.dismiss(None)
+
+
 class PluginSourcesScreen(ModalScreen[None]):
     """Manage plugin sources: configured set + the recommended catalog.
 
@@ -1903,11 +1984,12 @@ class PluginSourcesScreen(ModalScreen[None]):
             table.cursor_type = "row"
             yield table
             with Horizontal(id="plugins-controls"):
-                yield Input(placeholder="git url to add (pin with #ref)…", id="plugins-url")
-                yield Button("Add URL", id="plugins-add-url")
+                yield Button("Add selected", id="plugins-add-sel", variant="primary")
+                yield Button("Add URL…", id="plugins-add-url")
+                yield Button("Remove", id="plugins-remove")
                 yield Button("Pull", id="plugins-pull")
                 yield Button("Close", id="close")
-            yield Label("", id="plugins-status")
+            yield Label("↑/↓ select · a/Add selected · x removes · Add URL… for a custom repo", id="plugins-status")
 
     def on_mount(self) -> None:
         self._reload()
@@ -1933,7 +2015,7 @@ class PluginSourcesScreen(ModalScreen[None]):
             table.add_row("[dim]+[/]", row["id"], row["ref"], "[dim]recommended[/]", info, key=f"rec:{row['id']}")
             self._rows.append(("rec", row["id"]))
         if not self._rows:
-            self._set_status("No sources or recommendations. Add a git url below.")
+            self._set_status("No sources or recommendations yet — use Add URL… to add one.")
 
     def _current(self) -> tuple[str, str] | None:
         table = self.query_one("#plugins-table", DataTable)
@@ -1944,7 +2026,7 @@ class PluginSourcesScreen(ModalScreen[None]):
     def action_add_row(self) -> None:
         current = self._current()
         if current is None:
-            self._set_status("Highlight a recommended row to add, or type a url below.")
+            self._set_status("Highlight a recommended row, then Add selected — or use Add URL….")
             return
         kind, source_id = current
         if kind != "rec":
@@ -1975,28 +2057,34 @@ class PluginSourcesScreen(ModalScreen[None]):
         if ok:
             self._reload()
 
-    def _add_from_input(self) -> None:
-        field = self.query_one("#plugins-url", Input)
-        raw = field.value.strip()
-        if not raw:
-            self._set_status("Enter a git url (optionally url#ref).")
-            return
-        url, _, ref = raw.partition("#")
-        ok, message = plugin_src.add_url(url, ref=ref)
-        self._set_status(message)
-        if ok:
-            field.value = ""
-            self._reload()
+    def _open_add_url(self) -> None:
+        def on_result(value: str | None) -> None:
+            if not value:
+                return
+            url, _, ref = value.partition("#")
+            ok, message = plugin_src.add_url(url, ref=ref)
+            self._set_status(message)
+            if ok:
+                self._reload()
 
-    def on_input_submitted(self, event: Input.Submitted) -> None:
-        if event.input.id == "plugins-url":
-            self._add_from_input()
+        self.app.push_screen(
+            TextPromptScreen(
+                "Add plugin source",
+                placeholder="https://github.com/you/plugins.git#v1.0.0",
+                detail="Enter a git url. Pin a ref with url#ref (recommended).",
+            ),
+            on_result,
+        )
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "close":
             self.dismiss(None)
+        elif event.button.id == "plugins-add-sel":
+            self.action_add_row()
         elif event.button.id == "plugins-add-url":
-            self._add_from_input()
+            self._open_add_url()
+        elif event.button.id == "plugins-remove":
+            self.action_remove_row()
         elif event.button.id == "plugins-pull":
             self.action_pull()
 
