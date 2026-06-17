@@ -300,3 +300,136 @@ def read_lock(path: Path | None = None) -> list[LockedSource]:
             )
         )
     return out
+
+
+# --------------------------------------------------------------------------- #
+# Recommended sources (curated, opt-in; never auto-installed)
+# --------------------------------------------------------------------------- #
+@dataclass(frozen=True)
+class Recommendation:
+    """A curated, opt-in plugin source (the lightweight first-party registry)."""
+
+    id: str
+    description: str
+    url: str
+    ref: str
+    auth: str
+    tags: tuple[str, ...]
+
+
+def recommended_path() -> Path:
+    """Committed curated list of recommended first-party plugin sources."""
+    return Workdir.repo_root() / "config/recommended-sources.yaml"
+
+
+def load_recommended(path: Path | None = None) -> list[Recommendation]:
+    """Load the curated recommended-source catalog (data, not a dependency)."""
+    target = path or recommended_path()
+    if not target.exists():
+        return []
+    doc = yaml.safe_load(target.read_text(encoding="utf-8")) or {}
+    if not isinstance(doc, dict):
+        raise RegistryError("recommended-sources file must be a map")
+    raw = doc.get("recommended") or []
+    if not isinstance(raw, list):
+        raise RegistryError("recommended-sources: 'recommended' must be a list")
+    out: list[Recommendation] = []
+    seen: set[str] = set()
+    for index, entry in enumerate(raw, start=1):
+        if not isinstance(entry, dict):
+            raise RegistryError(f"recommended {index} must be a map")
+        rid = entry.get("id")
+        url = entry.get("url")
+        if not isinstance(rid, str) or not ID_RE.match(rid):
+            raise RegistryError(f"recommended {index}: id must match [a-z][a-z0-9-]*")
+        if rid in seen:
+            raise RegistryError(f"duplicate recommended id: {rid}")
+        if not isinstance(url, str) or not url:
+            raise RegistryError(f"recommended {rid}: url must be a non-empty string")
+        auth = entry.get("auth") or "none"
+        if auth not in VALID_AUTH:
+            raise RegistryError(f"recommended {rid}: auth must be one of {', '.join(VALID_AUTH)}")
+        tags = entry.get("tags") or []
+        seen.add(rid)
+        out.append(
+            Recommendation(
+                id=rid,
+                description=str(entry.get("description") or ""),
+                url=url,
+                ref=str(entry.get("ref") or ""),
+                auth=auth,
+                tags=tuple(str(tag) for tag in tags) if isinstance(tags, list) else (),
+            )
+        )
+    return out
+
+
+# --------------------------------------------------------------------------- #
+# Source mutation (edits the LOCAL override only; never the committed default)
+# --------------------------------------------------------------------------- #
+def _read_local_doc(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {"sources": []}
+    doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if doc is None:
+        return {"sources": []}
+    if not isinstance(doc, dict):
+        raise RegistryError(f"{path}: sources file must be a map")
+    sources = doc.get("sources")
+    if sources is None:
+        doc["sources"] = []
+    elif not isinstance(sources, list):
+        raise RegistryError(f"{path}: sources must be a list")
+    return doc
+
+
+def add_source(
+    entry: dict[str, Any],
+    *,
+    path: Path | None = None,
+    allow_unpinned: bool | None = None,
+) -> Source:
+    """Add (or replace by id) one source in the local override.
+
+    Always edits ``.eve/plugin-sources.yaml`` (user-writable) — never the
+    committed default — so core's shipped source list stays empty.
+    """
+    if allow_unpinned is None:
+        allow_unpinned = os.environ.get("EVE_ALLOW_UNPINNED_PLUGINS") == "1"
+    source = _parse_one(1, entry, allow_unpinned=allow_unpinned)
+    target = path or Workdir.plugin_sources_path()
+    doc = _read_local_doc(target)
+    kept = [
+        item
+        for item in doc["sources"]
+        if not (isinstance(item, dict) and item.get("id") == source.id)
+    ]
+    new_entry: dict[str, Any] = {"id": source.id, "url": source.url}
+    if source.subdir:
+        new_entry["subdir"] = source.subdir
+    if source.ref:
+        new_entry["ref"] = source.ref
+    new_entry["auth"] = source.auth
+    kept.append(new_entry)
+    doc["sources"] = kept
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(yaml.safe_dump(doc, sort_keys=False), encoding="utf-8")
+    return source
+
+
+def remove_source(source_id: str, *, path: Path | None = None) -> bool:
+    """Remove a source by id from the local override. Returns True if removed."""
+    target = path or Workdir.plugin_sources_path()
+    if not target.exists():
+        return False
+    doc = _read_local_doc(target)
+    before = len(doc["sources"])
+    doc["sources"] = [
+        item
+        for item in doc["sources"]
+        if not (isinstance(item, dict) and item.get("id") == source_id)
+    ]
+    if len(doc["sources"]) == before:
+        return False
+    target.write_text(yaml.safe_dump(doc, sort_keys=False), encoding="utf-8")
+    return True

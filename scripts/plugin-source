@@ -1,0 +1,152 @@
+#!/usr/bin/env python3
+"""Manage plugin sources (the user override at .eve/plugin-sources.yaml).
+
+Verbs:
+  list                       show configured sources (merged default + override)
+  recommended                show the curated first-party catalog
+  add <url> [opts]           add/replace a source by url
+  add --recommended <id>     add a source from the recommended catalog
+  remove <id>                remove a source from the override
+
+Adds/removes only ever touch the user override (.eve/plugin-sources.yaml); the
+committed default stays empty. Run `eve pull` afterwards to materialize.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from eve_sdk import registry  # noqa: E402
+
+
+def _derive_id(url: str) -> str:
+    base = url.rstrip("/").rsplit("/", 1)[-1]
+    base = re.sub(r"\.git$", "", base)
+    return base
+
+
+def _cmd_list(args: argparse.Namespace) -> int:
+    sources = registry.load_sources()
+    locked = {item.id for item in registry.read_lock()}
+    if args.json:
+        print(json.dumps(
+            [
+                {
+                    "id": s.id, "url": s.url, "subdir": s.subdir, "ref": s.ref,
+                    "auth": s.auth, "synced": s.id in locked,
+                }
+                for s in sources
+            ],
+            indent=2,
+        ))
+        return 0
+    if not sources:
+        print("No plugin sources configured. See `plugin-source recommended` or `add`.")
+        return 0
+    for s in sources:
+        mark = "synced" if s.id in locked else "not synced"
+        ref = s.ref or "(unpinned)"
+        print(f"  {s.id:<22} {s.url}  @{ref}  [{s.auth}, {mark}]")
+    return 0
+
+
+def _cmd_recommended(args: argparse.Namespace) -> int:
+    recs = registry.load_recommended()
+    if args.json:
+        print(json.dumps(
+            [
+                {"id": r.id, "description": r.description, "url": r.url,
+                 "ref": r.ref, "auth": r.auth, "tags": list(r.tags)}
+                for r in recs
+            ],
+            indent=2,
+        ))
+        return 0
+    if not recs:
+        print("No recommended sources.")
+        return 0
+    configured = {s.id for s in registry.load_sources()}
+    for r in recs:
+        added = " (added)" if r.id in configured else ""
+        tags = f" [{', '.join(r.tags)}]" if r.tags else ""
+        print(f"  {r.id}{tags}{added}\n      {r.description}\n      {r.url} @{r.ref or 'main'}")
+    print("\nAdd one with: plugin-source add --recommended <id>")
+    return 0
+
+
+def _cmd_add(args: argparse.Namespace) -> int:
+    if args.recommended:
+        recs = {r.id: r for r in registry.load_recommended()}
+        rec = recs.get(args.recommended)
+        if rec is None:
+            print(f"plugin-source: unknown recommended id: {args.recommended}", file=sys.stderr)
+            print(f"  available: {', '.join(sorted(recs)) or '(none)'}", file=sys.stderr)
+            return 2
+        entry = {"id": rec.id, "url": rec.url, "ref": rec.ref, "auth": rec.auth}
+    else:
+        if not args.url:
+            print("plugin-source add: provide a <url> or --recommended <id>", file=sys.stderr)
+            return 2
+        entry = {
+            "id": args.id or _derive_id(args.url),
+            "url": args.url,
+            "ref": args.ref or "",
+            "auth": args.auth,
+        }
+        if args.subdir:
+            entry["subdir"] = args.subdir
+    try:
+        source = registry.add_source(entry)
+    except registry.RegistryError as error:
+        print(f"plugin-source: {error}", file=sys.stderr)
+        return 2
+    print(f"Added source '{source.id}' ({source.url} @{source.ref or 'unpinned'}). Run `eve pull` to materialize.")
+    return 0
+
+
+def _cmd_remove(args: argparse.Namespace) -> int:
+    if registry.remove_source(args.id):
+        print(f"Removed source '{args.id}'. Run `eve pull` to update materialized plugins.")
+        return 0
+    print(f"plugin-source: no such source in override: {args.id}", file=sys.stderr)
+    return 1
+
+
+def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(prog="scripts/plugin-source", description=__doc__)
+    sub = parser.add_subparsers(dest="verb", required=True, metavar="<verb>")
+
+    p_list = sub.add_parser("list", help="show configured sources")
+    p_list.add_argument("--json", action="store_true")
+    p_list.set_defaults(func=_cmd_list)
+
+    p_rec = sub.add_parser("recommended", help="show the curated catalog")
+    p_rec.add_argument("--json", action="store_true")
+    p_rec.set_defaults(func=_cmd_recommended)
+
+    p_add = sub.add_parser("add", help="add/replace a source")
+    p_add.add_argument("url", nargs="?", help="git url or local path")
+    p_add.add_argument("--recommended", metavar="ID", help="add from the recommended catalog")
+    p_add.add_argument("--id", help="source id (default: derived from url)")
+    p_add.add_argument("--ref", help="pinned ref (tag/branch/sha)")
+    p_add.add_argument("--subdir", help="subdirectory within the repo")
+    p_add.add_argument("--auth", choices=registry.VALID_AUTH, default="none")
+    p_add.set_defaults(func=_cmd_add)
+
+    p_rm = sub.add_parser("remove", help="remove a source from the override")
+    p_rm.add_argument("id")
+    p_rm.set_defaults(func=_cmd_remove)
+
+    args = parser.parse_args(argv)
+    return int(args.func(args))
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

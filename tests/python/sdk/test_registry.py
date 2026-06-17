@@ -11,8 +11,12 @@ from eve_sdk.registry import (
     LockedSource,
     RegistryError,
     Source,
+    add_source,
+    load_recommended,
+    load_sources,
     parse_sources,
     read_lock,
+    remove_source,
     sync,
     write_lock,
 )
@@ -160,3 +164,77 @@ def test_frozen_rematerialize_checks_out_sha(tmp_path: Path) -> None:
     frozen = Source(id="s", url=str(upstream), subdir="a", ref=sha_v1, auth="none")
     sync([frozen], plugins_dir=tmp_path / "plugins", cache_dir=tmp_path / "cache")
     assert (tmp_path / "plugins/s/marker").read_text() == "v1"
+
+
+# --------------------------------------------------------------------------- #
+# recommended catalog + source mutation (v4.2 plugin-source management)
+# --------------------------------------------------------------------------- #
+def test_load_recommended_parses_curated_catalog(tmp_path: Path) -> None:
+    path = tmp_path / "recommended-sources.yaml"
+    path.write_text(
+        "recommended:\n"
+        "  - id: eve-providers\n"
+        "    description: First-party providers.\n"
+        "    url: https://github.com/fruwehq/eve-providers.git\n"
+        "    ref: main\n"
+        "    auth: none\n"
+        "    tags: [providers]\n",
+        encoding="utf-8",
+    )
+    recs = load_recommended(path)
+    assert len(recs) == 1
+    assert recs[0].id == "eve-providers"
+    assert recs[0].auth == "none"
+    assert recs[0].tags == ("providers",)
+
+
+def test_load_recommended_missing_file_is_empty(tmp_path: Path) -> None:
+    assert load_recommended(tmp_path / "nope.yaml") == []
+
+
+def test_load_recommended_rejects_duplicate_ids(tmp_path: Path) -> None:
+    path = tmp_path / "rec.yaml"
+    path.write_text(
+        "recommended:\n"
+        "  - {id: a, url: https://x/a.git}\n"
+        "  - {id: a, url: https://x/b.git}\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(RegistryError, match="duplicate recommended id"):
+        load_recommended(path)
+
+
+def test_add_source_writes_override_and_is_loadable(tmp_path: Path) -> None:
+    override = tmp_path / "plugin-sources.yaml"
+    source = add_source(
+        {"id": "demo", "url": "https://example.com/demo.git", "ref": "v1.0.0", "auth": "none"},
+        path=override,
+    )
+    assert source.id == "demo"
+    loaded = load_sources(override)
+    assert [s.id for s in loaded] == ["demo"]
+    assert loaded[0].ref == "v1.0.0"
+
+
+def test_add_source_replaces_by_id(tmp_path: Path) -> None:
+    override = tmp_path / "plugin-sources.yaml"
+    add_source({"id": "demo", "url": "https://example.com/a.git", "ref": "v1"}, path=override)
+    add_source({"id": "demo", "url": "https://example.com/b.git", "ref": "v2"}, path=override)
+    loaded = load_sources(override)
+    assert len(loaded) == 1
+    assert loaded[0].url == "https://example.com/b.git"
+    assert loaded[0].ref == "v2"
+
+
+def test_add_source_rejects_unpinned_by_default(tmp_path: Path) -> None:
+    with pytest.raises(RegistryError, match="missing ref"):
+        add_source({"id": "demo", "url": "https://example.com/demo.git"}, path=tmp_path / "s.yaml")
+
+
+def test_remove_source(tmp_path: Path) -> None:
+    override = tmp_path / "plugin-sources.yaml"
+    add_source({"id": "a", "url": "https://x/a.git", "ref": "v1"}, path=override)
+    add_source({"id": "b", "url": "https://x/b.git", "ref": "v1"}, path=override)
+    assert remove_source("a", path=override) is True
+    assert [s.id for s in load_sources(override)] == ["b"]
+    assert remove_source("missing", path=override) is False

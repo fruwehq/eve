@@ -1,0 +1,37 @@
+# Recommended plugin sources — a curated, opt-in catalog of first-party repos.
+#
+# This is DATA, not a dependency: nothing here is installed automatically. The
+# CLI/TUI offer these for one-step adoption:
+#   eve plugin source recommended
+#   eve plugin source add --recommended <id>
+#
+# Refs track `main` until the sibling repos cut tagged releases; pin to a tag
+# once available. All are public, so auth is `none`.
+recommended:
+  - id: eve-providers
+    description: First-party providers (aws, gcp, vultr, truenas, raspberry-pi, local-qemu, docker).
+    url: https://github.com/fruwehq/eve-providers.git
+    ref: main
+    auth: none
+    tags: [providers]
+
+  - id: eve-packages-linux
+    description: Linux packages — desktops, remote access, media, and tools.
+    url: https://github.com/fruwehq/eve-packages-linux.git
+    ref: main
+    auth: none
+    tags: [packages, linux]
+
+  - id: eve-packages-windows
+    description: Windows packages — remote access and apps.
+    url: https://github.com/fruwehq/eve-packages-windows.git
+    ref: main
+    auth: none
+    tags: [packages, windows]
+
+  - id: eve-plugins-ai
+    description: AI agents and developer tooling (claude, codex-cli, opencode, goose, hermes, vscode, dev-toolchain).
+    url: https://github.com/fruwehq/eve-plugins-ai.git
+    ref: main
+    auth: none
+    tags: [packages, ai, dev]

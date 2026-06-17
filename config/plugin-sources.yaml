@@ -1,22 +1,15 @@
-# Default first-party plugin sources (v4.0 agnostic core).
+# Plugin sources (v4.2: agnostic core ships NO default plugins).
 #
-# Core ships no providers/packages — they are pulled from these external repos by
-# `eve pull`. Sources here use LOCAL relative paths (resolved against the eve repo
-# root), so a sibling checkout works with no remote and no push. To pull from
-# GitHub instead, replace `url` with the git URL and `ref` with a pinned tag, e.g.
-#   url: https://github.com/fruwehq/eve-providers.git
-#   ref: v1.0.0
-# A local override at `.eve/plugin-sources.yaml` is merged on top (its source ids win).
-sources:
-  - id: eve-providers
-    url: ../eve-providers
-    ref: main
-    auth: none
-  - id: eve-packages-linux
-    url: ../eve-packages-linux
-    ref: main
-    auth: none
-  - id: eve-packages-windows
-    url: ../eve-packages-windows
-    ref: main
-    auth: none
+# Core deliberately bundles no providers/packages — adding a default here would
+# re-introduce the coupling v4.0/v4.1 removed. This committed file stays empty.
+#
+# Add sources with the CLI (writes the user override at `.eve/plugin-sources.yaml`,
+# which is merged on top of this file; a source id in the override wins):
+#   eve plugin source recommended              # see the curated first-party list
+#   eve plugin source add --recommended eve-providers
+#   eve plugin source add https://github.com/you/your-plugins.git --ref v1.0.0
+# or manage them in the TUI's plugin screen. Then `eve pull` to materialize.
+#
+# Local development against sibling checkouts (no remote needed):
+#   eve plugin source add ../eve-providers --id eve-providers --ref main --auth none
+sources: []

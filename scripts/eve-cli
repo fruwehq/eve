@@ -283,6 +283,28 @@ def _plugin_cmd(verb: str | None, ns: argparse.Namespace) -> list[str]:
         return ["scripts/plugin-list", "--validate"]
     if verb == "sync":
         return ["scripts/plugins-sync"]
+    if verb == "source":
+        action = getattr(ns, "source_action", None)
+        if not action:
+            raise SystemExit(2)
+        cmd = ["scripts/plugin-source", action]
+        if action in ("list", "recommended") and getattr(ns, "json", False):
+            cmd.append("--json")
+        elif action == "add":
+            if getattr(ns, "recommended", None):
+                cmd += ["--recommended", ns.recommended]
+            else:
+                if getattr(ns, "url", None):
+                    cmd.append(ns.url)
+                for opt in ("id", "ref", "subdir"):
+                    value = getattr(ns, opt, None)
+                    if value:
+                        cmd += [f"--{opt}", value]
+                if getattr(ns, "auth", None):
+                    cmd += ["--auth", ns.auth]
+        elif action == "remove":
+            cmd.append(ns.id)
+        return cmd
     if verb == "test":
         cmd = ["scripts/plugin-test", getattr(ns, "plugin_path", "")]
         if getattr(ns, "json", False):
@@ -588,6 +610,22 @@ def make_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.ArgumentP
     p = lv.add_parser("test", help="validate a plugin against the contract")
     p.add_argument("plugin_path", help="path to a plugin dir or eve-plugin.yaml")
     p.add_argument("--json", action="store_true")
+    # plugin source <action> — manage plugin sources (the user override)
+    src = lv.add_parser("source", help="manage plugin sources (add/remove/list/recommended)")
+    sv = src.add_subparsers(dest="source_action", metavar="<action>")
+    sp = sv.add_parser("list", help="show configured sources")
+    sp.add_argument("--json", action="store_true")
+    sp = sv.add_parser("recommended", help="show the curated catalog")
+    sp.add_argument("--json", action="store_true")
+    sp = sv.add_parser("add", help="add/replace a source")
+    sp.add_argument("url", nargs="?", help="git url or local path")
+    sp.add_argument("--recommended", metavar="ID", help="add from the recommended catalog")
+    sp.add_argument("--id")
+    sp.add_argument("--ref")
+    sp.add_argument("--subdir")
+    sp.add_argument("--auth", choices=["ssh", "token", "none"], default="none")
+    sp = sv.add_parser("remove", help="remove a source from the override")
+    sp.add_argument("id")
 
     # --- catalog ---
     cat = groups.add_parser("catalog", help="list catalog choices")
