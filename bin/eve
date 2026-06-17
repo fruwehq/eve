@@ -4,9 +4,16 @@
 # be a poetry-run Python entrypoint. See bin/README.md.
 #
 # Opens the gcloud-style `eve <group> <verb>` CLI tree (scripts/eve-cli). With no
-# args (or `eve tui`) the CLI opens the Textual TUI.
+# args it prints help; `eve tui` opens the Textual TUI.
+#
+# Startup: prefer the in-project venv's python directly — `poetry run` adds ~0.6s
+# of resolution overhead per invocation. Fall back to `poetry run` when the venv
+# isn't materialized (e.g. a non-in-project virtualenvs config).
 set -eu
 
 script_dir="$(CDPATH=; cd -- "$(dirname -- "$0")" && pwd)"
 cd "$script_dir/.."
+if [ -x ".venv/bin/python" ]; then
+  exec .venv/bin/python ./scripts/eve-cli "$@"
+fi
 exec poetry run python ./scripts/eve-cli "$@"
