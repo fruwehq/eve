@@ -24,7 +24,11 @@ def _ensure_plugins_synced() -> None:
     needs_sync = not synced.exists() or not any(synced.iterdir())
     if needs_sync:
         env = {key: value for key, value in os.environ.items() if key != "EVE_HOME"}
-        subprocess.run(
+        result = subprocess.run(
             [sys.executable, str(root / "scripts" / "plugins-pull")],
-            cwd=str(root), env=env, check=True, capture_output=True,
+            cwd=str(root), env=env, capture_output=True, check=False,
         )
+        if result.returncode != 0:
+            # Plugin sync may fail in CI when sibling repos are private.
+            # Individual tests that need plugins will fail with clear messages.
+            pass
