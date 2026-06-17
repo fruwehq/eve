@@ -8,8 +8,10 @@ Usage: scripts/test              # run all
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -47,9 +49,10 @@ SUITE_SCRIPTS: dict[str, list[str]] = {
 
 
 def main(argv: list[str]) -> int:
-    # Sync plugins first so suites can load the catalog.
-    subprocess.run([sys.executable, str(ROOT / "scripts/plugins-pull")],
-                   cwd=str(ROOT), capture_output=True, check=False)
+    # Set hermetic plugin discovery for all test subprocesses.
+    os.environ["EVE_PLUGIN_ROOTS"] = str(ROOT / "tests/fixtures/hermetic")
+    os.environ["EVE_PLUGIN_ROOTS_EXCLUSIVE"] = "1"
+    os.environ.setdefault("EVE_HOME", tempfile.mkdtemp(prefix="eve-test."))
 
     suites = argv if argv else ALL_SUITES
     fail = 0

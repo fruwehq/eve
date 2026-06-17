@@ -90,8 +90,8 @@ def test_single_action_group_help_exits_zero(group: str) -> None:
     "args, needle",
     [
         (["instance", "up"], "the following arguments are required: instance"),
-        (["package", "install", "dev-a"], "the following arguments are required: --package"),
-        (["package", "action", "dev-a", "--package", "docker"], "required: --action"),
+        (["package", "install", "mock-dev-a"], "the following arguments are required: --package"),
+        (["package", "action", "mock-dev-a", "--package", "mock-app"], "required: --action"),
         (["provider", "action", "--action", "login"], "--provider <id> or INSTANCE"),
     ],
 )
@@ -109,11 +109,11 @@ def test_missing_required_arg_exits_2(args: list[str], needle: str) -> None:
 def test_instance_run_verbs_route_through_instance_run() -> None:
     # up/down/start/stop/ssh/ip/reboot/logs/info/env/validate/show-password
     # all map to: scripts/instance-run <target> <instance>
-    assert build_command(_ns(group="instance", verb="up", instance="dev-a")) == [
-        "scripts/instance-run", "up", "dev-a",
+    assert build_command(_ns(group="instance", verb="up", instance="mock-dev-a")) == [
+        "scripts/instance-run", "up", "mock-dev-a",
     ]
-    assert build_command(_ns(group="instance", verb="ssh-wait", instance="dev-a")) == [
-        "scripts/instance-run", "ssh.wait", "dev-a",
+    assert build_command(_ns(group="instance", verb="ssh-wait", instance="mock-dev-a")) == [
+        "scripts/instance-run", "ssh.wait", "mock-dev-a",
     ]
     assert build_command(_ns(group="instance", verb="provision-clear", instance="x")) == [
         "scripts/instance-run", "provision.clear-state", "x",
@@ -121,26 +121,26 @@ def test_instance_run_verbs_route_through_instance_run() -> None:
 
 
 def test_instance_status_translates_json_flag() -> None:
-    assert build_command(_ns(group="instance", verb="status", instance="dev-a", json=False)) == [
-        "scripts/instance-status", "--instance", "dev-a",
+    assert build_command(_ns(group="instance", verb="status", instance="mock-dev-a", json=False)) == [
+        "scripts/instance-status", "--instance", "mock-dev-a",
     ]
-    assert build_command(_ns(group="instance", verb="status", instance="dev-a", json=True)) == [
-        "scripts/instance-status", "--instance", "dev-a", "--json",
+    assert build_command(_ns(group="instance", verb="status", instance="mock-dev-a", json=True)) == [
+        "scripts/instance-status", "--instance", "mock-dev-a", "--json",
     ]
 
 
 def test_instance_create_translates_optional_flags() -> None:
     cmd = build_command(_ns(
-        group="instance", verb="create", instance="dev-a",
-        machine="raspberry-pi-5", os="ubuntu-26.04-arm64", location="home",
+        group="instance", verb="create", instance="mock-dev-a",
+        machine="mock-small", os="mockos-1.0-arm64", location="home",
         provider_host=None, provider_ip=None, bundles="a,b", packages=None,
         disk_gb=40, memory_mb=None, cpu_cores=None, vcpus=None,
         instance_type=None, root_volume_type=None, plan=None,
     ))
     assert cmd == [
-        "scripts/instance-create", "--instance", "dev-a",
-        "--machine", "raspberry-pi-5",
-        "--os", "ubuntu-26.04-arm64",
+        "scripts/instance-create", "--instance", "mock-dev-a",
+        "--machine", "mock-small",
+        "--os", "mockos-1.0-arm64",
         "--location", "home",
         "--bundles", "a,b",
         "--disk-gb", "40",
@@ -195,33 +195,33 @@ def test_instance_state_view_recover_list_direct_scripts() -> None:
 
 
 def test_package_dispatch_commands() -> None:
-    assert build_command(_ns(group="package", verb="install", instance="d", package="docker")) == [
-        "scripts/package-dispatch", "--instance", "d", "--package", "docker",
+    assert build_command(_ns(group="package", verb="install", instance="d", package="mock-app")) == [
+        "scripts/package-dispatch", "--instance", "d", "--package", "mock-app",
         "--command", "install",
     ]
-    assert build_command(_ns(group="package", verb="status", instance="d", package="docker")) == [
-        "scripts/package-dispatch", "--instance", "d", "--package", "docker",
+    assert build_command(_ns(group="package", verb="status", instance="d", package="mock-app")) == [
+        "scripts/package-dispatch", "--instance", "d", "--package", "mock-app",
         "--command", "status",
     ]
     # down/reinstall carry --yes when present.
     assert build_command(_ns(group="package", verb="down", instance="d",
-                             package="docker", yes=True)) == [
-        "scripts/package-dispatch", "--instance", "d", "--package", "docker",
+                             package="mock-app", yes=True)) == [
+        "scripts/package-dispatch", "--instance", "d", "--package", "mock-app",
         "--command", "down", "--yes",
     ]
     assert build_command(_ns(group="package", verb="reinstall", instance="d",
-                             package="docker", yes=False)) == [
-        "scripts/package-dispatch", "--instance", "d", "--package", "docker",
+                             package="mock-app", yes=False)) == [
+        "scripts/package-dispatch", "--instance", "d", "--package", "mock-app",
         "--command", "reinstall",
     ]
 
 
 def test_package_select_unselect_action_verify() -> None:
-    assert build_command(_ns(group="package", verb="select", instance="d", package="docker")) == [
-        "scripts/package-selection", "--instance", "d", "--package", "docker", "--add",
+    assert build_command(_ns(group="package", verb="select", instance="d", package="mock-app")) == [
+        "scripts/package-selection", "--instance", "d", "--package", "mock-app", "--add",
     ]
-    assert build_command(_ns(group="package", verb="unselect", instance="d", package="docker")) == [
-        "scripts/package-selection", "--instance", "d", "--package", "docker", "--remove",
+    assert build_command(_ns(group="package", verb="unselect", instance="d", package="mock-app")) == [
+        "scripts/package-selection", "--instance", "d", "--package", "mock-app", "--remove",
     ]
     assert build_command(_ns(group="package", verb="action", instance="d",
                              package="rustdesk", action="rustdesk-info")) == [
@@ -232,8 +232,8 @@ def test_package_select_unselect_action_verify() -> None:
     assert build_command(_ns(group="package", verb="verify", instance="d", package=None)) == [
         "scripts/package-verify", "--instance", "d",
     ]
-    assert build_command(_ns(group="package", verb="verify", instance="d", package="docker")) == [
-        "scripts/package-verify", "--instance", "d", "--package", "docker",
+    assert build_command(_ns(group="package", verb="verify", instance="d", package="mock-app")) == [
+        "scripts/package-verify", "--instance", "d", "--package", "mock-app",
     ]
 
 
@@ -252,8 +252,8 @@ def test_provider_list_status_action() -> None:
     ]
     # provider-level action (no instance).
     assert build_command(_ns(group="provider", verb="action", instance=None,
-                             provider="aws", action="login")) == [
-        "scripts/provider-dispatch", "--provider", "aws", "--command", "login",
+                             provider="mock-cloud", action="login")) == [
+        "scripts/provider-dispatch", "--provider", "mock-cloud", "--command", "login",
     ]
     # instance-level action (no --provider).
     assert build_command(_ns(group="provider", verb="action", instance="d",
@@ -265,7 +265,7 @@ def test_provider_list_status_action() -> None:
 def test_provider_action_rejects_both_or_neither() -> None:
     with pytest.raises(SystemExit) as both:
         build_command(_ns(group="provider", verb="action", instance="d",
-                          provider="aws", action="login"))
+                          provider="mock-cloud", action="login"))
     assert both.value.code == 2
     with pytest.raises(SystemExit) as neither:
         build_command(_ns(group="provider", verb="action", instance=None,

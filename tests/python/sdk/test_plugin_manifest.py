@@ -8,12 +8,12 @@ from eve_sdk.plugin_manifest import PluginManifest
 
 
 def test_plugin_manifest_loads_and_validates_a_provider() -> None:
-    # Providers are external (pulled into .eve/plugins) after v4.0 Phase 3.
-    plugin = next(p for p in PluginManifest.load_all("provider") if p["id"] == "vultr")
+    # Providers are external (discovered via EVE_PLUGIN_ROOTS, not builtin).
+    plugin = next(p for p in PluginManifest.load_all("provider") if p["id"] == "mock-cloud")
 
     PluginManifest.validate(plugin)
 
-    assert plugin["id"] == "vultr"
+    assert plugin["id"] == "mock-cloud"
     assert PluginManifest.public(plugin)["source"] == "external"
 
 

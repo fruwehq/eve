@@ -7,7 +7,7 @@ message on stderr), the PROVIDER gate (unsupported exit 2), and the
 no-Vagrantfile branches. No real vagrant install or VM is required.
 
 Note: vagrant-up's `--plan` dry-run seam sits behind an ENGINE=vagrant AND
-PROVIDER=local-qemu conjunction. PROVIDER=local-qemu always derives
+PROVIDER=vagrant-mock-cloud conjunction. PROVIDER=vagrant-mock-cloud always derives
 ENGINE=qemu (see eve_sdk.resolve.engine_for / scripts/profile-resolve), so that
 seam is unreachable under the current engine derivation and is not exercised
 here -- the port preserves the original branch faithfully.
@@ -44,28 +44,28 @@ _CATALOG = dedent(
         providers: [local-vagrant]
     locations:
       - name: test-loc
-        aws:
-          availability_zone: ap-northeast-1a
-        local-qemu:
+        mock-cloud:
+          region: mock-northeast-1
+        mock-local:
           host: local
         local-vagrant:
           host: local
     profiles:
       - name: terraform-test
-        machine: aws-cheap-x86
-        os: ubuntu-26.04-amd64
-        init: ssh-ubuntu-cloud-init
+        machine: mock-small
+        os: mockos-1.0-amd64
+        init: ssh-mockos-cloud-init
         bundles: []
         location: test-loc
       - name: qemu-test
-        machine: local-qemu-medium
-        os: ubuntu-26.04-arm64
-        init: ssh-ubuntu-cloud-init
+        machine: mock-vm
+        os: mockos-1.0-arm64
+        init: ssh-mockos-cloud-init
         bundles: []
         location: test-loc
       - name: vagrant-test
         machine: local-vagrant-medium
-        os: ubuntu-26.04-amd64
+        os: mockos-1.0-amd64
         init: ssh-vagrant-init
         bundles: []
         location: test-loc
@@ -91,7 +91,7 @@ def vagrant_env(tmp_path: Path) -> dict[str, str]:
             instances:
               - name: vagrant-test
                 machine: local-vagrant-medium
-                os: ubuntu-26.04-amd64
+                os: mockos-1.0-amd64
                 init: ssh-vagrant-init
                 location: test-loc
                 bundles: []

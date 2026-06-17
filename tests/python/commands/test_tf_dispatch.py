@@ -19,23 +19,23 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[3]
 
-_TF_PROFILE = "tf-aws-test"  # ENGINE=terraform, STACK_TAGS=aws
-_QEMU_PROFILE = "qemu-test"  # ENGINE=qemu (local-qemu), STACK_TAGS=local-qemu
+_TF_PROFILE = "tf-aws-test"  # ENGINE=terraform (mock-cloud), STACK_TAGS=mock-cloud
+_QEMU_PROFILE = "qemu-test"  # ENGINE=qemu (mock-local), STACK_TAGS=mock-local
 _CATALOG = dedent(
     """\
     profiles:
       - name: tf-aws-test
-        machine: aws-cheap-x86
-        os: ubuntu-26.04-amd64
-        init: ssh-ubuntu-cloud-init
-        bundles: [dev-ai]
-        location: tokyo
+        machine: mock-small
+        os: mockos-1.0-amd64
+        init: ssh-mockos-cloud-init
+        bundles: [mock-dev]
+        location: mock-tokyo
       - name: qemu-test
-        machine: local-qemu-medium
-        os: ubuntu-26.04-arm64
-        init: ssh-ubuntu-cloud-init
-        bundles: [dev-ai]
-        location: tokyo
+        machine: mock-vm
+        os: mockos-1.0-arm64
+        init: ssh-mockos-cloud-init
+        bundles: [mock-dev]
+        location: mock-tokyo
     """
 )
 
@@ -106,14 +106,14 @@ def test_tf_init_print_mode_skips_workspace_in_profile_mode(tf_env: dict[str, st
     env = {**tf_env, "EVE_TF_PRINT": "1"}
     result = _run("tf-init", _TF_PROFILE, env=env)
     assert result.returncode == 0, result.stderr
-    assert "[tf-init] profile=tf-aws-test tags=aws" in result.stdout
+    assert "[tf-init] profile=tf-aws-test tags=mock-cloud" in result.stdout
     assert "[tf-init] would run:" in result.stdout
     assert "terraform init -reconfigure" in result.stdout
     assert "terraform workspace" not in result.stdout
 
 
 def test_tf_init_print_mode_schedules_workspace_in_instance_mode(tf_env: dict[str, str]) -> None:
-    instance = "aws-gpu-a"
+    instance = "mock-gpu-a"
     env = {**tf_env, "EVE_TF_PRINT": "1", "EVE_INSTANCE_NAME": instance}
     result = _run("tf-init", _TF_PROFILE, env=env)
     assert result.returncode == 0, result.stderr

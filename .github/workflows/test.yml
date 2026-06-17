@@ -19,33 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # only used in PRs; don't use in default branches. This is used to identify the delta
-
-      - name: Clone sibling plugin repos
-        env:
-          TOKEN: ${{ secrets.PLUGIN_REPO_TOKEN || secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          mkdir -p _sibling
-          for repo in eve-providers eve-packages-linux eve-packages-windows; do
-            if [ ! -d "_sibling/$repo" ]; then
-              git clone --depth 1 "https://x-access-token:${TOKEN}@github.com/fruwehq/${repo}.git" "_sibling/$repo" || \
-                echo "WARN: cannot clone $repo (private; set PLUGIN_REPO_TOKEN secret)"
-            fi
-          done
-          mkdir -p .eve
-          cat > .eve/plugin-sources.yaml <<'YAML'
-sources:
-  - id: eve-providers
-    url: _sibling/eve-providers
-    ref: main
-  - id: eve-packages-linux
-    url: _sibling/eve-packages-linux
-    ref: main
-  - id: eve-packages-windows
-    url: _sibling/eve-packages-windows
-    ref: main
-YAML
+          fetch-depth: 0
 
       - name: Initialize timing summary
         run: |

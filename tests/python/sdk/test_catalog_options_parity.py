@@ -22,10 +22,17 @@ SCRIPT = Workdir.repo_root() / "scripts/catalog-options"
 
 
 def _run_catalog_options() -> bytes:
-    # Scrub env that could pull in uncommitted synced plugins or an alternate
-    # home so the output reflects only the committed tree (config/catalog.yaml
-    # + builtin plugins/).
-    env = {key: value for key, value in os.environ.items() if key not in {"EVE_PLUGIN_ROOTS", "EVE_HOME"}}
+    # Run hermetically against the synthetic fixture plugins so the output is
+    # deterministic and independent of any ambient synced plugins. The golden
+    # is generated from these same fixtures (the decoupled, self-contained
+    # test suite contributes no real provider/package data).
+    hermetic = str(Workdir.repo_root() / "tests/fixtures/hermetic")
+    env = {
+        **{key: value for key, value in os.environ.items() if key not in {"EVE_PLUGIN_ROOTS", "EVE_HOME"}},
+        "EVE_PLUGIN_ROOTS": hermetic,
+        "EVE_PLUGIN_ROOTS_EXCLUSIVE": "1",
+        "EVE_HOME": tempfile.mkdtemp(prefix="eve-parity."),
+    }
     result = subprocess.run(
         [sys.executable, str(SCRIPT), "--json"],
         cwd=Workdir.repo_root(),

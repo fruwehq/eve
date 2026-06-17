@@ -22,19 +22,19 @@ ROOT = Path(__file__).resolve().parents[3]
 _CATALOG = dedent(
     """\
     profiles:
-      - name: local-qemu-ubuntu-dev-gui
-        machine: local-qemu-medium
-        os: ubuntu-26.04-arm64
-        init: ssh-ubuntu-cloud-init
-        bundles: [dev-ai]
-        location: tokyo
+      - name: mock-cloud-ubuntu-dev-gui
+        machine: mock-small
+        os: mockos-1.0-arm64
+        init: ssh-mockos-cloud-init
+        bundles: [mock-dev]
+        location: mock-tokyo
 
-      - name: vultr-windows-gaming
-        machine: vultr-vcg-a40-2c
-        os: windows-server-2025
-        init: ssh-windows-powershell7
-        bundles: [gaming-streaming]
-        location: tokyo
+      - name: mock-win-gaming
+        machine: mock-small
+        os: mockwin-1.0
+        init: ssh-mockwin-powershell
+        bundles: [mock-gaming]
+        location: mock-tokyo
     """
 )
 
@@ -97,19 +97,19 @@ def test_provision_missing_package_exit_2() -> None:
 
 @pytest.mark.parametrize("script", ["package-status-command", "package-down-command"])
 def test_command_missing_args_exit_nonzero(script: str) -> None:
-    result = _run(script, env={**os.environ, "EVE_INSTANCE_NAME": "dev-a"})
+    result = _run(script, env={**os.environ, "EVE_INSTANCE_NAME": "mock-dev-a"})
     assert result.returncode != 0
 
 
 def test_status_command_missing_eve_instance_name() -> None:
     env = {k: v for k, v in os.environ.items() if k != "EVE_INSTANCE_NAME"}
-    result = _run("package-status-command", "docker", "echo hi", env=env)
+    result = _run("package-status-command", "mock-app", "echo hi", env=env)
     assert result.returncode != 0
     assert "EVE_INSTANCE_NAME is required" in result.stderr
 
 
 def test_status_windows_missing_paths_exit_2() -> None:
-    result = _run("package-status-windows", "docker", env={**os.environ, "EVE_INSTANCE_NAME": "dev-a"})
+    result = _run("package-status-windows", "mock-app", env={**os.environ, "EVE_INSTANCE_NAME": "mock-dev-a"})
     assert result.returncode == 2
     assert "at least one path is required" in result.stderr
 
@@ -123,7 +123,7 @@ def test_verify_missing_instance_exit_2() -> None:
 # --------------------- OS-family dispatch selection ------------------------ #
 def test_provision_rejects_windows_profile(catalog_env: dict[str, str]) -> None:
     result = _run(
-        "package-provision", "--profile", "vultr-windows-gaming", "--package", "steam",
+        "package-provision", "--profile", "mock-win-gaming", "--package", "mock-app",
         "--dry-run", env=catalog_env,
     )
     assert result.returncode == 2
@@ -132,8 +132,8 @@ def test_provision_rejects_windows_profile(catalog_env: dict[str, str]) -> None:
 
 def test_provision_windows_rejects_ubuntu_profile(catalog_env: dict[str, str]) -> None:
     result = _run(
-        "package-provision-windows", "--profile", "local-qemu-ubuntu-dev-gui",
-        "--package", "docker", "--dry-run", env=catalog_env,
+        "package-provision-windows", "--profile", "mock-cloud-ubuntu-dev-gui",
+        "--package", "mock-app", "--dry-run", env=catalog_env,
     )
     assert result.returncode == 2
     assert "granular package install is only implemented for windows, got ubuntu" in result.stderr
@@ -142,70 +142,73 @@ def test_provision_windows_rejects_ubuntu_profile(catalog_env: dict[str, str]) -
 # --------------------- package-provision dry-run seam ---------------------- #
 def test_provision_dry_run_basic(catalog_env: dict[str, str]) -> None:
     result = _run(
-        "package-provision", "--profile", "local-qemu-ubuntu-dev-gui",
-        "--package", "docker", "--dry-run", env=catalog_env,
+        "package-provision", "--profile", "mock-cloud-ubuntu-dev-gui",
+        "--package", "mock-app", "--dry-run", env=catalog_env,
     )
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)
     assert payload["kind"] == "package-provision"
-    assert payload["package"] == "docker"
+    assert payload["package"] == "mock-app"
     assert payload["os_family"] == "ubuntu"
     assert payload["dry_run"] is True
-    assert payload["steps"] == ["base.sh", "timezone.sh", "provision/ubuntu/docker.sh"]
+    assert payload["steps"] == ["base.sh", "provision/ubuntu/mock-app.sh"]
 
 
 def test_provision_dry_run_dependency_chain(catalog_env: dict[str, str]) -> None:
+    # mock-tool depends_on mock-app: the chain expands deps-first and unions
+    # each plugin's install.ubuntu.steps with stable first-occurrence dedup.
     result = _run(
-        "package-provision", "--profile", "local-qemu-ubuntu-dev-gui",
-        "--package", "codex-cli", "--dry-run", env=catalog_env,
+        "package-provision", "--profile", "mock-cloud-ubuntu-dev-gui",
+        "--package", "mock-tool", "--dry-run", env=catalog_env,
     )
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)
-    assert payload["package"] == "codex-cli"
+    assert payload["package"] == "mock-tool"
     assert payload["steps"] == [
-        "base.sh", "timezone.sh", "provision/ubuntu/dev-toolchain.sh",
-        "provision/ubuntu/codex-cli.sh",
+        "base.sh", "provision/ubuntu/mock-app.sh",
+        "provision/ubuntu/mock-tool.sh",
     ]
-    assert payload["package_markers"] == ["dev-toolchain", "codex-cli"]
+    assert payload["package_markers"] == ["mock-app", "mock-tool"]
 
 
 def test_provision_dry_run_profile_alias(catalog_env: dict[str, str]) -> None:
     """--instance and --profile are compatibility aliases."""
     result = _run(
-        "package-provision", "--instance", "local-qemu-ubuntu-dev-gui",
-        "--package", "docker", "--dry-run", env=catalog_env,
+        "package-provision", "--instance", "mock-cloud-ubuntu-dev-gui",
+        "--package", "mock-app", "--dry-run", env=catalog_env,
     )
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)
-    assert payload["instance"] == "local-qemu-ubuntu-dev-gui"
-    assert payload["profile"] == "local-qemu-ubuntu-dev-gui"
+    assert payload["instance"] == "mock-cloud-ubuntu-dev-gui"
+    assert payload["profile"] == "mock-cloud-ubuntu-dev-gui"
 
 
 # ----------------- package-provision-windows dry-run seam ------------------ #
 def test_provision_windows_dry_run_granular(catalog_env: dict[str, str]) -> None:
     result = _run(
-        "package-provision-windows", "--profile", "vultr-windows-gaming",
-        "--package", "steam", "--dry-run", env=catalog_env,
+        "package-provision-windows", "--profile", "mock-win-gaming",
+        "--package", "mock-win-app", "--dry-run", env=catalog_env,
     )
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)
     assert payload["kind"] == "package-provision-windows"
-    assert payload["package"] == "steam"
+    assert payload["package"] == "mock-win-app"
     assert payload["os_family"] == "windows"
-    assert payload["steps"] == ["provision/windows/steam.ps1"]
+    assert payload["steps"] == ["provision/windows/mock-win-app.ps1"]
     assert payload["state_files"] == []
     assert payload["fallback"] is False
     assert payload["dry_run"] is True
 
 
 def test_provision_windows_dry_run_fallback(catalog_env: dict[str, str]) -> None:
+    # mock-app has no windows install mapping -> full-provision fallback.
     result = _run(
-        "package-provision-windows", "--profile", "vultr-windows-gaming",
-        "--package", "sunshine", "--dry-run", env=catalog_env,
+        "package-provision-windows", "--profile", "mock-win-gaming",
+        "--package", "mock-app", "--dry-run", env=catalog_env,
     )
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)
-    assert payload["package"] == "sunshine"
+    assert payload["package"] == "mock-app"
     assert payload["steps"] == []
     assert payload["state_files"] == []
     assert payload["fallback"] is True
@@ -213,8 +216,8 @@ def test_provision_windows_dry_run_fallback(catalog_env: dict[str, str]) -> None
 
 def test_provision_windows_dry_run_unmapped(catalog_env: dict[str, str]) -> None:
     result = _run(
-        "package-provision-windows", "--profile", "vultr-windows-gaming",
-        "--package", "docker", "--dry-run", env=catalog_env,
+        "package-provision-windows", "--profile", "mock-win-gaming",
+        "--package", "mock-app", "--dry-run", env=catalog_env,
     )
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)
@@ -222,14 +225,15 @@ def test_provision_windows_dry_run_unmapped(catalog_env: dict[str, str]) -> None
 
 
 def test_provision_windows_dry_run_state_files(catalog_env: dict[str, str]) -> None:
+    # mock-win-state declares install.windows.state_files.
     result = _run(
-        "package-provision-windows", "--profile", "vultr-windows-gaming",
-        "--package", "rustdesk", "--dry-run", env=catalog_env,
+        "package-provision-windows", "--profile", "mock-win-gaming",
+        "--package", "mock-win-state", "--dry-run", env=catalog_env,
     )
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)
-    assert payload["package"] == "rustdesk"
-    assert payload["steps"] == ["provision/windows/rustdesk.ps1"]
+    assert payload["package"] == "mock-win-state"
+    assert payload["steps"] == ["provision/windows/mock-win-state.ps1"]
     assert payload["state_files"] == ["env.json"]
     assert payload["fallback"] is False
 
@@ -238,13 +242,13 @@ def test_provision_windows_dry_run_state_files(catalog_env: dict[str, str]) -> N
 def test_status_command_emits_contract(fake_ssh: tuple[Path, Path]) -> None:
     state_dir, _ = fake_ssh
     fake_installed = str(state_dir / "fake-ssh-installed")
-    env = {**os.environ, "EVE_PACKAGE_STATUS_SSH": fake_installed, "EVE_INSTANCE_NAME": "dev-a"}
-    result = _run("package-status-command", "docker", "ignored remote command", env=env)
+    env = {**os.environ, "EVE_PACKAGE_STATUS_SSH": fake_installed, "EVE_INSTANCE_NAME": "mock-dev-a"}
+    result = _run("package-status-command", "mock-app", "ignored remote command", env=env)
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)
     assert payload["kind"] == "package-status"
-    assert payload["package"] == "docker"
-    assert payload["instance"] == "dev-a"
+    assert payload["package"] == "mock-app"
+    assert payload["instance"] == "mock-dev-a"
     assert payload["os_family"] == "ubuntu"
     assert payload["status"] == "installed"
 
@@ -255,8 +259,8 @@ def test_status_command_failed_status(fake_ssh: tuple[Path, Path]) -> None:
     fake_fail = state_dir / "fake-ssh-fail"
     fake_fail.write_text("#!/usr/bin/env sh\nset -eu\nexit 3\n")
     fake_fail.chmod(0o755)
-    env = {**os.environ, "EVE_PACKAGE_STATUS_SSH": str(fake_fail), "EVE_INSTANCE_NAME": "dev-a"}
-    result = _run("package-status-command", "docker", "echo hi", env=env)
+    env = {**os.environ, "EVE_PACKAGE_STATUS_SSH": str(fake_fail), "EVE_INSTANCE_NAME": "mock-dev-a"}
+    result = _run("package-status-command", "mock-app", "echo hi", env=env)
     assert result.returncode == 0
     payload = json.loads(result.stdout)
     assert payload["status"] == "failed"
@@ -274,13 +278,13 @@ def test_status_windows_emits_contract(fake_ssh: tuple[Path, Path], tmp_path: Pa
         "EVE_INSTANCE_NAME": "win-a",
     }
     result = _run(
-        "package-status-windows", "steam", r"C:\Program Files (x86)\Steam\steam.exe",
+        "package-status-windows", "mock-app", r"C:\Program Files (x86)\Steam\steam.exe",
         env=env,
     )
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)
     assert payload["kind"] == "package-status"
-    assert payload["package"] == "steam"
+    assert payload["package"] == "mock-app"
     assert payload["instance"] == "win-a"
     assert payload["os_family"] == "windows"
     assert payload["status"] == "installed"
@@ -298,10 +302,10 @@ def test_status_windows_running_normalizes_to_installed(fake_ssh: tuple[Path, Pa
         **os.environ,
         "EVE_PACKAGE_STATUS_SSH": fake_running,
         "EVE_INSTANCE_NAME": "win-a",
-        "EVE_PACKAGE_STATUS_PROCESS": "rustdesk",
-        "EVE_PACKAGE_STATUS_SERVICE_PATTERN": "rustdesk",
+        "EVE_PACKAGE_STATUS_PROCESS": "mock-app",
+        "EVE_PACKAGE_STATUS_SERVICE_PATTERN": "mock-app",
     }
-    result = _run("package-status-windows", "rustdesk", r"C:\Program Files\RustDesk\rustdesk.exe", env=env)
+    result = _run("package-status-windows", "mock-app", r"C:\Program Files\RustDesk\rustdesk.exe", env=env)
     assert result.returncode == 0
     payload = json.loads(result.stdout)
     assert payload["status"] == "installed"
@@ -311,37 +315,37 @@ def test_status_windows_running_normalizes_to_installed(fake_ssh: tuple[Path, Pa
 # --------------------- down-command contract ------------------------------- #
 def test_down_command_emits_contract(fake_ssh: tuple[Path, Path]) -> None:
     state_dir, fake_down = fake_ssh
-    env = {**os.environ, "EVE_PACKAGE_DOWN_SSH": str(fake_down), "EVE_INSTANCE_NAME": "dev-a"}
-    result = _run("package-down-command", "docker", "sudo apt-get remove -y docker-ce || true", env=env)
+    env = {**os.environ, "EVE_PACKAGE_DOWN_SSH": str(fake_down), "EVE_INSTANCE_NAME": "mock-dev-a"}
+    result = _run("package-down-command", "mock-app", "sudo apt-get remove -y mock-app-ce || true", env=env)
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)
     assert payload["kind"] == "package-down"
-    assert payload["package"] == "docker"
-    assert payload["instance"] == "dev-a"
+    assert payload["package"] == "mock-app"
+    assert payload["instance"] == "mock-dev-a"
     assert payload["os_family"] == "ubuntu"
     assert payload["status"] == "removed"
 
 
 def test_down_command_dry_run() -> None:
-    env = {**os.environ, "EVE_INSTANCE_NAME": "dev-a", "EVE_PLUGIN_DRY_RUN": "1"}
-    result = _run("package-down-command", "docker", "apt-get remove docker-ce", env=env)
+    env = {**os.environ, "EVE_INSTANCE_NAME": "mock-dev-a", "EVE_PLUGIN_DRY_RUN": "1"}
+    result = _run("package-down-command", "mock-app", "apt-get remove mock-app-ce", env=env)
     assert result.returncode == 0
     payload = json.loads(result.stdout)
     assert payload["kind"] == "package-down"
     assert payload["os_family"] == "ubuntu"
     assert payload["dry_run"] is True
-    assert payload["command"] == "apt-get remove docker-ce"
+    assert payload["command"] == "apt-get remove mock-app-ce"
 
 
 # --------------------- down-windows contract ------------------------------- #
 def test_down_windows_emits_contract(fake_ssh: tuple[Path, Path]) -> None:
     state_dir, fake_down = fake_ssh
     env = {**os.environ, "EVE_PACKAGE_DOWN_SSH": str(fake_down), "EVE_INSTANCE_NAME": "win-a"}
-    result = _run("package-down-windows", "steam", "winget uninstall --id Valve.Steam --silent; exit 0", env=env)
+    result = _run("package-down-windows", "mock-app", "winget uninstall --id Valve.Steam --silent; exit 0", env=env)
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)
     assert payload["kind"] == "package-down"
-    assert payload["package"] == "steam"
+    assert payload["package"] == "mock-app"
     assert payload["instance"] == "win-a"
     assert payload["os_family"] == "windows"
     assert payload["status"] == "removed"
@@ -349,7 +353,7 @@ def test_down_windows_emits_contract(fake_ssh: tuple[Path, Path]) -> None:
 
 def test_down_windows_dry_run() -> None:
     env = {**os.environ, "EVE_INSTANCE_NAME": "win-a", "EVE_PLUGIN_DRY_RUN": "1"}
-    result = _run("package-down-windows", "steam", "winget uninstall Valve.Steam", env=env)
+    result = _run("package-down-windows", "mock-app", "winget uninstall Valve.Steam", env=env)
     assert result.returncode == 0
     payload = json.loads(result.stdout)
     assert payload["kind"] == "package-down"

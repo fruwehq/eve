@@ -1,34 +1,32 @@
-"""Session setup: ensure the first-party plugins are synced.
+"""Session setup: hermetic plugin discovery for tests.
 
-After v4.0 Phase 3 the core ships no plugins — providers/packages are pulled from
-the external repos into `repo_root/.eve/plugins`. Tests that load the catalog or
-dispatch to a provider/package need them present, so sync once per session if the
-synced tree is missing/empty (idempotent; a no-op once populated).
+Points EVE_PLUGIN_ROOTS at the synthetic test fixtures and (via the session
+fixture) sets EVE_PLUGIN_ROOTS_EXCLUSIVE=1 so discovery sees ONLY those
+fixtures — no ambient user plugins (.eve/plugins, EVE_HOME) leak into results.
+The module-level assignment runs before any eve_sdk import at collection time;
+the autouse session fixture pins both vars for the whole run. Tests that need
+extra plugins append them to EVE_PLUGIN_ROOTS (exclusive still honours every
+listed root).
 """
 
 from __future__ import annotations
 
 import os
-import subprocess
-import sys
+import tempfile
+from pathlib import Path
 
 import pytest
 
-from eve_sdk.workdir import Workdir
+ROOT = Path(__file__).resolve().parents[2]
+HERMETIC_FIXTURES = str(ROOT / "tests/fixtures/hermetic")
+
+# Set BEFORE any eve_sdk import or fixture runs.
+os.environ["EVE_PLUGIN_ROOTS"] = HERMETIC_FIXTURES
+os.environ.setdefault("EVE_HOME", tempfile.mkdtemp(prefix="eve-hermetic."))
 
 
 @pytest.fixture(scope="session", autouse=True)
-def _ensure_plugins_synced() -> None:
-    root = Workdir.repo_root()
-    synced = root / ".eve" / "plugins"
-    needs_sync = not synced.exists() or not any(synced.iterdir())
-    if needs_sync:
-        env = {key: value for key, value in os.environ.items() if key != "EVE_HOME"}
-        result = subprocess.run(
-            [sys.executable, str(root / "scripts" / "plugins-pull")],
-            cwd=str(root), env=env, capture_output=True, check=False,
-        )
-        if result.returncode != 0:
-            # Plugin sync may fail in CI when sibling repos are private.
-            # Individual tests that need plugins will fail with clear messages.
-            pass
+def _hermetic_plugin_env() -> None:
+    """Ensure hermetic plugin discovery for the entire pytest session."""
+    os.environ["EVE_PLUGIN_ROOTS"] = HERMETIC_FIXTURES
+    os.environ["EVE_PLUGIN_ROOTS_EXCLUSIVE"] = "1"

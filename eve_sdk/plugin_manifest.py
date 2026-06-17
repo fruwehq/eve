@@ -49,6 +49,16 @@ class PluginManifest:
 
     @staticmethod
     def plugin_roots() -> list[Path]:
+        # When EVE_PLUGIN_ROOTS_EXCLUSIVE=1, return ONLY EVE_PLUGIN_ROOTS paths.
+        # This enables hermetic testing: the test suite sets EVE_PLUGIN_ROOTS
+        # to a synthetic fixture directory and the flag so no ambient user
+        # plugins (.eve/plugins, EVE_HOME) leak into test results.
+        if os.environ.get("EVE_PLUGIN_ROOTS_EXCLUSIVE") == "1":
+            return [
+                Path(entry).expanduser().resolve()
+                for entry in os.environ.get("EVE_PLUGIN_ROOTS", "").split(":")
+                if entry
+            ]
         # repo_root/plugins: legacy builtin location (empty after v4.0 Phase 3).
         # repo_root/.eve/plugins: the eve repo's own pulled first-party plugins,
         #   discoverable regardless of EVE_HOME (so tests that relocate EVE_HOME

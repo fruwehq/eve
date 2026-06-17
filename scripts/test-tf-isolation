@@ -14,6 +14,10 @@ import sys
 import tempfile
 from pathlib import Path
 
+os.environ["EVE_PLUGIN_ROOTS"] = str(Path(__file__).resolve().parents[1] / "tests/fixtures/hermetic")
+os.environ["EVE_PLUGIN_ROOTS_EXCLUSIVE"] = "1"
+os.environ.setdefault("EVE_HOME", tempfile.mkdtemp(prefix="eve-tf-iso."))
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -28,12 +32,12 @@ def main() -> int:
     tmpcatalog = Path(tmpcatalog_dir) / "catalog.local.yaml"
     tmpcatalog.write_text(
         "profiles:\n"
-        "  - name: aws-ubuntu-dev-headless\n"
-        "    machine: aws-cheap-x86\n"
-        "    os: ubuntu-26.04-amd64\n"
-        "    init: ssh-ubuntu-cloud-init\n"
-        "    bundles: [dev-ai]\n"
-        "    location: tokyo\n",
+        "  - name: mock-dev-headless\n"
+        "    machine: mock-small\n"
+        "    os: mockos-1.0-amd64\n"
+        "    init: ssh-mockos-cloud-init\n"
+        "    bundles: [mock-dev]\n"
+        "    location: mock-tokyo\n",
         encoding="utf-8",
     )
 
@@ -48,7 +52,7 @@ def main() -> int:
             "EVE_STATE_DIR": f"{tmpstate}/state",
             "VM_USER_NAME": "eve-test",
         }
-        profile = "aws-ubuntu-dev-headless"
+        profile = "mock-dev-headless"
         fail = 0
 
         def _run_with_files(cmd, e):
@@ -89,11 +93,11 @@ def main() -> int:
             print("  [OK] tf-env omits TF_WORKSPACE without EVE_INSTANCE_NAME")
 
         # 2. tf-env with instance: emits TF_WORKSPACE.
-        out = run_tf_env({"EVE_INSTANCE_NAME": "aws-gpu-a"})
-        if (re.search(r"^export TF_WORKSPACE='aws-gpu-a';$", out, re.M) and
-            f"export EVE_TF_DATA_BASE='{tmpwork}/work/aws-gpu-a/tf/data';" in out and
-            f"export EVE_TF_STATE_BASE='{tmpwork}/work/aws-gpu-a/tf/state';" in out):
-            print("  [OK] tf-env emits isolated Terraform env for EVE_INSTANCE_NAME=aws-gpu-a")
+        out = run_tf_env({"EVE_INSTANCE_NAME": "mock-dev-a"})
+        if (re.search(r"^export TF_WORKSPACE='mock-dev-a';$", out, re.M) and
+            f"export EVE_TF_DATA_BASE='{tmpwork}/work/mock-dev-a/tf/data';" in out and
+            f"export EVE_TF_STATE_BASE='{tmpwork}/work/mock-dev-a/tf/state';" in out):
+            print("  [OK] tf-env emits isolated Terraform env for EVE_INSTANCE_NAME=mock-dev-a")
         else:
             print("  [FAIL] tf-env did not emit expected isolated Terraform exports", file=sys.stderr)
             print(out, file=sys.stderr)
@@ -109,23 +113,23 @@ def main() -> int:
             fail += 1
 
         # 4. tf-init with instance: includes workspace step.
-        out = run_tf_init({"EVE_INSTANCE_NAME": "aws-gpu-a"})
+        out = run_tf_init({"EVE_INSTANCE_NAME": "mock-dev-a"})
         if ("terraform init -reconfigure" in out and
-            f"backend-config=path={tmpwork}/work/aws-gpu-a/tf/state" in out and
-            f"backend-config=workspace_dir={tmpwork}/work/aws-gpu-a/tf/state" in out and
-            "terraform workspace select -or-create aws-gpu-a" in out):
-            print("  [OK] tf-init schedules isolated backend and workspace for instance aws-gpu-a")
+            f"backend-config=path={tmpwork}/work/mock-dev-a/tf/state" in out and
+            f"backend-config=workspace_dir={tmpwork}/work/mock-dev-a/tf/state" in out and
+            "terraform workspace select -or-create mock-dev-a" in out):
+            print("  [OK] tf-init schedules isolated backend and workspace for instance mock-dev-a")
         else:
             print("  [FAIL] tf-init instance-mode output missing isolated backend/workspace setup", file=sys.stderr)
             print(out, file=sys.stderr)
             fail += 1
 
         # 5. Two different instances → different workspace names.
-        out_b = run_tf_init({"EVE_INSTANCE_NAME": "truenas-all-a"})
-        if ("terraform workspace select -or-create truenas-all-a" in out_b and
-            f"backend-config=path={tmpwork}/work/truenas-all-a/tf/state" in out_b and
-            f"backend-config=path={tmpwork}/work/aws-gpu-a/tf/state" not in out_b and
-            "terraform workspace select -or-create aws-gpu-a" not in out_b):
+        out_b = run_tf_init({"EVE_INSTANCE_NAME": "mock-gpu-a"})
+        if ("terraform workspace select -or-create mock-gpu-a" in out_b and
+            f"backend-config=path={tmpwork}/work/mock-gpu-a/tf/state" in out_b and
+            f"backend-config=path={tmpwork}/work/mock-dev-a/tf/state" not in out_b and
+            "terraform workspace select -or-create mock-dev-a" not in out_b):
             print("  [OK] distinct instance names produce distinct Terraform roots")
         else:
             print("  [FAIL] second instance did not produce distinct Terraform roots", file=sys.stderr)

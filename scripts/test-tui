@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# ruff: noqa: E501
 """Validate the optional Textual TUI entrypoint without requiring Textual."""
 
 from __future__ import annotations
@@ -34,8 +33,8 @@ def main() -> int:
 import runpy
 module = runpy.run_path("scripts/eve-tui")
 options = module["catalog_options"]()
-assert "vultr" in options["providers"]
-assert any(platform["provider"] == "vultr" and platform["os"] == "windows-server-2025" for platform in options["platforms"])
+assert "mock-cloud" in options["providers"]
+assert any(platform["provider"] == "mock-cloud" for platform in options["platforms"])
 format_aggregate = module["format_aggregate"]
 assert "running" in format_aggregate({"running": 0, "stopped": 0, "failed": 0, "other": 0})
 """],

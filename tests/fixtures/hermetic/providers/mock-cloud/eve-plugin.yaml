@@ -1,0 +1,95 @@
+api_version: eve.plugin/v1
+kind: provider
+id: mock-cloud
+display_name: Mock Cloud
+commands:
+  resolve: {exec: commands/provider-command, args: [resolve]}
+  init: {exec: commands/provider-command, args: [init]}
+  plan: {exec: commands/provider-command, args: [plan]}
+  up: {exec: commands/provider-command, args: [up]}
+  down: {exec: commands/provider-command, args: [down]}
+  start: {exec: commands/provider-command, args: [start]}
+  stop: {exec: commands/provider-command, args: [stop]}
+  status: {exec: commands/provider-command, args: [status]}
+  ip: {exec: commands/provider-command, args: [ip]}
+  ssh: {exec: commands/provider-command, args: [ssh]}
+  validate: {exec: ../_common/commands/validate-os, args: [all, cloud image URL, cloud_image_url]}
+  connectivity: {exec: commands/connectivity}
+host_tools:
+  - name: mock-cli
+    check: command -v mock-cli
+    brew: brew install mock-cli
+    apt: apt install mock-cli
+actions:
+  - id: status-details
+    label: Status
+    target: provider.status
+  - id: plan
+    label: Plan
+    target: provider.plan
+  - id: init
+    label: Init
+    target: provider.init
+access:
+  ubuntu:
+    bootstrap_user: {env: VM_USER_NAME, value: mock-user}
+    provision_user: {env: VM_USER_NAME, value: mock-user}
+    human_user: {env: VM_USER_NAME, fallback: provision_user}
+  windows:
+    bootstrap_user: {value: Administrator}
+    provision_user: {value: Administrator}
+    human_user: {value: Administrator}
+capabilities: [login]
+config_schema:
+  config:
+    region:
+      type: string
+      default: mock-region-1
+      env_var: MOCK_REGION
+      description: "Mock cloud region."
+  secrets:
+    api_key:
+      type: string
+      env_var: MOCK_API_KEY
+      description: "Mock cloud API key."
+env_emission:
+  - name: MOCK_IMAGE_URL
+    from: os.cloud_image_url
+    default: ""
+    match_provider: true
+supports:
+  engines: [terraform]
+  kinds: [vm]
+env: [MOCK_REGION, MOCK_API_KEY]
+catalog:
+  machines:
+    - name: mock-small
+      provider: mock-cloud
+      kind: vm
+      supports:
+        arches: [amd64, arm64]
+      defaults:
+        cpu_cores: 2
+        memory_mb: 4096
+        disk_gb: 20
+    - name: mock-gpu
+      provider: mock-cloud
+      kind: vm
+      supports:
+        arches: [amd64]
+      defaults:
+        cpu_cores: 4
+        memory_mb: 8192
+        disk_gb: 100
+  oses:
+    - id: mockos-1.0-amd64
+      cloud_image_url: https://example.com/mockos-1.0-amd64.img
+    - id: mockos-1.0-arm64
+      cloud_image_url: https://example.com/mockos-1.0-arm64.img
+    - id: mockwin-1.0
+      cloud_image_url: https://example.com/mockwin-1.0.img
+  locations:
+    - name: mock-tokyo
+      mock-cloud:
+        region: mock-northeast-1
+        availability_zone: mock-northeast-1b

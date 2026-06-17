@@ -22,7 +22,7 @@ def test_catalog_options_json_happy_path() -> None:
 
     assert result.returncode == 0, result.stderr
     doc = json.loads(result.stdout)
-    assert "vultr" in doc["providers"]
+    assert "mock-cloud" in doc["providers"]
     assert doc["platforms"]
 
 
@@ -37,7 +37,7 @@ def test_plugin_list_provider_json_happy_path() -> None:
 
     assert result.returncode == 0, result.stderr
     doc = json.loads(result.stdout)
-    assert any(plugin["id"] == "vultr" for plugin in doc["plugins"])
+    assert any(plugin["id"] == "mock-cloud" for plugin in doc["plugins"])
 
 
 def test_plugin_list_rejects_unknown_kind() -> None:

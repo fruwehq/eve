@@ -1,0 +1,45 @@
+api_version: eve.plugin/v1
+kind: provider
+id: mock-local
+display_name: Mock Local (QEMU)
+commands:
+  resolve: {exec: commands/provider-command, args: [resolve]}
+  init: {exec: commands/provider-command, args: [init]}
+  plan: {exec: commands/provider-command, args: [plan]}
+  up: {exec: commands/provider-command, args: [up]}
+  down: {exec: commands/provider-command, args: [down]}
+  start: {exec: commands/provider-command, args: [start]}
+  stop: {exec: commands/provider-command, args: [stop]}
+  status: {exec: commands/provider-command, args: [status]}
+  ip: {exec: commands/provider-command, args: [ip]}
+  ssh: {exec: commands/provider-command, args: [ssh]}
+  validate: {exec: ../_common/commands/validate-os, args: [all, Vagrant box, vagrant_box]}
+access:
+  ubuntu:
+    bootstrap_user: {env: VM_USER_NAME, value: vagrant}
+    provision_user: {env: VM_USER_NAME, value: vagrant}
+    human_user: {env: VM_USER_NAME, fallback: provision_user}
+supports:
+  engines: [qemu]
+  kinds: [vm]
+env: []
+catalog:
+  machines:
+    - name: mock-vm
+      provider: mock-local
+      kind: vm
+      supports:
+        arches: [amd64, arm64]
+      defaults:
+        cpu_cores: 2
+        memory_mb: 4096
+        disk_gb: 20
+  oses:
+    - id: mockos-1.0-amd64
+      vagrant_box: cloud-image/mockos-26.04
+    - id: mockos-1.0-arm64
+      vagrant_box: cloud-image/mockos-26.04
+  locations:
+    - name: mock-tokyo
+      mock-local:
+        host: local

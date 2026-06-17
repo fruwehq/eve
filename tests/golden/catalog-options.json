@@ -1,716 +1,136 @@
 {
   "providers": [
-    "aws",
-    "docker",
-    "gcp",
-    "local-qemu",
-    "raspberry-pi",
-    "truenas",
-    "vultr"
+    "mock-cloud",
+    "mock-local"
   ],
   "platforms": [
     {
-      "id": "aws:aws-cheap-x86:ubuntu-26.04-amd64:ssh-ubuntu-cloud-init",
-      "provider": "aws",
-      "machine": "aws-cheap-x86",
-      "os": "ubuntu-26.04-amd64",
+      "id": "mock-cloud:mock-gpu:mockos-1.0-amd64:ssh-mockos-cloud-init",
+      "provider": "mock-cloud",
+      "machine": "mock-gpu",
+      "os": "mockos-1.0-amd64",
       "os_family": "ubuntu",
-      "os_version": "26.04",
+      "os_version": "1.0",
       "arch": "amd64",
-      "init": "ssh-ubuntu-cloud-init",
+      "init": "ssh-mockos-cloud-init",
       "defaults": {
-        "instance_type": "t3.large",
-        "disk_gb": 80,
-        "root_volume_type": "gp3",
-        "use_spot": false
+        "cpu_cores": 4,
+        "memory_mb": 8192,
+        "disk_gb": 100
       }
     },
     {
-      "id": "aws:aws-cheap-x86:windows-server-2025:ssh-windows-powershell7",
-      "provider": "aws",
-      "machine": "aws-cheap-x86",
-      "os": "windows-server-2025",
+      "id": "mock-cloud:mock-gpu:mockwin-1.0:ssh-mockwin-powershell",
+      "provider": "mock-cloud",
+      "machine": "mock-gpu",
+      "os": "mockwin-1.0",
       "os_family": "windows",
-      "os_version": "2025",
+      "os_version": "1.0",
       "arch": "amd64",
-      "init": "ssh-windows-powershell7",
+      "init": "ssh-mockwin-powershell",
       "defaults": {
-        "instance_type": "t3.large",
-        "disk_gb": 80,
-        "root_volume_type": "gp3",
-        "use_spot": false
+        "cpu_cores": 4,
+        "memory_mb": 8192,
+        "disk_gb": 100
       }
     },
     {
-      "id": "aws:aws-gpu-g4dn-spot:ubuntu-26.04-amd64:ssh-ubuntu-cloud-init",
-      "provider": "aws",
-      "machine": "aws-gpu-g4dn-spot",
-      "os": "ubuntu-26.04-amd64",
+      "id": "mock-cloud:mock-small:mockos-1.0-amd64:ssh-mockos-cloud-init",
+      "provider": "mock-cloud",
+      "machine": "mock-small",
+      "os": "mockos-1.0-amd64",
       "os_family": "ubuntu",
-      "os_version": "26.04",
+      "os_version": "1.0",
       "arch": "amd64",
-      "init": "ssh-ubuntu-cloud-init",
+      "init": "ssh-mockos-cloud-init",
       "defaults": {
-        "instance_type": "g4dn.xlarge",
-        "disk_gb": 180,
-        "root_volume_type": "gp3",
-        "use_spot": true
-      }
-    },
-    {
-      "id": "aws:aws-gpu-g4dn-spot:windows-server-2025:ssh-windows-powershell7",
-      "provider": "aws",
-      "machine": "aws-gpu-g4dn-spot",
-      "os": "windows-server-2025",
-      "os_family": "windows",
-      "os_version": "2025",
-      "arch": "amd64",
-      "init": "ssh-windows-powershell7",
-      "defaults": {
-        "instance_type": "g4dn.xlarge",
-        "disk_gb": 180,
-        "root_volume_type": "gp3",
-        "use_spot": true
-      }
-    },
-    {
-      "id": "aws:aws-gpu-g5:ubuntu-26.04-amd64:ssh-ubuntu-cloud-init",
-      "provider": "aws",
-      "machine": "aws-gpu-g5",
-      "os": "ubuntu-26.04-amd64",
-      "os_family": "ubuntu",
-      "os_version": "26.04",
-      "arch": "amd64",
-      "init": "ssh-ubuntu-cloud-init",
-      "defaults": {
-        "instance_type": "g5.2xlarge",
-        "disk_gb": 200,
-        "use_spot": false
-      }
-    },
-    {
-      "id": "aws:aws-gpu-g5:windows-server-2025:ssh-windows-powershell7",
-      "provider": "aws",
-      "machine": "aws-gpu-g5",
-      "os": "windows-server-2025",
-      "os_family": "windows",
-      "os_version": "2025",
-      "arch": "amd64",
-      "init": "ssh-windows-powershell7",
-      "defaults": {
-        "instance_type": "g5.2xlarge",
-        "disk_gb": 200,
-        "use_spot": false
-      }
-    },
-    {
-      "id": "gcp:gcp-cheap-x86:ubuntu-26.04-amd64:ssh-ubuntu-cloud-init",
-      "provider": "gcp",
-      "machine": "gcp-cheap-x86",
-      "os": "ubuntu-26.04-amd64",
-      "os_family": "ubuntu",
-      "os_version": "26.04",
-      "arch": "amd64",
-      "init": "ssh-ubuntu-cloud-init",
-      "defaults": {
-        "machine_type": "e2-small",
-        "disk_gb": 20,
-        "disk_type": "pd-balanced"
-      }
-    },
-    {
-      "id": "local-qemu:local-qemu-medium:ubuntu-26.04-arm64:ssh-ubuntu-cloud-init",
-      "provider": "local-qemu",
-      "machine": "local-qemu-medium",
-      "os": "ubuntu-26.04-arm64",
-      "os_family": "ubuntu",
-      "os_version": "26.04",
-      "arch": "arm64",
-      "init": "ssh-ubuntu-cloud-init",
-      "defaults": {
-        "cpus": 2,
+        "cpu_cores": 2,
         "memory_mb": 4096,
         "disk_gb": 20
       }
     },
     {
-      "id": "raspberry-pi:raspberry-pi-5:ubuntu-26.04-arm64:ssh-ubuntu-metal",
-      "provider": "raspberry-pi",
-      "machine": "raspberry-pi-5",
-      "os": "ubuntu-26.04-arm64",
+      "id": "mock-cloud:mock-small:mockos-1.0-arm64:ssh-mockos-cloud-init",
+      "provider": "mock-cloud",
+      "machine": "mock-small",
+      "os": "mockos-1.0-arm64",
       "os_family": "ubuntu",
-      "os_version": "26.04",
+      "os_version": "1.0",
       "arch": "arm64",
-      "init": "ssh-ubuntu-metal",
+      "init": "ssh-mockos-cloud-init",
       "defaults": {
-        "architecture": "arm64"
+        "cpu_cores": 2,
+        "memory_mb": 4096,
+        "disk_gb": 20
       }
     },
     {
-      "id": "truenas:truenas-scale-medium:ubuntu-26.04-amd64:ssh-ubuntu-cloud-init",
-      "provider": "truenas",
-      "machine": "truenas-scale-medium",
-      "os": "ubuntu-26.04-amd64",
+      "id": "mock-cloud:mock-small:mockwin-1.0:ssh-mockwin-powershell",
+      "provider": "mock-cloud",
+      "machine": "mock-small",
+      "os": "mockwin-1.0",
+      "os_family": "windows",
+      "os_version": "1.0",
+      "arch": "amd64",
+      "init": "ssh-mockwin-powershell",
+      "defaults": {
+        "cpu_cores": 2,
+        "memory_mb": 4096,
+        "disk_gb": 20
+      }
+    },
+    {
+      "id": "mock-local:mock-vm:mockos-1.0-amd64:ssh-mockos-cloud-init",
+      "provider": "mock-local",
+      "machine": "mock-vm",
+      "os": "mockos-1.0-amd64",
       "os_family": "ubuntu",
-      "os_version": "26.04",
+      "os_version": "1.0",
       "arch": "amd64",
-      "init": "ssh-ubuntu-cloud-init",
+      "init": "ssh-mockos-cloud-init",
       "defaults": {
-        "cpu_cores": 4,
-        "cpu_mode": "HOST-PASSTHROUGH",
-        "vcpus": 1,
-        "memory_mb": 8192,
-        "disk_gb": 30,
-        "network": "br0",
-        "autostart": true,
-        "state": "RUNNING"
+        "cpu_cores": 2,
+        "memory_mb": 4096,
+        "disk_gb": 20
       }
     },
     {
-      "id": "vultr:vultr-vcg-a40-1c:windows-server-2025:ssh-windows-powershell7",
-      "provider": "vultr",
-      "machine": "vultr-vcg-a40-1c",
-      "os": "windows-server-2025",
-      "os_family": "windows",
-      "os_version": "2025",
-      "arch": "amd64",
-      "init": "ssh-windows-powershell7",
+      "id": "mock-local:mock-vm:mockos-1.0-arm64:ssh-mockos-cloud-init",
+      "provider": "mock-local",
+      "machine": "mock-vm",
+      "os": "mockos-1.0-arm64",
+      "os_family": "ubuntu",
+      "os_version": "1.0",
+      "arch": "arm64",
+      "init": "ssh-mockos-cloud-init",
       "defaults": {
-        "plan": "vcg-a40-1c-5g-2vram"
-      }
-    },
-    {
-      "id": "vultr:vultr-vcg-a40-2c:windows-server-2025:ssh-windows-powershell7",
-      "provider": "vultr",
-      "machine": "vultr-vcg-a40-2c",
-      "os": "windows-server-2025",
-      "os_family": "windows",
-      "os_version": "2025",
-      "arch": "amd64",
-      "init": "ssh-windows-powershell7",
-      "defaults": {
-        "plan": "vcg-a40-2c-10g-4vram"
-      }
-    },
-    {
-      "id": "vultr:vultr-vcg-a40-4c:windows-server-2025:ssh-windows-powershell7",
-      "provider": "vultr",
-      "machine": "vultr-vcg-a40-4c",
-      "os": "windows-server-2025",
-      "os_family": "windows",
-      "os_version": "2025",
-      "arch": "amd64",
-      "init": "ssh-windows-powershell7",
-      "defaults": {
-        "plan": "vcg-a40-4c-20g-8vram"
-      }
-    },
-    {
-      "id": "vultr:vultr-vcg-a40-6c:windows-server-2025:ssh-windows-powershell7",
-      "provider": "vultr",
-      "machine": "vultr-vcg-a40-6c",
-      "os": "windows-server-2025",
-      "os_family": "windows",
-      "os_version": "2025",
-      "arch": "amd64",
-      "init": "ssh-windows-powershell7",
-      "defaults": {
-        "plan": "vcg-a40-6c-30g-12vram"
+        "cpu_cores": 2,
+        "memory_mb": 4096,
+        "disk_gb": 20
       }
     }
   ],
   "bundles": [
     {
-      "id": "desktop-gnome",
+      "id": "mock-dev",
       "includes": [
-        "gnome-desktop",
-        "rdp"
+        "mock-app"
       ]
     },
     {
-      "id": "desktop-gnome-headless",
+      "id": "mock-gaming",
       "includes": [
-        "gnome-desktop-headless",
-        "rdp"
-      ]
-    },
-    {
-      "id": "desktop-gnome-mac",
-      "includes": [
-        "gnome-desktop",
-        "macos-desktop-theme",
-        "rdp"
-      ]
-    },
-    {
-      "id": "desktop-kde",
-      "includes": [
-        "kde-desktop",
-        "rdp"
-      ]
-    },
-    {
-      "id": "desktop-kde-headless",
-      "includes": [
-        "kde-desktop-headless",
-        "rdp"
-      ]
-    },
-    {
-      "id": "desktop-streaming",
-      "includes": [
-        "sunshine",
-        "rustdesk",
-        "vnc",
-        "rdp",
-        "waypipe"
-      ]
-    },
-    {
-      "id": "desktop-xfce",
-      "includes": [
-        "xfce-desktop",
-        "rdp"
-      ]
-    },
-    {
-      "id": "desktop-xfce-headless",
-      "includes": [
-        "xfce-desktop-headless",
-        "rdp"
-      ]
-    },
-    {
-      "id": "dev-ai",
-      "includes": [
-        "docker",
-        "dev-toolchain",
-        "goose",
-        "claude",
-        "codex-cli",
-        "hermes",
-        "opencode",
-        "vscode"
-      ]
-    },
-    {
-      "id": "gaming-streaming",
-      "includes": [
-        "sunshine",
-        "steam",
-        "rustdesk"
-      ]
-    },
-    {
-      "id": "remote-xpra",
-      "includes": [
-        "xpra"
+        "mock-win-app"
       ]
     }
   ],
   "packages": [
     {
-      "id": "claude",
-      "display_name": "Claude Code",
+      "id": "mock-app",
+      "display_name": "Mock App",
       "supports": {
         "os_families": [
           "ubuntu"
-        ]
-      },
-      "conflicts_with": [],
-      "installable": true,
-      "installable_os_families": [
-        "ubuntu"
-      ],
-      "actions": [],
-      "compatibility_enforced": false,
-      "compatibility": []
-    },
-    {
-      "id": "codex-cli",
-      "display_name": "Codex CLI",
-      "supports": {
-        "os_families": [
-          "ubuntu"
-        ]
-      },
-      "conflicts_with": [],
-      "installable": true,
-      "installable_os_families": [
-        "ubuntu"
-      ],
-      "actions": [],
-      "compatibility_enforced": false,
-      "compatibility": []
-    },
-    {
-      "id": "dev-toolchain",
-      "display_name": "Developer Toolchain",
-      "supports": {
-        "os_families": [
-          "ubuntu"
-        ]
-      },
-      "conflicts_with": [],
-      "installable": true,
-      "installable_os_families": [
-        "ubuntu"
-      ],
-      "actions": [],
-      "compatibility_enforced": false,
-      "compatibility": []
-    },
-    {
-      "id": "discord",
-      "display_name": "Discord",
-      "supports": {
-        "os_families": [
-          "ubuntu",
-          "windows"
-        ],
-        "arches": [
-          "amd64"
-        ]
-      },
-      "conflicts_with": [],
-      "installable": true,
-      "installable_os_families": [
-        "ubuntu",
-        "windows"
-      ],
-      "actions": [],
-      "compatibility_enforced": false,
-      "compatibility": [
-        {
-          "platform": "ubuntu",
-          "desktop": "any",
-          "session": "any",
-          "status": "supported",
-          "notes": "Discord works on Linux desktops via the official .deb installer."
-        },
-        {
-          "platform": "windows",
-          "desktop": "Windows",
-          "session": "Native",
-          "status": "supported",
-          "notes": "Mic capture routes through the streaming protocol (Sunshine/Moonlight) and can echo. Consider running Discord on your local machine instead. Not in the gaming-streaming bundle by default."
-        }
-      ]
-    },
-    {
-      "id": "docker",
-      "display_name": "Docker",
-      "supports": {
-        "os_families": [
-          "ubuntu"
-        ]
-      },
-      "conflicts_with": [],
-      "installable": true,
-      "installable_os_families": [
-        "ubuntu"
-      ],
-      "actions": [],
-      "compatibility_enforced": false,
-      "compatibility": []
-    },
-    {
-      "id": "gnome-desktop",
-      "display_name": "GNOME Desktop",
-      "supports": {
-        "os_families": [
-          "ubuntu"
-        ]
-      },
-      "conflicts_with": [
-        "xfce-desktop",
-        "xfce-desktop-headless",
-        "gnome-desktop-headless",
-        "kde-desktop",
-        "kde-desktop-headless"
-      ],
-      "installable": true,
-      "installable_os_families": [
-        "ubuntu"
-      ],
-      "actions": [],
-      "compatibility_enforced": false,
-      "compatibility": [
-        {
-          "platform": "ubuntu",
-          "desktop": "GNOME",
-          "session": "Wayland",
-          "status": "supported",
-          "notes": "Installs GNOME with GDM autologin for the local graphical session."
-        }
-      ]
-    },
-    {
-      "id": "gnome-desktop-headless",
-      "display_name": "GNOME Desktop Headless",
-      "supports": {
-        "os_families": [
-          "ubuntu"
-        ]
-      },
-      "conflicts_with": [
-        "xfce-desktop",
-        "xfce-desktop-headless",
-        "gnome-desktop",
-        "kde-desktop",
-        "kde-desktop-headless"
-      ],
-      "installable": true,
-      "installable_os_families": [
-        "ubuntu"
-      ],
-      "actions": [],
-      "compatibility_enforced": false,
-      "compatibility": [
-        {
-          "platform": "ubuntu",
-          "desktop": "GNOME Headless",
-          "session": "Wayland",
-          "status": "supported",
-          "notes": "Installs GNOME with GDM autologin and persistent Wayland virtual monitor setup."
-        }
-      ]
-    },
-    {
-      "id": "goose",
-      "display_name": "Goose",
-      "supports": {
-        "os_families": [
-          "ubuntu"
-        ],
-        "arches": [
-          "amd64",
-          "arm64"
-        ]
-      },
-      "conflicts_with": [],
-      "installable": true,
-      "installable_os_families": [
-        "ubuntu"
-      ],
-      "actions": [],
-      "compatibility_enforced": false,
-      "compatibility": []
-    },
-    {
-      "id": "hermes",
-      "display_name": "Hermes",
-      "supports": {
-        "os_families": [
-          "ubuntu"
-        ]
-      },
-      "conflicts_with": [],
-      "installable": true,
-      "installable_os_families": [
-        "ubuntu"
-      ],
-      "actions": [],
-      "compatibility_enforced": false,
-      "compatibility": []
-    },
-    {
-      "id": "kde-desktop",
-      "display_name": "KDE Plasma Desktop",
-      "supports": {
-        "os_families": [
-          "ubuntu"
-        ],
-        "arches": [
-          "amd64"
-        ]
-      },
-      "conflicts_with": [
-        "xfce-desktop",
-        "xfce-desktop-headless",
-        "gnome-desktop",
-        "gnome-desktop-headless",
-        "kde-desktop-headless"
-      ],
-      "installable": true,
-      "installable_os_families": [
-        "ubuntu"
-      ],
-      "actions": [],
-      "compatibility_enforced": false,
-      "compatibility": [
-        {
-          "platform": "ubuntu",
-          "desktop": "KDE Plasma",
-          "session": "Wayland",
-          "status": "supported",
-          "notes": "Installs KDE Plasma with SDDM autologin; RDP uses krdp."
-        }
-      ]
-    },
-    {
-      "id": "kde-desktop-headless",
-      "display_name": "KDE Plasma Desktop Headless",
-      "supports": {
-        "os_families": [
-          "ubuntu"
-        ],
-        "arches": [
-          "amd64"
-        ]
-      },
-      "conflicts_with": [
-        "xfce-desktop",
-        "xfce-desktop-headless",
-        "gnome-desktop",
-        "gnome-desktop-headless",
-        "kde-desktop"
-      ],
-      "installable": true,
-      "installable_os_families": [
-        "ubuntu"
-      ],
-      "actions": [],
-      "compatibility_enforced": false,
-      "compatibility": [
-        {
-          "platform": "ubuntu",
-          "desktop": "KDE Plasma Headless",
-          "session": "Wayland",
-          "status": "supported",
-          "notes": "Installs KDE Plasma with SDDM autologin and disables lock/power management for unattended krdp."
-        }
-      ]
-    },
-    {
-      "id": "macos-desktop-theme",
-      "display_name": "macOS-like GNOME Theme",
-      "supports": {
-        "os_families": [
-          "ubuntu"
-        ]
-      },
-      "conflicts_with": [],
-      "installable": true,
-      "installable_os_families": [
-        "ubuntu"
-      ],
-      "actions": [],
-      "compatibility_enforced": false,
-      "compatibility": [
-        {
-          "platform": "ubuntu",
-          "desktop": "GNOME",
-          "session": "Wayland",
-          "status": "wip",
-          "notes": "Theme layer on top of GNOME; remote access depends on the selected remote desktop package."
-        }
-      ]
-    },
-    {
-      "id": "nomachine",
-      "display_name": "NoMachine",
-      "supports": {
-        "os_families": [
-          "ubuntu",
-          "windows"
-        ]
-      },
-      "conflicts_with": [],
-      "installable": true,
-      "installable_os_families": [
-        "ubuntu",
-        "windows"
-      ],
-      "actions": [
-        {
-          "id": "nomachine",
-          "label": "NoMachine",
-          "target": "nomachine.connect"
-        },
-        {
-          "id": "nomachine-info",
-          "label": "NoMachine Info",
-          "target": "nomachine.info"
-        }
-      ],
-      "compatibility_enforced": true,
-      "compatibility": [
-        {
-          "platform": "windows",
-          "desktop": "Windows",
-          "session": "Native",
-          "status": "supported",
-          "notes": "Runs the NoMachine service against the active Windows desktop; connect with the Windows user's credentials."
-        },
-        {
-          "platform": "ubuntu",
-          "desktop": "XFCE",
-          "session": "X11",
-          "status": "supported",
-          "notes": "NoMachine NX server attaches to the local X11 desktop; connect with the system user's password."
-        },
-        {
-          "platform": "ubuntu",
-          "desktop": "XFCE Headless",
-          "session": "X11",
-          "status": "supported",
-          "notes": "NoMachine creates a virtual NX display when no physical/local session is attached."
-        },
-        {
-          "platform": "ubuntu",
-          "desktop": "GNOME",
-          "session": "Wayland",
-          "status": "wip",
-          "notes": "NoMachine recommends X11 capture; unattended GNOME Wayland sharing still needs live validation."
-        },
-        {
-          "platform": "ubuntu",
-          "desktop": "GNOME Headless",
-          "session": "Wayland",
-          "status": "wip",
-          "notes": "NoMachine recommends X11 capture; unattended GNOME Wayland sharing still needs live validation."
-        },
-        {
-          "platform": "ubuntu",
-          "desktop": "KDE Plasma",
-          "session": "Wayland",
-          "status": "wip",
-          "notes": "NoMachine recommends X11 capture; unattended KDE Wayland sharing still needs live validation."
-        },
-        {
-          "platform": "ubuntu",
-          "desktop": "KDE Plasma Headless",
-          "session": "Wayland",
-          "status": "wip",
-          "notes": "NoMachine recommends X11 capture; unattended KDE Wayland sharing still needs live validation."
-        }
-      ]
-    },
-    {
-      "id": "opencode",
-      "display_name": "OpenCode",
-      "supports": {
-        "os_families": [
-          "ubuntu"
-        ]
-      },
-      "conflicts_with": [],
-      "installable": true,
-      "installable_os_families": [
-        "ubuntu"
-      ],
-      "actions": [],
-      "compatibility_enforced": false,
-      "compatibility": []
-    },
-    {
-      "id": "rdp",
-      "display_name": "Remote Desktop Protocol",
-      "supports": {
-        "os_families": [
-          "ubuntu",
-          "windows"
         ]
       },
       "conflicts_with": [],
@@ -720,225 +140,42 @@
       ],
       "actions": [
         {
-          "id": "rdp",
-          "label": "RDP",
-          "target": "rdp.open",
-          "native": true
+          "id": "mock-app-info",
+          "label": "Mock App Info",
+          "target": "mock-app.info"
         }
       ],
-      "compatibility_enforced": true,
-      "compatibility": [
-        {
-          "platform": "windows",
-          "desktop": "Windows",
-          "session": "Native",
-          "status": "supported",
-          "notes": "Uses the built-in Windows RDP service."
-        },
-        {
-          "platform": "ubuntu",
-          "desktop": "XFCE",
-          "session": "X11",
-          "status": "supported",
-          "notes": "Uses xrdp/xorgxrdp with an isolated XFCE session."
-        },
-        {
-          "platform": "ubuntu",
-          "desktop": "XFCE Headless",
-          "session": "X11",
-          "status": "supported",
-          "notes": "Uses xrdp/xorgxrdp without a local display manager."
-        },
-        {
-          "platform": "ubuntu",
-          "desktop": "GNOME",
-          "session": "Wayland",
-          "status": "supported",
-          "notes": "Uses GNOME Remote Desktop per-user RDP with gate credentials."
-        },
-        {
-          "platform": "ubuntu",
-          "desktop": "GNOME Headless",
-          "session": "Wayland",
-          "status": "supported",
-          "notes": "Uses GNOME Remote Desktop per-user RDP with virtual monitor support."
-        },
-        {
-          "platform": "ubuntu",
-          "desktop": "KDE Plasma",
-          "session": "Wayland",
-          "status": "supported",
-          "notes": "Uses krdp. FreeRDP with /gfx:AVC444 is recommended; macOS Windows App may not work."
-        },
-        {
-          "platform": "ubuntu",
-          "desktop": "KDE Plasma Headless",
-          "session": "Wayland",
-          "status": "supported",
-          "notes": "Uses krdp with lock and power management disabled for unattended sessions."
-        }
-      ]
+      "compatibility_enforced": false,
+      "compatibility": []
     },
     {
-      "id": "rustdesk",
-      "display_name": "RustDesk",
+      "id": "mock-tool",
+      "display_name": "Mock Tool",
       "supports": {
         "os_families": [
-          "ubuntu",
+          "ubuntu"
+        ]
+      },
+      "conflicts_with": [],
+      "installable": true,
+      "installable_os_families": [
+        "ubuntu"
+      ],
+      "actions": [],
+      "compatibility_enforced": false,
+      "compatibility": []
+    },
+    {
+      "id": "mock-win-app",
+      "display_name": "Mock Windows App",
+      "supports": {
+        "os_families": [
           "windows"
         ]
       },
       "conflicts_with": [],
       "installable": true,
       "installable_os_families": [
-        "ubuntu",
-        "windows"
-      ],
-      "actions": [
-        {
-          "id": "rustdesk",
-          "label": "RustDesk",
-          "target": "rustdesk.connect"
-        },
-        {
-          "id": "rustdesk-info",
-          "label": "RustDesk Info",
-          "target": "rustdesk.info"
-        }
-      ],
-      "compatibility_enforced": true,
-      "compatibility": [
-        {
-          "platform": "windows",
-          "desktop": "Windows",
-          "session": "Native",
-          "status": "supported",
-          "notes": "Runs as a service against the active Windows desktop."
-        },
-        {
-          "platform": "ubuntu",
-          "desktop": "XFCE",
-          "session": "X11",
-          "status": "supported",
-          "notes": "Uses LightDM autologin plus an X11 desktop session."
-        },
-        {
-          "platform": "ubuntu",
-          "desktop": "XFCE Headless",
-          "session": "X11",
-          "status": "unsupported",
-          "notes": "RustDesk needs an active local desktop session; use RDP for headless XFCE."
-        },
-        {
-          "platform": "ubuntu",
-          "desktop": "GNOME",
-          "session": "Wayland",
-          "status": "unsupported",
-          "notes": "RustDesk cannot unattended-share GNOME Wayland without peer-side screen selection."
-        },
-        {
-          "platform": "ubuntu",
-          "desktop": "GNOME Headless",
-          "session": "Wayland",
-          "status": "unsupported",
-          "notes": "RustDesk cannot unattended-share GNOME Wayland without peer-side screen selection."
-        },
-        {
-          "platform": "ubuntu",
-          "desktop": "KDE Plasma",
-          "session": "Wayland",
-          "status": "unsupported",
-          "notes": "RustDesk unattended Wayland sharing is not a supported KDE path."
-        },
-        {
-          "platform": "ubuntu",
-          "desktop": "KDE Plasma Headless",
-          "session": "Wayland",
-          "status": "unsupported",
-          "notes": "RustDesk unattended Wayland sharing is not a supported KDE path."
-        }
-      ]
-    },
-    {
-      "id": "splashtop",
-      "display_name": "Splashtop",
-      "supports": {
-        "os_families": [
-          "ubuntu",
-          "windows"
-        ],
-        "arches": [
-          "amd64"
-        ]
-      },
-      "conflicts_with": [],
-      "installable": true,
-      "installable_os_families": [
-        "ubuntu",
-        "windows"
-      ],
-      "actions": [
-        {
-          "id": "splashtop-info",
-          "label": "Splashtop Info",
-          "target": "splashtop.info"
-        }
-      ],
-      "compatibility_enforced": true,
-      "compatibility": [
-        {
-          "platform": "windows",
-          "desktop": "Windows",
-          "session": "Native",
-          "status": "supported",
-          "notes": "Splashtop Streamer runs against the active Windows desktop; free for same-LAN/VPN use after account login."
-        },
-        {
-          "platform": "ubuntu",
-          "desktop": "XFCE",
-          "session": "X11",
-          "status": "wip",
-          "notes": "Splashtop Streamer attaches to a local X11 session; LAN/VPN personal tier, still needs live validation."
-        },
-        {
-          "platform": "ubuntu",
-          "desktop": "XFCE Headless",
-          "session": "X11",
-          "status": "unsupported",
-          "notes": "Splashtop needs an active local desktop session; use RDP for headless XFCE."
-        },
-        {
-          "platform": "ubuntu",
-          "desktop": "GNOME",
-          "session": "Wayland",
-          "status": "unsupported",
-          "notes": "Splashtop does not expose the local GNOME Wayland compositor unattended."
-        },
-        {
-          "platform": "ubuntu",
-          "desktop": "KDE Plasma",
-          "session": "Wayland",
-          "status": "unsupported",
-          "notes": "Splashtop does not expose the local KDE Wayland compositor unattended."
-        }
-      ]
-    },
-    {
-      "id": "steam",
-      "display_name": "Steam",
-      "supports": {
-        "os_families": [
-          "ubuntu",
-          "windows"
-        ],
-        "arches": [
-          "amd64"
-        ]
-      },
-      "conflicts_with": [],
-      "installable": true,
-      "installable_os_families": [
-        "ubuntu",
         "windows"
       ],
       "actions": [],
@@ -946,380 +183,21 @@
       "compatibility": []
     },
     {
-      "id": "sunshine",
-      "display_name": "Sunshine",
+      "id": "mock-win-state",
+      "display_name": "Mock Windows State App",
       "supports": {
         "os_families": [
-          "ubuntu",
           "windows"
         ]
       },
       "conflicts_with": [],
       "installable": true,
       "installable_os_families": [
-        "ubuntu",
         "windows"
-      ],
-      "actions": [
-        {
-          "id": "sunshine",
-          "label": "Sunshine",
-          "target": "sunshine.open"
-        },
-        {
-          "id": "pair-moonlight",
-          "label": "Pair Moonlight",
-          "target": "moonlight.pair"
-        },
-        {
-          "id": "moonlight",
-          "label": "Moonlight",
-          "target": "moonlight.open"
-        }
-      ],
-      "compatibility_enforced": true,
-      "compatibility": [
-        {
-          "platform": "windows",
-          "desktop": "Windows",
-          "session": "Native",
-          "status": "supported",
-          "notes": "Uses Virtual Display Driver as the intended single Sunshine display."
-        },
-        {
-          "platform": "ubuntu",
-          "desktop": "XFCE",
-          "session": "X11",
-          "status": "wip",
-          "notes": "Current Linux path uses X11 capture; ultrawide 5120x1440 still needs live validation."
-        },
-        {
-          "platform": "ubuntu",
-          "desktop": "XFCE Headless",
-          "session": "X11",
-          "status": "wip",
-          "notes": "Current Linux path uses X11 capture; ultrawide 5120x1440 still needs live validation."
-        },
-        {
-          "platform": "ubuntu",
-          "desktop": "GNOME",
-          "session": "Wayland",
-          "status": "wip",
-          "notes": "Wayland capture is not the stable default path yet."
-        }
-      ]
-    },
-    {
-      "id": "thinlinc",
-      "display_name": "ThinLinc",
-      "supports": {
-        "os_families": [
-          "ubuntu"
-        ],
-        "arches": [
-          "amd64"
-        ]
-      },
-      "conflicts_with": [],
-      "installable": true,
-      "installable_os_families": [
-        "ubuntu"
-      ],
-      "actions": [
-        {
-          "id": "web",
-          "label": "ThinLinc Web",
-          "target": "thinlinc.web"
-        },
-        {
-          "id": "client",
-          "label": "ThinLinc Client",
-          "target": "thinlinc.client"
-        }
-      ],
-      "compatibility_enforced": true,
-      "compatibility": [
-        {
-          "platform": "ubuntu",
-          "desktop": "XFCE",
-          "session": "X11",
-          "status": "supported",
-          "notes": "Stable ThinLinc session path on amd64."
-        },
-        {
-          "platform": "ubuntu",
-          "desktop": "XFCE Headless",
-          "session": "X11",
-          "status": "supported",
-          "notes": "Stable ThinLinc session path on amd64 without a local display manager."
-        },
-        {
-          "platform": "ubuntu",
-          "desktop": "GNOME",
-          "session": "X11",
-          "status": "wip",
-          "notes": "GNOME can run as a ThinLinc X11 session, but this path still needs validation."
-        },
-        {
-          "platform": "ubuntu",
-          "desktop": "GNOME",
-          "session": "Wayland",
-          "status": "unsupported",
-          "notes": "ThinLinc serves X11 sessions, not the local GNOME Wayland compositor."
-        }
-      ]
-    },
-    {
-      "id": "vnc",
-      "display_name": "TigerVNC",
-      "supports": {
-        "os_families": [
-          "ubuntu"
-        ]
-      },
-      "conflicts_with": [],
-      "installable": true,
-      "installable_os_families": [
-        "ubuntu"
-      ],
-      "actions": [
-        {
-          "id": "vnc",
-          "label": "VNC",
-          "target": "vnc.open",
-          "prompt": {
-            "title": "Open VNC",
-            "message": "Choose the viewer for this VNC session.",
-            "env": "VNC_VIEWER",
-            "choices": [
-              {
-                "value": "auto",
-                "label": "Auto",
-                "variant": "primary"
-              },
-              {
-                "value": "system",
-                "label": "macOS"
-              },
-              {
-                "value": "tigervnc",
-                "label": "TigerVNC"
-              }
-            ]
-          }
-        }
-      ],
-      "compatibility_enforced": true,
-      "compatibility": [
-        {
-          "platform": "ubuntu",
-          "desktop": "XFCE",
-          "session": "X11",
-          "status": "supported",
-          "notes": "Uses TigerVNC on display :1 with XFCE."
-        },
-        {
-          "platform": "ubuntu",
-          "desktop": "XFCE Headless",
-          "session": "X11",
-          "status": "supported",
-          "notes": "Uses TigerVNC on display :1 with XFCE."
-        },
-        {
-          "platform": "ubuntu",
-          "desktop": "GNOME",
-          "session": "Wayland",
-          "status": "unsupported",
-          "notes": "TigerVNC does not serve the local GNOME Wayland session."
-        },
-        {
-          "platform": "ubuntu",
-          "desktop": "GNOME Headless",
-          "session": "Wayland",
-          "status": "unsupported",
-          "notes": "TigerVNC does not serve the GNOME Wayland compositor."
-        },
-        {
-          "platform": "ubuntu",
-          "desktop": "KDE Plasma",
-          "session": "Wayland",
-          "status": "unsupported",
-          "notes": "TigerVNC does not serve the KDE Wayland compositor."
-        },
-        {
-          "platform": "ubuntu",
-          "desktop": "KDE Plasma Headless",
-          "session": "Wayland",
-          "status": "unsupported",
-          "notes": "TigerVNC does not serve the KDE Wayland compositor."
-        }
-      ]
-    },
-    {
-      "id": "vscode",
-      "display_name": "Visual Studio Code",
-      "supports": {
-        "os_families": [
-          "ubuntu"
-        ]
-      },
-      "conflicts_with": [],
-      "installable": true,
-      "installable_os_families": [
-        "ubuntu"
       ],
       "actions": [],
       "compatibility_enforced": false,
       "compatibility": []
-    },
-    {
-      "id": "waypipe",
-      "display_name": "Waypipe",
-      "supports": {
-        "os_families": [
-          "ubuntu"
-        ],
-        "arches": [
-          "amd64",
-          "arm64"
-        ]
-      },
-      "conflicts_with": [],
-      "installable": true,
-      "installable_os_families": [
-        "ubuntu"
-      ],
-      "actions": [
-        {
-          "id": "waypipe",
-          "label": "Waypipe",
-          "target": "waypipe.open"
-        }
-      ],
-      "compatibility_enforced": true,
-      "compatibility": [
-        {
-          "platform": "ubuntu",
-          "desktop": "GNOME",
-          "session": "Wayland",
-          "status": "wip",
-          "notes": "Wayland app forwarding, not a polished full desktop yet."
-        }
-      ]
-    },
-    {
-      "id": "xfce-desktop",
-      "display_name": "XFCE Desktop",
-      "supports": {
-        "os_families": [
-          "ubuntu"
-        ]
-      },
-      "conflicts_with": [
-        "xfce-desktop-headless",
-        "gnome-desktop",
-        "gnome-desktop-headless",
-        "kde-desktop",
-        "kde-desktop-headless"
-      ],
-      "installable": true,
-      "installable_os_families": [
-        "ubuntu"
-      ],
-      "actions": [],
-      "compatibility_enforced": false,
-      "compatibility": [
-        {
-          "platform": "ubuntu",
-          "desktop": "XFCE",
-          "session": "X11",
-          "status": "supported",
-          "notes": "Installs XFCE with LightDM autologin for a local graphical X11 session."
-        }
-      ]
-    },
-    {
-      "id": "xfce-desktop-headless",
-      "display_name": "XFCE Desktop Headless",
-      "supports": {
-        "os_families": [
-          "ubuntu"
-        ]
-      },
-      "conflicts_with": [
-        "xfce-desktop",
-        "gnome-desktop",
-        "gnome-desktop-headless",
-        "kde-desktop",
-        "kde-desktop-headless"
-      ],
-      "installable": true,
-      "installable_os_families": [
-        "ubuntu"
-      ],
-      "actions": [],
-      "compatibility_enforced": false,
-      "compatibility": [
-        {
-          "platform": "ubuntu",
-          "desktop": "XFCE Headless",
-          "session": "X11",
-          "status": "supported",
-          "notes": "Installs XFCE for xrdp without a local display manager."
-        }
-      ]
-    },
-    {
-      "id": "xpra",
-      "display_name": "Xpra",
-      "supports": {
-        "os_families": [
-          "ubuntu",
-          "windows"
-        ],
-        "arches": [
-          "amd64"
-        ],
-        "ubuntu_versions": [
-          "22.04",
-          "24.04"
-        ]
-      },
-      "conflicts_with": [],
-      "installable": true,
-      "installable_os_families": [
-        "ubuntu",
-        "windows"
-      ],
-      "actions": [
-        {
-          "id": "xpra-desktop",
-          "label": "Xpra Desktop",
-          "target": "xpra.desktop"
-        },
-        {
-          "id": "xpra-attach",
-          "label": "Xpra Attach",
-          "target": "xpra.attach"
-        }
-      ],
-      "compatibility_enforced": true,
-      "compatibility": [
-        {
-          "platform": "ubuntu",
-          "desktop": "XFCE",
-          "session": "X11",
-          "status": "legacy",
-          "notes": "Limited to Ubuntu 22.04/24.04; not an Ubuntu 26 path."
-        },
-        {
-          "platform": "windows",
-          "desktop": "Windows",
-          "session": "Native",
-          "status": "wip",
-          "notes": "Available as an experimental package only."
-        }
-      ]
     }
   ]
 }

@@ -5,7 +5,7 @@ scripts/providers-status as subprocesses and asserts the CLI contract for the
 seams that do not require a live instance/SSH/cloud: usage/missing-arg handling
 and exit codes, the upload name-validation and missing-upload-dir gates, the
 update-tools Windows-not-implemented guard, and the providers-status provider/
-field validation (exercised via the network-free local-qemu check).
+field validation (exercised via the network-free mock-cloud check).
 """
 
 from __future__ import annotations
@@ -26,17 +26,17 @@ _MISC_CATALOG = dedent(
     """\
     profiles:
       - name: ubuntu-test
-        machine: local-qemu-medium
-        os: ubuntu-26.04-arm64
-        init: ssh-ubuntu-cloud-init
+        machine: mock-small
+        os: mockos-1.0-arm64
+        init: ssh-mockos-cloud-init
         bundles: []
-        location: tokyo
+        location: mock-tokyo
       - name: windows-test
-        machine: aws-gpu-g4dn-spot
-        os: windows-server-2025
-        init: ssh-windows-powershell7
+        machine: mock-gpu
+        os: mockwin-1.0
+        init: ssh-mockwin-powershell
         bundles: []
-        location: tokyo
+        location: mock-tokyo
     """
 )
 
@@ -129,13 +129,13 @@ def test_update_tools_windows_not_implemented(catalog_env: dict[str, str]) -> No
 def test_providers_status_unknown_provider(catalog_env: dict[str, str]) -> None:
     result = _run("providers-status", "bogus", env=catalog_env)
     assert result.returncode == 1
-    assert "Unknown provider: bogus (valid: aws gcp local-qemu truenas vultr)" in result.stderr
+    assert "Unknown provider: bogus" in result.stderr
 
 
 def test_providers_status_unknown_field(catalog_env: dict[str, str]) -> None:
-    # local-qemu's check only probes for qemu binaries (network-free), so the
+    # mock-cloud's check only probes for qemu binaries (network-free), so the
     # command reaches the field-validation gate deterministically.
-    result = _run("providers-status", "local-qemu", "bogusfield", env=catalog_env)
+    result = _run("providers-status", "mock-cloud", "bogusfield", env=catalog_env)
     assert result.returncode == 1
     assert "Unknown field: bogusfield (valid: configured, reachable, notes)" in result.stderr
 
@@ -143,9 +143,9 @@ def test_providers_status_unknown_field(catalog_env: dict[str, str]) -> None:
 def test_providers_status_table_header_for_local_qemu(
     catalog_env: dict[str, str],
 ) -> None:
-    result = _run("providers-status", "local-qemu", env=catalog_env)
+    result = _run("providers-status", "mock-cloud", env=catalog_env)
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
     assert lines[0] == "Provider           Configured  Reachable  Notes"
     assert lines[1] == "-----------------  ----------  ---------  -------------------------------------------"
-    assert lines[2].startswith("local-qemu        ")
+    assert lines[2].startswith("mock-cloud        ")

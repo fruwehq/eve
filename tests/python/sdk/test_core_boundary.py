@@ -67,9 +67,9 @@ def test_planted_provider_literal_is_detected() -> None:
     """A provider id in an unallowed scanned core file is a violation."""
     module = _load_module()
     ids = module.all_ids()
-    assert "aws" in ids
+    assert "mock-cloud" in ids
     violations = module.find_provider_os_violations(
-        [("scripts/some-unallowed-file", 'provider = "aws"')],
+        [("scripts/some-unallowed-file", 'provider = "mock-cloud"')],
         ids,
         allowed=set(),
     )
@@ -107,7 +107,7 @@ def test_provider_ids_derived_from_manifests() -> None:
     module = _load_module()
     expected = sorted(p["id"] for p in PluginManifest.load_all("provider"))
     assert module.provider_ids() == expected
-    assert "aws" in expected
+    assert "mock-cloud" in expected
 
 
 def test_os_ids_derived_from_catalog() -> None:

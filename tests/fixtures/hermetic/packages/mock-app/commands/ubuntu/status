@@ -1,0 +1,8 @@
+#!/usr/bin/env sh
+set -eu
+pkg="${1:?package id}"
+if [ -n "${EVE_PLUGIN_DRY_RUN:-}" ] || [ "${2:-}" = "--dry-run" ]; then
+  printf '{"kind":"package-status","package":"%s","command":"status","instance":"%s","os_family":"ubuntu","status":"unknown","selected":true,"dry_run":true}\n' "$pkg" "${EVE_INSTANCE_NAME:-unknown}"
+  exit 0
+fi
+printf '{"kind":"package-status","package":"%s","command":"status","instance":"%s","os_family":"ubuntu","status":"installed","details":"installed"}\n' "$pkg" "${EVE_INSTANCE_NAME:-unknown}"

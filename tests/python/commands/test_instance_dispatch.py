@@ -33,17 +33,17 @@ _PASSWORD_CATALOG = dedent(
     """\
     profiles:
       - name: ubuntu-test
-        machine: local-qemu-medium
-        os: ubuntu-26.04-arm64
-        init: ssh-ubuntu-cloud-init
+        machine: mock-small
+        os: mockos-1.0-arm64
+        init: ssh-mockos-cloud-init
         bundles: []
-        location: tokyo
+        location: mock-tokyo
       - name: windows-test
-        machine: aws-gpu-g4dn-spot
-        os: windows-server-2025
-        init: ssh-windows-powershell7
+        machine: mock-gpu
+        os: mockwin-1.0
+        init: ssh-mockwin-powershell
         bundles: []
-        location: tokyo
+        location: mock-tokyo
     """
 )
 
@@ -75,7 +75,7 @@ def password_env(base_env: dict[str, str], tmp_path: Path) -> dict[str, str]:
 
 @pytest.fixture()
 def instance_env(base_env: dict[str, str]) -> dict[str, str]:
-    """Env pointed at the fixture instance registry (dev-a etc.)."""
+    """Env pointed at the fixture instance registry (mock-dev-a etc.)."""
     return {**base_env, "EVE_INSTANCE_REGISTRY": str(_FIXTURE)}
 
 
@@ -118,7 +118,7 @@ def test_instance_password_rejects_unimplemented_provider(
 ) -> None:
     result = _run("instance-password", "windows-test", env=password_env)
     assert result.returncode == 2
-    assert "[instance-password] not implemented for provider=aws" in result.stderr
+    assert "[instance-password] not implemented for provider=mock-cloud" in result.stderr
 
 
 # ------------------------------- instance-provision ----------------------- #
@@ -147,19 +147,19 @@ def test_instance_provision_help_exits_zero(instance_env: dict[str, str]) -> Non
 
 
 def test_instance_provision_dry_run_emits_plan(instance_env: dict[str, str]) -> None:
-    result = _run("instance-provision", "--instance", "dev-a", "--dry-run", env=instance_env)
+    result = _run("instance-provision", "--instance", "mock-dev-a", "--dry-run", env=instance_env)
     assert result.returncode == 0, result.stderr
     doc = json.loads(result.stdout)
-    assert doc["instance"] == "dev-a"
+    assert doc["instance"] == "mock-dev-a"
     assert doc["command"] == "provision"
     assert doc["force"] is False
     assert doc["dry_run"] is True
-    assert doc["overlay"].endswith("dev-a/catalog.local.yaml")
+    assert doc["overlay"].endswith("mock-dev-a/catalog.local.yaml")
 
 
 def test_instance_provision_dry_run_force(instance_env: dict[str, str]) -> None:
     result = _run(
-        "instance-provision", "--instance", "dev-a", "--dry-run", "--force", env=instance_env,
+        "instance-provision", "--instance", "mock-dev-a", "--dry-run", "--force", env=instance_env,
     )
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout)["force"] is True
@@ -180,28 +180,28 @@ def test_instance_run_missing_instance(instance_env: dict[str, str]) -> None:
 
 
 def test_instance_run_unsupported_target(instance_env: dict[str, str]) -> None:
-    result = _run("instance-run", "bogus", "dev-a", env=instance_env)
+    result = _run("instance-run", "bogus", "mock-dev-a", env=instance_env)
     assert result.returncode == 2
     assert "instance-run: unsupported target: bogus" in result.stderr
 
 
 def test_instance_run_env_dispatch_resolves(instance_env: dict[str, str]) -> None:
-    result = _run("instance-run", "env", "dev-a", env=instance_env)
+    result = _run("instance-run", "env", "mock-dev-a", env=instance_env)
     assert result.returncode == 0, result.stderr
-    assert "PROFILE_NAME=dev-a" in result.stdout
-    assert "PROVIDER=local-qemu" in result.stdout
+    assert "PROFILE_NAME=mock-dev-a" in result.stdout
+    assert "PROVIDER=mock-cloud" in result.stdout
 
 
 def test_instance_run_validate_dispatch(instance_env: dict[str, str]) -> None:
-    result = _run("instance-run", "validate", "dev-a", env=instance_env)
+    result = _run("instance-run", "validate", "mock-dev-a", env=instance_env)
     assert result.returncode == 0, result.stderr
 
 
 def test_instance_run_show_password_dispatches_to_password(
     instance_env: dict[str, str],
 ) -> None:
-    # show-password -> instance-password; dev-a is ubuntu so the not-a-Windows
+    # show-password -> instance-password; mock-dev-a is ubuntu so the not-a-Windows
     # gate fires (exit 2) without touching terraform/cloud.
-    result = _run("instance-run", "show-password", "dev-a", env=instance_env)
+    result = _run("instance-run", "show-password", "mock-dev-a", env=instance_env)
     assert result.returncode == 2
-    assert "[instance-password] dev-a is not a Windows profile (os_family=ubuntu)" in result.stderr
+    assert "[instance-password] mock-dev-a is not a Windows profile (os_family=ubuntu)" in result.stderr

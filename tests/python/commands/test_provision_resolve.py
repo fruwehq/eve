@@ -28,35 +28,37 @@ _CATALOG = dedent(
     """\
     profiles:
       - name: pr-ubuntu-qemu
-        machine: local-qemu-medium
-        os: ubuntu-26.04-arm64
-        init: ssh-ubuntu-cloud-init
-        bundles: [dev-ai]
-        location: tokyo
+        machine: mock-vm
+        os: mockos-1.0-arm64
+        init: ssh-mockos-cloud-init
+        bundles: [mock-dev]
+        location: mock-tokyo
       - name: pr-windows-aws
-        machine: aws-gpu-g4dn-spot
-        os: windows-server-2025
-        init: ssh-windows-powershell7
-        bundles: [gaming-streaming]
-        location: tokyo
+        machine: mock-gpu
+        os: mockwin-1.0
+        init: ssh-mockwin-powershell
+        bundles: [mock-gaming]
+        location: mock-tokyo
     """
 )
 
-# Exact KEY=value lines for the ubuntu-qemu profile (captured from pre-port
-# bash output as a golden; VM_USER_NAME unset so access users are blank).
+# Exact KEY=value lines for the ubuntu-qemu profile, resolved against the
+# hermetic mock fixtures (machine mock-vm -> provider mock-local, engine qemu;
+# VM_USER_NAME unset so access users are blank). This is the deterministic
+# golden for the decoupled, self-contained test suite.
 _EXPECTED_ENV_LINES = [
     "ACCESS_BOOTSTRAP_USER=",
     "ACCESS_HUMAN_USER=",
     "ACCESS_PROVISION_USER=",
     "PROFILE_NAME=pr-ubuntu-qemu",
     "ENGINE=qemu",
-    "PROVIDER=local-qemu",
-    "STACK_TAGS=local-qemu",
-    "LOCATION_NAME=tokyo",
-    "OS_ID=ubuntu-26.04-arm64",
+    "PROVIDER=mock-local",
+    "STACK_TAGS=mock-local",
+    "LOCATION_NAME=mock-tokyo",
+    "OS_ID=mockos-1.0-arm64",
     "OS_FAMILY=ubuntu",
-    "INIT_ID=ssh-ubuntu-cloud-init",
-    "BUNDLE_PACKAGES=claude,codex-cli,dev-toolchain,docker,goose,hermes,opencode,vscode",
+    "INIT_ID=ssh-mockos-cloud-init",
+    "BUNDLE_PACKAGES=mock-app",
     "VM_MEMORY_MB=4096",
     "VM_CPU_CORES=2",
     "VM_CPU_MODE=",
@@ -79,12 +81,12 @@ _EXPECTED_ENV_LINES = [
     "LOCATION_AVAILABILITY_ZONE=",
     "LOCATION_ZONE=",
     "SSH_USER=",
-    "CLOUD_IMAGE_URL=https://cloud-images.ubuntu.com/releases/26.04/release/ubuntu-26.04-server-cloudimg-arm64.img",
+    "CLOUD_IMAGE_URL=",
     "HUMAN_USER_NAME=",
     "PROVISION_USER_NAME=",
-    "RASPBERRY_PI_HOST=local",
+    "RASPBERRY_PI_HOST=",
     "RASPBERRY_PI_IP=",
-    "TRUENAS_HOST=local",
+    "TRUENAS_HOST=",
     "TRUENAS_SSH_PORT=22",
     "TRUENAS_SSH_USER=",
     "VM_USER_NAME=",
@@ -149,10 +151,10 @@ def test_profile_resolve_emit_json(pr_env: dict[str, str]) -> None:
     data = _json.loads(result.stdout)
     assert data["profile"]["name"] == "pr-ubuntu-qemu"
     assert data["engine"] == "qemu"
-    assert data["machine"]["provider"] == "local-qemu"
+    assert data["machine"]["provider"] == "mock-local"
     assert data["os"]["family"] == "ubuntu"
     assert "bundle_packages" in data
-    assert data["stack_tags"] == "local-qemu"
+    assert data["stack_tags"] == "mock-local"
     # Compact (jq -c) format: no spaces after colons/commas.
     assert '": "' not in result.stdout
     assert '", "' not in result.stdout
@@ -226,14 +228,14 @@ def test_profile_resolve_sdk_fast_path(pr_env: dict[str, str]) -> None:
     """EVE_RESOLVED_JSON bypasses catalog load; .instance.name maps to .profile.name."""
     import json as _json
     resolved_json = _json.dumps({
-        "instance": {"name": "fast-path-test", "machine": "local-qemu-medium"},
-        "machine": {"name": "local-qemu-medium", "provider": "local-qemu", "defaults": {}},
-        "os": {"id": "ubuntu-26.04-arm64", "family": "ubuntu"},
-        "init": {"id": "ssh-ubuntu-cloud-init"},
-        "location": {"name": "tokyo", "local-qemu": {"host": "local"}},
-        "bundle_packages": ["docker"],
+        "instance": {"name": "fast-path-test", "machine": "mock-small"},
+        "machine": {"name": "mock-small", "provider": "mock-cloud", "defaults": {}},
+        "os": {"id": "mockos-1.0-arm64", "family": "ubuntu"},
+        "init": {"id": "ssh-mockos-cloud-init"},
+        "location": {"name": "mock-tokyo", "mock-cloud": {"host": "local"}},
+        "bundle_packages": ["mock-app"],
         "engine": "qemu",
-        "stack_tags": "local-qemu",
+        "stack_tags": "mock-cloud",
     })
     env = {**pr_env, "EVE_RESOLVED_JSON": resolved_json}
     result = _run("profile-resolve", "--profile", "ignored", "--emit", "env", env=env)
@@ -263,16 +265,16 @@ def test_provision_unknown_os_family_exits_2(pr_env: dict[str, str]) -> None:
         """\
         profiles:
           - name: pr-unknown-family
-            machine: local-qemu-medium
-            os: ubuntu-26.04-arm64
+            machine: mock-small
+            os: mockos-1.0-arm64
             init: generic-ssh
-            bundles: [dev-ai]
-            location: tokyo
+            bundles: [mock-dev]
+            location: mock-tokyo
         inits:
           - id: generic-ssh
-            providers: [local-qemu]
+            providers: [mock-cloud]
         oses:
-          - id: ubuntu-26.04-arm64
+          - id: mockos-1.0-arm64
             family: freebsd
         """
     )
@@ -295,11 +297,11 @@ def test_provision_missing_os_dir_exits_2(pr_env: dict[str, str]) -> None:
         """\
         profiles:
           - name: pr-missing-os
-            machine: local-qemu-medium
+            machine: mock-small
             os: ubuntu-99.99-missing
-            init: ssh-ubuntu-cloud-init
-            bundles: [dev-ai]
-            location: tokyo
+            init: ssh-mockos-cloud-init
+            bundles: [mock-dev]
+            location: mock-tokyo
         oses:
           - id: ubuntu-99.99-missing
             family: ubuntu

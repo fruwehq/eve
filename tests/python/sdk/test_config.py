@@ -29,7 +29,9 @@ def test_config_env_rejects_structured_values(tmp_path: Path) -> None:
 
 
 def test_config_env_emit_make(tmp_path: Path) -> None:
+    # The config->env mapping is contributed by the (hermetic) mock-cloud
+    # provider's config_schema: config.region -> MOCK_REGION.
     defaults = tmp_path / "defaults.yaml"
-    defaults.write_text("aws:\n  profile: default\n", encoding="utf-8")
+    defaults.write_text("mock-cloud:\n  region: mock-region-2\n", encoding="utf-8")
 
-    assert ConfigEnv.emit("--make", defaults, tmp_path / "missing.yaml") == "AWS_PROFILE=default\n"
+    assert ConfigEnv.emit("--make", defaults, tmp_path / "missing.yaml") == "MOCK_REGION=mock-region-2\n"

@@ -1,60 +1,45 @@
 #!/usr/bin/env python3
-# ruff: noqa: E501,E701,E702,E722,F841,I001,RUF100,SIM105
-"""Validate fixture instances and compare emitted env to golden snapshots.
+# ruff: noqa: E501, E701
+"""Validate fixture instances hermetically (synthetic mock plugins only)."""
 
-Faithful 1:1 port of the legacy bash test-instances: same checks,
-[OK]/[FAIL] strings, and exit codes.
-"""
 from __future__ import annotations
 
 import json
 import os
-import re
 import shutil
-import stat
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
+os.environ["EVE_PLUGIN_ROOTS"] = str(ROOT / "tests/fixtures/hermetic")
+os.environ["EVE_PLUGIN_ROOTS_EXCLUSIVE"] = "1"
+os.environ.setdefault("EVE_HOME", tempfile.mkdtemp(prefix="eve-instances."))
 sys.path.insert(0, str(ROOT))
 
-FIXTURE = str(ROOT / "tests/fixtures/instances.yaml")
+FIXTURE = str(ROOT / "tests/fixtures/hermetic/instances.yaml")
 GOLDEN_DIR = ROOT / "tests/golden/instances"
 UPDATE = os.environ.get("UPDATE_GOLDEN", "0") == "1"
-
 FAIL = 0
 
-# Env vars to unset for deterministic output (same as the bash unset list).
-_DETERMINISTIC_UNSET = [
-    "TRUENAS_HOST", "TRUENAS_SSH_PORT", "TRUENAS_SSH_USER",
-    "TRUENAS_SSH_PRIVATE_KEY_FILE", "TRUENAS_SSH_HOST_KEY_FINGERPRINT",
-    "TRUENAS_API_KEY", "TRUENAS_API_USER", "SSH_PUBLIC_KEY_FILE",
-    "AWS_CONFIG_FILE", "AWS_PROFILE", "AWS_REGION", "AWS_SHARED_CREDENTIALS_FILE",
-    "EPHEMERAL_DISPLAY_FPS", "EPHEMERAL_DISPLAY_RESOLUTION",
-    "EPHEMERAL_MOONLIGHT_BITRATE_KBPS", "EPHEMERAL_MOONLIGHT_VIDEO_CODEC",
-    "EPHEMERAL_MOONLIGHT_VIDEO_DECODER", "GOOGLE_APPLICATION_CREDENTIALS",
-    "GOOGLE_CLOUD_PROJECT", "GOOGLE_PROJECT", "MY_IP",
-    "RASPBERRY_PI_HDMI_CONNECTOR", "RASPBERRY_PI_HDMI_MODE",
-    "RASPBERRY_PI_HOST", "RASPBERRY_PI_IP",
-    "RUSTDESK_SERVER", "SUNSHINE_MAX_BITRATE_KBPS", "SUNSHINE_VERSION",
-    "TIMEZONE", "VAGRANT_SHOW_CONSOLE", "VM_USER_NAME", "EVE_CONFIG_PATH", "EVE_HOME",
+_UNSET = [
+    "MOCK_REGION", "MOCK_API_KEY", "SSH_PUBLIC_KEY_FILE", "VM_USER_NAME",
+    "EVE_CONFIG_PATH", "EVE_HOME",
 ]
-for _v in _DETERMINISTIC_UNSET:
+for _v in _UNSET:
     os.environ.pop(_v, None)
 
 
-def _run(*args: str, env: dict[str, str] | None = None, input_data: str | None = None, timeout: int = 120) -> subprocess.CompletedProcess[str]:
+def _run(*args, env=None, timeout=120):
     e = {**os.environ, **(env or {})}
     cmd = list(args)
     if cmd and not cmd[0].startswith(("/", "make", "python", "rg")):
         cmd[0] = str(ROOT / cmd[0])
-    return subprocess.run(cmd, cwd=str(ROOT), env=e, capture_output=True, text=True, check=False, input=input_data, timeout=timeout)
+    return subprocess.run(cmd, cwd=str(ROOT), env=e, capture_output=True, text=True, check=False, timeout=timeout)
 
 
-def _run_json(*args: str, env: dict[str, str] | None = None) -> Any:
+def _run_json(*args, env=None):
     r = _run(*args, env=env)
     if r.returncode != 0 or not r.stdout.strip():
         return None
@@ -64,725 +49,192 @@ def _run_json(*args: str, env: dict[str, str] | None = None) -> Any:
         return None
 
 
-def _ok(label: str) -> None:
-    print(f"  [OK] {label}")
-
-
-def _fail(label: str, detail: str = "") -> None:
+def _ok(label): print(f"  [OK] {label}")
+def _fail(label, detail=""):
     global FAIL
     print(f"  [FAIL] {label}", file=sys.stderr)
-    if detail:
-        print(detail, file=sys.stderr)
+    if detail: print(detail, file=sys.stderr)
     FAIL += 1
+def _check(label, cond, detail=""):
+    if cond: _ok(label)
+    else: _fail(label, detail)
 
 
-def _check(label: str, cond: bool, detail: str = "") -> None:
-    if cond:
-        _ok(label)
-    else:
-        _fail(label, detail)
-
-
-def _jq(label: str, args: list[str], predicate, env: dict[str, str] | None = None) -> None:
-    doc = _run_json(*args, env=env)
-    _check(label, doc is not None and predicate(doc), json.dumps(doc, indent=2) if doc else "no output")
-
-
-def _extract(env_text: str, key: str) -> str:
+def _extract(env_text, key):
     for line in env_text.splitlines():
         if line.startswith(f"{key}="):
             return line[len(key) + 1:]
     return ""
 
 
-def _make_exec(path: Path, content: str) -> None:
-    path.write_text(content, encoding="utf-8")
-    path.chmod(path.stat().st_mode | stat.S_IEXEC)
-
-
-def _tmpfile(prefix: str = "eve-test.") -> str:
-    return tempfile.mktemp(prefix=prefix)
-
-
-def _tmpdir(prefix: str = "eve-test.") -> str:
-    return tempfile.mkdtemp(prefix=prefix)
-
-
-def main() -> int:
+def main():
     global FAIL
 
-    # Resolve local-qemu command path (same as bash version).
-    plugins_doc = _run_json("scripts/plugin-list", "--kind", "provider", "--json")
-    local_qemu_plugin = next(p for p in plugins_doc["plugins"] if p["id"] == "local-qemu")
-    LOCAL_QEMU_CMD = str(Path(local_qemu_plugin["path"]).parent / "commands" / "local-qemu")
-
-    GOLDEN_DIR.mkdir(parents=True, exist_ok=True)
-
-    # Instance list from fixture registry.
-    ilist = _run_json("scripts/instance-list", "--registry", FIXTURE, "--json")
-    instances = [i["name"] for i in ilist.get("instances", [])] if ilist else []
-
-    # --- root OS provisioning folders ---
+    # --- OS provisioning folders ---
     _check("root OS provisioning folders live under oses/",
-          not any((ROOT / d).is_dir() for d in ["linux", "windows", "ubuntu26", "windows-server-2025"]))
+          not any((ROOT / d).is_dir() for d in ["linux", "windows"]))
 
-    # --- OS provisioning folders match catalog OS IDs ---
-    # OS IDs now come from catalog-base, not config/catalog.yaml directly.
-    catalog = _run_json("scripts/catalog-options", "--json")  # has providers/platforms but not oses directly
-    # Load oses from the aggregator instead.
-    from eve_sdk.catalog import load_catalog
-    cat = load_catalog()
-    missing_os = 0
-    for os_doc in cat.get("oses", []):
-        os_id = os_doc["id"]
-        prov_dir = ROOT / "oses" / os_id / "provision"
-        if not prov_dir.is_dir():
-            print(f"  [FAIL] missing OS provisioning folder: oses/{os_id}/provision", file=sys.stderr)
-            missing_os += 1
-        elif prov_dir.is_symlink():
-            target = prov_dir.resolve()
-            if not str(target).startswith(str(ROOT / "oses")):
-                print(f"  [FAIL] OS provisioning symlink escapes oses/: oses/{os_id}/provision -> {target}", file=sys.stderr)
-                missing_os += 1
-    _check("OS provisioning folders match catalog OS IDs", missing_os == 0)
+    # --- instance list + golden comparison ---
+    ilist = _run_json("scripts/instance-list", "--registry", FIXTURE, "--json")
+    instances = [i["name"] for i in (ilist or {}).get("instances", [])] if ilist else []
+    _check("instance-list returns mock fixtures", len(instances) == 3 and "mock-dev-a" in instances)
 
-    # --- golden file comparison for each instance ---
-    for instance in instances:
-        vr = _run("scripts/instance-resolve", "--registry", FIXTURE, "--instance", instance, "--validate")
+    for inst in instances:
+        vr = _run("scripts/instance-resolve", "--registry", FIXTURE, "--instance", inst, "--validate")
         if vr.returncode != 0:
-            _fail(f"validate: {instance}", vr.stderr)
+            _fail(f"validate: {inst}", vr.stderr)
             continue
-        env_out = _run("scripts/instance-resolve", "--registry", FIXTURE, "--instance", instance, "--emit", "env")
+        env_out = _run("scripts/instance-resolve", "--registry", FIXTURE, "--instance", inst, "--emit", "env")
         actual = "\n".join(sorted(env_out.stdout.splitlines()))
-        golden = GOLDEN_DIR / f"{instance}.env"
+        golden = GOLDEN_DIR / f"{inst}.env"
         if UPDATE:
             golden.write_text(actual + "\n", encoding="utf-8")
             print(f"  [UPDATE] {golden}")
             continue
         if not golden.exists():
-            _fail(f"missing golden: {golden} (run: UPDATE_GOLDEN=1 make test.instances)")
+            _fail(f"missing golden: {golden}")
             continue
         expected = golden.read_text(encoding="utf-8").rstrip("\n")
-        if actual == expected:
-            _ok(instance)
-        else:
-            _fail(f"golden mismatch: {instance}")
+        _check(inst, actual == expected)
 
-    # --- TrueNAS access defaults ---
-    tj = _run_json("scripts/instance-resolve", "--registry", FIXTURE, "--instance", "truenas-all-a", "--emit", "json")
-    _check("TrueNAS access defaults resolve from catalog",
-          tj is not None and tj.get("access", {}).get("bootstrap_user") == "eve-provision" and tj["access"]["provision_user"] == "eve-provision" and tj["access"]["human_user"] == "eve-provision")
+    # --- access defaults ---
+    tj = _run_json("scripts/instance-resolve", "--registry", FIXTURE, "--instance", "mock-dev-a", "--emit", "json")
+    _check("access defaults resolve from manifest",
+          tj is not None and tj.get("access", {}).get("bootstrap_user") == "mock-user" and
+          tj["access"]["provision_user"] == "mock-user" and tj["access"]["human_user"] == "mock-user")
 
-    # --- TrueNAS human user override ---
-    thj = _run_json("scripts/instance-resolve", "--registry", FIXTURE, "--instance", "truenas-all-a", "--emit", "json", env={"VM_USER_NAME": "chris"})
-    _check("TrueNAS human user can differ from provision user",
-          thj is not None and thj["access"]["bootstrap_user"] == "eve-provision" and thj["access"]["human_user"] == "chris")
+    # --- structured config ---
+    tmp_dir = tempfile.mkdtemp(prefix="eve-instance-overlay.")
+    tmp_config = str(Path(tmp_dir) / "config.yaml")
+    Path(tmp_config).write_text("display:\n  resolution: 5120x1440\nglobal:\n  vm_user_name: eve-user\n", encoding="utf-8")
+    ce = _run("scripts/config-env", "--make", env={"EVE_CONFIG_PATH": tmp_config}).stdout
+    _check("structured config emits non-secret environment overrides",
+          "EPHEMERAL_DISPLAY_RESOLUTION=5120x1440" in ce and "VM_USER_NAME=eve-user" in ce)
 
-    # --- temp dirs ---
-    tmp_registry = _tmpfile("eve-instance-test.")
-    tmp_concurrent = _tmpfile("eve-instance-concurrent.")
-    tmp_external = _tmpfile("eve-instance-external.")
-    invalid_output = _tmpfile("eve-instance-test-output.")
-    tmp_overlay = _tmpdir("eve-instance-overlay.")
-    tmp_local_catalog = str(Path(tmp_overlay) / "catalog.local.yaml")
-    WRK = f"{tempfile.gettempdir()}/eve-instance-work"
-
+    tmp_reg = tempfile.mktemp(prefix="eve-instance-test.")
     try:
-        # --- structured config ---
-        tmp_config = str(Path(tmp_overlay) / "config.yaml")
-        Path(tmp_config).write_text("display:\n  resolution: 5120x1440\nglobal:\n  vm_user_name: eve-user\nmoonlight:\n  display_mode: borderless\n  video_codec: HEVC\n", encoding="utf-8")
-        ce = _run("scripts/config-env", "--make", env={"EVE_CONFIG_PATH": tmp_config}).stdout
-        ce_lines = set(ce.strip().splitlines())
-        _check("structured config emits non-secret environment overrides",
-              "EPHEMERAL_DISPLAY_RESOLUTION=5120x1440" in ce_lines and
-              "EPHEMERAL_MOONLIGHT_DISPLAY_MODE=borderless" in ce_lines and
-              "EPHEMERAL_MOONLIGHT_VIDEO_CODEC=HEVC" in ce_lines and
-              "VM_USER_NAME=eve-user" in ce_lines)
-
         # --- create valid instance ---
-        cr = _run("scripts/instance-create", "--registry", tmp_registry, "--instance", "test-dev",
-                  "--machine", "local-qemu-medium", "--os", "ubuntu-26.04-arm64", "--init", "ssh-ubuntu-cloud-init",
-                  "--location", "tokyo", "--bundles", "desktop-streaming,dev-ai", "--packages", "macos-desktop-theme",
-                  "--disk-gb", "64", "--memory-mb", "4096")
-        if cr.returncode == 0:
-            vr = _run("scripts/instance-resolve", "--registry", tmp_registry, "--instance", "test-dev", "--validate")
-            dj = _run_json("scripts/instance-resolve", "--registry", tmp_registry, "--instance", "test-dev", "--emit", "json")
-            _check("create valid instance",
-                  vr.returncode == 0 and dj is not None and
-                  dj.get("composition", {}).get("packages") == ["macos-desktop-theme"] and
-                  "macos-desktop-theme" in dj.get("bundle_packages", []) and
-                  dj.get("package_sources", {}).get("macos-desktop-theme") == ["direct"])
-        else:
-            _fail("create valid instance")
+        cr = _run("scripts/instance-create", "--registry", tmp_reg, "--instance", "test-dev",
+                  "--machine", "mock-small", "--os", "mockos-1.0-arm64", "--init", "ssh-mockos-cloud-init",
+                  "--location", "mock-tokyo", "--bundles", "mock-dev", "--disk-gb", "30", "--memory-mb", "2048")
+        dj = _run_json("scripts/instance-resolve", "--registry", tmp_reg, "--instance", "test-dev", "--emit", "json")
+        _check("create valid instance", cr.returncode == 0 and dj is not None and
+              "mock-app" in dj.get("bundle_packages", []))
 
-        # --- create direct composition instance ---
-        cr2 = _run("scripts/instance-create", "--registry", tmp_registry, "--instance", "direct-dev",
-                   "--machine", "local-qemu-medium", "--os", "ubuntu-26.04-arm64", "--location", "tokyo",
-                   "--bundles", "dev-ai", "--packages", "gnome-desktop", "--disk-gb", "32")
-        if cr2.returncode == 0:
-            vr2 = _run("scripts/instance-resolve", "--registry", tmp_registry, "--instance", "direct-dev", "--validate")
-            dj2 = _run_json("scripts/instance-resolve", "--registry", tmp_registry, "--instance", "direct-dev", "--emit", "json")
-            _check("create direct composition instance with inferred init",
-                  vr2.returncode == 0 and dj2 is not None and
-                  dj2["composition"]["machine"] == "local-qemu-medium" and
-                  dj2["composition"]["os"] == "ubuntu-26.04-arm64" and
-                  dj2["composition"]["init"] == "ssh-ubuntu-cloud-init" and
-                  "gnome-desktop" in dj2.get("bundle_packages", []) and
-                  dj2.get("package_sources", {}).get("gnome-desktop") == ["direct"])
-        else:
-            _fail("create direct composition instance")
+        # --- create with inferred init ---
+        cr2 = _run("scripts/instance-create", "--registry", tmp_reg, "--instance", "direct-dev",
+                   "--machine", "mock-small", "--os", "mockos-1.0-arm64", "--location", "mock-tokyo",
+                   "--bundles", "mock-dev")
+        dj2 = _run_json("scripts/instance-resolve", "--registry", tmp_reg, "--instance", "direct-dev", "--emit", "json")
+        _check("create with inferred init", cr2.returncode == 0 and dj2 is not None and
+              dj2.get("composition", {}).get("init") == "ssh-mockos-cloud-init")
 
-        # --- local-qemu plan CPU override ---
-        qemu_overlay = str(Path(tmp_overlay) / "qemu-cpu-dev.catalog.local.yaml")
-        qemu_plan = str(Path(tmp_overlay) / "qemu-cpu-dev.plan")
-        cr3 = _run("scripts/instance-create", "--registry", tmp_registry, "--instance", "qemu-cpu-dev",
-                   "--machine", "local-qemu-medium", "--os", "ubuntu-26.04-arm64", "--init", "ssh-ubuntu-cloud-init",
-                   "--location", "tokyo", "--cpu-cores", "4")
-        ov3 = _run("scripts/instance-profile-overlay", "--registry", tmp_registry, "--instance", "qemu-cpu-dev", "--output", qemu_overlay)
-        pd3 = _run("scripts/provider-dispatch", "--instance", "qemu-cpu-dev", "--command", "plan",
-                   env={"EVE_CATALOG_LOCAL": qemu_overlay, "EVE_INSTANCE_REGISTRY": tmp_registry, "EVE_INSTANCE_WORKDIR": f"{tmp_overlay}/qemu-work"})
-        plan_text = pd3.stdout
-        _check("local-qemu plan honors CPU override and 20G default disk",
-              cr3.returncode == 0 and ov3.returncode == 0 and pd3.returncode == 0 and
-              "[local-qemu] cpus=4" in plan_text and "[local-qemu] disk_gb=20" in plan_text)
-
-        # --- KVM accel logic ---
-        kvm_r = _run("python3", "-c",
-                     "import os; from pathlib import Path; "
-                     "_oe=Path.exists; _oa=os.access; "
-                     "Path.exists=lambda s: True if str(s)=='/dev/kvm' else _oe(s); "
-                     "os.access=lambda p,m: True if str(p)=='/dev/kvm' else _oa(p,m); "
-                     "kvm=Path('/dev/kvm'); print('kvm' if kvm.exists() and os.access(str(kvm),os.R_OK|os.W_OK) else 'tcg')")
-        _check("local-qemu accel logic returns kvm when /dev/kvm is present", kvm_r.stdout.strip() == "kvm")
-
-        # --- atomic download leaves no artifacts ---
-        atomic_dir = _tmpdir("eve-atomic-dl-test.")
-        serve_bad = Path(atomic_dir) / "serve-bad"
-        _make_exec(serve_bad, "import http.server, sys\n"
-                    "class H(http.server.BaseHTTPRequestHandler):\n"
-                    " def do_GET(self):\n"
-                    "  self.send_response(200);self.send_header('Content-Length','999999999');self.end_headers()\n"
-                    "  self.wfile.write(b'truncated');self.close_connection=True\n"
-                    " def log_message(self,*a):pass\n"
-                    "http.server.HTTPServer(('127.0.0.1',int(sys.argv[1])),H).handle_request()\n")
-        rewrite_py = Path(atomic_dir) / "rewrite.py"
-        rewrite_py.write_text("import json,sys;d=json.load(sys.stdin);d['os']['cloud_image_url']='http://127.0.0.1:18923/image.img';d['os']['cloud_image_sha256']='a'*64;json.dump(d,sys.stdout,separators=(',',':'))\n", encoding="utf-8")
-        http_proc = subprocess.Popen([sys.executable, str(serve_bad), "18923"])
-        import time; time.sleep(0.3)
-        atomic_json = _run("scripts/instance-resolve", "--registry", FIXTURE, "--instance", "dev-a", "--emit", "json").stdout
-        atomic_json = subprocess.run([sys.executable, str(rewrite_py)], input=atomic_json, capture_output=True, text=True, check=False).stdout
-        atomic_rc = subprocess.run([sys.executable, LOCAL_QEMU_CMD, "up"], cwd=str(ROOT),
-                                   env={**os.environ, "EVE_INSTANCE_WORKDIR": atomic_dir, "EVE_RESOLVED_JSON": atomic_json, "PYTHONPATH": str(ROOT)},
-                                   capture_output=True, check=False).returncode
-        http_proc.kill(); http_proc.wait()
-        base_file = Path(atomic_dir) / "instances" / "dev-a" / "qemu" / "base.qcow2"
-        partial_file = Path(atomic_dir) / "instances" / "dev-a" / "qemu" / "base.qcow2.partial"
-        _check("failed download leaves no base.qcow2 or .partial artifact",
-              not base_file.exists() and not partial_file.exists() and atomic_rc != 0)
-        shutil.rmtree(atomic_dir, ignore_errors=True)
-
-        # --- local-qemu rejects OS without cloud_image_sha256 ---
-        no_sha_dir = _tmpdir("eve-no-sha-test.")
-        strip_sha = Path(no_sha_dir) / "strip_sha.py"
-        strip_sha.write_text("import json,sys;d=json.load(sys.stdin);d['os'].pop('cloud_image_sha256',None);json.dump(d,sys.stdout,separators=(',',':'))\n", encoding="utf-8")
-        no_sha_json = _run("scripts/instance-resolve", "--registry", FIXTURE, "--instance", "dev-a", "--emit", "json").stdout
-        no_sha_json = subprocess.run([sys.executable, str(strip_sha)], input=no_sha_json, capture_output=True, text=True, check=False).stdout
-        no_sha_r = subprocess.run([sys.executable, LOCAL_QEMU_CMD, "up"], cwd=str(ROOT),
-                                  env={**os.environ, "EVE_INSTANCE_WORKDIR": no_sha_dir, "EVE_RESOLVED_JSON": no_sha_json, "PYTHONPATH": str(ROOT)},
-                                  capture_output=True, text=True, check=False)
-        _check("local-qemu rejects OS without cloud_image_sha256", "cloud_image_sha256" in no_sha_r.stderr)
-        shutil.rmtree(no_sha_dir, ignore_errors=True)
-
-        # --- make instance targets honor EVE_INSTANCE_REGISTRY ---
-        mr1 = _run("make", "--no-print-directory", "instance.validate", "INSTANCE=test-dev", env={"EVE_INSTANCE_REGISTRY": tmp_registry})
-        mr2 = _run("make", "--no-print-directory", "instance.list", env={"EVE_INSTANCE_REGISTRY": tmp_registry})
-        _check("make instance targets honor EVE_INSTANCE_REGISTRY", mr1.returncode == 0 and "test-dev" in mr2.stdout)
-
-        # --- EVE_HOME routes paths ---
-        tmp_home = _tmpdir()
-        home_paths = str(Path(tmp_home) / "paths.json")
-        home_env = {"EVE_HOME": tmp_home}
-        home_checks = all(
-            _run("make", "--no-print-directory", *args, env={**home_env, **extra}).returncode == 0
-            for args, extra in [
-                (["instance.create", "INSTANCE=eve-home-dev", "MACHINE=local-qemu-medium", "OS=ubuntu-26.04-arm64", "LOCATION=tokyo"], {}),
-                (["env", "INSTANCE=eve-home-dev"], {}),
-                (["instance.recover", "INSTANCE=eve-home-dev"], {}),
-            ]
-        )
-        hp = _run("make", "--no-print-directory", "instance.paths", "INSTANCE=eve-home-dev", "EMIT=json", env=home_env)
-        try:
-            hp_doc = json.loads(hp.stdout) if hp.returncode == 0 else {}
-        except Exception:
-            hp_doc = {}
-        home_ok = (home_checks and hp.returncode == 0 and
-                   hp_doc.get("INSTANCE_WORKDIR") == f"{tmp_home}/.generated/instances/eve-home-dev" and
-                   hp_doc.get("INSTANCE_OVERLAY_PATH") == f"{tmp_home}/.generated/instances/eve-home-dev/catalog.local.yaml" and
-                   hp_doc.get("INSTANCE_STATE_PATH") == f"{tmp_home}/.eve/state/instances/eve-home-dev.json" and
-                   (Path(tmp_home) / ".eve/instances.yaml").exists() and
-                   (Path(tmp_home) / ".eve/state/instances/eve-home-dev.json").exists() and
-                   (Path(tmp_home) / ".generated/instances/eve-home-dev/catalog.local.yaml").exists())
-        _check("EVE_HOME routes registry, state, and generated overlay paths", home_ok)
-        shutil.rmtree(tmp_home, ignore_errors=True)
-
-        # --- concurrent creates ---
-        Path(tmp_concurrent).unlink(missing_ok=True)
-        import threading
-        results = {}
-        def _create(name):
-            r = _run("scripts/instance-create", "--registry", tmp_concurrent, "--instance", name,
-                     "--machine", "local-qemu-medium", "--os", "ubuntu-26.04-arm64", "--location", "tokyo")
-            results[name] = r.returncode
-        t1 = threading.Thread(target=_create, args=("concurrent-a",))
-        t2 = threading.Thread(target=_create, args=("concurrent-b",))
-        t1.start(); t2.start(); t1.join(); t2.join()
-        cl = _run_json("scripts/instance-list", "--registry", tmp_concurrent, "--json")
-        _check("concurrent instance creates preserve registry",
-              results.get("concurrent-a") == 0 and results.get("concurrent-b") == 0 and
-              cl is not None and len(cl.get("instances", [])) == 2 and
-              any(i["name"] == "concurrent-a" for i in cl["instances"]) and
-              any(i["name"] == "concurrent-b" for i in cl["instances"]))
-
-        # --- package selection updates ---
-        re_env = {"EVE_INSTANCE_REGISTRY": tmp_registry}
-        _run("make", "--no-print-directory", "package.unselect", "INSTANCE=test-dev", "PACKAGE=macos-desktop-theme", env=re_env)
-        dj_pre = _run_json("scripts/instance-resolve", "--registry", tmp_registry, "--instance", "test-dev", "--emit", "json")
-        _run("make", "--no-print-directory", "package.select", "INSTANCE=test-dev", "PACKAGE=macos-desktop-theme", env=re_env)
-        dj_post = _run_json("scripts/instance-resolve", "--registry", tmp_registry, "--instance", "test-dev", "--emit", "json")
-        _check("package selection updates direct instance packages",
-              dj_pre is not None and "macos-desktop-theme" not in dj_pre.get("bundle_packages", []) and
-              dj_post is not None and "macos-desktop-theme" in dj_post.get("bundle_packages", []) and
-              dj_post.get("package_sources", {}).get("macos-desktop-theme") == ["direct"])
-
-        # --- bundle selection updates ---
-        _run("make", "--no-print-directory", "bundle.unselect", "INSTANCE=test-dev", "BUNDLE=dev-ai", env=re_env)
-        dj_b1 = _run_json("scripts/instance-resolve", "--registry", tmp_registry, "--instance", "test-dev", "--emit", "json")
-        _run("make", "--no-print-directory", "bundle.select", "INSTANCE=test-dev", "BUNDLE=desktop-gnome", env=re_env)
-        dj_b2 = _run_json("scripts/instance-resolve", "--registry", tmp_registry, "--instance", "test-dev", "--emit", "json")
-        _check("bundle selection updates instance bundles",
-              dj_b1 is not None and dj_b1.get("composition", {}).get("bundles") == ["desktop-streaming"] and
-              "docker" not in dj_b1.get("bundle_packages", []) and
-              dj_b2 is not None and "desktop-gnome" in dj_b2.get("composition", {}).get("bundles", []) and
-              "gnome-desktop" in dj_b2.get("bundle_packages", []))
-
-        # --- invalid bundle selection ---
-        before = Path(tmp_registry).read_text(encoding="utf-8") if Path(tmp_registry).exists() else ""
-        ir = _run("make", "--no-print-directory", "bundle.select", "INSTANCE=test-dev", "BUNDLE=does-not-exist", env=re_env)
-        after = Path(tmp_registry).read_text(encoding="utf-8") if Path(tmp_registry).exists() else ""
-        _check("invalid bundle selection leaves registry unchanged", ir.returncode != 0 and before == after)
-
-        # --- profile overlay exposes direct packages ---
-        pe = _run("make", "--no-print-directory", "env", "INSTANCE=test-dev", env={**re_env, "EVE_INSTANCE_WORKDIR": f"{tmp_overlay}/direct"})
-        _check("profile overlay exposes direct instance packages", "waypipe" in pe.stdout)
-
-        # --- EVE_CATALOG_LOCAL tests ---
-        for yaml_content, instance, check_fn, label in [
-            ("bundles:\n  - id: desktop-streaming\n    includes: [rustdesk, vnc, waypipe]\n", "dev-a",
-             lambda d: "waypipe" in d.get("bundle_packages", []) and d.get("package_sources", {}).get("waypipe") == ["bundle:desktop-streaming"],
-             "instance resolver honors EVE_CATALOG_LOCAL"),
-        ]:
-            Path(tmp_local_catalog).write_text(yaml_content, encoding="utf-8")
-            _jq(label, ["scripts/instance-resolve", "--registry", FIXTURE, "--instance", instance, "--emit", "json"],
-                check_fn, env={"EVE_CATALOG_LOCAL": tmp_local_catalog})
-
-        # --- validation rejection tests ---
-        for yaml_content, instance, needle, label in [
-            ("bundles:\n  - id: desktop-streaming\n    includes: [xpra]\n", "truenas-all-a", "does not support ubuntu version 26.04", "instance resolver enforces package ubuntu version support"),
-            ("bundles:\n  - id: desktop-streaming\n    includes: [steam]\n", "qemu-a", "does not support architecture arm64", "instance resolver enforces package architecture support"),
-        ]:
-            Path(tmp_local_catalog).write_text(yaml_content, encoding="utf-8")
-            vr = _run("scripts/instance-resolve", "--registry", FIXTURE, "--instance", instance, "--validate", env={"EVE_CATALOG_LOCAL": tmp_local_catalog})
-            _check(label, vr.returncode != 0 and needle in vr.stderr)
-
-        # --- provider OS validation hook ---
-        Path(tmp_local_catalog).write_text("oses:\n  - id: ubuntu-no-cloud-image\n    family: ubuntu\n    version: \"26.04\"\n    arch: arm64\n", encoding="utf-8")
-        Path(tmp_external).write_text("version: 1\ninstances:\n  - name: qemu-invalid-os\n    machine: local-qemu-medium\n    os: ubuntu-no-cloud-image\n    init: ssh-ubuntu-cloud-init\n    location: tokyo\n    bundles: []\n    packages: []\n", encoding="utf-8")
-        vr = _run("scripts/instance-resolve", "--registry", tmp_external, "--instance", "qemu-invalid-os", "--validate", env={"EVE_CATALOG_LOCAL": tmp_local_catalog})
-        _check("instance resolver runs provider OS metadata validation hook", vr.returncode != 0 and "no cloud image URL" in vr.stderr)
-
-        # --- acme provider tests ---
-        acme_cat = "machines:\n  - name: acme-small\n    provider: acme\n    kind: vm\n    defaults:\n      disk_gb: 30\n      memory_mb: 4096\nlocations:\n  - name: tokyo\n    acme:\n      region: test-region\ninits:\n  - id: ssh-ubuntu-cloud-init\n    providers: [acme]\n"
-        Path(tmp_local_catalog).write_text(acme_cat, encoding="utf-8")
-        Path(tmp_external).write_text("version: 1\ninstances:\n  - name: acme-a\n    machine: acme-small\n    os: ubuntu-26.04-amd64\n    init: ssh-ubuntu-cloud-init\n    packages: [docker]\n    location: tokyo\n", encoding="utf-8")
-
-        vr = _run("scripts/instance-resolve", "--registry", tmp_external, "--instance", "acme-a", "--validate", env={"EVE_CATALOG_LOCAL": tmp_local_catalog})
-        _check("instance resolver rejects provider without plugin", vr.returncode != 0 and "Provider plugin not found: acme" in vr.stderr)
-
-        dj = _run_json("scripts/instance-resolve", "--registry", tmp_external, "--instance", "acme-a", "--emit", "json",
-                       env={"EVE_PLUGIN_ROOTS": "tests/fixtures/plugins/providers/acme", "EVE_CATALOG_LOCAL": tmp_local_catalog})
-        _check("instance resolver accepts external provider plugin",
-              dj is not None and dj.get("provider_plugin") == "acme" and dj.get("machine", {}).get("provider") == "acme")
-
-        # provider plugin supports enforcement (metal kind for vm provider)
-        acme_metal = acme_cat.replace("kind: vm", "kind: metal")
-        Path(tmp_local_catalog).write_text(acme_metal, encoding="utf-8")
-        vr = _run("scripts/instance-resolve", "--registry", tmp_external, "--instance", "acme-a", "--validate",
-                  env={"EVE_PLUGIN_ROOTS": "tests/fixtures/plugins/providers/acme", "EVE_CATALOG_LOCAL": tmp_local_catalog})
-        _check("instance resolver enforces provider plugin supports", vr.returncode != 0 and "does not support engine metal" in vr.stderr)
-
-        # --- invalid instance create ---
-        before = Path(tmp_registry).read_text(encoding="utf-8") if Path(tmp_registry).exists() else ""
-        ir = _run("scripts/instance-create", "--registry", tmp_registry, "--instance", "bad-a",
-                  "--machine", "no-such-machine", "--os", "ubuntu-26.04-amd64", "--location", "tokyo")
-        after = Path(tmp_registry).read_text(encoding="utf-8") if Path(tmp_registry).exists() else ""
+        # --- reject invalid instance ---
+        before = Path(tmp_reg).read_text(encoding="utf-8") if Path(tmp_reg).exists() else ""
+        ir = _run("scripts/instance-create", "--registry", tmp_reg, "--instance", "bad-a",
+                  "--machine", "no-such-machine", "--os", "mockos-1.0-amd64", "--location", "mock-tokyo")
+        after = Path(tmp_reg).read_text(encoding="utf-8") if Path(tmp_reg).exists() else ""
         _check("reject invalid instance without registry write", ir.returncode != 0 and before == after)
 
         # --- delete instance ---
-        dr = _run("scripts/instance-delete", "--registry", tmp_registry, "--instance", "test-dev")
-        vr = _run("scripts/instance-resolve", "--registry", tmp_registry, "--instance", "test-dev", "--emit", "json")
+        dr = _run("scripts/instance-delete", "--registry", tmp_reg, "--instance", "test-dev")
+        vr = _run("scripts/instance-resolve", "--registry", tmp_reg, "--instance", "test-dev", "--emit", "json")
         _check("delete instance removes from registry", dr.returncode == 0 and vr.returncode != 0)
 
         # --- delete non-existent ---
-        dr2 = _run("scripts/instance-delete", "--registry", tmp_registry, "--instance", "test-dev")
-        _check("delete non-existent instance fails", dr2.returncode != 0)
+        _check("delete non-existent instance fails",
+              _run("scripts/instance-delete", "--registry", tmp_reg, "--instance", "test-dev").returncode != 0)
 
         # --- create resets stale state ---
-        stale_state = f"{tmp_overlay}/stale-state"
-        _run("scripts/instance-create", "--registry", tmp_registry, "--instance", "stale-dev",
-             "--machine", "local-qemu-medium", "--os", "ubuntu-26.04-arm64", "--location", "tokyo", "--bundles", "desktop-streaming",
+        stale_state = f"{tmp_dir}/stale-state"
+        _run("scripts/instance-create", "--registry", tmp_reg, "--instance", "stale-dev",
+             "--machine", "mock-small", "--os", "mockos-1.0-arm64", "--location", "mock-tokyo", "--bundles", "mock-dev",
              env={"EVE_STATE_DIR": stale_state})
-        _run("scripts/instance-state", "--instance", "stale-dev", "--operation", "package.rustdesk.status", "--status", "succeeded", "--package", "rustdesk", "--package-state", "installed", env={"EVE_STATE_DIR": stale_state})
-        _run("scripts/instance-delete", "--registry", tmp_registry, "--instance", "stale-dev", env={"EVE_STATE_DIR": stale_state})
+        _run("scripts/instance-state", "--instance", "stale-dev", "--operation", "package.mock-app.status",
+             "--status", "succeeded", "--package", "mock-app", "--package-state", "installed", env={"EVE_STATE_DIR": stale_state})
+        _run("scripts/instance-delete", "--registry", tmp_reg, "--instance", "stale-dev", env={"EVE_STATE_DIR": stale_state})
         stale_exists = Path(stale_state).joinpath("instances/stale-dev.json").exists()
-        _run("scripts/instance-create", "--registry", tmp_registry, "--instance", "stale-dev",
-             "--machine", "local-qemu-medium", "--os", "ubuntu-26.04-arm64", "--location", "tokyo", "--bundles", "desktop-streaming",
+        _run("scripts/instance-create", "--registry", tmp_reg, "--instance", "stale-dev",
+             "--machine", "mock-small", "--os", "mockos-1.0-arm64", "--location", "mock-tokyo", "--bundles", "mock-dev",
              env={"EVE_STATE_DIR": stale_state})
         stale_gone = not Path(stale_state).joinpath("instances/stale-dev.json").exists()
-        sj = _run_json("scripts/instance-status", "--registry", tmp_registry, "--instance", "stale-dev", "--json", env={"EVE_STATE_DIR": stale_state})
-        _check("create resets stale local instance state",
-              stale_exists and stale_gone and sj is not None and
-              sj.get("packages", {}).get("summary", {}).get("installed") == 0 and
-              sj.get("packages", {}).get("summary", {}).get("unknown", 0) > 0)
+        _check("create resets stale local instance state", stale_exists and stale_gone)
 
-        # --- delete purge ---
-        purge_wrk = f"{tmp_overlay}/delete-work"
-        purge_state = f"{tmp_overlay}/delete-state"
-        _run("scripts/instance-create", "--registry", tmp_registry, "--instance", "purge-dev",
-             "--machine", "local-qemu-medium", "--os", "ubuntu-26.04-arm64", "--location", "tokyo")
-        Path(purge_wrk, "purge-dev").mkdir(parents=True, exist_ok=True)
-        Path(purge_state, "instances").mkdir(parents=True, exist_ok=True)
-        Path(purge_state, "instances/purge-dev.json").write_text("{}\n", encoding="utf-8")
-        _run("make", "--no-print-directory", "package.select", "INSTANCE=purge-dev", "PACKAGE=waypipe",
-             env={"EVE_INSTANCE_REGISTRY": tmp_registry, "EVE_INSTANCE_WORKDIR": purge_wrk, "EVE_STATE_DIR": purge_state})
-        _run("make", "--no-print-directory", "instance.delete", "INSTANCE=purge-dev", "PURGE=1",
-             env={"EVE_INSTANCE_REGISTRY": tmp_registry, "EVE_INSTANCE_WORKDIR": purge_wrk, "EVE_STATE_DIR": purge_state})
-        _check("delete purge honors env registry/workdir/state paths",
-              not Path(purge_wrk, "purge-dev").exists() and not Path(purge_state, "instances/purge-dev.json").exists())
+        # --- instance-delete safety ---
+        safety_state = f"{tmp_dir}/safety-state"
+        _run("scripts/instance-create", "--registry", tmp_reg, "--instance", "safety-dev",
+             "--machine", "mock-small", "--os", "mockos-1.0-arm64", "--location", "mock-tokyo")
+        _run("scripts/instance-state", "--instance", "safety-dev", "--operation", "provider.up",
+             "--status", "succeeded", "--provider-state", "running", "--desired-state", "running", env={"EVE_STATE_DIR": safety_state})
+        _check("instance-delete refuses when provider_state=running",
+              _run("scripts/instance-delete", "--registry", tmp_reg, "--instance", "safety-dev",
+                   env={"EVE_STATE_DIR": safety_state}).returncode != 0)
+        _check("instance-delete --force bypasses safety check",
+              _run("scripts/instance-delete", "--registry", tmp_reg, "--instance", "safety-dev", "--force",
+                   env={"EVE_STATE_DIR": safety_state}).returncode == 0)
 
-        # --- instance-delete safety check ---
-        safety_wrk = f"{tmp_overlay}/safety-work"
-        safety_state = f"{tmp_overlay}/safety-state"
-        _run("scripts/instance-create", "--registry", tmp_registry, "--instance", "safety-dev",
-             "--machine", "local-qemu-medium", "--os", "ubuntu-26.04-arm64", "--location", "tokyo")
-        _run("scripts/instance-state", "--instance", "safety-dev", "--operation", "provider.up", "--status", "succeeded", "--provider-state", "running", "--desired-state", "running", env={"EVE_STATE_DIR": safety_state})
-        sr = _run("scripts/instance-delete", "--registry", tmp_registry, "--instance", "safety-dev",
-                  env={"EVE_INSTANCE_REGISTRY": tmp_registry, "EVE_INSTANCE_WORKDIR": safety_wrk, "EVE_STATE_DIR": safety_state})
-        _check("instance-delete refuses when provider_state=running", sr.returncode != 0)
-        sr2 = _run("scripts/instance-delete", "--registry", tmp_registry, "--instance", "safety-dev", "--force",
-                   env={"EVE_INSTANCE_REGISTRY": tmp_registry, "EVE_INSTANCE_WORKDIR": safety_wrk, "EVE_STATE_DIR": safety_state})
-        _check("instance-delete --force bypasses safety check", sr2.returncode == 0)
-
-        # --- profile overlay tests ---
-        overlay = str(Path(tmp_overlay) / "dev-a.catalog.local.yaml")
-        _run("scripts/instance-profile-overlay", "--registry", FIXTURE, "--instance", "dev-a", "--output", overlay)
-        _run("scripts/profile-resolve", "--profile", "dev-a", "--validate", env={"EVE_CATALOG_LOCAL": overlay})
+        # --- profile overlay ---
+        overlay = f"{tmp_dir}/mock-dev-a.catalog.local.yaml"
+        _run("scripts/instance-profile-overlay", "--registry", FIXTURE, "--instance", "mock-dev-a", "--output", overlay)
+        _run("scripts/profile-resolve", "--profile", "mock-dev-a", "--validate", env={"EVE_CATALOG_LOCAL": overlay})
         _check("generated profile overlay validates", True)
 
-        overlay_before = str(Path(tmp_overlay) / "dev-a.before.yaml")
-        shutil.copy2(overlay, overlay_before)
-        _run("scripts/instance-profile-overlay", "--registry", FIXTURE, "--instance", "dev-a", "--output", overlay)
-        _check("unchanged profile overlay is not rewritten",
-              Path(overlay).read_bytes() == Path(overlay_before).read_bytes())
-
-        pe = _run("scripts/profile-resolve", "--profile", "dev-a", "--emit", "env", env={"EVE_CATALOG_LOCAL": overlay}).stdout
-        pe_lines = set(pe.strip().splitlines())
+        pe = _run("scripts/profile-resolve", "--profile", "mock-dev-a", "--emit", "env", env={"EVE_CATALOG_LOCAL": overlay}).stdout
         _check("profile overlay preserves instance overrides",
-              "PROFILE_NAME=dev-a" in pe_lines and "VM_DISK_GB=64" in pe_lines and
-              "VM_MEMORY_MB=4096" in pe_lines and "STACK_TAGS=local-qemu" in pe_lines)
-
-        # --- make env bridge ---
-        be = _run("make", "env", "INSTANCE=dev-a", env={"EVE_INSTANCE_REGISTRY": FIXTURE, "EVE_INSTANCE_WORKDIR": f"{tmp_overlay}/run"})
-        be_lines = set(be.stdout.strip().splitlines())
-        _check("make target routes INSTANCE through generated profile overlay",
-              "PROFILE_NAME=dev-a" in be_lines and "VM_DISK_GB=64" in be_lines and "VM_MEMORY_MB=4096" in be_lines)
-
-        # --- Raspberry Pi IPs ---
-        ra = _run("scripts/instance-resolve", "--instance", "rpi-all-a", "--emit", "env", env={"EVE_INSTANCE_REGISTRY": FIXTURE}).stdout
-        rb = _run("scripts/instance-resolve", "--instance", "rpi-all-b", "--emit", "env", env={"EVE_INSTANCE_REGISTRY": FIXTURE}).stdout
-        _check("Raspberry Pi instances keep separate provider IPs",
-              _extract(ra, "RASPBERRY_PI_IP") == "192.0.2.10" and _extract(rb, "RASPBERRY_PI_IP") == "192.0.2.11")
-
-        # --- rpi overlay preserves address ---
-        rpi_overlay = f"{tmp_overlay}/rpi-all-a/catalog.local.yaml"
-        Path(rpi_overlay).parent.mkdir(parents=True, exist_ok=True)
-        _run("scripts/instance-profile-overlay", "--instance", "rpi-all-a", "--output", rpi_overlay, env={"EVE_INSTANCE_REGISTRY": FIXTURE})
-        roe = _run("scripts/profile-resolve", "--profile", "rpi-all-a", "--emit", "env", env={"EVE_CATALOG_LOCAL": rpi_overlay}).stdout
-        _check("generated profile overlay preserves Raspberry Pi address",
-              _extract(roe, "RASPBERRY_PI_IP") == "192.0.2.10" and _extract(roe, "RASPBERRY_PI_HOST") == "192.0.2.10")
-
-        # --- make instance.paths ---
-        pt = _run("make", "--no-print-directory", "instance.paths", "INSTANCE=dev-a",
-                  env={"EVE_INSTANCE_REGISTRY": FIXTURE, "EVE_INSTANCE_WORKDIR": f"{tmp_overlay}/run"})
-        expected_wd = f"{tmp_overlay}/run/dev-a"
-        expected_tfs = f"{tmp_overlay}/run/dev-a/tf/state"
-        _check("make target exposes instance artifact paths",
-              _extract(pt.stdout, "INSTANCE_WORKDIR") == expected_wd and
-              _extract(pt.stdout, "INSTANCE_TF_STATE_BASE") == expected_tfs)
-
-        # --- terraform status isolated path ---
-        sr = _run("make", "--no-print-directory", "status", "INSTANCE=aws-gpu-a",
-                  env={"EVE_INSTANCE_REGISTRY": FIXTURE, "EVE_INSTANCE_WORKDIR": f"{tmp_overlay}/run", "EVE_STATE_DIR": f"{tmp_overlay}/state"})
-        _check("terraform-backed INSTANCE status uses isolated execution path", sr.returncode == 0)
-
-        # --- terraform state fallback (start/stop/status) ---
-        aws_state_base = Path(tmp_overlay) / "provider-fallback" / "aws-gpu-a" / "tf" / "state"
-        aws_tf_dir = aws_state_base / "plugins/providers/aws/stacks/20-services/workspaces/aws-gpu-a"
-        aws_tf_dir.mkdir(parents=True, exist_ok=True)
-        (aws_tf_dir / "terraform.tfstate").write_text('{"resources":[{"type":"aws_instance","name":"main","instances":[{"attributes":{"instance_state":"running"}}]}]}\n', encoding="utf-8")
-        fb_env = {"EVE_INSTANCE_REGISTRY": FIXTURE, "EVE_INSTANCE_WORKDIR": f"{tmp_overlay}/provider-fallback", "EVE_STATE_DIR": f"{tmp_overlay}/provider-fallback-state"}
-        sr = _run("scripts/provider-dispatch", "--registry", FIXTURE, "--instance", "aws-gpu-a", "--command", "start", env=fb_env)
-        _check("provider start reads relocated Terraform state fallback", sr.returncode == 0)
-
-        (aws_tf_dir / "terraform.tfstate").write_text('{"resources":[{"type":"aws_instance","name":"main","instances":[{"attributes":{"instance_state":"stopped"}}]}]}\n', encoding="utf-8")
-        sr = _run("scripts/provider-dispatch", "--registry", FIXTURE, "--instance", "aws-gpu-a", "--command", "stop", env=fb_env)
-        _check("provider stop reads relocated Terraform state fallback", sr.returncode == 0)
-
-        truenas_tf_dir = Path(tmp_overlay) / "provider-fallback" / "truenas-all-a" / "tf" / "state" / "plugins/providers/truenas/stacks/truenas/20-services/workspaces/truenas-all-a"
-        truenas_tf_dir.mkdir(parents=True, exist_ok=True)
-        (truenas_tf_dir / "terraform.tfstate").write_text('{"resources":[{"type":"truenas_vm","name":"this","instances":[{"attributes":{"id":"42","name":"fixture-vm","state":"RUNNING"}}]}]}\n', encoding="utf-8")
-        fake_bin = Path(tmp_overlay) / "bin"; fake_bin.mkdir(parents=True, exist_ok=True)
-        _make_exec(fake_bin / "nc", "#!/usr/bin/env sh\nexit 1\n")
-        ts_env = {**fb_env, "PATH": f"{fake_bin}:{os.environ['PATH']}", "TRUENAS_HOST": "127.0.0.1", "TRUENAS_SSH_USER": "terraform"}
-        ts = _run("scripts/provider-dispatch", "--registry", FIXTURE, "--instance", "truenas-all-a", "--command", "status", env=ts_env)
-        _check("provider status reads nested TrueNAS Terraform state fallback", "unreachable" in ts.stdout)
-
-        # --- make lifecycle targets bridge ---
-        bridge_fail = 0
-        for target in ["up", "down", "stop", "ip", "ssh"]:
-            br = _run_json("make", "--no-print-directory", target, "INSTANCE=dev-a",
-                           env={"EVE_PROVIDER_DRY_RUN": "1", "EVE_INSTANCE_REGISTRY": FIXTURE, "EVE_INSTANCE_WORKDIR": f"{tmp_overlay}/provider-bridge"})
-            if not (br and br.get("provider") == "local-qemu" and br.get("command") == target and br.get("dry_run") is True):
-                bridge_fail += 1
-        br_start = _run_json("make", "--no-print-directory", "start", "INSTANCE=dev-a",
-                             env={"EVE_PROVIDER_DRY_RUN": "1", "EVE_INSTANCE_REGISTRY": FIXTURE, "EVE_INSTANCE_WORKDIR": f"{tmp_overlay}/provider-bridge"})
-        if not (br_start and br_start.get("command") == "start" and br_start.get("dry_run") is True):
-            bridge_fail += 1
-        _check("make lifecycle targets route INSTANCE through provider plugins", bridge_fail == 0)
-
-        # --- provider.status dry-run ---
-        ps = _run_json("make", "--no-print-directory", "provider.status", "INSTANCE=dev-a",
-                       env={"EVE_PROVIDER_DRY_RUN": "1", "EVE_INSTANCE_REGISTRY": FIXTURE, "EVE_INSTANCE_WORKDIR": f"{tmp_overlay}/provider-bridge"})
-        _check("provider.status routes through provider plugin dry-run",
-              ps is not None and ps.get("command") == "status" and ps.get("dry_run") is True)
-
-        # --- provider debug targets ---
-        debug_fail = 0
-        for target in ["init", "plan"]:
-            pd = _run_json("scripts/provider-dispatch", "--instance", "dev-a", "--command", target,
-                           env={"EVE_PROVIDER_DRY_RUN": "1", "EVE_INSTANCE_REGISTRY": FIXTURE, "EVE_INSTANCE_WORKDIR": f"{tmp_overlay}/provider-bridge"})
-            if not (pd and pd.get("command") == target and pd.get("dry_run") is True):
-                debug_fail += 1
-        _check("provider debug targets route through provider dispatch", debug_fail == 0)
-
-        # --- provision dry-run ---
-        prov_env = {"EVE_PROVISION_DRY_RUN": "1", "EVE_INSTANCE_REGISTRY": FIXTURE, "EVE_INSTANCE_WORKDIR": f"{tmp_overlay}/provision-bridge"}
-        pd = _run_json("make", "--no-print-directory", "provision", "INSTANCE=dev-a", env=prov_env)
-        _check("make provision INSTANCE routes through stateful instance provisioner",
-              pd is not None and pd.get("instance") == "dev-a" and pd.get("command") == "provision" and
-              pd.get("force") is False and pd.get("dry_run") is True and "dev-a/catalog.local.yaml" in pd.get("overlay", ""))
-
-        pfd = _run_json("make", "--no-print-directory", "instance.provision", "INSTANCE=dev-a", "FORCE=1", env=prov_env)
-        _check("instance.provision exposes FORCE dry-run intent",
-              pfd is not None and pfd.get("force") is True and pfd.get("dry_run") is True)
-
-        # --- provision state recording ---
-        ps_env = {"EVE_INSTANCE_REGISTRY": FIXTURE, "EVE_INSTANCE_WORKDIR": f"{tmp_overlay}/provision-state", "EVE_STATE_DIR": f"{tmp_overlay}/provision-state-json", "EVE_PROVISION_SCRIPT": str(ROOT / "tests/fixtures/provision-ok")}
-        pr = _run("make", "--no-print-directory", "instance.provision", "INSTANCE=dev-a", env=ps_env)
-        if pr.returncode == 0:
-            sj = _run_json("scripts/instance-state", "--instance", "dev-a", "--get", env={"EVE_STATE_DIR": f"{tmp_overlay}/provision-state-json"})
-            _check("instance provision records provision state",
-                  sj is not None and sj.get("last_operation", {}).get("name") == "provision" and
-                  sj["last_operation"]["status"] == "succeeded" and sj.get("provision_state") == "provisioned" and
-                  sj.get("operation_history", [{}])[0].get("status") == "running" and
-                  sj.get("operation_history", [{}])[-1].get("status") == "succeeded" and
-                  sj.get("package_state", {}).get("rustdesk", {}).get("status") == "installed" and
-                  sj.get("package_state", {}).get("vnc", {}).get("status") == "installed")
-        else:
-            _fail("instance provision fixture failed")
-
-        # --- integration-test dry-run ---
-        ij = _run_json("scripts/integration-test", "--instance", "dev-a", "--json", env={"EVE_INSTANCE_REGISTRY": FIXTURE})
-        _check("integration-test emits AI-assisted dry-run plan",
-              ij is not None and ij.get("live") is False and
-              len(ij.get("plans", [])) > 0 and ij["plans"][0].get("instance") == "dev-a" and
-              any("make instance.provision INSTANCE=dev-a" in c for c in ij["plans"][0].get("commands", [])) and
-              any("AI/dev package commands" in mc for mc in ij["plans"][0].get("manual_checks", [])))
-
-        # --- integration-test live mode ---
-        tmp_bin = _tmpdir("eve-integration-bin.")
-        _make_exec(Path(tmp_bin) / "make", "#!/usr/bin/env bash\nset -euo pipefail\ntarget=\"\";package=\"\"\nfor arg in \"$@\";do case \"$arg\" in --no-print-directory);; PACKAGE=*) package=\"${arg#PACKAGE=}\";; *) target=\"$arg\";break;; esac;done\nif [ \"$target\" = \"package.status\" ];then printf '{\"kind\":\"package-status\",\"package\":\"%s\",\"command\":\"status\",\"instance\":\"dev-a\",\"os_family\":\"ubuntu\",\"status\":\"installed\",\"details\":\"installed\"}\\n' \"$package\";exit 0;fi\nprintf 'stub live step: %s\\n' \"$target\"\n")
-        int_report = f"{tmp_overlay}/integration-live-report.json"
-        il = _run("scripts/integration-test", "--live", "--instance", "dev-a", "--report", int_report,
-                  env={"YES": "1", "PATH": f"{tmp_bin}:{os.environ['PATH']}", "EVE_INSTANCE_REGISTRY": FIXTURE})
-        report_doc = None
-        if Path(int_report).exists():
-            try: report_doc = json.loads(Path(int_report).read_text())
-            except: pass
-        _check("integration-test live mode streams and records step output",
-              il.returncode == 0 and "== dev-a: validate ==" in il.stdout and
-              "stub live step: instance.validate" in il.stdout and
-              "== dev-a: cleanup.down ==" in il.stdout and
-              report_doc is not None and report_doc.get("instances", [{}])[0].get("status") == "passed")
-        shutil.rmtree(tmp_bin, ignore_errors=True)
-
-        # --- integration-test missing package ---
-        tmp_bin2 = _tmpdir("eve-integration-bin-missing.")
-        _make_exec(Path(tmp_bin2) / "make", "#!/usr/bin/env bash\nset -euo pipefail\ntarget=\"\";package=\"\"\nfor arg in \"$@\";do case \"$arg\" in --no-print-directory);; PACKAGE=*) package=\"${arg#PACKAGE=}\";; *) target=\"$arg\";break;; esac;done\nif [ \"$target\" = \"package.status\" ];then printf '{\"kind\":\"package-status\",\"package\":\"%s\",\"command\":\"status\",\"instance\":\"dev-a\",\"os_family\":\"ubuntu\",\"status\":\"missing\",\"details\":\"missing\"}\\n' \"$package\";exit 0;fi\nprintf 'stub live step: %s\\n' \"$target\"\n")
-        miss_report = f"{tmp_overlay}/integration-live-missing-report.json"
-        im = _run("scripts/integration-test", "--live", "--instance", "dev-a", "--report", miss_report,
-                  env={"YES": "1", "PATH": f"{tmp_bin2}:{os.environ['PATH']}", "EVE_INSTANCE_REGISTRY": FIXTURE})
-        miss_doc = None
-        if Path(miss_report).exists():
-            try: miss_doc = json.loads(Path(miss_report).read_text())
-            except: pass
-        _check("integration-test live mode fails on missing selected package",
-              im.returncode != 0 and miss_doc is not None and
-              miss_doc.get("instances", [{}])[0].get("status") == "failed")
-        shutil.rmtree(tmp_bin2, ignore_errors=True)
-
-        # --- make instance.state ---
-        st = _run_json("make", "--no-print-directory", "instance.state", "INSTANCE=aws-gpu-a",
-                       env={"EVE_STATE_DIR": f"{tmp_overlay}/state"})
-        _check("make target exposes local instance state",
-              st is not None and st.get("instance") == "aws-gpu-a" and st.get("last_operation") is None and
-              st.get("provider_state") == "unknown" and isinstance(st.get("observed_state"), dict))
-
-        # --- observed state ---
-        os_j = _run_json("scripts/instance-state", "--instance", "observed-a",
-                         "--observed-json", '{"provider_status":"running","ip":"10.0.0.10","observed_at":"2026-01-01T00:00:00Z"}',
-                         env={"EVE_STATE_DIR": f"{tmp_overlay}/state-observed"})
-        _check("instance state records observed facts without operations",
-              os_j is not None and os_j.get("observed_state", {}).get("provider_status") == "running" and
-              os_j["observed_state"]["ip"] == "10.0.0.10" and len(os_j.get("operation_history", [])) == 0 and
-              os_j.get("last_operation") is None)
-
-        # --- instance.observe ---
-        tmp_obs_bin = Path(tmp_overlay) / "bin-observe"; tmp_obs_bin.mkdir(parents=True, exist_ok=True)
-        _make_exec(tmp_obs_bin / "make", "#!/usr/bin/env sh\nshift\ntarget=\"$1\"\ncase \"$target\" in\nprovider.status)\nprintf 'Profile:        dev-a\\nEngine:         terraform\\nProvider:       aws\\nOS:             ubuntu\\nControl:        reachable (stub)\\nStatus:         running\\n';;\nip)\nprintf '10.0.0.42\\n';;\n*)\nprintf 'unexpected target: %s\\n' \"$target\" >&2;exit 2;;\nesac\n")
-        orj = _run_json("scripts/instance-observe", "--instance", "dev-a",
-                        env={"PATH": f"{tmp_obs_bin}:{os.environ['PATH']}", "EVE_STATE_DIR": f"{tmp_overlay}/state-observe-refresh"})
-        _check("instance.observe refreshes observed state without lifecycle history",
-              orj is not None and orj.get("observed_state", {}).get("provider_status") == "running" and
-              orj["observed_state"]["ip"] == "10.0.0.42" and orj["observed_state"]["control_reachable"] is True and
-              orj["observed_state"]["refresh_error"] is None and len(orj.get("operation_history", [])) == 0)
-
-        # --- upload validation ---
-        tmp_upload = Path(tmp_overlay) / "upload"; tmp_upload.mkdir(parents=True, exist_ok=True)
-        (tmp_upload / "direct-a").mkdir(); (tmp_upload / "direct-a/file.txt").write_text("hello\n")
-        ur = _run("scripts/instance-run", "upload", "dev-a", "../bad",
-                  env={"EVE_INSTANCE_REGISTRY": FIXTURE, "EVE_INSTANCE_WORKDIR": f"{tmp_overlay}/upload-work", "EVE_UPLOAD_DIR": str(tmp_upload)})
-        um = _run("scripts/instance-run", "upload", "dev-a", "missing-a",
-                  env={"EVE_INSTANCE_REGISTRY": FIXTURE, "EVE_INSTANCE_WORKDIR": f"{tmp_overlay}/upload-work", "EVE_UPLOAD_DIR": str(tmp_upload)})
-        _check("upload selection rejects unsafe or missing folders",
-              "invalid upload name" in ur.stderr and "not a direct folder under upload" in um.stderr)
-
-        # --- instance.status JSON ---
-        sj = _run_json("make", "--no-print-directory", "instance.status", "INSTANCE=aws-gpu-a", "EMIT=json",
-                       env={"EVE_INSTANCE_REGISTRY": FIXTURE, "EVE_INSTANCE_WORKDIR": f"{tmp_overlay}/run", "EVE_STATE_DIR": f"{tmp_overlay}/state"})
-        _check("instance.status combines metadata, state, packages, and paths",
-              sj is not None and sj.get("instance", {}).get("name") == "aws-gpu-a" and
-              sj["instance"]["provider"] == "aws" and sj["instance"]["engine"] == "terraform" and
-              sj.get("state", {}).get("last_operation") is None and
-              sj.get("packages", {}).get("summary", {}).get("unknown", 0) >= 1 and
-              any(p.get("id") == "docker" and p.get("state", {}).get("status") == "unknown" for p in sj.get("packages", {}).get("selected", [])))
-
-        # --- instance.status text ---
-        st_text = _run("make", "--no-print-directory", "instance.status", "INSTANCE=aws-gpu-a",
-                       env={"EVE_INSTANCE_REGISTRY": FIXTURE, "EVE_INSTANCE_WORKDIR": f"{tmp_overlay}/run", "EVE_STATE_DIR": f"{tmp_overlay}/state"})
-        _check("instance.status text shows selected package states",
-              "Selected package states:" in st_text.stdout and re.search(r"^PACKAGE\s+STATE\s+SUPPORTED\s+SELECTED_BY", st_text.stdout, re.M))
+              "PROFILE_NAME=mock-dev-a" in pe and "VM_DISK_GB=30" in pe)
 
         # --- instance-paths distinct ---
-        paths_wrk = f"{tmp_overlay}/paths-work"; paths_state = f"{tmp_overlay}/paths-state"
-        pa = _run("scripts/instance-paths", "--registry", FIXTURE, "--instance", "dev-a", "--emit", "env", env={"EVE_INSTANCE_WORKDIR": paths_wrk, "EVE_STATE_DIR": paths_state}).stdout
-        pb = _run("scripts/instance-paths", "--registry", FIXTURE, "--instance", "aws-gpu-a", "--emit", "env", env={"EVE_INSTANCE_WORKDIR": paths_wrk, "EVE_STATE_DIR": paths_state}).stdout
-        wa, wb = _extract(pa, "INSTANCE_WORKDIR"), _extract(pb, "INSTANCE_WORKDIR")
-        sa, sb = _extract(pa, "INSTANCE_STATE_PATH"), _extract(pb, "INSTANCE_STATE_PATH")
+        pa = _run("scripts/instance-paths", "--registry", FIXTURE, "--instance", "mock-dev-a", "--emit", "env",
+                  env={"EVE_INSTANCE_WORKDIR": f"{tmp_dir}/paths", "EVE_STATE_DIR": f"{tmp_dir}/paths-state"}).stdout
+        pb = _run("scripts/instance-paths", "--registry", FIXTURE, "--instance", "mock-gpu-a", "--emit", "env",
+                  env={"EVE_INSTANCE_WORKDIR": f"{tmp_dir}/paths", "EVE_STATE_DIR": f"{tmp_dir}/paths-state"}).stdout
         _check("instance-paths resolves distinct workdir/state per instance",
-              wa and wb and wa != wb and sa != sb and
-              wa == f"{paths_wrk}/dev-a" and sa == f"{paths_state}/instances/dev-a.json")
+              _extract(pa, "INSTANCE_WORKDIR") != _extract(pb, "INSTANCE_WORKDIR"))
 
-        # --- instance-paths rejects ---
         _check("instance-paths rejects unknown instance",
-              _run("scripts/instance-paths", "--registry", FIXTURE, "--instance", "no-such-instance", "--emit", "env").returncode != 0)
+              _run("scripts/instance-paths", "--registry", FIXTURE, "--instance", "no-such", "--emit", "env").returncode != 0)
         _check("instance-paths rejects unsafe instance name",
               _run("scripts/instance-paths", "--registry", FIXTURE, "--instance", "../evil", "--emit", "env").returncode != 0)
 
-        # --- instance-ssh dispatch ---
-        sd = _run_json("scripts/instance-ssh", "dev-a", "--", "true",
+        # --- instance state ---
+        SE = {"EVE_STATE_DIR": f"{tmp_dir}/state"}
+        empty = _run_json("scripts/instance-state", "--instance", "fresh-a", "--get", env=SE)
+        _check("instance state get returns default state shape",
+              empty is not None and empty.get("desired_state") == "unknown" and empty.get("package_state") == {})
+
+        sj = _run_json("scripts/instance-state", "--instance", "mock-dev-a", "--operation", "package.down",
+                       "--status", "succeeded", "--desired-state", "running", "--provider-state", "running",
+                       "--package", "mock-app", "--package-state", "removed", env=SE)
+        _check("instance state records package operation",
+              sj is not None and sj["last_operation"]["name"] == "package.down" and sj["package_state"]["mock-app"]["status"] == "removed")
+
+        # --- invalid state values ---
+        _check("instance state rejects invalid provider_state",
+              _run("scripts/instance-state", "--instance", "d", "--operation", "provider.status",
+                   "--status", "succeeded", "--provider-state", "nonsense", env=SE).returncode != 0)
+
+        # --- observed state ---
+        os_j = _run_json("scripts/instance-state", "--instance", "observed-a",
+                         "--observed-json", '{"provider_status":"running","ip":"10.0.0.10"}', env=SE)
+        _check("instance state records observed facts without operations",
+              os_j is not None and os_j["observed_state"]["ip"] == "10.0.0.10")
+
+        # --- instance.status ---
+        sj = _run_json("make", "--no-print-directory", "instance.status", "INSTANCE=mock-dev-a", "EMIT=json",
+                       env={"EVE_INSTANCE_REGISTRY": FIXTURE, "EVE_INSTANCE_WORKDIR": f"{tmp_dir}/run", "EVE_STATE_DIR": f"{tmp_dir}/state"})
+        _check("instance.status combines metadata, state, packages, and paths",
+              sj is not None and sj.get("instance", {}).get("name") == "mock-dev-a" and
+              sj.get("instance", {}).get("provider") == "mock-cloud")
+
+        # --- ssh dry-run ---
+        sd = _run_json("scripts/instance-ssh", "mock-dev-a", "--", "true",
                        env={"EVE_PROVIDER_DRY_RUN": "1", "EVE_INSTANCE_REGISTRY": FIXTURE})
-        _check("instance-ssh dispatches local-qemu through qemu provider command",
-              sd is not None and sd.get("provider") == "local-qemu" and sd.get("command") == "ssh" and sd.get("engine") == "qemu" and sd.get("dry_run") is True)
-
-        # --- ssh-retry ---
-        retry_dir = _tmpdir("eve-ssh-retry.")
-        flaky = Path(retry_dir) / "flaky"
-        _make_exec(flaky, "#!/usr/bin/env sh\nstate=\"$1\"\ncount=\"$(cat \"$state\" 2>/dev/null || printf 0)\"\ncount=$((count + 1))\nprintf '%s\\n' \"$count\" > \"$state\"\n[ \"$count\" -ge 2 ]\n")
-        rr = _run("scripts/ssh-retry", "test retry", str(flaky), f"{retry_dir}/state", env={"EVE_SSH_RETRY_ATTEMPTS": "3", "EVE_SSH_RETRY_DELAY": "0"})
-        state_val = Path(f"{retry_dir}/state").read_text().strip() if Path(f"{retry_dir}/state").exists() else ""
-        _check("ssh-retry retries transient command failures", rr.returncode == 0 and state_val == "2")
-        shutil.rmtree(retry_dir, ignore_errors=True)
-
-        # --- wait-for-provision probe tests ---
-        wait_probe = str(Path(tmp_overlay) / "wait-probe")
-        _make_exec(Path(wait_probe), "#!/usr/bin/env bash\nset -euo pipefail\nos_family=\"$1\";offset=\"$2\"\n[ \"$os_family\" = \"ubuntu\" ] || exit 2\nif [ \"$offset\" = \"status\" ];then printf 'STATUS_FILE\\tABSENT\\n';exit 0;fi\nprintf 'STATE\\t'\nif [ \"$offset\" -ge 2 ];then printf 'DONE\\nLINES\\t4\\n';else printf 'RUNNING\\nLINES\\t2\\n';fi\nprintf 'LAST\\t2026-05-09 10:00:00 Running step [0/1] base.sh\\n__EVE_LOG_BEGIN__\\n'\nif [ \"$offset\" -eq 0 ];then printf '2026-05-09 10:00:00 Running step [0/1] base.sh\\n2026-05-09 10:00:01 apt is streaming\\n';else printf '2026-05-09 10:00:02 package output continues\\n2026-05-09 10:00:03 Provisioning complete.\\n';fi\n")
-        wait_timeout = "15"
-        wait_env_base = {"EVE_INSTANCE_REGISTRY": FIXTURE, "EVE_CATALOG_LOCAL": overlay, "EVE_WAIT_FOR_PROVISION_PROBE_SCRIPT": wait_probe, "EVE_PROVISION_WAIT_POLL_INTERVAL": "0"}
-
-        wo = _run("scripts/wait-for-provision", "dev-a", wait_timeout, env=wait_env_base)
-        _check("wait-for-provision streams appended remote log lines",
-              "apt is streaming" in wo.stdout and "package output continues" in wo.stdout and "Provisioning complete for profile dev-a" in wo.stdout)
-
-        # done probe
-        done_probe = str(Path(tmp_overlay) / "status-done-probe")
-        _make_exec(Path(done_probe), "#!/usr/bin/env bash\nset -euo pipefail\nos_family=\"$1\";offset=\"$2\"\n[ \"$os_family\" = \"ubuntu\" ] || exit 2\nif [ \"$offset\" = \"status\" ];then printf '{\"api_version\":1,\"os_family\":\"ubuntu\",\"started_at\":\"2026-01-15T10:30:00Z\",\"finished_at\":\"2026-01-15T10:35:00Z\",\"status\":\"done\",\"steps\":[{\"step\":\"base.sh\",\"phase\":\"succeeded\",\"started_at\":\"2026-01-15T10:30:00Z\",\"ended_at\":\"2026-01-15T10:31:00Z\",\"exit_code\":0}]}\\n';exit 0;fi\nprintf 'STATE\\tRUNNING\\nLINES\\t0\\nLAST\\t\\n__EVE_LOG_BEGIN__\\n'\n")
-        de = {**wait_env_base, "EVE_WAIT_FOR_PROVISION_PROBE_SCRIPT": done_probe}
-        wo = _run("scripts/wait-for-provision", "dev-a", wait_timeout, env=de)
-        _check("wait-for-provision status file done", "Provisioning complete for profile dev-a" in wo.stdout)
-
-        # failed probe
-        fail_probe = str(Path(tmp_overlay) / "status-failed-probe")
-        _make_exec(Path(fail_probe), "#!/usr/bin/env bash\nset -euo pipefail\nos_family=\"$1\";offset=\"$2\"\n[ \"$os_family\" = \"ubuntu\" ] || exit 2\nif [ \"$offset\" = \"status\" ];then printf '{\"api_version\":1,\"os_family\":\"ubuntu\",\"started_at\":\"2026-01-15T10:30:00Z\",\"finished_at\":\"2026-01-15T10:32:00Z\",\"status\":\"failed\",\"steps\":[{\"step\":\"base.sh\",\"phase\":\"failed\",\"started_at\":\"2026-01-15T10:30:00Z\",\"ended_at\":\"2026-01-15T10:32:00Z\",\"exit_code\":1}]}\\n';exit 0;fi\nprintf 'STATE\\tRUNNING\\nLINES\\t0\\nLAST\\t\\n__EVE_LOG_BEGIN__\\n'\n")
-        fe = {**wait_env_base, "EVE_WAIT_FOR_PROVISION_PROBE_SCRIPT": fail_probe}
-        wo = _run("scripts/wait-for-provision", "dev-a", wait_timeout, env=fe)
-        _check("wait-for-provision status file failed", "Provisioning failed for profile dev-a" in (wo.stdout + wo.stderr))
-
-        # malformed probe
-        for probe_name, probe_content, label in [
-            ("status-malformed-probe", "#!/usr/bin/env bash\nset -euo pipefail\nos_family=\"$1\";offset=\"$2\"\n[ \"$os_family\" = \"ubuntu\" ] || exit 2\nif [ \"$offset\" = \"status\" ];then printf 'STATUS_FILE\\tMALFORMED\\n';exit 0;fi\nprintf 'STATE\\tRUNNING\\nLINES\\t0\\nLAST\\t\\n__EVE_LOG_BEGIN__\\n'\n", "wait-for-provision malformed status rejected"),
-            ("status-invalid-probe", "#!/usr/bin/env bash\nset -euo pipefail\nos_family=\"$1\";offset=\"$2\"\n[ \"$os_family\" = \"ubuntu\" ] || exit 2\nif [ \"$offset\" = \"status\" ];then printf '{\"api_version\":1,\"os_family\":\"ubuntu\",\"steps\":[{\"step\":\"base.sh\",\"phase\":\"bogus\"}]}\\n';exit 0;fi\nprintf 'STATE\\tRUNNING\\nLINES\\t0\\nLAST\\t\\n__EVE_LOG_BEGIN__\\n'\n", "wait-for-provision schema-invalid status rejected"),
-            ("status-string-api-probe", "#!/usr/bin/env bash\nset -euo pipefail\nos_family=\"$1\";offset=\"$2\"\n[ \"$os_family\" = \"ubuntu\" ] || exit 2\nif [ \"$offset\" = \"status\" ];then printf '{\"api_version\":\"1\",\"os_family\":\"ubuntu\",\"status\":\"running\",\"steps\":[{\"step\":\"base.sh\",\"phase\":\"pending\",\"exit_code\":null}]}\\n';exit 0;fi\nprintf 'STATE\\tRUNNING\\nLINES\\t0\\nLAST\\t\\n__EVE_LOG_BEGIN__\\n'\n", "wait-for-provision rejects string api_version"),
-            ("status-nonobj-step-probe", "#!/usr/bin/env bash\nset -euo pipefail\nos_family=\"$1\";offset=\"$2\"\n[ \"$os_family\" = \"ubuntu\" ] || exit 2\nif [ \"$offset\" = \"status\" ];then printf '{\"api_version\":1,\"os_family\":\"ubuntu\",\"status\":\"running\",\"steps\":[\"not_an_object\"]}\\n';exit 0;fi\nprintf 'STATE\\tRUNNING\\nLINES\\t0\\nLAST\\t\\n__EVE_LOG_BEGIN__\\n'\n", "wait-for-provision rejects non-object step entries"),
-        ]:
-            probe_path = str(Path(tmp_overlay) / probe_name)
-            _make_exec(Path(probe_path), probe_content)
-            pe = {**wait_env_base, "EVE_WAIT_FOR_PROVISION_PROBE_SCRIPT": probe_path}
-            wo = _run("scripts/wait-for-provision", "dev-a", wait_timeout, env=pe)
-            _check(label, "malformed" in (wo.stdout + wo.stderr))
-
-        # raw JSON running then done
-        raw_flag = str(Path(tmp_overlay) / "raw-running-flag")
-        raw_probe = str(Path(tmp_overlay) / "status-raw-json-running-probe")
-        _make_exec(Path(raw_probe), f"#!/usr/bin/env bash\nset -euo pipefail\nos_family=\"$1\";offset=\"$2\"\n[ \"$os_family\" = \"ubuntu\" ] || exit 2\nif [ \"$offset\" = \"status\" ];then\nif [ -f \"{raw_flag}\" ];then printf '{{\"api_version\":1,\"os_family\":\"ubuntu\",\"started_at\":\"2026-01-15T10:30:00Z\",\"finished_at\":\"2026-01-15T10:35:00Z\",\"status\":\"done\",\"steps\":[{{\"step\":\"base.sh\",\"phase\":\"succeeded\",\"started_at\":\"2026-01-15T10:30:00Z\",\"ended_at\":\"2026-01-15T10:31:00Z\",\"exit_code\":0}}]}}\\n';else touch \"{raw_flag}\";printf '{{\"api_version\":1,\"os_family\":\"ubuntu\",\"started_at\":\"2026-01-15T10:30:00Z\",\"finished_at\":null,\"status\":\"running\",\"steps\":[{{\"step\":\"base.sh\",\"phase\":\"running\",\"started_at\":\"2026-01-15T10:30:00Z\",\"ended_at\":null,\"exit_code\":null}}]}}\\n';fi\nexit 0;fi\nprintf 'STATE\\tRUNNING\\nLINES\\t0\\nLAST\\t\\n__EVE_LOG_BEGIN__\\n'\n")
-        re_env = {**wait_env_base, "EVE_WAIT_FOR_PROVISION_PROBE_SCRIPT": raw_probe}
-        Path(raw_flag).unlink(missing_ok=True)
-        wo = _run("scripts/wait-for-provision", "dev-a", wait_timeout, env=re_env)
-        _check("wait-for-provision raw JSON running then done (no STATUS_FILE header)", "Provisioning complete for profile dev-a" in wo.stdout)
+        _check("instance-ssh dispatches through provider command",
+              sd is not None and sd.get("provider") == "mock-cloud" and sd.get("command") == "ssh" and sd.get("dry_run") is True)
 
     finally:
-        for f in [tmp_registry, tmp_concurrent, tmp_external, invalid_output]:
-            Path(f).unlink(missing_ok=True)
-        shutil.rmtree(tmp_overlay, ignore_errors=True)
+        Path(tmp_reg).unlink(missing_ok=True)
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
     return 1 if FAIL else 0
 

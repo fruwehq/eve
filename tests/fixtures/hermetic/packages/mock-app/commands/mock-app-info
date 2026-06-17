@@ -1,0 +1,3 @@
+#!/usr/bin/env sh
+set -eu
+printf '{"kind":"package-action","package":"mock-app","action":"mock-app-info","target":"mock-app.info","instance":"%s","dry_run":true}\n' "${EVE_INSTANCE_NAME:-unknown}"

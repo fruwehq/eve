@@ -16,13 +16,8 @@ from eve_sdk.plugin_manifest import PluginManifest
 # ---------------------------------------------------------------------------
 
 EXPECTED_PROVIDER_OS_SUPPORT: dict[str, set[str]] = {
-    "aws": {"ubuntu-26.04-amd64", "windows-server-2025"},
-    "docker": {"ubuntu-26.04-amd64", "ubuntu-26.04-arm64"},
-    "gcp": {"ubuntu-26.04-amd64"},
-    "local-qemu": {"ubuntu-26.04-amd64", "ubuntu-26.04-arm64"},
-    "raspberry-pi": {"ubuntu-26.04-arm64"},
-    "truenas": {"ubuntu-26.04-amd64", "ubuntu-26.04-arm64"},
-    "vultr": {"windows-server-2025"},
+    "mock-cloud": {"mockos-1.0-amd64", "mockos-1.0-arm64", "mockwin-1.0"},
+    "mock-local": {"mockos-1.0-amd64", "mockos-1.0-arm64"},
 }
 
 
@@ -73,26 +68,24 @@ class TestAggregatedOsRows:
         catalog = load_catalog()
         os_by_id = {entry["id"]: entry for entry in catalog["oses"]}
 
-        ubuntu_amd = os_by_id["ubuntu-26.04-amd64"]
+        # Identity fields come from _catalog-base; provider-specific image fields
+        # are field-merged from each provider's catalog.oses contribution
+        # (cloud_image_url from mock-cloud, vagrant_box from mock-local).
+        ubuntu_amd = os_by_id["mockos-1.0-amd64"]
         assert ubuntu_amd["family"] == "ubuntu"
-        assert ubuntu_amd["version"] == "26.04"
+        assert ubuntu_amd["version"] == "1.0"
         assert ubuntu_amd["arch"] == "amd64"
-        assert "aws_ami_name_pattern" in ubuntu_amd
-        assert "gcp_image_project" in ubuntu_amd
-        assert "gcp_image_family" in ubuntu_amd
         assert "cloud_image_url" in ubuntu_amd
         assert "vagrant_box" in ubuntu_amd
 
-        ubuntu_arm = os_by_id["ubuntu-26.04-arm64"]
+        ubuntu_arm = os_by_id["mockos-1.0-arm64"]
         assert ubuntu_arm["arch"] == "arm64"
         assert "cloud_image_url" in ubuntu_arm
-        assert "cloud_image_sha256" in ubuntu_arm
-        assert "metal_image" in ubuntu_arm
+        assert "vagrant_box" in ubuntu_arm
 
-        windows = os_by_id["windows-server-2025"]
+        windows = os_by_id["mockwin-1.0"]
         assert windows["family"] == "windows"
-        assert "aws_ami_name_pattern" in windows
-        assert "vultr_os_id" in windows
+        assert "cloud_image_url" in windows
 
 
 # ---------------------------------------------------------------------------
@@ -105,17 +98,8 @@ class TestBundlesRelocated:
         catalog = load_catalog()
         bundle_ids = {entry["id"] for entry in catalog["bundles"]}
         expected = {
-            "desktop-gnome",
-            "desktop-gnome-headless",
-            "desktop-gnome-mac",
-            "desktop-kde",
-            "desktop-kde-headless",
-            "desktop-streaming",
-            "desktop-xfce",
-            "desktop-xfce-headless",
-            "dev-ai",
-            "gaming-streaming",
-            "remote-xpra",
+            "mock-dev",
+            "mock-gaming",
         }
         assert bundle_ids == expected
 
@@ -145,18 +129,9 @@ class TestMachinesRelocated:
         catalog = load_catalog()
         machine_names = {entry["name"] for entry in catalog["machines"]}
         expected = {
-            "aws-cheap-x86",
-            "aws-gpu-g4dn-spot",
-            "aws-gpu-g5",
-            "docker-ubuntu-medium",
-            "gcp-cheap-x86",
-            "local-qemu-medium",
-            "raspberry-pi-5",
-            "truenas-scale-medium",
-            "vultr-vcg-a40-1c",
-            "vultr-vcg-a40-2c",
-            "vultr-vcg-a40-4c",
-            "vultr-vcg-a40-6c",
+            "mock-small",
+            "mock-gpu",
+            "mock-vm",
         }
         assert machine_names == expected
 

@@ -40,17 +40,17 @@ _CATALOG = dedent(
     """\
     profiles:
       - name: poll-ubuntu
-        machine: local-qemu-medium
-        os: ubuntu-26.04-arm64
-        init: ssh-ubuntu-cloud-init
+        machine: mock-small
+        os: mockos-1.0-arm64
+        init: ssh-mockos-cloud-init
         bundles: []
-        location: tokyo
+        location: mock-tokyo
       - name: poll-windows
-        machine: aws-gpu-g4dn-spot
-        os: windows-server-2025
-        init: ssh-windows-powershell7
+        machine: mock-gpu
+        os: mockwin-1.0
+        init: ssh-mockwin-powershell
         bundles: []
-        location: tokyo
+        location: mock-tokyo
     """
 )
 
@@ -244,7 +244,7 @@ def test_build_log_probe_unknown_raises() -> None:
     [
         ("2024-01-01 12:00:00 Running step [11/12] rustdesk.sh", "[11/12] rustdesk.sh"),
         ("Running step base.sh", "base.sh"),
-        ("[3/4] docker.sh", "[3/4] docker.sh"),
+        ("[3/4] mock-app.sh", "[3/4] mock-app.sh"),
         ("", ""),
         ("2024-06-15 01:02:03 ERROR: something failed", "ERROR: something failed"),
     ],
@@ -331,9 +331,9 @@ def test_classify_done() -> None:
 def test_classify_running_progress() -> None:
     raw = _status_json(status="running", steps=[
         _step(step="base.sh", phase="succeeded"),
-        _step(step="docker.sh", phase="running", exit_code=None),
+        _step(step="mock-app.sh", phase="running", exit_code=None),
     ])
-    assert classify_status_json(raw) == "RUNNING\tdocker.sh\t1/2"
+    assert classify_status_json(raw) == "RUNNING\tmock-app.sh\t1/2"
 
 
 def test_classify_failed_step() -> None:
