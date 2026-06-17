@@ -23,6 +23,7 @@ from textual.widgets.selection_list import Selection
 
 from textual.message import Message
 
+from tui import plugins as plugin_src
 from tui.commands import (
     catalog_options,
     create_instance_args,
@@ -1832,6 +1833,172 @@ class ProviderConfigScreen(ModalScreen[None]):
                     self.post_message(ProviderPane.ActionRequested(self.provider_id, action))
                     self.dismiss(None)
                     return
+
+    def action_dismiss_cancel(self) -> None:
+        self.dismiss(None)
+
+
+class PluginSourcesScreen(ModalScreen[None]):
+    """Manage plugin sources: configured set + the recommended catalog.
+
+    Adds/removes edit only the user override (.eve/plugin-sources.yaml); core's
+    committed source list stays empty. Pull materializes the configured set.
+    """
+
+    CSS = """
+    PluginSourcesScreen {
+        align: center middle;
+    }
+
+    #plugins-dialog {
+        width: 90%;
+        height: 90%;
+        max-width: 140;
+        max-height: 50;
+        border: round $primary;
+        background: $surface;
+        padding: 1 2;
+    }
+
+    #plugins-title {
+        text-align: center;
+        margin-bottom: 1;
+    }
+
+    #plugins-table {
+        height: 1fr;
+    }
+
+    #plugins-controls {
+        height: 3;
+    }
+
+    #plugins-url {
+        width: 1fr;
+    }
+
+    #plugins-status {
+        height: 1;
+        color: $text-muted;
+    }
+    """
+
+    BINDINGS = [
+        Binding("a", "add_row", "Add"),
+        Binding("x", "remove_row", "Remove"),
+        Binding("p", "pull", "Pull"),
+        Binding("escape", "dismiss_cancel", "Close"),
+    ]
+
+    def __init__(self) -> None:
+        super().__init__()
+        # parallel to table rows: (kind, source_id) where kind is "cfg" | "rec"
+        self._rows: list[tuple[str, str]] = []
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="plugins-dialog"):
+            yield Label("[b]Plugin sources[/b]", id="plugins-title")
+            table: DataTable[Any] = DataTable(id="plugins-table")
+            table.add_columns("", "Source", "Ref", "Status", "Info")
+            table.cursor_type = "row"
+            yield table
+            with Horizontal(id="plugins-controls"):
+                yield Input(placeholder="git url to add (pin with #ref)…", id="plugins-url")
+                yield Button("Add URL", id="plugins-add-url")
+                yield Button("Pull", id="plugins-pull")
+                yield Button("Close", id="close")
+            yield Label("", id="plugins-status")
+
+    def on_mount(self) -> None:
+        self._reload()
+
+    def _set_status(self, message: str) -> None:
+        self.query_one("#plugins-status", Label).update(message)
+
+    def _reload(self) -> None:
+        table = self.query_one("#plugins-table", DataTable)
+        table.clear()
+        self._rows = []
+        configured_ids: set[str] = set()
+        for row in plugin_src.configured_rows():
+            configured_ids.add(row["id"])
+            status = "synced" if row["synced"] else "not synced"
+            table.add_row("✔", f"[b]{row['id']}[/b]", row["ref"], status, row["url"], key=f"cfg:{row['id']}")
+            self._rows.append(("cfg", row["id"]))
+        for row in plugin_src.recommended_rows():
+            if row["id"] in configured_ids:
+                continue
+            tags = ", ".join(row["tags"])
+            info = f"{row['description']}" + (f" [dim]({tags})[/]" if tags else "")
+            table.add_row("[dim]+[/]", row["id"], row["ref"], "[dim]recommended[/]", info, key=f"rec:{row['id']}")
+            self._rows.append(("rec", row["id"]))
+        if not self._rows:
+            self._set_status("No sources or recommendations. Add a git url below.")
+
+    def _current(self) -> tuple[str, str] | None:
+        table = self.query_one("#plugins-table", DataTable)
+        if not self._rows or table.cursor_row is None or table.cursor_row >= len(self._rows):
+            return None
+        return self._rows[table.cursor_row]
+
+    def action_add_row(self) -> None:
+        current = self._current()
+        if current is None:
+            self._set_status("Highlight a recommended row to add, or type a url below.")
+            return
+        kind, source_id = current
+        if kind != "rec":
+            self._set_status(f"'{source_id}' is already configured.")
+            return
+        ok, message = plugin_src.add_recommended(source_id)
+        self._set_status(message)
+        if ok:
+            self._reload()
+
+    def action_remove_row(self) -> None:
+        current = self._current()
+        if current is None:
+            return
+        kind, source_id = current
+        if kind != "cfg":
+            self._set_status(f"'{source_id}' is not configured (nothing to remove).")
+            return
+        ok, message = plugin_src.remove(source_id)
+        self._set_status(message)
+        if ok:
+            self._reload()
+
+    def action_pull(self) -> None:
+        self._set_status("Pulling…")
+        ok, message = plugin_src.pull()
+        self._set_status(message.splitlines()[-1] if message else ("pull complete" if ok else "pull failed"))
+        if ok:
+            self._reload()
+
+    def _add_from_input(self) -> None:
+        field = self.query_one("#plugins-url", Input)
+        raw = field.value.strip()
+        if not raw:
+            self._set_status("Enter a git url (optionally url#ref).")
+            return
+        url, _, ref = raw.partition("#")
+        ok, message = plugin_src.add_url(url, ref=ref)
+        self._set_status(message)
+        if ok:
+            field.value = ""
+            self._reload()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id == "plugins-url":
+            self._add_from_input()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "close":
+            self.dismiss(None)
+        elif event.button.id == "plugins-add-url":
+            self._add_from_input()
+        elif event.button.id == "plugins-pull":
+            self.action_pull()
 
     def action_dismiss_cancel(self) -> None:
         self.dismiss(None)

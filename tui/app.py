@@ -73,6 +73,7 @@ from tui.widgets import (
     DeleteConfirmScreen,
     FirstRunScreen,
     NewInstanceScreen,
+    PluginSourcesScreen,
     ProviderConfigScreen,
     ProviderPane,
     SettingsScreen,
@@ -359,6 +360,7 @@ class EveTui(App[None]):
         Binding("ctrl+y", "copy_log", "Copy Log", priority=True),
         Binding("q", "quit", "Quit"),
         Binding("s", "open_settings", "Settings"),
+        Binding("g", "open_plugins", "Plugins"),
     ]
 
     def __init__(self) -> None:
@@ -1417,6 +1419,9 @@ class EveTui(App[None]):
 
     def action_open_settings(self) -> None:
         self.push_screen(SettingsScreen())
+
+    def action_open_plugins(self) -> None:
+        self.push_screen(PluginSourcesScreen())
 
     async def action_cancel_command(self) -> None:
         proc = self.current_process
