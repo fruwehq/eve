@@ -97,25 +97,6 @@ def http_head_ok(url: str, redirects: int = 5) -> tuple[bool, str]:
         return False, str(error.reason)
 
 
-def count_docker_builds(workflow: dict[str, Any]) -> int:
-    jobs = workflow.get("jobs", {})
-    if not isinstance(jobs, dict):
-        return 0
-
-    count = 0
-    for job in jobs.values():
-        if not isinstance(job, dict):
-            continue
-        steps = job.get("steps", [])
-        if not isinstance(steps, list):
-            continue
-        for step in steps:
-            text = run_text(step) if isinstance(step, dict) else ""
-            if "--target runtime-slim" in text and "--file docker/Dockerfile" in text:
-                count += 1
-    return count
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--offline", action="store_true", help="Skip remote release-asset checks")
@@ -160,13 +141,6 @@ def main() -> int:
     python_step = find_step(test_steps, "Install Python")
     python_version = python_step.get("with", {}).get("python-version") if python_step else None
     checks.assert_check("test job uses Python 3.14", python_version == "3.14")
-    make_test_step = find_step(test_steps, "Run make test")
-    make_test_env = make_test_step.get("env", {}) if make_test_step else {}
-    checks.assert_check(
-        "Ubuntu host job explicitly skips duplicate Docker smoke",
-        isinstance(make_test_env, dict)
-        and make_test_env.get("EVE_SKIP_DOCKER_SMOKE") == "${{ runner.os == 'Linux' && '1' || '' }}",
-    )
 
     terramate_step = find_step(test_steps, "Install Terramate")
     terramate_version = terramate_step.get("env", {}).get("TERRAMATE_VERSION") if terramate_step else None
@@ -182,133 +156,6 @@ def main() -> int:
     checks.assert_check(
         "Terramate arm64 tarball mapping matches release asset names",
         "arm64|aarch64) tool_arch=arm64 ;;" in terramate_run,
-    )
-
-    docker_slim_job = jobs.get("docker-runtime-slim", {})
-    docker_slim_steps = docker_slim_job.get("steps", []) if isinstance(docker_slim_job, dict) else []
-    if not isinstance(docker_slim_steps, list):
-        docker_slim_steps = []
-    docker_slim_step_names = step_names(docker_slim_steps)
-    checks.assert_check(
-        "docker-runtime-slim runs on ubuntu-24.04",
-        isinstance(docker_slim_job, dict) and docker_slim_job.get("runs-on") == "ubuntu-24.04",
-    )
-    checks.assert_check(
-        "docker-runtime-slim builds and smokes image",
-        "Build slim runtime image" in docker_slim_step_names
-        and "Smoke slim runtime image" in docker_slim_step_names,
-    )
-    checks.assert_check(
-        "docker-runtime-slim reports inspectable image size",
-        "Report slim image size" in docker_slim_step_names,
-    )
-    checks.assert_check("docker-runtime-slim publishes timing summary", "Timing summary" in docker_slim_step_names)
-    checks.assert_check(
-        "docker-runtime-slim writes timing summary to GITHUB_STEP_SUMMARY",
-        "$GITHUB_STEP_SUMMARY" in run_text(find_step(docker_slim_steps, "Timing summary")),
-    )
-    checks.assert_check("docker-runtime-slim sets up Docker Buildx", "Set up Docker Buildx" in docker_slim_step_names)
-    checks.assert_check(
-        "docker-runtime-slim computes explicit cache scope",
-        "Compute slim runtime cache scope" in docker_slim_step_names,
-    )
-    checks.assert_check(
-        "docker-runtime-slim probes explicit cache key",
-        "Probe slim runtime cache key" in docker_slim_step_names,
-    )
-    checks.assert_check(
-        "docker-runtime-slim reports cache misses explicitly",
-        "Report Docker cache status" in docker_slim_step_names,
-    )
-    cache_scope_run = run_text(find_step(docker_slim_steps, "Compute slim runtime cache scope"))
-    checks.assert_check(
-        "docker-runtime-slim cache scope includes runner OS, arch, Dockerfile, and lockfile",
-        "docker/Dockerfile poetry.lock" in cache_scope_run
-        and "RUNNER_OS" in cache_scope_run
-        and "RUNNER_ARCH" in cache_scope_run
-        and "EVE_DOCKER_CACHE_SCOPE=slim-" in cache_scope_run,
-    )
-    checks.assert_check(
-        "docker-runtime-slim cache status logs cache miss: rebuilding",
-        "cache miss: rebuilding" in run_text(find_step(docker_slim_steps, "Report Docker cache status")),
-    )
-    checks.assert_check("only one dedicated slim Docker build exists", count_docker_builds(workflow) == 1)
-
-    build_run = run_text(find_step(docker_slim_steps, "Build slim runtime image"))
-    checks.assert_check(
-        "docker-runtime-slim imports BuildKit GHA cache",
-        '--cache-from "type=gha,scope=${EVE_DOCKER_CACHE_SCOPE}"' in build_run,
-    )
-    checks.assert_check(
-        "docker-runtime-slim exports BuildKit GHA cache",
-        '--cache-to "type=gha,mode=max,scope=${EVE_DOCKER_CACHE_SCOPE}"' in build_run,
-    )
-
-    size_run = run_text(find_step(docker_slim_steps, "Report slim image size"))
-    checks.assert_check(
-        "docker-runtime-slim reports compressed image size",
-        "slim image: uncompressed=${inspect_size} compressed=${compressed_size}" in size_run,
-    )
-    checks.assert_check(
-        "docker-runtime-slim enforces uncompressed size under 1600 MB",
-        '"${inspect_size}" -ge 1600000000' in size_run,
-    )
-    checks.assert_check(
-        "docker-runtime-slim enforces compressed size under 500 MB",
-        '"${compressed_size}" -ge 500000000' in size_run,
-    )
-
-    docker_full_job = jobs.get("docker-runtime-full", {})
-    docker_full_steps = docker_full_job.get("steps", []) if isinstance(docker_full_job, dict) else []
-    if not isinstance(docker_full_steps, list):
-        docker_full_steps = []
-    docker_full_step_names = step_names(docker_full_steps)
-    checks.assert_check(
-        "docker-runtime-full is schedule-only",
-        isinstance(docker_full_job, dict) and "github.event_name == 'schedule'" in str(docker_full_job.get("if", "")),
-    )
-    checks.assert_check("docker-runtime-full publishes timing summary", "Timing summary" in docker_full_step_names)
-    checks.assert_check("docker-runtime-full sets up Docker Buildx", "Set up Docker Buildx" in docker_full_step_names)
-    checks.assert_check(
-        "docker-runtime-full computes explicit cache scope",
-        "Compute full runtime cache scope" in docker_full_step_names,
-    )
-    checks.assert_check(
-        "docker-runtime-full probes explicit cache key",
-        "Probe full runtime cache key" in docker_full_step_names,
-    )
-    checks.assert_check(
-        "docker-runtime-full reports cache misses explicitly",
-        "Report Docker cache status" in docker_full_step_names,
-    )
-    checks.assert_check("docker-runtime-full smokes image", "Smoke full runtime image" in docker_full_step_names)
-    checks.assert_check("docker-runtime-full reports image size", "Report full image size" in docker_full_step_names)
-    full_cache_scope_run = run_text(find_step(docker_full_steps, "Compute full runtime cache scope"))
-    checks.assert_check(
-        "docker-runtime-full cache scope includes runner OS, arch, Dockerfile, and lockfile",
-        "docker/Dockerfile poetry.lock" in full_cache_scope_run
-        and "RUNNER_OS" in full_cache_scope_run
-        and "RUNNER_ARCH" in full_cache_scope_run
-        and "EVE_DOCKER_FULL_CACHE_SCOPE=full-" in full_cache_scope_run,
-    )
-    checks.assert_check(
-        "docker-runtime-full cache status logs cache miss: rebuilding",
-        "cache miss: rebuilding" in run_text(find_step(docker_full_steps, "Report Docker cache status")),
-    )
-    full_build_run = run_text(find_step(docker_full_steps, "Build full runtime image"))
-    checks.assert_check("docker-runtime-full pins linux/amd64 platform", "--platform linux/amd64" in full_build_run)
-    checks.assert_check(
-        "docker-runtime-full imports BuildKit GHA cache",
-        '--cache-from "type=gha,scope=${EVE_DOCKER_FULL_CACHE_SCOPE}"' in full_build_run,
-    )
-    checks.assert_check(
-        "docker-runtime-full exports BuildKit GHA cache",
-        '--cache-to "type=gha,mode=max,scope=${EVE_DOCKER_FULL_CACHE_SCOPE}"' in full_build_run,
-    )
-    full_size_run = run_text(find_step(docker_full_steps, "Report full image size"))
-    checks.assert_check(
-        "docker-runtime-full reports compressed image size",
-        "full image: uncompressed=${inspect_size} compressed=${compressed_size}" in full_size_run,
     )
 
     print("\n== ci-pipeline Terramate asset checks ==")
@@ -327,23 +174,12 @@ def main() -> int:
                 if not ok:
                     print(f"    {url}: {detail}", file=sys.stderr)
 
-    print("\n== ci-pipeline Docker installer contract ==")
+    print("\n== ci-pipeline toolchain image contract ==")
 
-    for path in ("docker/Dockerfile", "docker/Dockerfile.toolchain"):
-        content = (root / path).read_text()
-        checks.assert_check(
-            f"{path} maps Terraform amd64 separately from Terramate x86_64",
-            "terraform_arch=amd64" in content and "terramate_arch=x86_64" in content,
-        )
-
-    runtime_dockerfile = (root / "docker/Dockerfile").read_text()
+    toolchain = (root / "docker/Dockerfile.toolchain").read_text()
     checks.assert_check(
-        "docker runtime uses official Python 3.14 slim base",
-        "python:3.14-slim-trixie" in runtime_dockerfile,
-    )
-    checks.assert_check(
-        "docker runtime does not download Python source",
-        "www.python.org/ftp/python" not in runtime_dockerfile,
+        "Dockerfile.toolchain maps Terraform amd64 separately from Terramate x86_64",
+        "terraform_arch=amd64" in toolchain and "terramate_arch=x86_64" in toolchain,
     )
 
     if checks.failures:

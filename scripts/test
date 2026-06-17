@@ -17,7 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 ALL_SUITES = [
-    "catalog", "config-save", "core-boundary", "docker", "doctor",
+    "catalog", "config-save", "core-boundary", "doctor",
     "instances", "lifecycle", "os-portability", "plugins", "plugins-sync",
     "provision-runner", "python", "schemas", "secrets", "shellcheck",
     "state-concurrency", "terraform", "tf-isolation", "tui", "lint",
@@ -28,7 +28,6 @@ SUITE_SCRIPTS: dict[str, list[str]] = {
     "ci-pipeline": ["poetry", "run", "python", "scripts/test-ci-pipeline"],
     "config-save": ["scripts/test-config-save"],
     "core-boundary": ["scripts/test-core-boundary"],
-    "docker": ["scripts/test-docker"],
     "doctor": ["scripts/test-doctor"],
     "instances": ["scripts/test-instances"],
     "lifecycle": ["scripts/test-lifecycle"],

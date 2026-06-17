@@ -1,6 +1,6 @@
 # Makefile
 .DEFAULT_GOAL := default
-.PHONY: bundle.select bundle.unselect catalog.list clean default docker.runtime.full docker.runtime.slim \
+.PHONY: bundle.select bundle.unselect catalog.list clean default \
 				doctor down env eve generate help info init.all install-cli instance.create \
 				instance.delete instance.env instance.info instance.list instance.observe instance.paths instance.provision \
 				instance.recover instance.state instance.status instance.validate instance.view integration.packages \
@@ -8,7 +8,7 @@
 				package.reinstall package.select package.status package.uninstall package.unselect package.verify \
 				plugins.list plugins.sync plugins.validate provider.action provider.status providers.status provision \
 				provision.clear-state provision.restart provision.wait reboot show-password ssh ssh.run \
-				ssh.wait start status stop test test.catalog test.ci-pipeline test.core-boundary test.docker test.doctor test.instances test.lifecycle test.lint test.os-portability test.plugins \
+				ssh.wait start status stop test test.catalog test.ci-pipeline test.core-boundary test.doctor test.instances test.lifecycle test.lint test.os-portability test.plugins \
 				test.plugins-sync test.provision-runner test.python test.config-save test.schemas test.secrets test.shellcheck test.state-concurrency test.terraform test.tf-isolation test.tui \
 				test.update-golden tui up update upload validate
 
@@ -107,12 +107,6 @@ clean: ## Remove terramate-generated terraform files and cache
 	rm -rf .terraform-cache-dir/state/*
 
 default: help  ## Show help
-
-docker.runtime.full: ## Build the full Eve runtime container with Vagrant and QEMU
-	./docker/build.sh full
-
-docker.runtime.slim: ## Build the slim Eve runtime container
-	./docker/build.sh slim
 
 doctor: ## Check local tools, plugins, providers, and state hints
 	./scripts/doctor
@@ -390,9 +384,6 @@ test.ci-pipeline: ## Validate GitHub Actions workflow and release asset assumpti
 
 test.core-boundary: ## Fail if central scripts reference provider/OS IDs outside allowlist
 	@./scripts/test-core-boundary
-
-test.docker: ## Smoke-test the slim Docker runtime on Linux hosts
-	@./scripts/test-docker
 
 test.doctor: ## Validate doctor JSON output and OS-specific hints
 	@./scripts/test-doctor
