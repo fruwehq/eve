@@ -17,7 +17,7 @@ jobs:
         os: [macos-latest, ubuntu-24.04]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -27,7 +27,7 @@ jobs:
           : > "$RUNNER_TEMP/eve-ci-timings.tsv"
 
       - name: Install Terraform
-        uses: hashicorp/setup-terraform@v3
+        uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: "1.14.9"
           terraform_wrapper: false
@@ -63,7 +63,7 @@ jobs:
           terramate version
 
       - name: Install Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.14"
 
@@ -179,7 +179,7 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Initialize timing summary
         run: |
@@ -187,7 +187,7 @@ jobs:
           : > "$RUNNER_TEMP/eve-ci-timings.tsv"
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Compute slim runtime cache scope
         run: |
@@ -202,7 +202,7 @@ jobs:
 
       - name: Probe slim runtime cache key
         id: slim-cache-probe
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           key: buildkit-slim-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('docker/Dockerfile', 'poetry.lock') }}
           lookup-only: true
@@ -247,7 +247,7 @@ jobs:
 
       - name: Save Docker cache marker
         if: success() && steps.slim-cache-probe.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           key: buildkit-slim-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('docker/Dockerfile', 'poetry.lock') }}
           path: ${{ runner.temp }}/eve-buildkit-cache-marker
@@ -312,7 +312,7 @@ jobs:
     if: github.event_name == 'schedule'
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Initialize timing summary
         run: |
@@ -320,7 +320,7 @@ jobs:
           : > "$RUNNER_TEMP/eve-ci-timings.tsv"
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Compute full runtime cache scope
         run: |
@@ -335,7 +335,7 @@ jobs:
 
       - name: Probe full runtime cache key
         id: full-cache-probe
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           key: buildkit-full-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('docker/Dockerfile', 'poetry.lock') }}
           lookup-only: true
@@ -380,7 +380,7 @@ jobs:
 
       - name: Save Docker cache marker
         if: success() && steps.full-cache-probe.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           key: buildkit-full-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('docker/Dockerfile', 'poetry.lock') }}
           path: ${{ runner.temp }}/eve-full-buildkit-cache-marker
