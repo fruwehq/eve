@@ -11,8 +11,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from eve_sdk.schema import SchemaValidationError
-from eve_sdk.state import State, StateError
+from eve_sdk.schema import SchemaValidationError  # noqa: E402
+from eve_sdk.state import State, StateError  # noqa: E402
 
 
 def parser() -> argparse.ArgumentParser:

@@ -79,9 +79,9 @@ Options:
   --memory-mb <mb>
   --cpu-cores <n>
   --vcpus <n>
-  --instance-type <aws-type>
-  --root-volume-type <aws-volume-type>
-  --plan <vultr-plan>""",
+  --instance-type <provider-specific-type>
+  --root-volume-type <provider-specific-volume-type>
+  --plan <provider-specific-plan>""",
         file=sys.stderr,
     )
 

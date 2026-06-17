@@ -9,6 +9,9 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+os.environ["EVE_PLUGIN_ROOTS"] = str(ROOT / "tests/fixtures/hermetic")
+os.environ["EVE_PLUGIN_ROOTS_EXCLUSIVE"] = "1"
+os.environ.setdefault("EVE_HOME", tempfile.mkdtemp(prefix="eve-doctor."))
 DOCTOR = ROOT / "scripts/doctor"
 failures = 0
 

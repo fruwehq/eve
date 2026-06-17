@@ -1,24 +1,63 @@
-#!/usr/bin/env sh
-# Run or describe a Windows package removal command for a package plugin.
+#!/usr/bin/env python3
+"""Run or describe a Windows package removal command for a package plugin.
 
-set -eu
+Usage: scripts/package-down-windows <package> <remote-command>
 
-package="${1:?Usage: package-down-windows <package> <remote-command>}"
-remote_command="${2:?Usage: package-down-windows <package> <remote-command>}"
-profile="${EVE_INSTANCE_NAME:?EVE_INSTANCE_NAME is required}"
-ssh_cmd="${EVE_PACKAGE_DOWN_SSH:-./scripts/instance-ssh}"
+Mirrors the original sh script: positional args (exit 1 with the Usage message
+when missing), ``EVE_INSTANCE_NAME`` required, ``EVE_PACKAGE_DOWN_SSH`` selects
+the SSH helper, and ``EVE_PLUGIN_DRY_RUN=1`` emits the dry-run contract.
+"""
 
-if [ "${EVE_PLUGIN_DRY_RUN:-0}" = "1" ]; then
-  jq -n \
-    --arg package "$package" \
-    --arg instance "$profile" \
-    --arg command "$remote_command" \
-    '{kind: "package-down", package: $package, instance: $instance, os_family: "windows", command: $command, dry_run: true}'
-  exit 0
-fi
+from __future__ import annotations
 
-"$ssh_cmd" "$profile" -- "$remote_command"
-jq -n \
-  --arg package "$package" \
-  --arg instance "$profile" \
-  '{kind: "package-down", package: $package, instance: $instance, os_family: "windows", status: "removed"}'
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from eve_sdk.package_dispatch import emit_json  # noqa: E402
+
+_USAGE = "Usage: package-down-windows <package> <remote-command>"
+
+
+def main(argv: list[str]) -> int:
+    if len(argv) < 2:
+        print(_USAGE, file=sys.stderr)
+        return 1
+    package = argv[0]
+    remote_command = argv[1]
+    profile = os.environ.get("EVE_INSTANCE_NAME", "")
+    if not profile:
+        print("EVE_INSTANCE_NAME is required", file=sys.stderr)
+        return 1
+    ssh_cmd = os.environ.get("EVE_PACKAGE_DOWN_SSH", str(ROOT / "scripts/instance-ssh"))
+
+    if os.environ.get("EVE_PLUGIN_DRY_RUN", "0") == "1":
+        emit_json({
+            "kind": "package-down",
+            "package": package,
+            "instance": profile,
+            "os_family": "windows",
+            "command": remote_command,
+            "dry_run": True,
+        })
+        return 0
+
+    status = subprocess.run([ssh_cmd, profile, "--", remote_command]).returncode
+    if status != 0:
+        return status
+    emit_json({
+        "kind": "package-down",
+        "package": package,
+        "instance": profile,
+        "os_family": "windows",
+        "status": "removed",
+    })
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

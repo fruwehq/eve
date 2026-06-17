@@ -1,25 +1,54 @@
-#!/usr/bin/env bash
-# Retry short SSH/SCP operations that can fail during early boot or transient
-# network churn. Intended for idempotent preparation/upload commands.
+#!/usr/bin/env python3
+"""Retry short SSH/SCP operations that can fail during early boot or transient
+network churn. Intended for idempotent preparation/upload commands.
 
-set -euo pipefail
+Usage: scripts/ssh-retry <label> <command> [args...]
+"""
 
-LABEL="${1:?Usage: scripts/ssh-retry <label> <command> [args...]}"
-shift
-[ "$#" -gt 0 ] || { echo "ssh-retry: missing command for $LABEL" >&2; exit 2; }
+from __future__ import annotations
 
-ATTEMPTS="${EVE_SSH_RETRY_ATTEMPTS:-6}"
-DELAY="${EVE_SSH_RETRY_DELAY:-5}"
+import os
+import subprocess
+import sys
+import time
 
-attempt=1
-while [ "$attempt" -le "$ATTEMPTS" ]; do
-  "$@" && exit 0
-  status=$?
-  if [ "$attempt" -eq "$ATTEMPTS" ]; then
-    echo "[ssh-retry] $LABEL failed after $ATTEMPTS attempts (exit $status)" >&2
-    exit "$status"
-  fi
-  echo "[ssh-retry] $LABEL failed with exit $status; retrying in ${DELAY}s ($attempt/$ATTEMPTS)" >&2
-  sleep "$DELAY"
-  attempt=$((attempt + 1))
-done
+
+def main(argv: list[str]) -> int:
+    if not argv:
+        print("Usage: scripts/ssh-retry <label> <command> [args...]", file=sys.stderr)
+        return 2
+    label = argv[0]
+    command = argv[1:]
+    if not command:
+        print(f"ssh-retry: missing command for {label}", file=sys.stderr)
+        return 2
+
+    attempts = int(os.environ.get("EVE_SSH_RETRY_ATTEMPTS", "6"))
+    delay = float(os.environ.get("EVE_SSH_RETRY_DELAY", "5"))
+
+    for attempt in range(1, attempts + 1):
+        status = subprocess.run(command, check=False).returncode
+        if status == 0:
+            return 0
+        if attempt == attempts:
+            print(
+                f"[ssh-retry] {label} failed after {attempts} attempts (exit {status})",
+                file=sys.stderr,
+            )
+            return status
+        print(
+            f"[ssh-retry] {label} failed with exit {status}; retrying in "
+            f"{_fmt(delay)}s ({attempt}/{attempts})",
+            file=sys.stderr,
+        )
+        time.sleep(delay)
+    return 0
+
+
+def _fmt(value: float) -> str:
+    """Render the delay like the shell did (no trailing .0 for whole seconds)."""
+    return str(int(value)) if value == int(value) else str(value)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

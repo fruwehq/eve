@@ -23,12 +23,12 @@ def run_cmd(*args: str, env: dict[str, str] | None = None) -> subprocess.Complet
 
 def test_config_env_make_happy_path(tmp_path: Path) -> None:
     config = tmp_path / "config.yaml"
-    config.write_text("aws:\n  profile: local\n", encoding="utf-8")
+    config.write_text("mock-cloud:\n  region: mock-region-1\n", encoding="utf-8")
 
     result = run_cmd("scripts/config-env", "--make", env={"EVE_CONFIG_PATH": str(config)})
 
     assert result.returncode == 0, result.stderr
-    assert "AWS_PROFILE=local\n" in result.stdout
+    assert "MOCK_REGION=mock-region-1\n" in result.stdout
 
 
 def test_config_env_rejects_unknown_flag() -> None:
@@ -41,8 +41,8 @@ def test_config_save_write_and_unset(tmp_path: Path) -> None:
     config = tmp_path / "config.yaml"
     env = {"EVE_CONFIG_PATH": str(config)}
 
-    write = run_cmd("scripts/config-save", "aws", "region", "us-west-2", env=env)
-    unset = run_cmd("scripts/config-save", "--unset", "aws", "region", env=env)
+    write = run_cmd("scripts/config-save", "mock-cloud", "region", "mock-west-1", env=env)
+    unset = run_cmd("scripts/config-save", "--unset", "mock-cloud", "region", env=env)
 
     assert write.returncode == 0, write.stderr
     assert unset.returncode == 0, unset.stderr
@@ -72,7 +72,7 @@ def test_config_save_concurrent_writers(tmp_path: Path) -> None:
 
 
 def test_config_save_requires_section_and_field() -> None:
-    result = run_cmd("scripts/config-save", "aws")
+    result = run_cmd("scripts/config-save", "mock-cloud")
 
     assert result.returncode == 2
 

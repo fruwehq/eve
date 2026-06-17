@@ -1,63 +1,89 @@
-#!/usr/bin/env bash
-# Validate catalog-backed provider/platform/content choices.
+#!/usr/bin/env python3
+# ruff: noqa: E501
+"""Validate catalog-backed provider/platform/content choices."""
 
-set -euo pipefail
-cd "$(git rev-parse --show-toplevel)"
+from __future__ import annotations
 
-FAIL=0
+import json
+import os
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
 
-catalog_options_json="$(./scripts/catalog-options --json)"
-if printf '%s\n' "$catalog_options_json" |
-  jq -e '
-    (.providers | index("vultr")) and
-    (.providers | index("truenas")) and
-    (.providers | index("gcp")) and
-    any(.platforms[]; .provider == "aws" and .machine == "aws-gpu-g4dn-spot" and .os == "ubuntu-26.04-amd64") and
-    any(.platforms[]; .provider == "aws" and .machine == "aws-gpu-g4dn-spot" and .os == "windows-server-2025") and
-    any(.platforms[]; .provider == "vultr" and .machine == "vultr-vcg-a40-2c" and .os == "windows-server-2025") and
-    any(.platforms[]; .provider == "truenas" and .machine == "truenas-scale-medium" and .os == "ubuntu-26.04-amd64") and
-    any(.platforms[]; .provider == "gcp" and .machine == "gcp-cheap-x86" and .os == "ubuntu-26.04-amd64") and
-    any(.bundles[]; .id == "desktop-streaming" and (.includes | index("gnome-desktop") | not) and (.includes | index("sunshine")) and (.includes | index("rustdesk")) and (.includes | index("vnc")) and (.includes | index("rdp")) and (.includes | index("waypipe"))) and
-    any(.bundles[]; .id == "gaming-streaming" and (.includes | index("steam"))) and
-    all(.bundles[]; .id != "desktop-rustdesk-vnc" and .id != "desktop-vnc" and .id != "remote-rdp" and .id != "remote-waypipe" and .id != "dev-ai-arm64") and
-    any(.packages[]; .id == "codex-cli" and .supports.os_families == ["ubuntu"]) and
-    any(.packages[]; .id == "xpra" and .supports.ubuntu_versions == ["22.04", "24.04"]) and
-    any(.packages[]; .id == "rdp" and .supports.os_families == ["ubuntu", "windows"] and .installable_os_families == ["ubuntu"]) and
-    any(.packages[]; .id == "thinlinc" and .supports.os_families == ["ubuntu"] and .supports.arches == ["amd64"] and .installable_os_families == ["ubuntu"]) and
-    any(.packages[]; .id == "nomachine" and .supports.os_families == ["ubuntu", "windows"] and .installable_os_families == ["ubuntu", "windows"]) and
-    any(.packages[]; .id == "splashtop" and .supports.os_families == ["ubuntu", "windows"] and .supports.arches == ["amd64"]) and
-    any(.packages[]; .id == "steam" and .supports.arches == ["amd64"])
-  ' >/dev/null; then
-  printf '  [OK] catalog-options emits provider/platform/content choices with package support metadata\n'
-else
-  printf '  [FAIL] catalog-options emits provider/platform/content choices with package support metadata\n' >&2
-  printf '%s\n' "$catalog_options_json" >&2
-  FAIL=$((FAIL + 1))
-fi
+ROOT = Path(__file__).resolve().parents[1]
+# Hermetic: use synthetic fixtures, never ambient user plugins.
+os.environ["EVE_PLUGIN_ROOTS"] = str(ROOT / "tests/fixtures/hermetic")
+os.environ["EVE_PLUGIN_ROOTS_EXCLUSIVE"] = "1"
+os.environ.setdefault("EVE_HOME", tempfile.mkdtemp(prefix="eve-catalog."))
 
-if printf '%s\n' "$catalog_options_json" |
-  jq -e '
-    all(.platforms[]; .provider != "vultr" or .os != "ubuntu-26.04-amd64") and
-    any(.platforms[]; .provider == "aws" and .os == "windows-server-2025")
-  ' >/dev/null; then
-  printf '  [OK] catalog-options hides invalid provider/OS pairs and exposes AWS Windows with image metadata\n'
-else
-  printf '  [FAIL] catalog-options provider/OS image metadata gating regressed\n' >&2
-  printf '%s\n' "$catalog_options_json" | jq '.platforms[] | select((.provider == "vultr" and .os == "ubuntu-26.04-amd64") or (.provider == "aws" and .os == "windows-server-2025"))' >&2
-  FAIL=$((FAIL + 1))
-fi
+sys.path.insert(0, str(ROOT))
 
-if printf '%s\n' "$catalog_options_json" |
-  jq -e '
-    any(.platforms[]; .provider == "raspberry-pi" and .init == "ssh-ubuntu-metal") and
-    all(.platforms[]; .provider != "raspberry-pi" or .init == "ssh-ubuntu-metal") and
-    all(.platforms[]; .provider == "raspberry-pi" or .init != "ssh-ubuntu-metal")
-  ' >/dev/null; then
-  printf '  [OK] catalog-options gates init choices by provider\n'
-else
-  printf '  [FAIL] catalog-options exposes invalid provider/init pairs\n' >&2
-  printf '%s\n' "$catalog_options_json" | jq '.platforms[] | select(.init == "ssh-ubuntu-metal" or .provider == "raspberry-pi")' >&2
-  FAIL=$((FAIL + 1))
-fi
 
-[ "$FAIL" -eq 0 ]
+def _run_json(*args):
+    cmd = [sys.executable]
+    for a in args:
+        if a.startswith("-") or a.startswith("/"):
+            cmd.append(a)
+        else:
+            cmd.append(str(ROOT / a))
+    r = subprocess.run(cmd, cwd=str(ROOT), capture_output=True, text=True, check=False, timeout=30)
+    return json.loads(r.stdout) if r.returncode == 0 and r.stdout.strip() else None
+
+
+def _check(label, cond, detail=""):
+    if cond:
+        print(f"  [OK] {label}")
+        return True
+    print(f"  [FAIL] {label}", file=sys.stderr)
+    if detail:
+        print(detail, file=sys.stderr)
+    return False
+
+
+def main():
+    fail = 0
+    doc = _run_json("scripts/catalog-options", "--json")
+    if not doc:
+        print("  [FAIL] catalog-options produced no output", file=sys.stderr)
+        return 1
+
+    def has_plat(provider, machine=None, os_id=None):
+        return any(
+            p["provider"] == provider and (machine is None or p["machine"] == machine) and (os_id is None or p["os"] == os_id)
+            for p in doc["platforms"])
+
+    # Check 1: providers/platforms/packages/bundles present
+    c1 = (
+        "mock-cloud" in doc["providers"] and
+        has_plat("mock-cloud", "mock-small", "mockos-1.0-amd64") and
+        has_plat("mock-cloud", "mock-small", "mockos-1.0-arm64") and
+        has_plat("mock-cloud", "mock-gpu", "mockos-1.0-amd64") and
+        has_plat("mock-cloud", "mock-small", "mockwin-1.0") and
+        has_plat("mock-cloud", "mock-gpu", "mockwin-1.0") and
+        any(b["id"] == "mock-dev" and "mock-app" in b.get("includes", []) for b in doc["bundles"]) and
+        any(b["id"] == "mock-gaming" and "mock-win-app" in b.get("includes", []) for b in doc["bundles"]) and
+        any(p["id"] == "mock-app" and p.get("supports", {}).get("os_families") == ["ubuntu"] for p in doc["packages"]) and
+        any(p["id"] == "mock-win-app" and p.get("supports", {}).get("os_families") == ["windows"] for p in doc["packages"])
+    )
+    if not _check("catalog-options emits provider/platform/content choices with package support metadata", c1, json.dumps(doc, indent=2)):
+        fail += 1
+
+    # Check 2: OS/provider gating (mock-gpu only supports amd64)
+    no_gpu_arm64 = all(not (p["provider"] == "mock-cloud" and p["machine"] == "mock-gpu" and p["os"] == "mockos-1.0-arm64") for p in doc["platforms"])
+    has_mockwin = has_plat("mock-cloud", "mock-small", "mockwin-1.0")
+    if not _check("catalog-options hides invalid provider/OS pairs and exposes mock-win with image metadata", no_gpu_arm64 and has_mockwin):
+        fail += 1
+
+    # Check 3: init gating
+    ubuntu_inits = {p["init"] for p in doc["platforms"] if p.get("os_family") == "ubuntu"}
+    win_inits = {p["init"] for p in doc["platforms"] if p.get("os_family") == "windows"}
+    c3 = ubuntu_inits == {"ssh-mockos-cloud-init"} and win_inits == {"ssh-mockwin-powershell"}
+    if not _check("catalog-options gates init choices by provider", c3):
+        fail += 1
+
+    return 1 if fail else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,48 +1,90 @@
-#!/usr/bin/env bash
-# Wait until SSH on the profile's instance accepts connections.
-# Usage: scripts/ssh-wait <instance> [max-wait-seconds]
+#!/usr/bin/env python3
+"""Wait until SSH on the profile's instance accepts connections.
 
-set -euo pipefail
+Usage: scripts/ssh-wait <instance> [max-wait-seconds]
+"""
 
-PROFILE="${1:?Usage: scripts/ssh-wait <instance> [max-wait-seconds]}"
-MAX_SECONDS=${2:-1200}
-POLL_INTERVAL=2
-cd "$(git rev-parse --show-toplevel)"
-# shellcheck source=lib/instance-workdir.sh
-. ./scripts/lib/instance-workdir.sh
+from __future__ import annotations
 
-RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
-ENGINE=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^ENGINE=/{print $2}')
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
 
-# SECONDS is bash's built-in wall-clock counter from script start. It captures
-# the time taken by SSH attempts themselves (which can take several seconds
-# each, especially during early boot when ports are slow to respond) — counting
-# only completed poll cycles would underreport.
-SECONDS=0
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
-try_ssh() {
-  if [ "$ENGINE" = "vagrant" ]; then
-    (cd "$(eve_instance_workdir "$PROFILE")" && vagrant ssh -c "exit 0" >/dev/null 2>&1)
-  else
-    EPHEMERAL_SSH_BATCH=1 ./scripts/instance-ssh "$PROFILE" -- exit 0 >/dev/null 2>&1
-  fi
-}
+from eve_sdk.remote_launch import instance_workdir, repo_root, resolve_env  # noqa: E402
 
-while [ "$SECONDS" -lt "$MAX_SECONDS" ]; do
-  # Print before the attempt — SSH probes can block for several seconds, and
-  # without this update the line stays stuck on the previous countdown.
-  printf "\rchecking SSH (%ds/%ds elapsed)...                         " "$SECONDS" "$MAX_SECONDS"
-  if try_ssh; then
-    printf "\rSSH ready for profile %s (%ds)                     \n" "$PROFILE" "$SECONDS"
-    exit 0
-  fi
-  next_poll=$((SECONDS + POLL_INTERVAL))
-  while [ "$SECONDS" -lt "$next_poll" ] && [ "$SECONDS" -lt "$MAX_SECONDS" ]; do
-    remaining=$((next_poll - SECONDS))
-    printf "\rwaiting for SSH (%ds/%ds elapsed, next poll in %ds)...   " "$SECONDS" "$MAX_SECONDS" "$remaining"
-    sleep 1
-  done
-done
+POLL_INTERVAL = 2
 
-echo "SSH did not become ready in time for profile $PROFILE (${MAX_SECONDS}s)" >&2
-exit 1
+
+def try_ssh(root: Path, profile: str, engine: str) -> bool:
+    """Attempt one SSH probe; return True if it succeeded.
+
+    Mirrors the bash ``try_ssh``: ``vagrant ssh`` inside the instance workdir
+    for a vagrant engine, otherwise ``EPHEMERAL_SSH_BATCH=1 instance-ssh``.
+    """
+    if engine == "vagrant":
+        workdir = instance_workdir(root, profile)
+        return subprocess.run(
+            ["vagrant", "ssh", "-c", "exit 0"],
+            cwd=workdir, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
+        ).returncode == 0
+    env = {**os.environ, "EPHEMERAL_SSH_BATCH": "1"}
+    return subprocess.run(
+        [str(root / "scripts/instance-ssh"), profile, "--", "exit 0"],
+        cwd=root, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False, env=env,
+    ).returncode == 0
+
+
+def main(argv: list[str]) -> int:
+    if not argv:
+        print("Usage: scripts/ssh-wait <instance> [max-wait-seconds]", file=sys.stderr)
+        return 2
+    profile = argv[0]
+    max_seconds = int(argv[1]) if len(argv) > 1 else 1200
+    root = repo_root()
+    engine = resolve_env(root, profile).get("ENGINE", "")
+
+    # Mirror bash ``SECONDS`` — integer wall-clock seconds from script start.
+    # It captures the time taken by the SSH attempts themselves (which can take
+    # several seconds each, especially during early boot); counting only
+    # completed poll cycles would underreport.
+    start = time.monotonic()
+    while True:
+        secs = int(time.monotonic() - start)
+        if secs >= max_seconds:
+            break
+        # Print before the attempt — SSH probes can block for several seconds,
+        # and without this update the line stays stuck on the previous countdown.
+        sys.stdout.write(f"\rchecking SSH ({secs}/{max_seconds}s elapsed)..." + " " * 25)
+        sys.stdout.flush()
+        if try_ssh(root, profile, engine):
+            sys.stdout.write(
+                f"\rSSH ready for profile {profile} ({secs}s)" + " " * 21 + "\n"
+            )
+            return 0
+        next_poll = secs + POLL_INTERVAL
+        while True:
+            secs = int(time.monotonic() - start)
+            if secs >= next_poll or secs >= max_seconds:
+                break
+            remaining = next_poll - secs
+            sys.stdout.write(
+                f"\rwaiting for SSH ({secs}/{max_seconds}s elapsed, next poll in {remaining}s)..."
+                + " " * 3
+            )
+            sys.stdout.flush()
+            time.sleep(1)
+
+    print(
+        f"SSH did not become ready in time for profile {profile} ({max_seconds}s)",
+        file=sys.stderr,
+    )
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

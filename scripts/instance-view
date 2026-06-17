@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+"""Per-instance view: resolve + packages + paths + provider actions.
+
+Cold entrypoint: parses catalog/plugins fresh per call, then delegates to the
+shared pure assembly in ``eve_sdk.instance_view`` (the same module the warm
+Engine uses), guaranteeing byte-identical output between cold and warm paths.
+"""
+
 from __future__ import annotations
 
 import json
@@ -10,28 +17,22 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from eve_sdk import state_machine  # noqa: E402
-from eve_sdk.dispatch import run_json  # noqa: E402
-from eve_sdk.resolve import default_registry_path, load_any  # noqa: E402
-from eve_sdk.state import State  # noqa: E402
+from eve_sdk.instance_view import (  # noqa: E402
+    build_aggregate,
+    build_instance_view,
+    build_statuses,
+)
+from eve_sdk.plugin_manifest import PluginManifest  # noqa: E402
+from eve_sdk.resolve import default_registry_path, resolve_instance  # noqa: E402
 
 
 def usage() -> None:
     print(
         """Usage:
   scripts/instance-view --instance <name> [--registry <path>] [--emit json] [--observe]
-  scripts/instance-view --aggregate [--registry <path>]""",
+  scripts/instance-view --aggregate [--registry <path>)]""",
         file=sys.stderr,
     )
-
-
-def provider_actions(provider_id: str) -> list[dict[str, object]]:
-    plugin_doc = run_json(str(ROOT / "scripts/plugin-list"), "--kind", "provider", "--json")
-    plugin = next((entry for entry in plugin_doc["plugins"] if entry["id"] == provider_id), None)
-    if not plugin:
-        return []
-    actions = plugin.get("actions")
-    return actions if isinstance(actions, list) else []
 
 
 def main(argv: list[str]) -> int:
@@ -64,29 +65,12 @@ def main(argv: list[str]) -> int:
             return 2
     try:
         if aggregate or statuses_only:
-            registry = load_any(registry_path)
-            statuses: dict[str, dict[str, object]] = {}
-            for instance in registry.get("instances", []):
-                if not isinstance(instance, dict) or not instance.get("name"):
-                    continue
-                name = str(instance["name"])
-                state = State.read(name)
-                observed = state.get("observed_state", {})
-                status = state_machine.status_with_observed_state(
-                    {"instance": instance, "state": state, "observed_state": observed},
-                    {"observed_state": observed},
-                )
-                inner = status.get("state")
-                if isinstance(inner, dict):
-                    # The list renders effective_provider_state, which is computed
-                    # rather than stored; add it so this fast (no-resolve) read is a
-                    # drop-in for rendering the instance table.
-                    inner["effective_provider_state"] = state_machine.effective_provider_state(inner)
-                statuses[name] = status
+            # --statuses / --aggregate never need catalog or plugins: a fast
+            # persisted-state sweep over the registry.
             if statuses_only:
-                print(json.dumps({"statuses": statuses}, separators=(",", ":")))
+                print(json.dumps({"statuses": build_statuses(registry_path)}, separators=(",", ":")))
             else:
-                print(json.dumps({"aggregate": state_machine.aggregate_summary(statuses)}, indent=2))
+                print(json.dumps({"aggregate": build_aggregate(registry_path)}, indent=2))
             return 0
         if not instance_name:
             usage()
@@ -96,6 +80,9 @@ def main(argv: list[str]) -> int:
             usage()
             return 2
         if observe:
+            # Live provider.status is still a subprocess boundary (it shells to
+            # make + the provider plugin). Run it, then build the view in-process
+            # via the shared assembly so catalog/plugins are not re-parsed here.
             env: dict[str, str] = {}
             if registry_path != default_registry_path():
                 env["EVE_INSTANCE_REGISTRY"] = str(registry_path)
@@ -110,18 +97,15 @@ def main(argv: list[str]) -> int:
             if result.returncode != 0:
                 details = result.stderr if result.stderr else result.stdout
                 raise RuntimeError(f"observe failed for {instance_name}: {details.strip()}")
-        resolve_cmd = [str(ROOT / "scripts/instance-resolve"), "--instance", instance_name, "--emit", "json"]
-        paths_cmd = [str(ROOT / "scripts/instance-paths"), "--instance", instance_name, "--emit", "json"]
-        package_cmd = [str(ROOT / "scripts/package-list"), "--instance", instance_name, "--json"]
-        if registry_path != default_registry_path():
-            resolve_cmd.extend(["--registry", str(registry_path)])
-            paths_cmd.extend(["--registry", str(registry_path)])
-            package_cmd.extend(["--registry", str(registry_path)])
-        resolved = run_json(*resolve_cmd)
-        paths = run_json(*paths_cmd)
-        packages = run_json(*package_cmd)["packages"]
-        view = State.build_view(instance_name=instance_name, resolved=resolved, packages=packages, paths=paths)
-        view["provider_actions"] = provider_actions(resolved["provider_plugin"])
+        # Cold path: parse fresh; the shared assembly guarantees the warm Engine
+        # (which passes memoized catalog/plugins) produces byte-identical output.
+        resolved = resolve_instance(instance_name, registry_path)
+        view = build_instance_view(
+            instance_name,
+            resolved=resolved,
+            package_plugins=[PluginManifest.public(p) for p in PluginManifest.load_all("package")],
+            provider_plugins=[PluginManifest.public(p) for p in PluginManifest.load_all("provider")],
+        )
         print(json.dumps(view, indent=2))
         return 0
     except Exception as error:

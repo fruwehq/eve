@@ -12,6 +12,10 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+os.environ["EVE_PLUGIN_ROOTS"] = str(Path(__file__).resolve().parents[1] / "tests/fixtures/hermetic")
+os.environ["EVE_PLUGIN_ROOTS_EXCLUSIVE"] = "1"
+os.environ.setdefault("EVE_HOME", tempfile.mkdtemp(prefix="eve-prov."))
+
 ROOT = Path(__file__).resolve().parents[1]
 UBUNTU_RUNNER = ROOT / "oses/ubuntu-26.04/provision/scripts/runner.sh"
 WINDOWS_RUNNER = ROOT / "oses/windows-server-2025/provision/scripts/runner.ps1"

@@ -1,4 +1,0 @@
-#!/usr/bin/env sh
-set -eu
-
-exec ./scripts/package-down-command discord 'sudo apt-get remove -y discord || true'

@@ -14,6 +14,9 @@ dependencies = [
     "textual (>=8.2.5,<9.0.0)"
 ]
 
+[project.scripts]
+eve = "eve_sdk.cli:main"
+
 [dependency-groups]
 dev = [
     "mypy (>=1.20.2,<2.0.0)",
@@ -30,6 +33,8 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 
 [tool.ruff.lint.per-file-ignores]
 "scripts/eve-tui" = ["E402", "E501"]
+# package-verify embeds long, single-line remote probe commands that do not wrap.
+"scripts/package-verify" = ["E501"]
 
 [tool.mypy]
 python_version = "3.12"
@@ -45,7 +50,8 @@ ignore_missing_imports = true
 pythonpath = ["."]
 
 [tool.poetry]
-package-mode = false
+packages = [{include = "eve_sdk"}]
+include = ["scripts", "core", "config", "oses"]
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]

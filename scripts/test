@@ -1,59 +1,81 @@
-#!/usr/bin/env bash
-# Top-level test orchestrator. Runs all project checks.
-# Usage: scripts/test              # run all
-#        scripts/test catalog      # run only one suite
-#        UPDATE_GOLDEN=1 scripts/test instances # refresh instance goldens
+#!/usr/bin/env python3
+"""Top-level test orchestrator. Runs all project checks.
 
-set -euo pipefail
-cd "$(git rev-parse --show-toplevel)"
+Usage: scripts/test              # run all
+       scripts/test catalog      # run only one suite
+       UPDATE_GOLDEN=1 scripts/test instances  # refresh instance goldens
+"""
 
-FAIL=0
-if [ "$#" -eq 0 ]; then
-  SUITES=(catalog config-save core-boundary docker doctor instances lifecycle os-portability plugins plugins-sync provision-runner schemas secrets state-concurrency terraform tf-isolation tui python shellcheck lint)
-else
-  SUITES=("$@")
-fi
+from __future__ import annotations
 
-run() {
-  local name="$1"; shift
-  printf '\n== %s ==\n' "$name"
-  if "$@"; then
-    printf '[OK]   %s\n' "$name"
-  else
-    printf '[FAIL] %s\n' "$name"
-    FAIL=$((FAIL + 1))
-  fi
+import os
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+
+ALL_SUITES = [
+    "catalog", "config-save", "core-boundary", "docker", "doctor",
+    "instances", "lifecycle", "os-portability", "plugins", "plugins-sync",
+    "provision-runner", "python", "schemas", "secrets", "shellcheck",
+    "state-concurrency", "terraform", "tf-isolation", "tui", "lint",
+]
+
+SUITE_SCRIPTS: dict[str, list[str]] = {
+    "catalog": ["scripts/test-catalog"],
+    "ci-pipeline": ["poetry", "run", "python", "scripts/test-ci-pipeline"],
+    "config-save": ["scripts/test-config-save"],
+    "core-boundary": ["scripts/test-core-boundary"],
+    "docker": ["scripts/test-docker"],
+    "doctor": ["scripts/test-doctor"],
+    "instances": ["scripts/test-instances"],
+    "lifecycle": ["scripts/test-lifecycle"],
+    "os-portability": ["scripts/test-os-portability"],
+    "plugins": ["scripts/test-plugins"],
+    "plugins-sync": ["scripts/test-plugins-sync"],
+    "provision-runner": ["scripts/test-provision-runner"],
+    "python": ["scripts/test-python"],
+    "schemas": ["scripts/test-schemas"],
+    "secrets": ["scripts/test-secrets"],
+    "shellcheck": ["scripts/test-shellcheck"],
+    "state-concurrency": ["scripts/test-state-concurrency"],
+    "terraform": ["scripts/test-terraform"],
+    "tf-isolation": ["scripts/test-tf-isolation"],
+    "tui": ["scripts/test-tui"],
+    "lint": ["scripts/test-lint"],
 }
 
-for suite in "${SUITES[@]}"; do
-  case "$suite" in
-    catalog)   run "catalog"   ./scripts/test-catalog   ;;
-    ci-pipeline) run "ci-pipeline" poetry run python scripts/test-ci-pipeline ;;
-    config-save) run "config-save" ./scripts/test-config-save ;;
-    core-boundary) run "core-boundary" ./scripts/test-core-boundary ;;
-    docker) run "docker" ./scripts/test-docker ;;
-    doctor) run "doctor" ./scripts/test-doctor ;;
-    instances)  run "instances"  ./scripts/test-instances  ;;
-    lifecycle)  run "lifecycle"  ./scripts/test-lifecycle  ;;
-    os-portability) run "os-portability" ./scripts/test-os-portability ;;
-    plugins)    run "plugins"    ./scripts/test-plugins    ;;
-    plugins-sync) run "plugins-sync" ./scripts/test-plugins-sync ;;
-    provision-runner) run "provision-runner" ./scripts/test-provision-runner ;;
-    python) run "python" ./scripts/test-python ;;
-    schemas) run "schemas" ./scripts/test-schemas ;;
-    secrets) run "secrets" ./scripts/test-secrets ;;
-    shellcheck) run "shellcheck" ./scripts/test-shellcheck ;;
-    state-concurrency) run "state-concurrency" ./scripts/test-state-concurrency ;;
-    terraform)  run "terraform"  ./scripts/test-terraform  ;;
-    tf-isolation) run "tf-isolation" ./scripts/test-tf-isolation ;;
-    tui) run "tui" ./scripts/test-tui ;;
-    lint) run "lint" ./scripts/test-lint ;;
-    *) echo "unknown suite: $suite" >&2; exit 2 ;;
-  esac
-done
 
-if [ "$FAIL" -ne 0 ]; then
-  printf '\n%d suite(s) failed.\n' "$FAIL" >&2
-  exit 1
-fi
-printf '\nAll tests passed.\n'
+def main(argv: list[str]) -> int:
+    # Set hermetic plugin discovery for all test subprocesses.
+    os.environ["EVE_PLUGIN_ROOTS"] = str(ROOT / "tests/fixtures/hermetic")
+    os.environ["EVE_PLUGIN_ROOTS_EXCLUSIVE"] = "1"
+    os.environ.setdefault("EVE_HOME", tempfile.mkdtemp(prefix="eve-test."))
+
+    suites = argv if argv else ALL_SUITES
+    fail = 0
+    for suite in suites:
+        if suite not in SUITE_SCRIPTS:
+            print(f"unknown suite: {suite}", file=sys.stderr)
+            return 2
+        script_args = SUITE_SCRIPTS[suite]
+        cmd = script_args if script_args[0].startswith("poetry") else [str(ROOT / script_args[0]), *script_args[1:]]
+        print(f"\n== {suite} ==")
+        code = subprocess.run(cmd, cwd=str(ROOT), check=False).returncode
+        if code == 0:
+            print(f"[OK]   {suite}")
+        else:
+            print(f"[FAIL] {suite}")
+            fail += 1
+
+    if fail:
+        print(f"\n{fail} suite(s) failed.", file=sys.stderr)
+        return 1
+    print("\nAll tests passed.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

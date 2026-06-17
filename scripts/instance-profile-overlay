@@ -79,7 +79,9 @@ def build_overlay(instance_name: str, resolved: dict[str, Any]) -> dict[str, Any
         location_name = f"instance-{instance_name}-location"
         overlay_location["name"] = location_name
         overlay_location[provider] = {**overlay_location.get(provider, {}), **provider_config}
-        if provider == "raspberry-pi" and not str(overlay_location[provider].get("host", "")):
+        # Metal targets (e.g. Raspberry Pi) fall back host=ip when host is unset.
+        machine_kind = resolved.get("machine", {}).get("kind") or ""
+        if machine_kind == "metal" and not str(overlay_location[provider].get("host", "")):
             overlay_location[provider]["host"] = overlay_location[provider].get("ip")
         overlay_profile["location"] = location_name
         overlay["locations"] = sorted([source_location, overlay_location], key=lambda entry: entry["name"])

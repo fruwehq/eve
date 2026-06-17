@@ -1,26 +1,41 @@
-#!/usr/bin/env bash
-# Stream the remote provisioning logs for a profile.
-# Usage: scripts/logs <instance>
+#!/usr/bin/env python3
+"""Stream the remote provisioning logs for a profile.
 
-set -euo pipefail
+Usage: scripts/logs <instance>
+"""
+from __future__ import annotations
 
-PROFILE="${1:?Usage: scripts/logs <instance>}"
-cd "$(git rev-parse --show-toplevel)"
+import os
+import sys
+from pathlib import Path
 
-RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
-OS_FAMILY=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^OS_FAMILY=/{print $2}')
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
-case "$OS_FAMILY" in
-  ubuntu)
-    # shellcheck disable=SC2016
-    # $HOME is expanded by the remote shell, not locally.
-    exec ./scripts/instance-ssh "$PROFILE" -- 'bash $HOME/provision/scripts/logs.sh'
-    ;;
-  windows)
-    exec ./scripts/instance-ssh "$PROFILE" -- "if (Test-Path 'C:\\Users\\Administrator\\provision\\scripts\\logs.ps1') { & 'C:\\Users\\Administrator\\provision\\scripts\\logs.ps1' } else { Write-Output 'No logs script found. Run make provision first.' }"
-    ;;
-  *)
-    echo "[logs] unknown os_family: $OS_FAMILY" >&2
-    exit 2
-    ;;
-esac
+from eve_sdk.tf_dispatch import repo_root, resolve_env  # noqa: E402
+
+
+def main(argv: list[str]) -> int:
+    profile = argv[0] if argv else ""
+    if not profile:
+        print("Usage: scripts/logs <instance>", file=sys.stderr)
+        return 2
+    root = repo_root()
+    os_family = resolve_env(root, profile).get("OS_FAMILY", "")
+    ssh = str(ROOT / "scripts/instance-ssh")
+    if os_family == "ubuntu":
+        # $HOME is expanded by the remote shell, not locally.
+        os.execv(ssh, [ssh, profile, "--", "bash $HOME/provision/scripts/logs.sh"])
+        return 1
+    if os_family == "windows":
+        os.execv(ssh, [ssh, profile, "--",
+                       "if (Test-Path 'C:\\Users\\Administrator\\provision\\scripts\\logs.ps1') "
+                       "{ & 'C:\\Users\\Administrator\\provision\\scripts\\logs.ps1' } "
+                       "else { Write-Output 'No logs script found. Run make provision first.' }"])
+        return 1
+    print(f"[logs] unknown os_family: {os_family}", file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

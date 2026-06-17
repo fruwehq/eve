@@ -19,7 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # only used in PRs; don't use in default branches. This is used to identify the delta
+          fetch-depth: 0
 
       - name: Initialize timing summary
         run: |

@@ -1,7 +1,7 @@
 # Makefile
 .DEFAULT_GOAL := default
-.PHONY: bundle.select bundle.unselect catalog.list clean default docker.build docker.runtime.full docker.runtime.slim \
-				docker.shell docker.test doctor down env eve generate help info init.all install-cli instance.create \
+.PHONY: bundle.select bundle.unselect catalog.list clean default docker.runtime.full docker.runtime.slim \
+				doctor down env eve generate help info init.all install-cli instance.create \
 				instance.delete instance.env instance.info instance.list instance.observe instance.paths instance.provision \
 				instance.recover instance.state instance.status instance.validate instance.view integration.packages \
 				integration.plan integration.test ip lint logs package.action package.down package.install package.list \
@@ -13,7 +13,6 @@
 				test.update-golden tui up update upload validate
 
 TM_PARALLEL ?= 8
-EVE_TOOLCHAIN_IMAGE ?= eve-toolchain:local
 
 # v3 concrete instance selection. Instances live in .eve/instances.yaml.
 INSTANCE ?=
@@ -109,20 +108,11 @@ clean: ## Remove terramate-generated terraform files and cache
 
 default: help  ## Show help
 
-docker.build: ## Build optional Eve CLI/toolchain container
-	docker build -f docker/Dockerfile.toolchain -t $(EVE_TOOLCHAIN_IMAGE) .
-
 docker.runtime.full: ## Build the full Eve runtime container with Vagrant and QEMU
 	./docker/build.sh full
 
 docker.runtime.slim: ## Build the slim Eve runtime container
 	./docker/build.sh slim
-
-docker.shell: ## Open a shell inside the optional Eve toolchain container
-	EVE_TOOLCHAIN_IMAGE=$(EVE_TOOLCHAIN_IMAGE) ./scripts/eve-docker bash
-
-docker.test: ## Run make test inside the optional Eve toolchain container
-	EVE_TOOLCHAIN_IMAGE=$(EVE_TOOLCHAIN_IMAGE) ./scripts/eve-docker make test
 
 doctor: ## Check local tools, plugins, providers, and state hints
 	./scripts/doctor
@@ -136,7 +126,7 @@ env: ## Print resolved instance data as env lines
 	./scripts/instance-run env $(INSTANCE)
 
 eve: ## Open Eve, the Textual instance manager
-	@./scripts/eve
+	@./bin/eve
 
 generate: ## Generate terraform configuration from terramate files
 	terramate generate
@@ -155,7 +145,7 @@ init.all: generate ## Init all stacks in parallel (set TM_PARALLEL=N)
 
 install-cli: ## Install eve launcher into ~/.local/bin
 	@install -d "$(HOME)/.local/bin"
-	@printf '%s\n' '#!/usr/bin/env sh' 'set -eu' 'exec "$(CURDIR)/scripts/eve" "$$@"' > "$(HOME)/.local/bin/eve"
+	@printf '%s\n' '#!/usr/bin/env sh' 'set -eu' 'exec "$(CURDIR)/bin/eve" "$$@"' > "$(HOME)/.local/bin/eve"
 	@chmod +x "$(HOME)/.local/bin/eve"
 	@echo "Installed eve to $(HOME)/.local/bin/eve"
 	@case ":$$PATH:" in *:$(HOME)/.local/bin:*) ;; *) echo "Add $(HOME)/.local/bin to PATH if eve is not found by your shell."; esac

@@ -15,7 +15,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from eve_sdk.workdir import Workdir
+from eve_sdk.workdir import Workdir  # noqa: E402
 
 
 def absolute(path: str) -> Path:
@@ -58,7 +58,10 @@ def main() -> int:
         return 0
 
     if not instances:
-        print("No instances found. Create one with: make instance.create INSTANCE=<name> MACHINE=<machine> OS=<os> LOCATION=<location>")
+        print(
+            "No instances found. Create one with: "
+            "make instance.create INSTANCE=<name> MACHINE=<machine> OS=<os> LOCATION=<location>"
+        )
         return 0
 
     print(f"{'INSTANCE':<28} {'MACHINE':<32} {'OS':<24} {'LOCATION':<24}")
@@ -67,10 +70,10 @@ def main() -> int:
         if not isinstance(instance, dict):
             continue
         print(
-            f"{str(instance.get('name', '')):<28} "
-            f"{str(instance.get('machine') or '-'):<32} "
-            f"{str(instance.get('os') or '-'):<24} "
-            f"{str(instance.get('location') or '-'):<24}"
+            f"{instance.get('name', '')!s:<28} "
+            f"{instance.get('machine') or '-'!s:<32} "
+            f"{instance.get('os') or '-'!s:<24} "
+            f"{instance.get('location') or '-'!s:<24}"
         )
     return 0
 

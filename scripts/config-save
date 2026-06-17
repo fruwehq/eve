@@ -10,8 +10,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from eve_sdk.atomic_yaml import AtomicYaml
-from eve_sdk.workdir import Workdir
+from eve_sdk.atomic_yaml import AtomicYaml  # noqa: E402
+from eve_sdk.workdir import Workdir  # noqa: E402
 
 
 def parser() -> argparse.ArgumentParser:

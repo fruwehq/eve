@@ -1,0 +1,203 @@
+{
+  "providers": [
+    "mock-cloud",
+    "mock-local"
+  ],
+  "platforms": [
+    {
+      "id": "mock-cloud:mock-gpu:mockos-1.0-amd64:ssh-mockos-cloud-init",
+      "provider": "mock-cloud",
+      "machine": "mock-gpu",
+      "os": "mockos-1.0-amd64",
+      "os_family": "ubuntu",
+      "os_version": "1.0",
+      "arch": "amd64",
+      "init": "ssh-mockos-cloud-init",
+      "defaults": {
+        "cpu_cores": 4,
+        "memory_mb": 8192,
+        "disk_gb": 100
+      }
+    },
+    {
+      "id": "mock-cloud:mock-gpu:mockwin-1.0:ssh-mockwin-powershell",
+      "provider": "mock-cloud",
+      "machine": "mock-gpu",
+      "os": "mockwin-1.0",
+      "os_family": "windows",
+      "os_version": "1.0",
+      "arch": "amd64",
+      "init": "ssh-mockwin-powershell",
+      "defaults": {
+        "cpu_cores": 4,
+        "memory_mb": 8192,
+        "disk_gb": 100
+      }
+    },
+    {
+      "id": "mock-cloud:mock-small:mockos-1.0-amd64:ssh-mockos-cloud-init",
+      "provider": "mock-cloud",
+      "machine": "mock-small",
+      "os": "mockos-1.0-amd64",
+      "os_family": "ubuntu",
+      "os_version": "1.0",
+      "arch": "amd64",
+      "init": "ssh-mockos-cloud-init",
+      "defaults": {
+        "cpu_cores": 2,
+        "memory_mb": 4096,
+        "disk_gb": 20
+      }
+    },
+    {
+      "id": "mock-cloud:mock-small:mockos-1.0-arm64:ssh-mockos-cloud-init",
+      "provider": "mock-cloud",
+      "machine": "mock-small",
+      "os": "mockos-1.0-arm64",
+      "os_family": "ubuntu",
+      "os_version": "1.0",
+      "arch": "arm64",
+      "init": "ssh-mockos-cloud-init",
+      "defaults": {
+        "cpu_cores": 2,
+        "memory_mb": 4096,
+        "disk_gb": 20
+      }
+    },
+    {
+      "id": "mock-cloud:mock-small:mockwin-1.0:ssh-mockwin-powershell",
+      "provider": "mock-cloud",
+      "machine": "mock-small",
+      "os": "mockwin-1.0",
+      "os_family": "windows",
+      "os_version": "1.0",
+      "arch": "amd64",
+      "init": "ssh-mockwin-powershell",
+      "defaults": {
+        "cpu_cores": 2,
+        "memory_mb": 4096,
+        "disk_gb": 20
+      }
+    },
+    {
+      "id": "mock-local:mock-vm:mockos-1.0-amd64:ssh-mockos-cloud-init",
+      "provider": "mock-local",
+      "machine": "mock-vm",
+      "os": "mockos-1.0-amd64",
+      "os_family": "ubuntu",
+      "os_version": "1.0",
+      "arch": "amd64",
+      "init": "ssh-mockos-cloud-init",
+      "defaults": {
+        "cpu_cores": 2,
+        "memory_mb": 4096,
+        "disk_gb": 20
+      }
+    },
+    {
+      "id": "mock-local:mock-vm:mockos-1.0-arm64:ssh-mockos-cloud-init",
+      "provider": "mock-local",
+      "machine": "mock-vm",
+      "os": "mockos-1.0-arm64",
+      "os_family": "ubuntu",
+      "os_version": "1.0",
+      "arch": "arm64",
+      "init": "ssh-mockos-cloud-init",
+      "defaults": {
+        "cpu_cores": 2,
+        "memory_mb": 4096,
+        "disk_gb": 20
+      }
+    }
+  ],
+  "bundles": [
+    {
+      "id": "mock-dev",
+      "includes": [
+        "mock-app"
+      ]
+    },
+    {
+      "id": "mock-gaming",
+      "includes": [
+        "mock-win-app"
+      ]
+    }
+  ],
+  "packages": [
+    {
+      "id": "mock-app",
+      "display_name": "Mock App",
+      "supports": {
+        "os_families": [
+          "ubuntu"
+        ]
+      },
+      "conflicts_with": [],
+      "installable": true,
+      "installable_os_families": [
+        "ubuntu"
+      ],
+      "actions": [
+        {
+          "id": "mock-app-info",
+          "label": "Mock App Info",
+          "target": "mock-app.info"
+        }
+      ],
+      "compatibility_enforced": false,
+      "compatibility": []
+    },
+    {
+      "id": "mock-tool",
+      "display_name": "Mock Tool",
+      "supports": {
+        "os_families": [
+          "ubuntu"
+        ]
+      },
+      "conflicts_with": [],
+      "installable": true,
+      "installable_os_families": [
+        "ubuntu"
+      ],
+      "actions": [],
+      "compatibility_enforced": false,
+      "compatibility": []
+    },
+    {
+      "id": "mock-win-app",
+      "display_name": "Mock Windows App",
+      "supports": {
+        "os_families": [
+          "windows"
+        ]
+      },
+      "conflicts_with": [],
+      "installable": true,
+      "installable_os_families": [
+        "windows"
+      ],
+      "actions": [],
+      "compatibility_enforced": false,
+      "compatibility": []
+    },
+    {
+      "id": "mock-win-state",
+      "display_name": "Mock Windows State App",
+      "supports": {
+        "os_families": [
+          "windows"
+        ]
+      },
+      "conflicts_with": [],
+      "installable": true,
+      "installable_os_families": [
+        "windows"
+      ],
+      "actions": [],
+      "compatibility_enforced": false,
+      "compatibility": []
+    }
+  ]
+}

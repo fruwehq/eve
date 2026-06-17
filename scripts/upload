@@ -1,105 +1,165 @@
-#!/usr/bin/env bash
-# Upload selected ./upload entries to a remote instance via instance-ssh / --scp.
-# Skips files that already exist remotely.
-set -euo pipefail
+#!/usr/bin/env python3
+"""Upload selected ./upload entries to a remote instance via instance-ssh / --scp.
 
-INSTANCE_NAME="${1:?Usage: scripts/upload <instance> [upload-name ...]}"
-shift || true
-cd "$(git rev-parse --show-toplevel)"
+Skips files that already exist remotely.
+Usage: scripts/upload <instance> [upload-name ...]
+"""
+from __future__ import annotations
 
-UPLOAD_DIR="${EVE_UPLOAD_DIR:-./upload}"
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
 
-if [ ! -d "$UPLOAD_DIR" ]; then
-  printf '%s\n' "No upload directory found. Skipping upload."
-  exit 0
-fi
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
-RESOLVED_ENV=$(./scripts/profile-resolve --profile "$INSTANCE_NAME" --emit env)
-OS_FAMILY=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^OS_FAMILY=/{print $2}')
+from eve_sdk.tf_dispatch import repo_root, resolve_env  # noqa: E402
 
-selected_paths=()
-if [ "$#" -gt 0 ]; then
-  for upload_name in "$@"; do
-    case "$upload_name" in
-      ""|.|..|*/*|*\\*|*[[:space:]]*)
-        printf 'upload: invalid upload name: %s\n' "$upload_name" >&2
-        exit 2
-        ;;
-    esac
-    if [ ! -d "$UPLOAD_DIR/$upload_name" ]; then
-      printf 'upload: selected upload is not a direct folder under upload: %s\n' "$upload_name" >&2
-      exit 2
-    fi
-    selected_paths+=("$UPLOAD_DIR/$upload_name")
-  done
-else
-  selected_paths=("$UPLOAD_DIR")
-fi
+_DEVNULL = subprocess.DEVNULL
+# Bash `'\"'$x'\"'` concatenation yields single-quote, double-quote, single-quote
+# around the value; reproduce those exact bytes for the remote PowerShell input.
+_Q = "'" + '"' + "'"
 
-upload_files() {
-  find "$@" -type f ! -name '.gitkeep'
-}
+_REMOTE_UPLOAD_DIR = "C:\\Users\\Administrator\\upload"
+_REMOTE_DESKTOP_DIR = "C:\\Users\\Administrator\\Desktop\\upload"
 
-shell_quote() {
-  printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
-}
 
-upload_windows() {
-  local remote_upload_dir remote_desktop_dir
-  remote_upload_dir='C:\Users\Administrator\upload'
-  remote_desktop_dir='C:\Users\Administrator\Desktop\upload'
+def _invalid_name(name: str) -> bool:
+    if name in ("", ".", ".."):
+        return True
+    if "/" in name or "\\" in name:
+        return True
+    return re.search(r"[ \t\n\r\f\v]", name) is not None
 
-  printf '%s\n' "Preparing remote upload folder..."
-  ./scripts/instance-ssh "$INSTANCE_NAME" -- "New-Item -ItemType Directory -Force '$remote_upload_dir' | Out-Null; if (!(Test-Path '$remote_desktop_dir')) { cmd /c mklink /J \"$remote_desktop_dir\" \"$remote_upload_dir\" >nul 2>&1 }"
 
-  upload_files "${selected_paths[@]}" | while IFS= read -r file; do
-    rel_path="${file#"$UPLOAD_DIR"/}"
-    rel_path_win=$(printf "%s" "$rel_path" | sed "s#/#\\\\\\\\#g")
-    rel_dir=$(dirname "$rel_path")
+def _shell_quote(value: str) -> str:
+    return "'" + value.replace("'", "'\\''") + "'"
 
-    if [ "$rel_dir" = "." ]; then
-      remote_dir="C:\\Users\\Administrator\\upload"
-    else
-      rel_dir_win=$(printf "%s" "$rel_dir" | sed "s#/#\\\\\\\\#g")
-      remote_dir="C:\\Users\\Administrator\\upload\\$rel_dir_win"
-    fi
 
-    ./scripts/instance-ssh "$INSTANCE_NAME" -- "New-Item -ItemType Directory -Force '\"'$remote_dir'\"' | Out-Null"
+def _upload_files(paths: list[str]) -> list[str]:
+    result = subprocess.run(
+        ["find", *paths, "-type", "f", "!", "-name", ".gitkeep"],
+        capture_output=True, text=True, check=False,
+    )
+    if result.returncode != 0:
+        raise SystemExit(result.returncode)
+    return result.stdout.splitlines()
 
-    if ./scripts/instance-ssh "$INSTANCE_NAME" -- "if (Test-Path '\"'C:\\Users\\Administrator\\upload\\$rel_path_win'\"') { exit 0 } else { exit 1 }" >/dev/null 2>&1; then
-      printf "%s\n" "Skipping existing upload file: $rel_path"
-    else
-      printf "%s\n" "Uploading: $rel_path"
-      ./scripts/instance-ssh "$INSTANCE_NAME" --scp "$file" "C:/Users/Administrator/upload/$rel_path"
-    fi
-  done
-}
 
-upload_linux() {
-  printf '%s\n' "Preparing remote upload folder..."
-  ./scripts/instance-ssh "$INSTANCE_NAME" -- "mkdir -p ~/upload"
+def _upload_windows(ssh: str, instance: str, upload_dir: str, selected_paths: list[str]) -> int:
+    print("Preparing remote upload folder...")
+    prepare = (
+        f"New-Item -ItemType Directory -Force '{_REMOTE_UPLOAD_DIR}' | Out-Null; "
+        f"if (!(Test-Path '{_REMOTE_DESKTOP_DIR}')) "
+        f'{{ cmd /c mklink /J "{_REMOTE_DESKTOP_DIR}" "{_REMOTE_UPLOAD_DIR}" >nul 2>&1 }}'
+    )
+    result = subprocess.run([ssh, instance, "--", prepare], check=False)
+    if result.returncode != 0:
+        return result.returncode
 
-  upload_files "${selected_paths[@]}" | while IFS= read -r file; do
-    rel_path="${file#"$UPLOAD_DIR"/}"
-    rel_dir=$(dirname "$rel_path")
-    if [ "$rel_dir" != "." ]; then
-      ./scripts/instance-ssh "$INSTANCE_NAME" -- "mkdir -p ~/upload/$(shell_quote "$rel_dir")"
-    fi
+    prefix = upload_dir + "/"
+    for file in _upload_files(selected_paths):
+        rel_path = file[len(prefix):] if file.startswith(prefix) else file
+        rel_path_win = rel_path.replace("/", "\\\\")
+        rel_dir = os.path.dirname(rel_path) or "."
+        rel_dir_win = rel_dir.replace("/", "\\\\")
+        remote_dir = _REMOTE_UPLOAD_DIR if rel_dir == "." else f"{_REMOTE_UPLOAD_DIR}\\{rel_dir_win}"
 
-    if ./scripts/instance-ssh "$INSTANCE_NAME" -- "test -f ~/upload/$(shell_quote "$rel_path")" >/dev/null 2>&1; then
-      printf "%s\n" "Skipping existing upload file: $rel_path"
-    else
-      printf "%s\n" "Uploading: $rel_path"
-      ./scripts/instance-ssh "$INSTANCE_NAME" --scp "$file" "upload/$rel_path"
-    fi
-  done
-}
+        mkdir_cmd = f"New-Item -ItemType Directory -Force {_Q}{remote_dir}{_Q} | Out-Null"
+        result = subprocess.run([ssh, instance, "--", mkdir_cmd], check=False)
+        if result.returncode != 0:
+            return result.returncode
 
-case "$OS_FAMILY" in
-  windows) upload_windows ;;
-  ubuntu|linux) upload_linux ;;
-  *)
-    printf 'upload: unsupported OS family: %s\n' "$OS_FAMILY" >&2
-    exit 2
-    ;;
-esac
+        win_path = "C:\\Users\\Administrator\\upload\\" + rel_path_win
+        exist_cmd = f"if (Test-Path {_Q}{win_path}{_Q}) {{ exit 0 }} else {{ exit 1 }}"
+        result = subprocess.run(
+            [ssh, instance, "--", exist_cmd], stdout=_DEVNULL, stderr=_DEVNULL, check=False,
+        )
+        if result.returncode == 0:
+            print(f"Skipping existing upload file: {rel_path}")
+        else:
+            print(f"Uploading: {rel_path}")
+            result = subprocess.run(
+                [ssh, instance, "--scp", file, f"C:/Users/Administrator/upload/{rel_path}"],
+                check=False,
+            )
+            if result.returncode != 0:
+                return result.returncode
+    return 0
+
+
+def _upload_linux(ssh: str, instance: str, upload_dir: str, selected_paths: list[str]) -> int:
+    print("Preparing remote upload folder...")
+    result = subprocess.run([ssh, instance, "--", "mkdir -p ~/upload"], check=False)
+    if result.returncode != 0:
+        return result.returncode
+
+    prefix = upload_dir + "/"
+    for file in _upload_files(selected_paths):
+        rel_path = file[len(prefix):] if file.startswith(prefix) else file
+        rel_dir = os.path.dirname(rel_path) or "."
+        if rel_dir != ".":
+            mkdir_cmd = f"mkdir -p ~/upload/{_shell_quote(rel_dir)}"
+            result = subprocess.run([ssh, instance, "--", mkdir_cmd], check=False)
+            if result.returncode != 0:
+                return result.returncode
+
+        exist_cmd = f"test -f ~/upload/{_shell_quote(rel_path)}"
+        result = subprocess.run(
+            [ssh, instance, "--", exist_cmd], stdout=_DEVNULL, stderr=_DEVNULL, check=False,
+        )
+        if result.returncode == 0:
+            print(f"Skipping existing upload file: {rel_path}")
+        else:
+            print(f"Uploading: {rel_path}")
+            result = subprocess.run(
+                [ssh, instance, "--scp", file, f"upload/{rel_path}"], check=False,
+            )
+            if result.returncode != 0:
+                return result.returncode
+    return 0
+
+
+def main(argv: list[str]) -> int:
+    instance = argv[0] if argv else ""
+    if not instance:
+        print("Usage: scripts/upload <instance> [upload-name ...]", file=sys.stderr)
+        return 2
+    root = repo_root()
+    upload_dir = os.environ.get("EVE_UPLOAD_DIR", "./upload")
+
+    if not Path(upload_dir).is_dir():
+        print("No upload directory found. Skipping upload.")
+        return 0
+
+    os_family = resolve_env(root, instance).get("OS_FAMILY", "")
+
+    if len(argv) > 1:
+        selected_paths: list[str] = []
+        for name in argv[1:]:
+            if _invalid_name(name):
+                print(f"upload: invalid upload name: {name}", file=sys.stderr)
+                return 2
+            if not Path(f"{upload_dir}/{name}").is_dir():
+                print(
+                    f"upload: selected upload is not a direct folder under upload: {name}",
+                    file=sys.stderr,
+                )
+                return 2
+            selected_paths.append(f"{upload_dir}/{name}")
+    else:
+        selected_paths = [upload_dir]
+
+    ssh = str(ROOT / "scripts/instance-ssh")
+    if os_family == "windows":
+        return _upload_windows(ssh, instance, upload_dir, selected_paths)
+    if os_family in ("ubuntu", "linux"):
+        return _upload_linux(ssh, instance, upload_dir, selected_paths)
+    print(f"upload: unsupported OS family: {os_family}", file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

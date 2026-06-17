@@ -15,7 +15,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from eve_sdk.plugin_manifest import PluginManifest
+from eve_sdk.plugin_manifest import PluginManifest  # noqa: E402
 
 CACHE_FILE = ROOT / ".generated" / "cache" / "plugin-list.json"
 

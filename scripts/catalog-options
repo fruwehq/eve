@@ -9,178 +9,22 @@ import sys
 from pathlib import Path
 from typing import Any
 
-import yaml
-
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from eve_sdk.plugin_manifest import PluginManifest
-from eve_sdk.workdir import Workdir
-
-CATALOG_SECTIONS = {
-    "machines": "name",
-    "oses": "id",
-    "inits": "id",
-    "bundles": "id",
-    "packages": "id",
-    "locations": "name",
-}
-
-
-def load_any(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        return {}
-    loaded = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    if not isinstance(loaded, dict):
-        raise ValueError(f"{path}: expected a mapping")
-    return loaded
-
-
-def merge_entries(target: list[dict[str, Any]], entries: Any, key: str) -> None:
-    if not isinstance(entries, list):
-        return
-    for entry in entries:
-        if not isinstance(entry, dict):
-            continue
-        entry_id = entry.get(key)
-        if entry_id is None or str(entry_id) == "":
-            continue
-        for index, candidate in enumerate(target):
-            if candidate.get(key) == entry_id:
-                target[index] = entry
-                break
-        else:
-            target.append(entry)
-
-
-def os_available_for_provider(os_entry: dict[str, Any], provider: str) -> bool:
-    match provider:
-        case "aws":
-            return any(key in os_entry for key in ("aws_ami_name_pattern", "aws_ami_id", "aws_ssm_parameter"))
-        case "gcp":
-            return "gcp_image_project" in os_entry and "gcp_image_family" in os_entry
-        case "vultr":
-            return "vultr_os_id" in os_entry
-        case "local-qemu":
-            return "cloud_image_url" in os_entry
-        case "truenas":
-            return "cloud_image_url" in os_entry
-        case "raspberry-pi":
-            return "metal_image" in os_entry
-        case _:
-            return False
-
-
-def init_available_for_provider(init: dict[str, Any], provider: str) -> bool:
-    providers = init.get("providers") if isinstance(init.get("providers"), list) else []
-    if providers:
-        return provider in providers
-    return init.get("provider") is None or init.get("provider") == provider
-
-
-def load_catalog() -> dict[str, list[dict[str, Any]]]:
-    catalog: dict[str, list[dict[str, Any]]] = {section: [] for section in CATALOG_SECTIONS}
-    for path in (Workdir.repo_root() / "config/catalog.yaml", Workdir.repo_root() / "config/catalog.local.yaml"):
-        doc = load_any(path)
-        for section, key in CATALOG_SECTIONS.items():
-            merge_entries(catalog[section], doc.get(section), key)
-    return catalog
+from eve_sdk.catalog import load_catalog  # noqa: E402
+from eve_sdk.catalog_view import build_catalog_options  # noqa: E402
+from eve_sdk.plugin_manifest import PluginManifest  # noqa: E402
 
 
 def build_doc() -> dict[str, Any]:
-    catalog = load_catalog()
-    package_plugins = PluginManifest.load_all("package")
-    package_plugin_by_id = {plugin["id"]: plugin for plugin in package_plugins}
-    providers = sorted({machine.get("provider") for machine in catalog["machines"] if machine.get("provider")})
-    platforms: list[dict[str, Any]] = []
-
-    for machine in catalog["machines"]:
-        provider = machine.get("provider")
-        if not provider:
-            continue
-        for os_entry in catalog["oses"]:
-            supports = machine.get("supports") if isinstance(machine.get("supports"), dict) else {}
-            arches = supports.get("arches") if isinstance(supports.get("arches"), list) else []
-            os_ids = supports.get("os_ids") if isinstance(supports.get("os_ids"), list) else []
-            if arches and os_entry.get("arch") not in arches:
-                continue
-            if os_ids and os_entry.get("id") not in os_ids:
-                continue
-            if not os_available_for_provider(os_entry, provider):
-                continue
-            for init in catalog["inits"]:
-                if init.get("os_family") and init.get("os_family") != os_entry.get("family"):
-                    continue
-                if not init_available_for_provider(init, provider):
-                    continue
-                for location in catalog["locations"]:
-                    if not location.get(provider):
-                        continue
-                    defaults = machine.get("defaults") if isinstance(machine.get("defaults"), dict) else {}
-                    platforms.append(
-                        {
-                            "id": ":".join(
-                                [
-                                    str(provider),
-                                    str(machine.get("name")),
-                                    str(os_entry.get("id")),
-                                    str(init.get("id")),
-                                    str(location.get("name")),
-                                ]
-                            ),
-                            "provider": provider,
-                            "machine": machine.get("name"),
-                            "os": os_entry.get("id"),
-                            "os_family": os_entry.get("family"),
-                            "os_version": os_entry.get("version"),
-                            "arch": os_entry.get("arch"),
-                            "init": init.get("id"),
-                            "location": location.get("name"),
-                            "defaults": defaults,
-                        }
-                    )
-
-    bundles = [
-        {"id": bundle.get("id"), "includes": bundle.get("includes") if isinstance(bundle.get("includes"), list) else []}
-        for bundle in catalog["bundles"]
-    ]
-
-    packages = []
-    for package in catalog["packages"]:
-        plugin = package_plugin_by_id.get(package.get("id"), {})
-        supports = plugin.get("supports") if isinstance(plugin.get("supports"), dict) else {}
-        actions = plugin.get("actions") if isinstance(plugin.get("actions"), list) else []
-        compatibility = plugin.get("compatibility") if isinstance(plugin.get("compatibility"), list) else []
-        install = plugin.get("install") if isinstance(plugin.get("install"), dict) else None
-        packages.append(
-            {
-                "id": package.get("id"),
-                "display_name": plugin.get("display_name") or package.get("id"),
-                "supports": supports,
-                "conflicts_with": plugin.get("conflicts_with") if isinstance(plugin.get("conflicts_with"), list) else [],
-                "installable": install is not None,
-                "installable_os_families": list(install.keys()) if install else [],
-                "actions": actions,
-                "compatibility_enforced": plugin.get("compatibility_enforced") is True,
-                "compatibility": compatibility,
-            }
-        )
-
-    return {
-        "providers": providers,
-        "platforms": sorted(
-            platforms,
-            key=lambda platform: (
-                str(platform["provider"]),
-                str(platform["machine"]),
-                str(platform["os"]),
-                str(platform["location"]),
-                str(platform["init"]),
-            ),
-        ),
-        "bundles": sorted(bundles, key=lambda bundle: str(bundle.get("id"))),
-        "packages": sorted(packages, key=lambda package: str(package.get("id"))),
-    }
+    # Cold path: parse fresh, then delegate to the shared assembly the warm Engine
+    # also uses (eve_sdk.catalog_view.build_catalog_options) for byte-identical output.
+    return build_catalog_options(
+        load_catalog(),
+        PluginManifest.load_all("provider"),
+        PluginManifest.load_all("package"),
+    )
 
 
 def parser() -> argparse.ArgumentParser:
@@ -206,7 +50,10 @@ def main() -> int:
         print()
         print("PLATFORMS")
         for platform in doc["platforms"]:
-            print(f"  {platform['provider']} {platform['machine']} {platform['os']} {platform['location']} {platform['init']}")
+            print(
+                f"  {platform['provider']} {platform['machine']} {platform['os']} "
+                f"{platform['location']} {platform['init']}"
+            )
     return 0
 
 

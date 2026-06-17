@@ -1,68 +1,100 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/usr/bin/env python3
+"""Run terraform init for a profile's stacks.
 
-# Run terraform init for a profile's stacks.
-# Usage: scripts/tf-init <instance>
+Usage: scripts/tf-init <instance>
+"""
 
-PROFILE="${1:?Usage: scripts/tf-init <instance>}"
-cd "$(git rev-parse --show-toplevel)"
+from __future__ import annotations
 
-RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
-ENGINE=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^ENGINE=/{print $2}')
+import os
+import subprocess
+import sys
+from pathlib import Path
 
-if [ "$ENGINE" != "terraform" ]; then
-  echo "[tf-init] no-op for engine=$ENGINE"
-  exit 0
-fi
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
-TAGS=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^STACK_TAGS=/{print $2}')
-echo "[tf-init] profile=$PROFILE tags=$TAGS"
+from eve_sdk.tf_dispatch import apply_tf_env, quote_arg, repo_root, resolve_env  # noqa: E402
 
-run_step() {
-  if [ "${EVE_TF_PRINT:-0}" = "1" ]; then
-    printf '[tf-init] would run:'
-    printf ' %q' "$@"
-    printf '\n'
+
+def main(argv: list[str]) -> int:
+    profile = argv[0] if argv else ""
+    if not profile:
+        print("Usage: scripts/tf-init <instance>", file=sys.stderr)
+        return 2
+    root = repo_root()
+
+    resolved = resolve_env(root, profile)
+    engine = resolved.get("ENGINE", "")
+    if engine != "terraform":
+        print(f"[tf-init] no-op for engine={engine}")
+        return 0
+
+    tags = resolved.get("STACK_TAGS", "")
+    print(f"[tf-init] profile={profile} tags={tags}")
+
+    print_mode = os.environ.get("EVE_TF_PRINT") == "1"
+
+    def run_step(cmd: list[str]) -> int:
+        if print_mode:
+            print("[tf-init] would run: " + " ".join(quote_arg(a) for a in cmd))
+            return 0
+        rc = subprocess.run(cmd, cwd=root).returncode
+        if rc != 0:
+            raise SystemExit(rc)
+        return rc
+
+    if not print_mode:
+        rc = subprocess.run(["terramate", "generate"], cwd=root).returncode
+        if rc != 0:
+            return rc
+
+    apply_tf_env(root, profile)
+
+    init_args = ["terraform", "init", "-reconfigure"]
+    tm_args = [
+        "--disable-safeguards=git-untracked",
+        "--disable-safeguards=git-uncommitted",
+        "--disable-safeguards=git-out-of-sync",
+        "--disable-safeguards=outdated-code",
+        f"--tags={tags}",
+    ]
+
+    instance = os.environ.get("EVE_INSTANCE_NAME", "")
+    if instance:
+        state_base = os.environ.get("EVE_TF_STATE_BASE", "")
+        data_base = os.environ.get("EVE_TF_DATA_BASE", "")
+        if not state_base:
+            print("tf-env did not set EVE_TF_STATE_BASE", file=sys.stderr)
+            return 1
+        if not data_base:
+            print("tf-env did not set EVE_TF_DATA_BASE", file=sys.stderr)
+            return 1
+        if not print_mode:
+            Path(state_base).mkdir(parents=True, exist_ok=True)
+            Path(data_base).mkdir(parents=True, exist_ok=True)
+        tm_args.append("--eval")
+        init_args += [
+            f"-backend-config=path={state_base}/" + "${terramate.stack.path.relative}/default.tfstate",
+            f"-backend-config=workspace_dir={state_base}/" + "${terramate.stack.path.relative}/workspaces",
+        ]
+
+    run_step(["terramate", "run", *tm_args, "--", *init_args])
+
+    if instance:
+        cmd = ["terramate", "run", *tm_args, "--", "terraform", "workspace", "select",
+               "-or-create", instance]
+        if print_mode:
+            run_step(cmd)
+        else:
+            env = dict(os.environ)
+            env["TF_WORKSPACE"] = ""
+            rc = subprocess.run(cmd, cwd=root, env=env).returncode
+            if rc != 0:
+                return rc
+
     return 0
-  fi
-  "$@"
-}
 
-if [ "${EVE_TF_PRINT:-0}" != "1" ]; then
-  terramate generate
-fi
 
-eval "$(./scripts/tf-env "$PROFILE")"
-
-init_args=(terraform init -reconfigure)
-tm_args=(
-  --disable-safeguards=git-untracked
-  --disable-safeguards=git-uncommitted
-  --disable-safeguards=git-out-of-sync
-  --disable-safeguards=outdated-code
-  --tags="$TAGS"
-)
-
-# When in v3 INSTANCE= mode, ensure a dedicated workspace exists per stack so
-# subsequent plan/apply/destroy/output operations (which honor TF_WORKSPACE and
-# EVE_TF_DATA_BASE from tf-env) target isolated backend and data paths.
-# PROFILE= callers skip this and keep using the default compatibility paths.
-if [ -n "${EVE_INSTANCE_NAME:-}" ]; then
-  : "${EVE_TF_STATE_BASE:?tf-env did not set EVE_TF_STATE_BASE}"
-  : "${EVE_TF_DATA_BASE:?tf-env did not set EVE_TF_DATA_BASE}"
-  if [ "${EVE_TF_PRINT:-0}" != "1" ]; then
-    mkdir -p "$EVE_TF_STATE_BASE" "$EVE_TF_DATA_BASE"
-  fi
-  tm_args+=(--eval)
-  init_args+=(
-    "-backend-config=path=${EVE_TF_STATE_BASE}/\${terramate.stack.path.relative}/default.tfstate"
-    "-backend-config=workspace_dir=${EVE_TF_STATE_BASE}/\${terramate.stack.path.relative}/workspaces"
-  )
-fi
-
-run_step terramate run "${tm_args[@]}" -- "${init_args[@]}"
-
-if [ -n "${EVE_INSTANCE_NAME:-}" ]; then
-  TF_WORKSPACE="" run_step terramate run "${tm_args[@]}" -- \
-    terraform workspace select -or-create "$EVE_INSTANCE_NAME"
-fi
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

@@ -1,41 +1,66 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/usr/bin/env python3
+"""Run terraform plan for a profile's stacks.
 
-# Run terraform plan for a profile's stacks.
-# Usage: scripts/tf-plan <instance>
+Usage: scripts/tf-plan <instance>
+"""
 
-PROFILE="${1:?Usage: scripts/tf-plan <instance>}"
-cd "$(git rev-parse --show-toplevel)"
+from __future__ import annotations
 
-RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
-ENGINE=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^ENGINE=/{print $2}')
+import subprocess
+import sys
+from pathlib import Path
 
-if [ "$ENGINE" != "terraform" ]; then
-  echo "[tf-plan] not supported for engine=$ENGINE"
-  exit 1
-fi
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
-TAGS=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^STACK_TAGS=/{print $2}')
-echo "[tf-plan] profile=$PROFILE tags=$TAGS"
+from eve_sdk.tf_dispatch import apply_tf_env, repo_root, resolve_env  # noqa: E402
 
-terramate generate
 
-eval "$(./scripts/tf-env "$PROFILE")"
+def main(argv: list[str]) -> int:
+    profile = argv[0] if argv else ""
+    if not profile:
+        print("Usage: scripts/tf-plan <instance>", file=sys.stderr)
+        return 2
+    root = repo_root()
 
-FAIL=0
+    resolved = resolve_env(root, profile)
+    engine = resolved.get("ENGINE", "")
+    if engine != "terraform":
+        print(f"[tf-plan] not supported for engine={engine}")
+        return 1
 
-echo "  === Shared infrastructure ==="
-if ! terramate run --tags="$TAGS-shared" -- terraform plan; then
-  echo "  [FAIL] Shared plan failed." >&2
-  FAIL=1
-fi
+    tags = resolved.get("STACK_TAGS", "")
+    print(f"[tf-plan] profile={profile} tags={tags}")
 
-echo "  === Services ==="
-if ! terramate run --tags="$TAGS-services" -- terraform plan; then
-  echo "  [FAIL] Services plan failed. Apply shared first: make apply PROFILE=$PROFILE" >&2
-  FAIL=1
-fi
+    rc = subprocess.run(["terramate", "generate"], cwd=root).returncode
+    if rc != 0:
+        return rc
 
-if [ "$FAIL" -ne 0 ]; then
-  exit 1
-fi
+    apply_tf_env(root, profile)
+
+    fail = 0
+
+    print("  === Shared infrastructure ===")
+    rc = subprocess.run(
+        ["terramate", "run", f"--tags={tags}-shared", "--", "terraform", "plan"], cwd=root,
+    ).returncode
+    if rc != 0:
+        print("  [FAIL] Shared plan failed.", file=sys.stderr)
+        fail = 1
+
+    print("  === Services ===")
+    rc = subprocess.run(
+        ["terramate", "run", f"--tags={tags}-services", "--", "terraform", "plan"], cwd=root,
+    ).returncode
+    if rc != 0:
+        print(
+            f"  [FAIL] Services plan failed. Apply shared first: make apply PROFILE={profile}",
+            file=sys.stderr,
+        )
+        fail = 1
+
+    return 1 if fail else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

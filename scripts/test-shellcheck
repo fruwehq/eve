@@ -1,29 +1,56 @@
-#!/usr/bin/env bash
-# Run shellcheck on all shell scripts in the repo.
-# Skipped silently if shellcheck is not installed.
+#!/usr/bin/env python3
+"""Run shellcheck on all shell scripts in the repo.
 
-set -euo pipefail
-cd "$(git rev-parse --show-toplevel)"
+Skipped silently if shellcheck is not installed.
+"""
 
-if ! command -v shellcheck >/dev/null 2>&1; then
-  echo "  shellcheck not installed; skipping (brew install shellcheck)" >&2
-  exit 0
-fi
+from __future__ import annotations
 
-FILES=()
-while IFS= read -r f; do FILES+=("$f"); done < <(
-  find scripts -type f 2>/dev/null
-  find oses -path '*/provision/scripts/*' -type f -name '*.sh' 2>/dev/null
-  find plugins/providers -path '*/lib/*.sh' -type f 2>/dev/null
-)
+import shutil
+import subprocess
+import sys
+from pathlib import Path
 
-FAIL=0
-for f in "${FILES[@]}"; do
-  # Only check files with a bash/sh shebang
-  head -c 80 "$f" | grep -qE '^#!(/usr/bin/env (ba)?sh|/bin/(ba)?sh)' || continue
-  if ! shellcheck -x --source-path=SCRIPTDIR "$f"; then
-    FAIL=$((FAIL + 1))
-  fi
-done
+ROOT = Path(__file__).resolve().parents[1]
 
-[ "$FAIL" -eq 0 ]
+BASH_SHEBANGS = ("#!/usr/bin/env bash", "#!/usr/bin/env sh", "#!/bin/bash", "#!/bin/sh")
+
+
+def main() -> int:
+    if shutil.which("shellcheck") is None:
+        print("  shellcheck not installed; skipping (brew install shellcheck)", file=sys.stderr)
+        return 0
+
+    files: list[str] = []
+    for pattern in ["scripts", "oses", "plugins"]:
+        base = ROOT / pattern
+        if not base.exists():
+            continue
+        for p in sorted(base.rglob("*")):
+            if not p.is_file():
+                continue
+            if pattern == "oses" and not ("/provision/scripts/" in str(p) and p.suffix == ".sh"):
+                continue
+            if pattern == "plugins" and not ("/lib/" in str(p) and p.suffix == ".sh"):
+                continue
+            try:
+                first_line = p.read_text(encoding="utf-8", errors="replace")[:80]
+            except OSError:
+                continue
+            if any(first_line.startswith(s) for s in BASH_SHEBANGS):
+                files.append(str(p))
+
+    fail = 0
+    for f in files:
+        code = subprocess.run(
+            ["shellcheck", "-x", "--source-path=SCRIPTDIR", f],
+            cwd=str(ROOT), check=False,
+        ).returncode
+        if code != 0:
+            fail += 1
+
+    return 1 if fail else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

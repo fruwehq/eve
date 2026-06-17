@@ -1,0 +1,23 @@
+api_version: eve.plugin/v1
+kind: package
+id: mock-app
+display_name: Mock App
+commands:
+  install: {exec: commands/ubuntu/install, args: [mock-app]}
+  status: {exec: commands/ubuntu/status, args: [mock-app]}
+  down: {exec: commands/ubuntu/down, args: [mock-app]}
+supports: {os_families: [ubuntu]}
+down: {destructive: false}
+env: []
+bundles:
+  - id: mock-dev
+    includes: [mock-app]
+actions:
+  - id: mock-app-info
+    label: Mock App Info
+    target: mock-app.info
+install:
+  ubuntu:
+    steps:
+      - base.sh
+      - provision/ubuntu/mock-app.sh

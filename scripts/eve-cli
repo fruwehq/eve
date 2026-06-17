@@ -1,0 +1,687 @@
+#!/usr/bin/env python3
+"""eve — the gcloud-style CLI tree for instance/platform management.
+
+A single human-facing entrypoint with argparse subparser groups that dispatches
+to the EXISTING scripts under ``scripts/``. Each verb maps 1:1 to a Make
+user-target (see the Makefile ``## help`` annotations); the Make targets stay
+working as thin aliases over the same scripts. This CLI is an additive,
+parallel surface — it wraps, never rewrites.
+
+The arg->script translation is factored into ``build_command``, a PURE function
+(no execution, no side effects beyond bad-input validation) so it can be
+unit-tested without instances, clouds, or network. ``main`` parses argv, builds
+the underlying command vector, and execs it with inherited stdin/stdout/stderr,
+preserving the wrapped script's exit code.
+
+``eve batch`` (v4.0 Phase 5) loads ONE warm Engine and runs N ops from stdin
+(one per line) or ``--file``, reusing the single memoized parse across every
+op. Read-only verbs (catalog/plugin/instance reads) are dispatched in-process
+through the Engine; mutating verbs fall back to the underlying script subprocess
+so an N-op batch parses catalog/plugins exactly once for the read portion.
+
+Usage:
+  eve <group> <verb> [args...]
+  eve <group> --help
+  eve --help
+  eve                   # no args (or `eve tui`) opens the Textual TUI
+  eve batch [--file <path>]   # read ops from stdin or --file, one per line
+
+Groups: instance, package, provider, bundle, plugin, catalog, config,
+        doctor, tui, pull, batch
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import shlex
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+# Verbs routed through ``scripts/instance-run <target> <instance>``.
+# CLI verb -> instance-run target.
+_INSTANCE_RUN_TARGETS: dict[str, str] = {
+    "up": "up",
+    "down": "down",
+    "start": "start",
+    "stop": "stop",
+    "ssh": "ssh",
+    "ip": "ip",
+    "reboot": "reboot",
+    "logs": "logs",
+    "info": "info",
+    "env": "env",
+    "validate": "validate",
+    "show-password": "show-password",
+    "ssh-wait": "ssh.wait",
+    "provision-wait": "provision.wait",
+    "provision-clear": "provision.clear-state",
+}
+
+# ``eve instance create`` optional flags (argparse dest -> script flag).
+_CREATE_FLAGS: list[tuple[str, str]] = [
+    ("machine", "--machine"),
+    ("os", "--os"),
+    ("location", "--location"),
+    ("init", "--init"),
+    ("provider_host", "--provider-host"),
+    ("provider_ip", "--provider-ip"),
+    ("bundles", "--bundles"),
+    ("packages", "--packages"),
+    ("disk_gb", "--disk-gb"),
+    ("memory_mb", "--memory-mb"),
+    ("cpu_cores", "--cpu-cores"),
+    ("vcpus", "--vcpus"),
+    ("instance_type", "--instance-type"),
+    ("root_volume_type", "--root-volume-type"),
+    ("plan", "--plan"),
+]
+
+# Single-action groups (top-level command, no nested <verb>).
+_SINGLE_ACTION_GROUPS = frozenset({"pull", "doctor", "tui"})
+
+
+def _opt_pairs(ns: argparse.Namespace, table: list[tuple[str, str]]) -> list[str]:
+    """Build ``--flag value`` pairs for non-None attributes listed in ``table``."""
+    out: list[str] = []
+    for attr, flag in table:
+        val = getattr(ns, attr, None)
+        if val is not None:
+            out += [flag, str(val)]
+    return out
+
+
+def _bool_flags(ns: argparse.Namespace, mapping: list[tuple[str, str]]) -> list[str]:
+    """Append each flag whose boolean attribute is truthy."""
+    out: list[str] = []
+    for attr, flag in mapping:
+        if getattr(ns, attr, False):
+            out.append(flag)
+    return out
+
+
+def build_command(ns: argparse.Namespace) -> list[str]:
+    """Translate a parsed eve-cli namespace into the underlying script argv.
+
+    Pure: returns the command vector relative to the repo root
+    (e.g. ``["scripts/instance-run", "up", "dev-a"]``) WITHOUT executing it.
+    Raises ``SystemExit(2)`` on bad input combinations (mirrors the
+    ``eve_sdk.remote_launch`` builder convention).
+    """
+    group = ns.group
+    if group in _SINGLE_ACTION_GROUPS:
+        return _single_action(group, ns)
+    verb = ns.verb
+    if group == "instance":
+        return _instance_cmd(verb, ns)
+    if group == "package":
+        return _package_cmd(verb, ns)
+    if group == "provider":
+        return _provider_cmd(verb, ns)
+    if group == "bundle":
+        return _bundle_cmd(verb, ns)
+    if group == "plugin":
+        return _plugin_cmd(verb, ns)
+    if group == "catalog":
+        cmd = ["scripts/catalog-options"]
+        if getattr(ns, "json", False):
+            cmd.append("--json")
+        return cmd
+    if group == "config":
+        return _config_cmd(verb, ns)
+    raise SystemExit(2)
+
+
+def _single_action(group: str, ns: argparse.Namespace) -> list[str]:
+    if group == "pull":
+        cmd = ["scripts/plugins-pull"]
+        if getattr(ns, "frozen", False):
+            cmd.append("--frozen")
+        if getattr(ns, "if_stale", None) is not None:
+            cmd += ["--if-stale", str(ns.if_stale)]
+        return cmd
+    if group == "doctor":
+        cmd = ["scripts/doctor"]
+        if getattr(ns, "json", False):
+            cmd.append("--json")
+        return cmd
+    return ["scripts/eve-tui"]
+
+
+def _instance_cmd(verb: str | None, ns: argparse.Namespace) -> list[str]:
+    instance = getattr(ns, "instance", "")
+    if verb in _INSTANCE_RUN_TARGETS:
+        return ["scripts/instance-run", _INSTANCE_RUN_TARGETS[verb], instance]
+    if verb == "create":
+        return ["scripts/instance-create", "--instance", instance, *_opt_pairs(ns, _CREATE_FLAGS)]
+    if verb == "list":
+        cmd = ["scripts/instance-list"]
+        if getattr(ns, "json", False):
+            cmd.append("--json")
+        return cmd
+    if verb == "status":
+        cmd = ["scripts/instance-status", "--instance", instance]
+        if getattr(ns, "json", False):
+            cmd.append("--json")
+        return cmd
+    if verb == "provision":
+        return ["scripts/instance-provision", "--instance", instance,
+                *_bool_flags(ns, [("force", "--force")])]
+    if verb == "delete":
+        return ["scripts/instance-delete", "--instance", instance,
+                *_bool_flags(ns, [("purge", "--purge"), ("force", "--force")])]
+    if verb == "observe":
+        cmd = ["scripts/instance-observe", "--instance", instance]
+        ttl = getattr(ns, "ttl", None)
+        if ttl is not None:
+            cmd += ["--ttl", str(ttl)]
+        return cmd
+    if verb == "state":
+        return ["scripts/instance-state", "--instance", instance, "--get"]
+    if verb == "recover":
+        return ["scripts/instance-state", "--instance", instance, "--recover-running"]
+    if verb == "view":
+        return ["scripts/instance-view", "--instance", instance]
+    if verb == "paths":
+        cmd = ["scripts/instance-paths", "--instance", instance]
+        emit = getattr(ns, "emit", None)
+        if emit is not None:
+            cmd += ["--emit", emit]
+        return cmd
+    raise SystemExit(2)
+
+
+def _package_cmd(verb: str | None, ns: argparse.Namespace) -> list[str]:
+    instance = getattr(ns, "instance", "")
+    package = getattr(ns, "package", None)
+    if verb == "list":
+        cmd = ["scripts/package-list", "--instance", instance]
+        if getattr(ns, "json", False):
+            cmd.append("--json")
+        return cmd
+    if verb in {"select", "unselect"}:
+        op = "--add" if verb == "select" else "--remove"
+        return ["scripts/package-selection", "--instance", instance, "--package", package, op]
+    if verb in {"install", "status", "down", "reinstall"}:
+        cmd = ["scripts/package-dispatch", "--instance", instance,
+               "--package", package, "--command", verb]
+        if verb in {"down", "reinstall"} and getattr(ns, "yes", False):
+            cmd.append("--yes")
+        return cmd
+    if verb == "action":
+        return ["scripts/package-action", "--instance", instance,
+                "--package", package, "--action", getattr(ns, "action", "")]
+    if verb == "provision":
+        return ["scripts/instance-provision", "--instance", instance,
+                *_bool_flags(ns, [("force", "--force")])]
+    if verb == "verify":
+        cmd = ["scripts/package-verify", "--instance", instance]
+        if package is not None:
+            cmd += ["--package", package]
+        return cmd
+    raise SystemExit(2)
+
+
+def _provider_cmd(verb: str | None, ns: argparse.Namespace) -> list[str]:
+    if verb == "list":
+        cmd = ["scripts/plugin-list", "--kind", "provider"]
+        if getattr(ns, "json", False):
+            cmd.append("--json")
+        return cmd
+    if verb == "status":
+        return ["scripts/provider-dispatch", "--instance", getattr(ns, "instance", ""),
+                "--command", "status"]
+    if verb == "action":
+        instance = getattr(ns, "instance", None)
+        provider = getattr(ns, "provider", None)
+        if instance and provider:
+            print("eve provider action: pass either --provider or INSTANCE, not both",
+                  file=sys.stderr)
+            raise SystemExit(2)
+        if not instance and not provider:
+            print("eve provider action: --provider <id> or INSTANCE <name> is required",
+                  file=sys.stderr)
+            raise SystemExit(2)
+        cmd = ["scripts/provider-dispatch"]
+        if provider:
+            cmd += ["--provider", provider]
+        else:
+            cmd += ["--instance", instance]
+        return [*cmd, "--command", getattr(ns, "action", "")]
+    raise SystemExit(2)
+
+
+def _bundle_cmd(verb: str | None, ns: argparse.Namespace) -> list[str]:
+    if verb == "list":
+        cmd = ["scripts/catalog-options"]
+        if getattr(ns, "json", False):
+            cmd.append("--json")
+        return cmd
+    if verb in {"select", "unselect"}:
+        op = "--add" if verb == "select" else "--remove"
+        return ["scripts/bundle-selection", "--instance", getattr(ns, "instance", ""),
+                "--bundle", getattr(ns, "bundle", ""), op]
+    raise SystemExit(2)
+
+
+def _plugin_cmd(verb: str | None, ns: argparse.Namespace) -> list[str]:
+    if verb == "list":
+        cmd = ["scripts/plugin-list"]
+        kind = getattr(ns, "kind", None)
+        if kind:
+            cmd += ["--kind", kind]
+        if getattr(ns, "json", False):
+            cmd.append("--json")
+        return cmd
+    if verb == "validate":
+        return ["scripts/plugin-list", "--validate"]
+    if verb == "sync":
+        return ["scripts/plugins-sync"]
+    if verb == "test":
+        cmd = ["scripts/plugin-test", getattr(ns, "plugin_path", "")]
+        if getattr(ns, "json", False):
+            cmd.append("--json")
+        return cmd
+    raise SystemExit(2)
+
+
+def _config_cmd(verb: str | None, ns: argparse.Namespace) -> list[str]:
+    if verb == "get":
+        return ["scripts/config-env", "--json"]
+    if verb == "list":
+        return ["scripts/config-env", "--shell"]
+    if verb == "set":
+        cmd = ["scripts/config-save", getattr(ns, "section", ""), getattr(ns, "field", "")]
+        value = getattr(ns, "value", None)
+        if value is not None:
+            cmd.append(value)
+        return cmd
+    if verb == "unset":
+        return ["scripts/config-save", "--unset", getattr(ns, "section", ""),
+                getattr(ns, "field", "")]
+    raise SystemExit(2)
+
+
+# ============================ batch / session mode ========================= #
+# v4.0 Phase 5: load ONE warm Engine and stream N ops through it. Read-only
+# verbs run in-process via the Engine (parse-once); mutating verbs fall back to
+# the underlying script subprocess so behavior stays identical to `eve <group>
+# <verb>` run by hand.
+
+# (group, verb) pairs the batch runner serves from the warm Engine directly.
+# Every entry avoids re-parsing catalog/plugins per op — the Phase 5 invariant.
+_WARM_BATCH_OPS: frozenset[tuple[str, str]] = frozenset({
+    ("catalog", "list"),
+    ("plugin", "list"),
+    ("instance", "list"),
+    ("instance", "view"),
+    ("instance", "statuses"),  # convenience alias for `instance-view --statuses`
+})
+
+
+def parse_batch_line(line: str) -> list[str]:
+    """Split one batch input line into tokens (PURE: no execution).
+
+    Shell-styles the line via ``shlex.split`` so quoted args survive. ``#`` starts
+    a comment to the end of line; blank/whitespace-only lines return ``[]``
+    (skipped by the runner).
+    """
+    stripped = line.strip()
+    if not stripped or stripped.startswith("#"):
+        return []
+    return shlex.split(stripped)
+
+
+def _run_warm_op(
+    engine: Any,
+    group: str,
+    verb: str | None,
+    tokens: list[str],
+    out: Any,
+) -> int:
+    """Dispatch a read-only (group, verb) through the warm Engine. Returns exit code."""
+    if group == "catalog" and verb == "list":
+        out(json.dumps(engine.catalog_options(), indent=2))
+        return 0
+    if group == "plugin" and verb == "list":
+        kind: str | None = None
+        if "--kind" in tokens:
+            idx = tokens.index("--kind")
+            if idx + 1 < len(tokens):
+                kind = tokens[idx + 1]
+        plugins = engine.plugin_list(kind=kind)
+        if "--json" in tokens:
+            out(json.dumps({"plugins": plugins}, indent=2))
+        else:
+            for plugin in plugins:
+                out(f"{plugin.get('kind', '-'):<10} {plugin.get('id', '-'):<24} "
+                    f"{plugin.get('display_name', '-')}")
+        return 0
+    if group == "instance" and verb == "list":
+        rows = engine.instance_rows()
+        if "--json" in tokens:
+            out(json.dumps({"instances": rows}, indent=2))
+        else:
+            for row in rows:
+                out(f"{row.get('name', '-'):<28} {row.get('machine', '-'):<32} "
+                    f"{row.get('os', '-'):<24} {row.get('location', '-')}")
+        return 0
+    if group == "instance" and verb == "view":
+        name = tokens[0] if tokens else ""
+        if not name:
+            print("eve batch: instance view requires an instance name", file=sys.stderr)
+            return 2
+        out(json.dumps(engine.instance_view(name), indent=2))
+        return 0
+    if group == "instance" and verb == "statuses":
+        out(json.dumps({"statuses": engine.instance_statuses()}, indent=2))
+        return 0
+    # Not a warm op — caller should fall back to subprocess.
+    return -1
+
+
+def run_batch(
+    lines: list[str],
+    *,
+    engine: Any | None = None,
+    out: Any = print,
+) -> int:
+    """Run a sequence of batch ops against a single warm Engine.
+
+    Returns the first non-zero exit code, or 0 if every op succeeded. Each line
+    is parsed by ``parse_batch_line``; warm (group, verb) pairs dispatch through
+    the Engine in-process, everything else falls back to the underlying script
+    (preserving today's `eve <group> <verb>` semantics). The Engine parses
+    catalog/plugins exactly once across the whole batch.
+    """
+    if engine is None:
+        from eve_sdk.engine import default_engine
+        engine = default_engine()
+    exit_code = 0
+    for raw in lines:
+        tokens = parse_batch_line(raw)
+        if not tokens:
+            continue
+        group, verb = tokens[0], (tokens[1] if len(tokens) > 1 else None)
+        if (group, verb) in _WARM_BATCH_OPS:
+            code = _run_warm_op(engine, group, verb, tokens[2:], out)
+            if code != -1:
+                if code != 0 and exit_code == 0:
+                    exit_code = code
+                continue
+        # Cold fallback: dispatch to the underlying script via build_command.
+        code = _exec_subprocess(tokens)
+        if code != 0 and exit_code == 0:
+            exit_code = code
+    return exit_code
+
+
+def _exec_subprocess(tokens: list[str]) -> int:
+    """Run a non-warm batch op as the underlying script subprocess."""
+    parser, _ = make_parser()
+    args = parser.parse_args(tokens)
+    if args.group is None:
+        return 2
+    try:
+        cmd = build_command(args)
+    except SystemExit as exit_err:
+        return int(exit_err.code) if isinstance(exit_err.code, int) else 2
+    return subprocess.run(cmd, cwd=str(ROOT), check=False).returncode
+
+
+# ============================ argparse tree =============================== #
+
+def _add_instance_subparser(verbs: argparse._SubParsersAction,
+                            verb: str, help_text: str) -> argparse.ArgumentParser:
+    parser = verbs.add_parser(verb, help=help_text)
+    parser.add_argument("instance", help="instance name")
+    return parser
+
+
+def make_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.ArgumentParser]]:
+    """Build the eve CLI parser tree. Returns ``(parser, group_parsers)``."""
+    parser = argparse.ArgumentParser(
+        prog="eve",
+        description="Eve — instance/platform management CLI.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="Run 'eve <group> --help' to list a group's verbs.",
+    )
+    groups = parser.add_subparsers(dest="group", metavar="<group>")
+    group_parsers: dict[str, argparse.ArgumentParser] = {}
+
+    # --- instance ---
+    inst = groups.add_parser("instance", help="manage concrete instances")
+    group_parsers["instance"] = inst
+    iv = inst.add_subparsers(dest="verb", metavar="<verb>")
+    _add_instance_subparser(iv, "up", "create and start provider resources")
+    _add_instance_subparser(iv, "down", "destroy provider resources")
+    _add_instance_subparser(iv, "start", "power on a stopped instance")
+    _add_instance_subparser(iv, "stop", "power off without destroying")
+    _add_instance_subparser(iv, "ssh", "SSH into the instance")
+    _add_instance_subparser(iv, "ssh-wait", "wait until SSH accepts connections")
+    _add_instance_subparser(iv, "ip", "print the instance IP")
+    _add_instance_subparser(iv, "reboot", "reboot the instance")
+    _add_instance_subparser(iv, "logs", "stream remote provisioning logs")
+    _add_instance_subparser(iv, "info", "resolved instance data as JSON")
+    _add_instance_subparser(iv, "env", "resolved instance data as env lines")
+    _add_instance_subparser(iv, "validate", "validate the resolved instance")
+    _add_instance_subparser(iv, "state", "print local orchestration state")
+    _add_instance_subparser(iv, "recover", "mark an interrupted running op as failed")
+    _add_instance_subparser(iv, "view", "emit the shared view object")
+    _add_instance_subparser(iv, "show-password", "display the default password (Windows)")
+    _add_instance_subparser(iv, "provision-wait", "wait until provisioning finishes")
+    _add_instance_subparser(iv, "provision-clear", "clear remote provision state/logs")
+    # status: positional instance + --json
+    p = iv.add_parser("status", help="combined status, state, packages, paths")
+    p.add_argument("instance", help="instance name")
+    p.add_argument("--json", action="store_true")
+    # observe: positional instance + --ttl
+    p = iv.add_parser("observe", help="refresh cached observed status/IP")
+    p.add_argument("instance", help="instance name")
+    p.add_argument("--ttl", type=int, default=None)
+    # paths: positional instance + --emit
+    p = iv.add_parser("paths", help="resolved local artifact paths")
+    p.add_argument("instance", help="instance name")
+    p.add_argument("--emit", choices=["env", "json"], default=None)
+    # provision: positional instance + --force
+    p = iv.add_parser("provision", help="converge provisioning")
+    p.add_argument("instance", help="instance name")
+    p.add_argument("--force", action="store_true")
+    # delete: positional instance + --purge/--force
+    p = iv.add_parser("delete", help="delete the local instance registry entry")
+    p.add_argument("instance", help="instance name")
+    p.add_argument("--purge", action="store_true")
+    p.add_argument("--force", action="store_true")
+    p = iv.add_parser("create", help="create a local instance registry entry")
+    p.add_argument("instance", help="instance name")
+    for flag in [
+        "--machine", "--os", "--location", "--init", "--provider-host", "--provider-ip",
+        "--bundles", "--packages", "--disk-gb", "--memory-mb", "--cpu-cores", "--vcpus",
+        "--instance-type", "--root-volume-type", "--plan",
+    ]:
+        p.add_argument(flag, default=None)
+    p = iv.add_parser("list", help="list local concrete instances")
+    p.add_argument("--json", action="store_true")
+
+    # --- package ---
+    pkg = groups.add_parser("package", help="manage instance package plugins")
+    group_parsers["package"] = pkg
+    pv = pkg.add_subparsers(dest="verb", metavar="<verb>")
+    p = pv.add_parser("list", help="list package plugins for an instance")
+    p.add_argument("instance", help="instance name")
+    p.add_argument("--json", action="store_true")
+    for verb, help_text in [
+        ("select", "add a package to the desired list"),
+        ("unselect", "remove a package from the desired list"),
+    ]:
+        p = pv.add_parser(verb, help=help_text)
+        p.add_argument("instance", help="instance name")
+        p.add_argument("--package", required=True)
+    for verb, help_text in [
+        ("install", "install a package"),
+        ("status", "show package plugin status"),
+    ]:
+        p = pv.add_parser(verb, help=help_text)
+        p.add_argument("instance", help="instance name")
+        p.add_argument("--package", required=True)
+    for verb, help_text in [
+        ("down", "remove a package (destructive with --yes)"),
+        ("reinstall", "reinstall a package (destructive with --yes)"),
+    ]:
+        p = pv.add_parser(verb, help=help_text)
+        p.add_argument("instance", help="instance name")
+        p.add_argument("--package", required=True)
+        p.add_argument("--yes", action="store_true")
+    p = pv.add_parser("action", help="run a package-defined action")
+    p.add_argument("instance", help="instance name")
+    p.add_argument("--package", required=True)
+    p.add_argument("--action", required=True)
+    p = pv.add_parser("provision", help="converge provisioning for the instance")
+    p.add_argument("instance", help="instance name")
+    p.add_argument("--force", action="store_true")
+    p = pv.add_parser("verify", help="live smoke-check selected packages")
+    p.add_argument("instance", help="instance name")
+    p.add_argument("--package", default=None)
+
+    # --- provider ---
+    prov = groups.add_parser("provider", help="manage provider plugins")
+    group_parsers["provider"] = prov
+    rv = prov.add_subparsers(dest="verb", metavar="<verb>")
+    p = rv.add_parser("list", help="list provider plugins")
+    p.add_argument("--json", action="store_true")
+    p = rv.add_parser("status", help="show provider plugin status for an instance")
+    p.add_argument("instance", help="instance name")
+    p = rv.add_parser("action", help="run a provider-declared action")
+    p.add_argument("instance", help="instance name", nargs="?")
+    p.add_argument("--provider")
+    p.add_argument("--action", required=True)
+
+    # --- bundle ---
+    bnd = groups.add_parser("bundle", help="manage instance bundles")
+    group_parsers["bundle"] = bnd
+    bv = bnd.add_subparsers(dest="verb", metavar="<verb>")
+    p = bv.add_parser("list", help="list available catalog content (bundles)")
+    p.add_argument("--json", action="store_true")
+    for verb, help_text in [
+        ("select", "add a bundle to the desired list"),
+        ("unselect", "remove a bundle from the desired list"),
+    ]:
+        p = bv.add_parser(verb, help=help_text)
+        p.add_argument("instance", help="instance name")
+        p.add_argument("--bundle", required=True)
+
+    # --- plugin ---
+    plg = groups.add_parser("plugin", help="manage plugin manifests and sync")
+    group_parsers["plugin"] = plg
+    lv = plg.add_subparsers(dest="verb", metavar="<verb>")
+    p = lv.add_parser("list", help="list provider and package plugins")
+    p.add_argument("--kind", choices=["provider", "package"], default=None)
+    p.add_argument("--json", action="store_true")
+    lv.add_parser("validate", help="validate plugin manifests")
+    lv.add_parser("sync", help="download pinned external plugins")
+    p = lv.add_parser("test", help="validate a plugin against the contract")
+    p.add_argument("plugin_path", help="path to a plugin dir or eve-plugin.yaml")
+    p.add_argument("--json", action="store_true")
+
+    # --- catalog ---
+    cat = groups.add_parser("catalog", help="list catalog choices")
+    group_parsers["catalog"] = cat
+    cv = cat.add_subparsers(dest="verb", metavar="<verb>")
+    p = cv.add_parser("list", help="list provider/platform/content choices")
+    p.add_argument("--json", action="store_true")
+
+    # --- config ---
+    cfg = groups.add_parser("config", help="read/write structured preferences")
+    group_parsers["config"] = cfg
+    fv = cfg.add_subparsers(dest="verb", metavar="<verb>")
+    fv.add_parser("get", help="print merged config as JSON")
+    fv.add_parser("list", help="print merged config as shell exports")
+    p = fv.add_parser("set", help="persist a config field")
+    p.add_argument("section")
+    p.add_argument("field")
+    p.add_argument("value", nargs="?")
+    p = fv.add_parser("unset", help="clear a config field")
+    p.add_argument("section")
+    p.add_argument("field")
+
+    # --- doctor ---
+    doc = groups.add_parser("doctor", help="check local tools, plugins, providers")
+    group_parsers["doctor"] = doc
+    doc.add_argument("--json", action="store_true")
+
+    # --- batch (v4.0 Phase 5: warm session mode over stdin/--file) ---
+    batch = groups.add_parser(
+        "batch",
+        help="run N ops from stdin (or --file) against ONE warm Engine",
+    )
+    group_parsers["batch"] = batch
+    batch.add_argument(
+        "--file",
+        metavar="PATH",
+        default=None,
+        help="read batch ops from PATH instead of stdin (one op per line)",
+    )
+
+    # --- tui ---
+    group_parsers["tui"] = groups.add_parser("tui", help="open the Textual instance manager")
+
+    # --- pull ---
+    pull = groups.add_parser("pull", help="sync+resolve+lock external plugins")
+    group_parsers["pull"] = pull
+    pull.add_argument("--frozen", action="store_true",
+                      help="re-materialize locked SHAs without re-resolving")
+    pull.add_argument("--if-stale", type=float, metavar="TTL",
+                      help="skip if lockfile younger than TTL seconds")
+
+    return parser, group_parsers
+
+
+# ============================ entrypoint ================================== #
+
+def _exec(cmd: list[str]) -> int:
+    """Run the underlying script with inherited stdio; return its exit code."""
+    completed = subprocess.run(cmd, cwd=str(ROOT), check=False)
+    return completed.returncode
+
+
+def main(argv: list[str] | None = None) -> int:
+    if argv is None:
+        argv = sys.argv[1:]
+    # `eve` with no args opens the TUI (same as `eve tui`).
+    if not argv:
+        argv = ["tui"]
+
+    parser, group_parsers = make_parser()
+    args = parser.parse_args(argv)
+
+    if args.group is None:
+        parser.print_help()
+        return 0
+
+    # `eve batch` runs the warm session: read ops from stdin or --file and
+    # dispatch them through one Engine so an N-op batch parses once.
+    if args.group == "batch":
+        source = Path(args.file) if args.file else None
+        lines = (
+            source.read_text(encoding="utf-8").splitlines()
+            if source is not None
+            else sys.stdin.read().splitlines()
+        )
+        return run_batch(lines)
+
+    # Verb-based groups with no verb: print that group's help and exit cleanly.
+    if args.group not in _SINGLE_ACTION_GROUPS and args.verb is None:
+        group_parsers[args.group].print_help()
+        return 0
+
+    return _exec(build_command(args))
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,0 +1,6 @@
+#!/usr/bin/env python3
+import json, os, sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[5]))
+from eve_sdk.provider_command import dispatch
+raise SystemExit(dispatch(sys.argv[1:]))

@@ -1,0 +1,126 @@
+#!/usr/bin/env python3
+"""Pull external plugin sources: sync, pin to SHA, and write the lockfile.
+
+Backs `eve pull` (the gcloud-style CLI tree lands in Phase 4). Modes:
+- (default)        sync each source at its ref, resolve to SHA, write .eve/plugins.lock
+- --frozen         re-materialize the exact locked SHAs without re-resolving
+- --if-stale <ttl> no-op if the lockfile is younger than <ttl> seconds
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+import time
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from eve_sdk.plugin_manifest import CORE_VERSION, PluginManifest  # noqa: E402
+from eve_sdk.registry import (  # noqa: E402
+    LockedSource,
+    RegistryError,
+    Source,
+    load_sources,
+    lock_path,
+    read_lock,
+    sync,
+    write_lock,
+)
+from eve_sdk.resolver import (  # noqa: E402
+    ResolutionError,
+    candidate_from_manifest,
+    resolve,
+    version_from_ref,
+)
+from eve_sdk.workdir import Workdir  # noqa: E402
+
+
+def parser() -> argparse.ArgumentParser:
+    arg_parser = argparse.ArgumentParser(prog="scripts/plugins-pull", description=__doc__)
+    arg_parser.add_argument("--frozen", action="store_true", help="re-materialize locked SHAs without re-resolving")
+    arg_parser.add_argument("--if-stale", type=float, metavar="TTL", help="skip if lockfile younger than TTL seconds")
+    return arg_parser
+
+
+def _is_fresh(ttl: float) -> bool:
+    path = lock_path()
+    return path.exists() and (time.time() - path.stat().st_mtime) < ttl
+
+
+def main() -> int:
+    args = parser().parse_args()
+
+    if args.if_stale is not None and _is_fresh(args.if_stale):
+        print(f"plugins-pull: lockfile is fresh (< {args.if_stale}s); skipping")
+        return 0
+
+    try:
+        sources = load_sources()
+        if args.frozen:
+            locked = _frozen_sources(sources)
+            sync(locked)
+            print(f"plugins-pull: re-materialized {len(locked)} locked source(s)")
+        else:
+            locked = sync(sources)
+            resolved = _resolve_synced(sources)
+            write_lock(locked, resolved=resolved)
+            print(
+                f"plugins-pull: synced {len(locked)} source(s), resolved "
+                f"{len(resolved)} plugin(s) -> {lock_path()}"
+            )
+    except RegistryError as error:
+        print(f"plugins-pull: {error}", file=sys.stderr)
+        return 1
+    except ResolutionError as error:
+        print(f"plugins-pull: dependency resolution failed:\n{error}", file=sys.stderr)
+        return 1
+    return 0
+
+
+def _resolve_synced(sources: list[Source]) -> list[dict]:
+    """Build candidates from the synced manifests and run the resolver.
+
+    Plugin versions come from each source's pinned tag (`version_from_ref`).
+    Still-builtin plugin ids are exempt (Phase 3 extracts them into versioned
+    sources). Returns the resolved set as lockfile dicts.
+    """
+    plugins_dir = Workdir.plugins_dir()
+    # Builtin ids (the legacy in-repo plugins) are exempt from resolution. Scan the
+    # builtin root directly rather than via load_all() — load_all() dedups by
+    # kind:id and would raise on the synced sources' (legitimately) repeated ids.
+    builtin_root = Workdir.repo_root() / "plugins"
+    builtin_ids = frozenset(
+        PluginManifest.load(path)["id"]
+        for path in builtin_root.glob("**/eve-plugin.yaml")
+    ) if builtin_root.exists() else frozenset()
+    candidates = []
+    for source in sources:
+        version = version_from_ref(source.ref)
+        for manifest_path in sorted((plugins_dir / source.id).glob("**/eve-plugin.yaml")):
+            manifest = PluginManifest.load(manifest_path)
+            PluginManifest.validate(manifest)  # schema + requires.eve core gate at load
+            candidates.append(candidate_from_manifest(manifest, version, source_id=source.id))
+
+    resolved = resolve(candidates, CORE_VERSION, exempt_ids=builtin_ids)
+    return [
+        {"id": item.id, "version": item.version, "source_id": item.source_id, "required_by": list(item.required_by)}
+        for item in resolved
+    ]
+
+
+def _frozen_sources(sources: list[Source]) -> list[Source]:
+    """Build Sources pinned to the locked SHA (auth carried from the live sources)."""
+    auth_by_id = {source.id: source.auth for source in sources}
+    locked: list[LockedSource] = read_lock()
+    if not locked:
+        raise RegistryError("--frozen requires an existing .eve/plugins.lock")
+    return [
+        Source(id=item.id, url=item.url, subdir=item.subdir, ref=item.sha, auth=auth_by_id.get(item.id, "ssh"))
+        for item in locked
+    ]
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,0 +1,17 @@
+api_version: eve.plugin/v1
+kind: package
+id: mock-win-state
+display_name: Mock Windows State App
+commands:
+  install: {exec: ../mock-win-app/commands/windows/install, args: [mock-win-state]}
+  status: {exec: ../mock-win-app/commands/windows/status, args: [mock-win-state]}
+  down: {exec: ../mock-win-app/commands/windows/down, args: [mock-win-state]}
+supports: {os_families: [windows]}
+down: {destructive: false}
+env: []
+install:
+  windows:
+    steps:
+      - provision/windows/mock-win-state.ps1
+    state_files:
+      - env.json

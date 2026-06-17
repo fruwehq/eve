@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+"""List package plugins available to an instance.
+
+Cold entrypoint: parses fresh, then delegates the row assembly to the shared
+``eve_sdk.instance_view.build_package_rows`` (the same function the warm Engine
+uses), guaranteeing byte-identical output between cold and warm paths.
+"""
+
 from __future__ import annotations
 
 import json
@@ -10,49 +17,13 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from eve_sdk.dispatch import run_json, support_allowed  # noqa: E402
-from eve_sdk.workdir import Workdir  # noqa: E402
+from eve_sdk.instance_view import build_package_rows  # noqa: E402
+from eve_sdk.plugin_manifest import PluginManifest  # noqa: E402
+from eve_sdk.resolve import resolve_instance  # noqa: E402
 
 
 def usage() -> None:
     print("Usage:\n  scripts/package-list --instance <name> [--registry <path>] [--json]", file=sys.stderr)
-
-
-def compatibility_target(os_family: str, package_ids: list[str]) -> dict[str, str]:
-    if os_family == "windows":
-        return {"platform": "windows", "desktop": "Windows", "session": "Native"}
-    if os_family == "ubuntu" and "gnome-desktop-headless" in package_ids:
-        return {"platform": "ubuntu", "desktop": "GNOME Headless", "session": "Wayland"}
-    if os_family == "ubuntu" and "gnome-desktop" in package_ids:
-        return {"platform": "ubuntu", "desktop": "GNOME", "session": "Wayland"}
-    if os_family == "ubuntu" and "kde-desktop-headless" in package_ids:
-        return {"platform": "ubuntu", "desktop": "KDE Plasma Headless", "session": "Wayland"}
-    if os_family == "ubuntu" and "kde-desktop" in package_ids:
-        return {"platform": "ubuntu", "desktop": "KDE Plasma", "session": "Wayland"}
-    if os_family == "ubuntu" and "xfce-desktop-headless" in package_ids:
-        return {"platform": "ubuntu", "desktop": "XFCE Headless", "session": "X11"}
-    if os_family == "ubuntu":
-        return {"platform": "ubuntu", "desktop": "XFCE", "session": "X11"}
-    return {"platform": os_family, "desktop": "", "session": ""}
-
-
-def compatibility_match(plugin: dict[str, Any], target: dict[str, str]) -> bool:
-    entries = plugin.get("compatibility") if isinstance(plugin.get("compatibility"), list) else []
-    if plugin.get("compatibility_enforced") is not True:
-        return True
-    for entry in entries:
-        if not isinstance(entry, dict):
-            continue
-        if entry.get("status") != "supported":
-            continue
-        if entry.get("platform") != target["platform"]:
-            continue
-        if str(entry.get("desktop") or "") and entry.get("desktop") != target["desktop"]:
-            continue
-        if str(entry.get("session") or "") and entry.get("session") != target["session"]:
-            continue
-        return True
-    return False
 
 
 def parse_args(argv: list[str]) -> tuple[str, str | None, bool]:
@@ -81,73 +52,15 @@ def parse_args(argv: list[str]) -> tuple[str, str | None, bool]:
     return instance_name, registry_path, emit_json
 
 
-def build_packages(instance_name: str, registry_path: str | None) -> tuple[str, list[dict[str, Any]]]:
-    resolve_cmd = [str(Workdir.repo_root() / "scripts/instance-resolve"), "--instance", instance_name, "--emit", "json"]
-    if registry_path:
-        resolve_cmd.extend(["--registry", registry_path])
-    resolved = run_json(*resolve_cmd)
-    plugin_doc = run_json(str(Workdir.repo_root() / "scripts/plugin-list"), "--kind", "package", "--json")
-    plugins = plugin_doc["plugins"]
-    plugin_by_id = {plugin["id"]: plugin for plugin in plugins}
-    selected_ids = resolved["bundle_packages"]
-    package_sources = resolved.get("package_sources", {})
-    os_doc = resolved["os"]
-    os_family = os_doc["family"]
-    os_arch = os_doc.get("arch", "")
-    os_version = os_doc.get("version", "")
-    target = compatibility_target(os_family, selected_ids)
-
-    packages: list[dict[str, Any]] = []
-    for plugin in sorted(plugins, key=lambda entry: entry["id"]):
-        supports = plugin.get("supports") or {}
-        supported = (
-            support_allowed(supports, "os_families", os_family)
-            and support_allowed(supports, "arches", os_arch)
-            and support_allowed(supports, "os_ids", os_doc["id"])
-            and support_allowed(supports, "os_versions", os_version)
-            and support_allowed(supports, f"{os_family}_versions", os_version)
-        )
-        install = plugin.get("install") if isinstance(plugin.get("install"), dict) else {}
-        installable = isinstance(install.get(os_family), dict)
-        actions = plugin.get("actions", [])
-        conflicts = plugin.get("conflicts_with") if isinstance(plugin.get("conflicts_with"), list) else []
-        conflict = next((package for package in conflicts if package in selected_ids), None)
-        if conflict or not compatibility_match(plugin, target):
-            supported = False
-            installable = False
-            actions = []
-        packages.append(
-            {
-                "id": plugin["id"],
-                "display_name": plugin["display_name"],
-                "plugin": plugin["id"],
-                "selected": plugin["id"] in selected_ids,
-                "selected_by": package_sources.get(plugin["id"], []),
-                "supported": supported,
-                "installable": installable,
-                "source": plugin["source"],
-                "path": plugin["path"],
-                "actions": actions,
-            }
-        )
-
-    for package_id in selected_ids:
-        if package_id in plugin_by_id:
-            continue
-        packages.append(
-            {
-                "id": package_id,
-                "display_name": package_id,
-                "plugin": None,
-                "selected": True,
-                "selected_by": package_sources.get(package_id, []),
-                "supported": False,
-                "source": "missing",
-                "path": None,
-                "actions": [],
-            }
-        )
-    return os_family, packages
+def build_packages(
+    instance_name: str, registry_path: str | None
+) -> tuple[str, list[dict[str, Any]]]:
+    # Cold path: parse fresh for parity with the warm Engine (which passes its
+    # memoized resolved + plugin set to the same build_package_rows()).
+    registry = str(Path(registry_path).resolve()) if registry_path else None
+    resolved = resolve_instance(instance_name, registry)
+    packages = [PluginManifest.public(p) for p in PluginManifest.load_all("package")]
+    return build_package_rows(resolved, packages)
 
 
 def main(argv: list[str]) -> int:

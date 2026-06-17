@@ -1,4 +1,0 @@
-#!/usr/bin/env sh
-set -eu
-
-exec ./scripts/package-status-command gnome-desktop 'if command -v gnome-shell >/dev/null 2>&1 && command -v gnome-session >/dev/null 2>&1; then echo installed; else echo missing; fi'

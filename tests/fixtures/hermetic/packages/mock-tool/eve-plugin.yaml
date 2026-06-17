@@ -1,0 +1,16 @@
+api_version: eve.plugin/v1
+kind: package
+id: mock-tool
+display_name: Mock Tool
+commands:
+  install: {exec: ../mock-app/commands/ubuntu/install, args: [mock-tool]}
+  status: {exec: ../mock-app/commands/ubuntu/status, args: [mock-tool]}
+  down: {exec: ../mock-app/commands/ubuntu/down, args: [mock-tool]}
+supports: {os_families: [ubuntu]}
+down: {destructive: false}
+env: []
+depends_on: [mock-app]
+install:
+  ubuntu:
+    steps:
+      - provision/ubuntu/mock-tool.sh

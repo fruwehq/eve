@@ -1,15 +1,54 @@
-#!/usr/bin/env bash
-# Run strict Python linting and type checks.
+#!/usr/bin/env python3
+"""Run strict Python linting and type checks."""
 
-set -euo pipefail
-cd "$(git rev-parse --show-toplevel)"
+from __future__ import annotations
 
-cache_dir="$(mktemp -d "${TMPDIR:-/tmp}/eve-python-cache.XXXXXX")"
-trap 'rm -rf "$cache_dir"' EXIT
+import subprocess
+import tempfile
+from pathlib import Path
 
-RUFF_CACHE_DIR="$cache_dir/ruff" poetry run ruff check eve_sdk scripts/eve-tui
-MYPY_CACHE_DIR="$cache_dir/mypy" poetry run mypy scripts/eve-tui
+ROOT = Path(__file__).resolve().parents[1]
 
-poetry run pytest tests/python
 
-printf '  [OK] python lint, type checks, and tests pass\n'
+def main() -> int:
+    cache_dir = tempfile.mkdtemp(prefix="eve-python-cache.")
+    try:
+        # Select Python scripts by shebang (same logic as the bash version).
+        python_scripts = sorted(
+            str(p)
+            for p in (ROOT / "scripts").iterdir()
+            if p.is_file() and p.read_text(encoding="utf-8", errors="replace").startswith("#!/usr/bin/env python3")
+        )
+
+        env_ruff = {"RUFF_CACHE_DIR": f"{cache_dir}/ruff", "PATH": __import__("os").environ["PATH"]}
+        code = subprocess.run(
+            ["poetry", "run", "ruff", "check", "eve_sdk", *python_scripts],
+            cwd=str(ROOT), env={**__import__("os").environ, **env_ruff}, check=False,
+        ).returncode
+        if code != 0:
+            return code
+
+        env_mypy = {"MYPY_CACHE_DIR": f"{cache_dir}/mypy", "PATH": __import__("os").environ["PATH"]}
+        code = subprocess.run(
+            ["poetry", "run", "mypy", "scripts/eve-tui"],
+            cwd=str(ROOT), env={**__import__("os").environ, **env_mypy}, check=False,
+        ).returncode
+        if code != 0:
+            return code
+
+        code = subprocess.run(
+            ["poetry", "run", "pytest", "tests/python"],
+            cwd=str(ROOT), check=False,
+        ).returncode
+        if code != 0:
+            return code
+
+        print("  [OK] python lint, type checks, and tests pass")
+        return 0
+    finally:
+        import shutil
+        shutil.rmtree(cache_dir, ignore_errors=True)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

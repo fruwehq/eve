@@ -1,350 +1,208 @@
-#!/usr/bin/env bash
-# Poll the remote until provisioning has finished. Survives reboots that the
-# provisioning state machine triggers between steps (SSH probes simply fail
-# while the VM is rebooting and we retry on the next interval).
-#
-# Usage: scripts/wait-for-provision <instance> [max-wait-seconds]
+#!/usr/bin/env python3
+"""Poll the remote until provisioning has finished. Survives reboots that the
+provisioning state machine triggers between steps (SSH probes simply fail while
+the VM is rebooting and we retry on the next interval).
 
-set -euo pipefail
+Usage: scripts/wait-for-provision <instance> [max-wait-seconds]
+"""
 
-PROFILE="${1:?Usage: scripts/wait-for-provision <instance> [max-wait-seconds]}"
-MAX_SECONDS=${2:-3600}
-POLL_INTERVAL=${EVE_PROVISION_WAIT_POLL_INTERVAL:-5}
-cd "$(git rev-parse --show-toplevel)"
+from __future__ import annotations
 
-RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
-OS_FAMILY=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^OS_FAMILY=/{print $2}')
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
 
-build_status_probe() {
-  case "$OS_FAMILY" in
-    ubuntu)
-      cat <<'EOF'
-sf="$HOME/provision/state/provision-status.json"
-if [ ! -f "$sf" ]; then
-  printf 'STATUS_FILE\tABSENT\n'
-  exit 0
-fi
-if ! cat "$sf" | jq empty 2>/dev/null; then
-  printf 'STATUS_FILE\tMALFORMED\n'
-  exit 0
-fi
-cat "$sf"
-EOF
-      ;;
-    windows)
-      cat <<'EOF'
-$sf = "C:\Users\Administrator\provision\state\provision-status.json"
-if (-not (Test-Path $sf)) {
-  "STATUS_FILE`tABSENT"
-  exit 0
-}
-try {
-  $null = Get-Content $sf | ConvertFrom-Json
-} catch {
-  "STATUS_FILE`tMALFORMED"
-  exit 0
-}
-Get-Content $sf
-EOF
-      ;;
-    *)
-      echo "wait-for-provision: unknown os_family: $OS_FAMILY" >&2
-      exit 2
-      ;;
-  esac
-}
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
-# Each probe returns a small tab-separated header followed by newly appended
-# log lines after __EVE_LOG_BEGIN__. This keeps the TUI responsive while
-# still showing the real apt/PowerShell output produced by the remote runner.
-#
-# DONE requires "Provisioning complete." to appear AFTER the most recent
-# "Running step" line — `provision` (without clear-state) doesn't wipe the log
-# file, so a stale completion marker from a prior run can otherwise short-
-# circuit the wait while a new run is mid-flight.
-build_probe() {
-  local offset="$1"
-  case "$OS_FAMILY" in
-    ubuntu)
-      cat <<EOF
-offset=$offset
-log="\$HOME/provision/logs/provision.log"
-if [ ! -f "\$log" ]; then
-  printf 'STATE\tMISSING\nLINES\t0\nLAST\t\n__EVE_LOG_BEGIN__\n'
-  exit 0
-fi
-line_count=\$(wc -l < "\$log" | tr -d ' ')
-last_step=\$(awk "/Running step / {n=NR} END {print n+0}" "\$log")
-last_done=\$(awk "/Provisioning complete\\./ {n=NR} END {print n+0}" "\$log")
-last_error=\$(awk "/ERROR: / {n=NR} END {print n+0}" "\$log")
-if [ "\$last_done" -gt "\$last_step" ] && [ "\$last_done" -gt 0 ]; then
-  state=DONE
-elif systemctl is-failed --quiet ephemeral-provision.service 2>/dev/null; then
-  state=FAILED
-elif [ "\$last_error" -gt "\$last_step" ] && [ "\$last_error" -gt "\$last_done" ]; then
-  state=FAILED
-else
-  state=RUNNING
-fi
-last_line=\$(grep -E "Running step |ERROR: " "\$log" | tail -n 1 || true)
-printf 'STATE\t%s\n' "\$state"
-printf 'LINES\t%s\n' "\$line_count"
-printf 'LAST\t%s\n' "\$last_line"
-printf '__EVE_LOG_BEGIN__\n'
-if [ "\$line_count" -gt "\$offset" ]; then
-  start=\$((offset + 1))
-  sed -n "\${start},\${line_count}p" "\$log"
-fi
-EOF
-      ;;
-    windows)
-      printf '%s = %s\n' "\$offset" "$offset"
-      cat <<'EOF'
-$tab = [char]9
-$log = "C:\Users\Administrator\provision\logs\provision.log"
-if (-not (Test-Path $log)) {
-  "STATE${tab}MISSING"
-  "LINES${tab}0"
-  "LAST${tab}"
-  "__EVE_LOG_BEGIN__"
-  exit 0
-}
-$lines = @(Get-Content $log)
-$lineCount = $lines.Count
-$lastStep = -1
-$lastDone = -1
-$lastError = -1
-for ($i = 0; $i -lt $lines.Count; $i++) {
-  if ($lines[$i] -match "Running step ") { $lastStep = $i }
-  if ($lines[$i] -match "Provisioning complete\.") { $lastDone = $i }
-  if ($lines[$i] -match "ERROR: ") { $lastError = $i }
-}
-if ($lastDone -gt $lastStep -and $lastDone -ge 0) {
-  $state = "DONE"
-} elseif ($lastError -gt $lastStep -and $lastError -gt $lastDone) {
-  $state = "FAILED"
-} else {
-  $state = "RUNNING"
-}
-$last = $lines | Select-String -Pattern "Running step|ERROR: " | Select-Object -Last 1
-if ($last) { $lastLine = $last.Line } else { $lastLine = "" }
-"STATE${tab}$state"
-"LINES${tab}$lineCount"
-"LAST${tab}$lastLine"
-"__EVE_LOG_BEGIN__"
-if ($lineCount -gt $offset) {
-  $start = [Math]::Max($offset, 0)
-  for ($i = $start; $i -lt $lineCount; $i++) { $lines[$i] }
-}
-EOF
-      ;;
-    *)
-      echo "wait-for-provision: unknown os_family: $OS_FAMILY" >&2
-      exit 2
-      ;;
-  esac
-}
+from eve_sdk.provision_pollers import (  # noqa: E402
+    build_log_probe,
+    build_status_probe,
+    classify_status_json,
+    clean_step,
+    parse_probe_result,
+)
+from eve_sdk.remote_launch import repo_root, resolve_env  # noqa: E402
 
-# Strip leading timestamp ("YYYY-MM-DD HH:MM:SS ") and the redundant
-# "Running step " prefix from a log line, leaving e.g. "[11/12] rustdesk.ps1".
-clean_step() { sed -E -e 's/^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9:]+ //' -e 's/^Running step //'; }
 
-run_probe() {
-  local offset="$1"
-  if [ -n "${EVE_WAIT_FOR_PROVISION_PROBE_SCRIPT:-}" ]; then
-    "$EVE_WAIT_FOR_PROVISION_PROBE_SCRIPT" "$OS_FAMILY" "$offset"
-  else
-    ./scripts/instance-ssh "$PROFILE" -- "$(build_probe "$offset")"
-  fi
-}
+def _elapsed(start: float) -> int:
+    """Integer wall-clock seconds since ``start`` (mirrors bash ``SECONDS``)."""
+    return int(time.monotonic() - start)
 
-run_status_probe() {
-  if [ -n "${EVE_WAIT_FOR_PROVISION_PROBE_SCRIPT:-}" ]; then
-    "$EVE_WAIT_FOR_PROVISION_PROBE_SCRIPT" "$OS_FAMILY" "status"
-  else
-    ./scripts/instance-ssh "$PROFILE" -- "$(build_status_probe)"
-  fi
-}
 
-parse_status_json() {
-  local raw="$1"
-  local file_status
-  file_status=$(printf '%s' "$raw" | grep -E '^STATUS_FILE' | awk -F'\t' '{print $2}' || true)
-  if [ "$file_status" = "ABSENT" ]; then
-    printf 'NOT_PRESENT\n'
-    return 0
-  fi
-  if [ "$file_status" = "MALFORMED" ]; then
-    printf 'MALFORMED\n'
-    return 0
-  fi
-  local json
-  if [ -n "$file_status" ]; then
-    json=$(printf '%s' "$raw" | grep -v '^STATUS_FILE' || true)
-  else
-    json="$raw"
-  fi
-  if ! printf '%s' "$json" | jq empty 2>/dev/null; then
-    printf 'MALFORMED\n'
-    return 0
-  fi
-  local valid
-  valid=$(printf '%s' "$json" | jq -e '
-    .api_version == 1
-    and (.os_family | IN("ubuntu","windows"))
-    and has("started_at")
-    and ((.started_at | type) == "string" or (.started_at | type) == "null")
-    and (.status as $s | $s | IN("running","done","failed"))
-    and (.steps | type) == "array"
-    and ([.steps[] | (
-      (.step | type) == "string" and (.step | length) > 0
-      and (.phase as $p | $p | IN("pending","running","succeeded","failed","skipped"))
-      and has("started_at")
-      and has("ended_at")
-      and has("exit_code")
-      and ((.started_at | type) == "string" or (.started_at | type) == "null")
-      and ((.ended_at | type) == "string" or (.ended_at | type) == "null")
-      and ((.exit_code | type) == "number" or (.exit_code | type) == "null")
-      and (if .exit_code != null then (.exit_code | . == floor) else true end)
-    )] | all)
-  ' 2>/dev/null) || true
-  if [ "$valid" != "true" ]; then
-    printf 'MALFORMED\n'
-    return 0
-  fi
-  local overall
-  overall=$(printf '%s' "$json" | jq -r '.status')
-  local last_running
-  last_running=$(printf '%s' "$json" | jq -r '[.steps[] | select(.phase == "running" or .phase == "succeeded" or .phase == "failed")] | last.step // empty')
-  local total_done
-  total_done=$(printf '%s' "$json" | jq '[.steps[] | select(.phase == "succeeded")] | length')
-  local total_steps
-  total_steps=$(printf '%s' "$json" | jq '.steps | length')
-  if [ "$overall" = "done" ]; then
-    printf 'DONE\t%s\t%s/%s\n' "$last_running" "$total_done" "$total_steps"
-  elif [ "$overall" = "failed" ]; then
-    local failed_step
-    failed_step=$(printf '%s' "$json" | jq -r '[.steps[] | select(.phase == "failed")] | last.step // empty')
-    printf 'FAILED\t%s\t%s/%s\n' "$failed_step" "$total_done" "$total_steps"
-  else
-    printf 'RUNNING\t%s\t%s/%s\n' "$last_running" "$total_done" "$total_steps"
-  fi
-}
+def _print_status(secs: int, max_seconds: int, msg: str, last_step: str, interactive: bool) -> None:
+    """Mirror the bash ``print_status``: ``\\r`` countdown (interactive) or ``\\n`` line."""
+    if interactive:
+        sys.stdout.write(
+            f"\r[{secs}/{max_seconds}s] {msg} — last step: {last_step}" + " " * 55
+        )
+        sys.stdout.flush()
+    else:
+        sys.stdout.write(f"[{secs}/{max_seconds}s] {msg} — last step: {last_step}\n")
 
-SECONDS=0
-last_step="(none yet)"
-log_offset=0
-interactive_output=0
-if [ -t 1 ]; then
-  interactive_output=1
-fi
 
-print_status() {
-  if [ "$interactive_output" -eq 1 ]; then
-    printf "\r[%ds/%ds] %s — last step: %s                                                       " \
-      "$SECONDS" "$MAX_SECONDS" "$1" "$last_step"
-  else
-    printf "[%ds/%ds] %s — last step: %s\n" \
-      "$SECONDS" "$MAX_SECONDS" "$1" "$last_step"
-  fi
-}
+def _complete_status(secs: int, profile: str, progress: str, last_step: str, interactive: bool) -> None:
+    if interactive:
+        sys.stdout.write(
+            f"\rProvisioning complete for profile {profile} ({secs}s, {progress}, last step: {last_step})"
+            + " " * 39 + "\n"
+        )
+    else:
+        sys.stdout.write(
+            f"Provisioning complete for profile {profile} ({secs}s, {progress}, last step: {last_step})\n"
+        )
 
-while [ "$SECONDS" -lt "$MAX_SECONDS" ]; do
-  if [ "$interactive_output" -eq 1 ]; then
-    print_status "probing"
-  fi
 
-  used_status_file=0
-  if status_raw=$(run_status_probe 2>/dev/null); then
-    status_raw=$(printf '%s\n' "$status_raw" | tr -d '\r')
-    status_result=$(parse_status_json "$status_raw")
-    case "$status_result" in
-      MALFORMED*)
-        printf "\n"
-        echo "Provision status file exists but is malformed. Refusing to silently ignore." >&2
-        echo "Run: scripts/instance-ssh $PROFILE -- 'cat ~/provision/state/provision-status.json' (or C:\Users\Administrator\...)" >&2
-        exit 1
-        ;;
-      NOT_PRESENT*)
-        used_status_file=0
-        ;;
-      DONE*)
-        used_status_file=1
-        status_step=$(printf '%s' "$status_result" | awk -F'\t' '{print $2}')
-        status_progress=$(printf '%s' "$status_result" | awk -F'\t' '{print $3}')
-        if [ -n "$status_step" ]; then
-          last_step="$status_step"
-        fi
-        if [ "$interactive_output" -eq 1 ]; then
-          printf "\rProvisioning complete for profile %s (%ds, %s, last step: %s)                                       \n" "$PROFILE" "$SECONDS" "$status_progress" "$last_step"
-        else
-          printf "Provisioning complete for profile %s (%ds, %s, last step: %s)\n" "$PROFILE" "$SECONDS" "$status_progress" "$last_step"
-        fi
-        exit 0
-        ;;
-      FAILED*)
-        used_status_file=1
-        status_step=$(printf '%s' "$status_result" | awk -F'\t' '{print $2}')
-        status_progress=$(printf '%s' "$status_result" | awk -F'\t' '{print $3}')
-        printf "\n"
-        echo "Provisioning failed for profile $PROFILE (${SECONDS}s, $status_progress)" >&2
-        [ -n "$status_step" ] && echo "Failed step: $status_step" >&2
-        exit 1
-        ;;
-      RUNNING*)
-        used_status_file=1
-        status_step=$(printf '%s' "$status_result" | awk -F'\t' '{print $2}')
-        status_progress=$(printf '%s' "$status_result" | awk -F'\t' '{print $3}')
-        if [ -n "$status_step" ]; then
-          last_step="$status_step"
-        fi
-        print_status "connected [$status_progress]"
-        ;;
-    esac
-  fi
+def _complete_log(secs: int, profile: str, last_step: str, interactive: bool) -> None:
+    if interactive:
+        sys.stdout.write(
+            f"\rProvisioning complete for profile {profile} ({secs}s, last step: {last_step})"
+            + " " * 39 + "\n"
+        )
+    else:
+        sys.stdout.write(
+            f"Provisioning complete for profile {profile} ({secs}s, last step: {last_step})\n"
+        )
 
-  if [ "$used_status_file" -eq 0 ]; then
-    if result=$(run_probe "$log_offset" 2>/dev/null); then
-      result=$(printf '%s\n' "$result" | tr -d '\r')
-      state=$(printf '%s\n' "$result" | awk -F '\t' '$1 == "STATE" {print $2; exit}')
-      line_count=$(printf '%s\n' "$result" | awk -F '\t' '$1 == "LINES" {print $2; exit}')
-      step_line=$(printf '%s\n' "$result" | awk -F '\t' '$1 == "LAST" {print substr($0, index($0, "\t") + 1); exit}')
-      new_log=$(printf '%s\n' "$result" | sed -n '/^__EVE_LOG_BEGIN__$/,$p' | sed '1d')
-      if [ -n "$step_line" ]; then
-        last_step=$(printf '%s' "$step_line" | clean_step)
-      fi
-      if [ -n "$line_count" ] && [ "$line_count" -ge 0 ] 2>/dev/null; then
-        log_offset="$line_count"
-      fi
-      if [ -n "$new_log" ]; then
-        if [ "$interactive_output" -eq 1 ]; then
-          printf "\n"
-        fi
-        printf '%s\n' "$new_log"
-      fi
-      if [ "$state" = "DONE" ]; then
-        if [ "$interactive_output" -eq 1 ]; then
-          printf "\rProvisioning complete for profile %s (%ds, last step: %s)                                       \n" "$PROFILE" "$SECONDS" "$last_step"
-        else
-          printf "Provisioning complete for profile %s (%ds, last step: %s)\n" "$PROFILE" "$SECONDS" "$last_step"
-        fi
-        exit 0
-      fi
-      if [ "$state" = "FAILED" ]; then
-        printf "\n"
-        echo "Provisioning failed for profile $PROFILE (${SECONDS}s)" >&2
-        echo "Last seen step: $last_step" >&2
-        exit 1
-      fi
-      print_status "connected"
-    else
-      print_status "waiting for SSH (reboot in progress?)"
-    fi
-  fi
-  sleep "$POLL_INTERVAL"
-done
 
-printf "\n"
-echo "Provisioning did not finish in time for profile $PROFILE (${MAX_SECONDS}s)" >&2
-echo "Last seen step: $last_step" >&2
-exit 1
+def main(argv: list[str]) -> int:
+    if not argv:
+        print("Usage: scripts/wait-for-provision <instance> [max-wait-seconds]", file=sys.stderr)
+        return 2
+    profile = argv[0]
+    max_seconds = int(argv[1]) if len(argv) > 1 else 3600
+    poll_interval = int(os.environ.get("EVE_PROVISION_WAIT_POLL_INTERVAL", "5"))
+    root = repo_root()
+    os_family = resolve_env(root, profile).get("OS_FAMILY", "")
+
+    if os_family not in ("ubuntu", "windows"):
+        print(f"wait-for-provision: unknown os_family: {os_family}", file=sys.stderr)
+        return 2
+
+    instance_ssh = str(root / "scripts/instance-ssh")
+    probe_script = os.environ.get("EVE_WAIT_FOR_PROVISION_PROBE_SCRIPT", "")
+    interactive = sys.stdout.isatty()
+
+    def run_status_probe() -> subprocess.CompletedProcess[str]:
+        if probe_script:
+            return subprocess.run(
+                [probe_script, os_family, "status"],
+                text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False,
+            )
+        return subprocess.run(
+            [instance_ssh, profile, "--", build_status_probe(os_family)],
+            cwd=root, text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False,
+        )
+
+    def run_log_probe(offset: int) -> subprocess.CompletedProcess[str]:
+        if probe_script:
+            return subprocess.run(
+                [probe_script, os_family, str(offset)],
+                text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False,
+            )
+        return subprocess.run(
+            [instance_ssh, profile, "--", build_log_probe(os_family, offset)],
+            cwd=root, text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False,
+        )
+
+    start = time.monotonic()
+    last_step = "(none yet)"
+    log_offset = 0
+
+    while _elapsed(start) < max_seconds:
+        if interactive:
+            _print_status(_elapsed(start), max_seconds, "probing", last_step, interactive)
+
+        used_status_file = False
+        status_cp = run_status_probe()
+        if status_cp.returncode == 0:
+            status_raw = status_cp.stdout.replace("\r", "")
+            status_result = classify_status_json(status_raw)
+            parts = status_result.split("\t")
+            status_step = parts[1] if len(parts) > 1 else ""
+            status_progress = parts[2] if len(parts) > 2 else ""
+
+            if status_result.startswith("MALFORMED"):
+                sys.stdout.write("\n")
+                print(
+                    "Provision status file exists but is malformed. Refusing to silently ignore.",
+                    file=sys.stderr,
+                )
+                print(
+                    "Run: scripts/instance-ssh " + profile + " -- "
+                    "'cat ~/provision/state/provision-status.json' "
+                    "(or C:\\Users\\Administrator\\...)",
+                    file=sys.stderr,
+                )
+                return 1
+            if status_result.startswith("NOT_PRESENT"):
+                used_status_file = False
+            elif status_result.startswith("DONE"):
+                if status_step:
+                    last_step = status_step
+                _complete_status(_elapsed(start), profile, status_progress, last_step, interactive)
+                return 0
+            elif status_result.startswith("FAILED"):
+                sys.stdout.write("\n")
+                print(
+                    f"Provisioning failed for profile {profile} "
+                    f"({_elapsed(start)}s, {status_progress})",
+                    file=sys.stderr,
+                )
+                if status_step:
+                    print(f"Failed step: {status_step}", file=sys.stderr)
+                return 1
+            elif status_result.startswith("RUNNING"):
+                used_status_file = True
+                if status_step:
+                    last_step = status_step
+                _print_status(
+                    _elapsed(start), max_seconds, f"connected [{status_progress}]", last_step, interactive
+                )
+
+        if not used_status_file:
+            probe_cp = run_log_probe(log_offset)
+            if probe_cp.returncode == 0:
+                result = probe_cp.stdout.replace("\r", "")
+                parsed = parse_probe_result(result)
+                if parsed.step_line:
+                    last_step = clean_step(parsed.step_line)
+                if parsed.line_count is not None and parsed.line_count >= 0:
+                    log_offset = parsed.line_count
+                if parsed.new_log:
+                    if interactive:
+                        sys.stdout.write("\n")
+                    sys.stdout.write(parsed.new_log + "\n")
+                if parsed.state == "DONE":
+                    _complete_log(_elapsed(start), profile, last_step, interactive)
+                    return 0
+                if parsed.state == "FAILED":
+                    sys.stdout.write("\n")
+                    print(
+                        f"Provisioning failed for profile {profile} ({_elapsed(start)}s)",
+                        file=sys.stderr,
+                    )
+                    print(f"Last seen step: {last_step}", file=sys.stderr)
+                    return 1
+                _print_status(_elapsed(start), max_seconds, "connected", last_step, interactive)
+            else:
+                _print_status(
+                    _elapsed(start), max_seconds, "waiting for SSH (reboot in progress?)",
+                    last_step, interactive,
+                )
+
+        time.sleep(poll_interval)
+
+    sys.stdout.write("\n")
+    print(
+        f"Provisioning did not finish in time for profile {profile} ({max_seconds}s)",
+        file=sys.stderr,
+    )
+    print(f"Last seen step: {last_step}", file=sys.stderr)
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

@@ -1,4 +1,0 @@
-#!/usr/bin/env sh
-set -eu
-
-exec ./scripts/package-status-command waypipe 'if command -v waypipe >/dev/null 2>&1; then echo installed; else echo missing; fi'

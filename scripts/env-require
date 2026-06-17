@@ -1,32 +1,35 @@
-#!/usr/bin/env sh
-# env-require: error if any of the listed environment variables is unset or empty.
-# Usage: scripts/env-require VAR1 [VAR2 ...]
-#
-# Used to enforce that variables documented in config/defaults.yaml (and
-# meant to be supplied via config-save or the shell) are actually populated
-# before a code path that depends on them runs. Variables for unrelated
-# providers are not checked — only call this with the vars the current operation actually needs.
-set -eu
+#!/usr/bin/env python3
+"""env-require: error if any listed environment variable is unset or empty.
 
-if [ "$#" -eq 0 ]; then
-  echo "usage: scripts/env-require VAR1 [VAR2 ...]" >&2
-  exit 2
-fi
+Usage: scripts/env-require VAR1 [VAR2 ...]
 
-missing=""
-for var in "$@"; do
-  eval "value=\${$var:-}"
-  if [ -z "$value" ]; then
-    missing="$missing $var"
-  fi
-done
+Enforces that variables documented in config/defaults.yaml (and meant to be
+supplied via config-save or the shell) are populated before a code path that
+depends on them runs. Variables for unrelated providers are not checked — only
+call this with the vars the current operation actually needs.
+"""
 
-if [ -n "$missing" ]; then
-  echo "Error: required environment variable(s) not set:" >&2
-  for var in $missing; do
-    echo "  - $var" >&2
-  done
-  echo "" >&2
-  echo "Set them via config-save or your shell environment and retry." >&2
-  exit 1
-fi
+from __future__ import annotations
+
+import os
+import sys
+
+
+def main(argv: list[str]) -> int:
+    if not argv:
+        print("usage: scripts/env-require VAR1 [VAR2 ...]", file=sys.stderr)
+        return 2
+
+    missing = [var for var in argv if not os.environ.get(var)]
+    if missing:
+        print("Error: required environment variable(s) not set:", file=sys.stderr)
+        for var in missing:
+            print(f"  - {var}", file=sys.stderr)
+        print("", file=sys.stderr)
+        print("Set them via config-save or your shell environment and retry.", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

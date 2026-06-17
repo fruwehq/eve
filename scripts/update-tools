@@ -1,65 +1,101 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/usr/bin/env python3
+"""Update all installed tools on a remote instance to their latest versions.
 
-USAGE="Usage: scripts/update-tools <instance>
+Usage: scripts/update-tools <instance>
+"""
+from __future__ import annotations
+
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from eve_sdk.tf_dispatch import repo_root, resolve_env  # noqa: E402
+
+USAGE = """\
+Usage: scripts/update-tools <instance>
 
 Updates all installed tools on a remote instance to their latest versions.
-"
+"""
 
-PROFILE="${1:?$USAGE}"
-cd "$(git rev-parse --show-toplevel)"
 
-OS_FAMILY=$(./scripts/profile-resolve --profile "$PROFILE" --emit env | awk -F= '/^OS_FAMILY=/{print $2}')
-SSH_CMD=(./scripts/instance-ssh "$PROFILE" --)
+def main(argv: list[str]) -> int:
+    profile = argv[0] if argv else ""
+    if not profile:
+        sys.stderr.write(USAGE)
+        return 2
+    root = repo_root()
+    os_family = resolve_env(root, profile).get("OS_FAMILY", "")
+    ssh = [str(ROOT / "scripts/instance-ssh"), profile, "--"]
 
-case "$OS_FAMILY" in
-  ubuntu)
-    log() { printf '[update] %s\n' "$*"; }
+    if os_family == "ubuntu":
+        # Connectivity check: failure propagates verbatim (no `|| true` in the original).
+        print("[update] Checking SSH connectivity...")
+        result = subprocess.run([*ssh, "true"], check=False)
+        if result.returncode != 0:
+            return result.returncode
 
-    log "Checking SSH connectivity..."
-    "${SSH_CMD[@]}" true
+        # Each step mirrors `<ssh> '<script>' || <handler>`:
+        #   None failure  -> `|| true`            (continue silently)
+        #   str failure   -> `|| log "<message>"` (emit [update] line, continue)
+        steps: list[tuple[str, str, str | None]] = [
+            ("Updating apt packages...",
+             "sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq && "
+             "sudo DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -qq",
+             None),
+            ("Updating VS Code...",
+             "sudo DEBIAN_FRONTEND=noninteractive apt-get install --only-upgrade -y code 2>/dev/null",
+             "vscode not installed"),
+            ("Updating Claude...",
+             'command -v claude >/dev/null 2>&1 && curl -fsSL https://claude.ai/install.sh | sh '
+             '|| echo "skip"',
+             None),
+            ("Updating OpenCode...",
+             'command -v opencode >/dev/null 2>&1 && curl -fsSL https://opencode.ai/install | bash '
+             '|| echo "skip"',
+             None),
+            ("Updating Codex CLI...",
+             'command -v codex >/dev/null 2>&1 && sudo npm update -g @openai/codex || echo "skip"',
+             None),
+            ("Updating Goose...",
+             'command -v goose >/dev/null 2>&1 && goose update 2>/dev/null || echo "skip"',
+             None),
+            ("Updating Hermes...",
+             'command -v hermes >/dev/null 2>&1 && hermes update || echo "skip"',
+             None),
+            ("Updating RustDesk...",
+             "command -v rustdesk >/dev/null 2>&1 && sudo DEBIAN_FRONTEND=noninteractive "
+             'apt-get install --only-upgrade -y rustdesk 2>/dev/null || echo "skip"',
+             None),
+            ("Updating Sunshine...",
+             "dpkg -l sunshine >/dev/null 2>&1 && sudo DEBIAN_FRONTEND=noninteractive "
+             'apt-get install --only-upgrade -y sunshine 2>/dev/null || echo "skip"',
+             None),
+            ("Updating Docker...",
+             "command -v docker >/dev/null 2>&1 && sudo apt-get install --only-upgrade -y "
+             'docker-ce docker-ce-cli containerd.io 2>/dev/null || echo "skip"',
+             None),
+            ("Updating Rust...",
+             'command -v rustup >/dev/null 2>&1 && rustup update || echo "skip"',
+             None),
+        ]
+        for msg, script, fail_msg in steps:
+            print(f"[update] {msg}")
+            step = subprocess.run([*ssh, script], check=False)
+            if step.returncode != 0 and fail_msg is not None:
+                print(f"[update] {fail_msg}")
+        print("[update] All tools updated.")
+        return 0
 
-    log "Updating apt packages..."
-    "${SSH_CMD[@]}" 'sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq && sudo DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -qq' || true
+    if os_family == "windows":
+        print("Windows update not yet implemented")
+        return 1
 
-    log "Updating VS Code..."
-    "${SSH_CMD[@]}" 'sudo DEBIAN_FRONTEND=noninteractive apt-get install --only-upgrade -y code 2>/dev/null' || log "vscode not installed"
+    print(f"Unsupported OS family: {os_family}")
+    return 1
 
-    log "Updating Claude..."
-    "${SSH_CMD[@]}" 'command -v claude >/dev/null 2>&1 && curl -fsSL https://claude.ai/install.sh | sh || echo "skip"' || true
 
-    log "Updating OpenCode..."
-    "${SSH_CMD[@]}" 'command -v opencode >/dev/null 2>&1 && curl -fsSL https://opencode.ai/install | bash || echo "skip"' || true
-
-    log "Updating Codex CLI..."
-    "${SSH_CMD[@]}" 'command -v codex >/dev/null 2>&1 && sudo npm update -g @openai/codex || echo "skip"' || true
-
-    log "Updating Goose..."
-    "${SSH_CMD[@]}" 'command -v goose >/dev/null 2>&1 && goose update 2>/dev/null || echo "skip"' || true
-
-    log "Updating Hermes..."
-    "${SSH_CMD[@]}" 'command -v hermes >/dev/null 2>&1 && hermes update || echo "skip"' || true
-
-    log "Updating RustDesk..."
-    "${SSH_CMD[@]}" 'command -v rustdesk >/dev/null 2>&1 && sudo DEBIAN_FRONTEND=noninteractive apt-get install --only-upgrade -y rustdesk 2>/dev/null || echo "skip"' || true
-
-    log "Updating Sunshine..."
-    "${SSH_CMD[@]}" 'dpkg -l sunshine >/dev/null 2>&1 && sudo DEBIAN_FRONTEND=noninteractive apt-get install --only-upgrade -y sunshine 2>/dev/null || echo "skip"' || true
-
-    log "Updating Docker..."
-    "${SSH_CMD[@]}" 'command -v docker >/dev/null 2>&1 && sudo apt-get install --only-upgrade -y docker-ce docker-ce-cli containerd.io 2>/dev/null || echo "skip"' || true
-
-    log "Updating Rust..."
-    "${SSH_CMD[@]}" 'command -v rustup >/dev/null 2>&1 && rustup update || echo "skip"' || true
-
-    log "All tools updated."
-    ;;
-  windows)
-    echo "Windows update not yet implemented"
-    exit 1
-    ;;
-  *)
-    echo "Unsupported OS family: $OS_FAMILY"
-    exit 1
-    ;;
-esac
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

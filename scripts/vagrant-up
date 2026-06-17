@@ -1,48 +1,69 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/usr/bin/env python3
+"""Run vagrant up for a profile.
 
-# Run vagrant up for a profile.
-# Usage: scripts/vagrant-up [--plan] <instance>
-#   --plan: generate Vagrantfile only, do not start the VM.
+Usage: scripts/vagrant-up [--plan] <instance>
+  --plan: generate Vagrantfile only, do not start the VM.
+"""
 
-PLAN=0
-if [ "${1:-}" = "--plan" ]; then
-  PLAN=1
-  shift
-fi
+from __future__ import annotations
 
-PROFILE="${1:?Usage: scripts/vagrant-up [--plan] <instance>}"
-cd "$(git rev-parse --show-toplevel)"
-# shellcheck source=lib/instance-workdir.sh
-. ./scripts/lib/instance-workdir.sh
+import subprocess
+import sys
+from pathlib import Path
 
-RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
-ENGINE=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^ENGINE=/{print $2}')
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
-if [ "$ENGINE" != "vagrant" ]; then
-  echo "[vagrant-up] not supported for engine=$ENGINE"
-  exit 1
-fi
+from eve_sdk.tf_dispatch import repo_root, resolve_env  # noqa: E402
+from eve_sdk.vagrant_dispatch import instance_workdir  # noqa: E402
 
-VPROV=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^PROVIDER=/{print $2}')
-case "$VPROV" in
-  local-qemu) VAGRANT_PROVIDER=qemu ;;
-  *)
-    echo "[vagrant-up] unsupported local provider=$VPROV" >&2
-    exit 2
-    ;;
-esac
-echo "[vagrant-up] profile=$PROFILE provider=$VAGRANT_PROVIDER"
 
-WORKDIR="$(eve_instance_workdir "$PROFILE")"
-mkdir -p "$WORKDIR"
-./scripts/profile-resolve --profile "$PROFILE" --emit vagrant \
-  --output "$WORKDIR/Vagrantfile"
+def main(argv: list[str]) -> int:
+    plan = False
+    if argv and argv[0] == "--plan":
+        plan = True
+        argv = argv[1:]
 
-if [ "$PLAN" -eq 1 ]; then
-  echo "[vagrant-up] Vagrantfile generated at $WORKDIR/Vagrantfile (dry run)"
-  exit 0
-fi
+    profile = argv[0] if argv else ""
+    if not profile:
+        print("Usage: scripts/vagrant-up [--plan] <instance>", file=sys.stderr)
+        return 2
+    root = repo_root()
 
-cd "$WORKDIR"
-vagrant up "--provider=$VAGRANT_PROVIDER"
+    resolved = resolve_env(root, profile)
+    engine = resolved.get("ENGINE", "")
+    if engine != "vagrant":
+        print(f"[vagrant-up] not supported for engine={engine}")
+        return 1
+
+    provider = resolved.get("PROVIDER", "")
+    # The qemu engine uses the qemu Vagrant provider;
+    # other local engines are not wired here.
+    if engine == "qemu":
+        vagrant_provider = "qemu"
+    else:
+        print(f"[vagrant-up] unsupported local provider={provider}", file=sys.stderr)
+        return 2
+    print(f"[vagrant-up] profile={profile} provider={vagrant_provider}")
+
+    workdir = instance_workdir(root, profile)
+    Path(workdir).mkdir(parents=True, exist_ok=True)
+    rc = subprocess.run(
+        [str(root / "scripts/profile-resolve"), "--profile", profile,
+         "--emit", "vagrant", "--output", f"{workdir}/Vagrantfile"],
+        cwd=root,
+    ).returncode
+    if rc != 0:
+        return rc
+
+    if plan:
+        print(f"[vagrant-up] Vagrantfile generated at {workdir}/Vagrantfile (dry run)")
+        return 0
+
+    return subprocess.run(
+        ["vagrant", "up", f"--provider={vagrant_provider}"], cwd=workdir,
+    ).returncode
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

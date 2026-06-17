@@ -1,4 +1,0 @@
-#!/usr/bin/env sh
-set -eu
-
-exec ./scripts/package-down-command xfce-desktop 'sudo sed -i "s/^user-session=.*/user-session=/" /etc/lightdm/lightdm.conf.d/50-ephemeral-autologin.conf 2>/dev/null || true; sudo DEBIAN_FRONTEND=noninteractive apt-get remove -y xfce4 xfce4-terminal xterm lightdm || true'

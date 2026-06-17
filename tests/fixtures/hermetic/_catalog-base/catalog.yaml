@@ -1,0 +1,37 @@
+# OS identity catalog (shared across providers).
+oses:
+  - id: mockos-1.0-amd64
+    family: ubuntu
+    version: "1.0"
+    arch: amd64
+
+  - id: mockos-1.0-arm64
+    family: ubuntu
+    version: "1.0"
+    arch: arm64
+
+  - id: mockwin-1.0
+    family: windows
+    version: "1.0"
+    arch: amd64
+
+# Init catalog
+inits:
+  - id: ssh-mockos-cloud-init
+    os_family: ubuntu
+    providers: [mock-cloud, mock-local]
+
+  - id: ssh-mockwin-powershell
+    os_family: windows
+    providers: [mock-cloud]
+
+# Package identity registry
+packages:
+  - id: mock-app
+  - id: mock-tool
+  - id: mock-win-app
+  - id: mock-win-state
+
+# Bundles are package-owned: each package manifest declares its own `bundles`
+# block (mock-app -> mock-dev, mock-win-app -> mock-gaming); the aggregator
+# unions them into the effective catalog.

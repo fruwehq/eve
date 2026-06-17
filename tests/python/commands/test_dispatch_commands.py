@@ -26,7 +26,7 @@ def test_provider_dispatch_dry_run_happy_path(tmp_path: Path) -> None:
         "--registry",
         str(FIXTURE),
         "--instance",
-        "aws-gpu-a",
+        "mock-gpu-a",
         "--command",
         "status",
         "--dry-run",
@@ -36,7 +36,7 @@ def test_provider_dispatch_dry_run_happy_path(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)
     assert payload["kind"] == "provider"
-    assert payload["provider"] == "aws"
+    assert payload["provider"] == "mock-cloud"
     assert payload["command"] == "status"
     assert payload["dry_run"] is True
 
@@ -47,7 +47,7 @@ def test_provider_dispatch_rejects_missing_command(tmp_path: Path) -> None:
         "--registry",
         str(FIXTURE),
         "--instance",
-        "dev-a",
+        "mock-dev-a",
         "--command",
         "bogus",
         env={"EVE_INSTANCE_WORKDIR": str(tmp_path)},
@@ -63,9 +63,9 @@ def test_package_dispatch_status_dry_run_happy_path(tmp_path: Path) -> None:
         "--registry",
         str(FIXTURE),
         "--instance",
-        "dev-a",
+        "mock-dev-a",
         "--package",
-        "docker",
+        "mock-app",
         "--command",
         "status",
         "--dry-run",
@@ -74,7 +74,7 @@ def test_package_dispatch_status_dry_run_happy_path(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)
-    assert payload["package"] == "docker"
+    assert payload["package"] == "mock-app"
     assert payload["command"] == "status"
     assert payload["selected"] is True
     assert payload["status"] == "unknown"
@@ -86,7 +86,7 @@ def test_package_dispatch_rejects_unsupported_os(tmp_path: Path) -> None:
         "--registry",
         str(FIXTURE),
         "--instance",
-        "dev-a",
+        "mock-dev-a",
         "--package",
         "win-only",
         "--command",
@@ -94,7 +94,7 @@ def test_package_dispatch_rejects_unsupported_os(tmp_path: Path) -> None:
         "--dry-run",
         env={
             "EVE_INSTANCE_WORKDIR": str(tmp_path),
-            "EVE_PLUGIN_ROOTS": str(ROOT / "tests/fixtures/plugins/packages/win-only"),
+            "EVE_PLUGIN_ROOTS": f"{os.environ.get('EVE_PLUGIN_ROOTS', '')}:{ROOT / 'tests/fixtures/plugins/packages/win-only'}",
         },
     )
 
@@ -106,11 +106,11 @@ def test_package_action_dry_run_happy_path() -> None:
     result = run_cmd(
         "scripts/package-action",
         "--instance",
-        "dev-a",
+        "mock-dev-a",
         "--package",
-        "rustdesk",
+        "mock-app",
         "--action",
-        "rustdesk-info",
+        "mock-app-info",
         "--dry-run",
         env={"EVE_INSTANCE_REGISTRY": str(FIXTURE)},
     )
@@ -118,16 +118,16 @@ def test_package_action_dry_run_happy_path() -> None:
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)
     assert payload["kind"] == "package-action"
-    assert payload["target"] == "rustdesk.info"
+    assert payload["target"] == "mock-app.info"
 
 
 def test_package_action_rejects_unknown_action() -> None:
     result = run_cmd(
         "scripts/package-action",
         "--instance",
-        "dev-a",
+        "mock-dev-a",
         "--package",
-        "rustdesk",
+        "mock-app",
         "--action",
         "missing",
         "--dry-run",

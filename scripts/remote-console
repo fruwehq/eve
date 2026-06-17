@@ -1,32 +1,41 @@
-#!/usr/bin/env bash
-# Open the VM's graphical console for a local profile.
-# Usage: scripts/remote-console <instance>
-#
-# QEMU: not implemented; use VNC/RustDesk/Waypipe/Xpra inside the guest.
+#!/usr/bin/env python3
+"""Open the VM's graphical console for a local profile.
 
-set -euo pipefail
+Usage: scripts/remote-console <instance>
 
-PROFILE="${1:?Usage: scripts/remote-console <instance>}"
-cd "$(git rev-parse --show-toplevel)"
-# shellcheck source=lib/instance-workdir.sh
-. ./scripts/lib/instance-workdir.sh
+QEMU: not implemented; use VNC/RustDesk/Waypipe/Xpra inside the guest.
+"""
 
-RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
-ENGINE=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^ENGINE=/{print $2}')
-PROVIDER=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^PROVIDER=/{print $2}')
+from __future__ import annotations
 
-if [ "$ENGINE" != "vagrant" ]; then
-  echo "remote.console is only supported for local (vagrant) profiles. Provider: $PROVIDER" >&2
-  exit 1
-fi
+import sys
+from pathlib import Path
 
-case "$PROVIDER" in
-  local-qemu)
-    echo "remote.console is not implemented for local-qemu. Use SSH or provision a remote GUI package." >&2
-    exit 2
-    ;;
-  *)
-    echo "remote.console: unsupported local provider: $PROVIDER" >&2
-    exit 1
-    ;;
-esac
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from eve_sdk.remote_launch import repo_root, resolve_env  # noqa: E402
+
+
+def main(argv: list[str]) -> int:
+    profile = argv[0] if argv else ""
+    if not profile:
+        print("Usage: scripts/remote-console <instance>", file=sys.stderr)
+        return 2
+    root = repo_root()
+    resolved = resolve_env(root, profile)
+    engine = resolved.get("ENGINE", "")
+    if engine != "vagrant":
+        print(
+            f"remote.console is only supported for local (vagrant) profiles. "
+            f"Engine: {engine}",
+            file=sys.stderr,
+        )
+        return 1
+    print(f"remote.console: not implemented for engine={engine}. "
+          "Use SSH or provision a remote GUI package.", file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

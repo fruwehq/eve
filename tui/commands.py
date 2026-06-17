@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 from pathlib import Path
 from typing import Any, cast
+
+from eve_sdk.engine import default_engine
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -25,35 +26,32 @@ def run_command(args: list[str], *, env: dict[str, str] | None = None) -> tuple[
     return proc.returncode, proc.stdout, proc.stderr
 
 
-def load_json(args: list[str]) -> dict[str, Any]:
-    code, out, err = run_command(args)
-    if code != 0:
-        raise RuntimeError(err.strip() or out.strip() or f"{args[0]} exited {code}")
-    parsed = json.loads(out)
-    if not isinstance(parsed, dict):
-        raise RuntimeError(f"{args[0]} did not return a JSON object")
-    return cast(dict[str, Any], parsed)
-
-
 def instance_rows() -> list[dict[str, Any]]:
-    doc = load_json([str(ROOT / "scripts/instance-list"), "--json"])
-    rows = doc.get("instances", [])
+    """Concrete instances from the registry, served from the warm Engine.
+
+    Reads the registry in-process (no subprocess, no catalog parse); identical
+    shape to ``instance-list --json`` ``instances``.
+    """
+    rows = default_engine().instance_rows()
     return rows if isinstance(rows, list) else []
 
 
 def catalog_options() -> dict[str, Any]:
-    return load_json([str(ROOT / "scripts/catalog-options"), "--json"])
+    """Providers/platforms/bundles/packages view, served from the warm Engine.
+
+    Identical shape to ``catalog-options --json``; parsed once per TUI process
+    instead of once per refresh.
+    """
+    return default_engine().catalog_options()
 
 
 def provider_capabilities_map() -> dict[str, list[str]]:
+    """Provider id → sorted capability list, from the warm Engine's plugin set."""
     global _provider_capabilities_cache
     if _provider_capabilities_cache is not None:
         return _provider_capabilities_cache
-    doc = load_json([str(ROOT / "scripts/plugin-list"), "--kind", "provider", "--json"])
     result: dict[str, list[str]] = {}
-    for plugin in doc.get("plugins", []):
-        if not isinstance(plugin, dict):
-            continue
+    for plugin in default_engine().plugin_list(kind="provider"):
         plugin_id = str(plugin.get("id", ""))
         capabilities = plugin.get("capabilities", [])
         if isinstance(capabilities, list):
@@ -67,21 +65,27 @@ def provider_has_capability(provider_id: str, capability: str) -> bool:
 
 
 def instance_view(instance: str) -> dict[str, Any]:
-    return load_json([str(ROOT / "scripts/instance-view"), "--instance", instance])
+    """Full instance view, served from the warm Engine (== ``instance-view``)."""
+    return default_engine().instance_view(instance)
 
 
 def instance_observe_view(instance: str) -> dict[str, Any]:
-    return load_json([str(ROOT / "scripts/instance-view"), "--instance", instance, "--observe"])
+    """Instance view with a fresh live observe first (== ``instance-view --observe``).
+
+    The live ``provider.status`` call is still a subprocess boundary (it shells
+    to the provider plugin); the catalog/plugins parse stays warm.
+    """
+    return default_engine().instance_view(instance, observe=True)
 
 
 def instance_statuses() -> dict[str, dict[str, Any]]:
-    """Last-known status for every instance from one fast (~0.6s) call.
+    """Last-known status for every instance from one fast in-process sweep.
 
     Reads persisted state without resolving or live-observing each instance
     (~3-8s each), so the instance table can render real state immediately; the
-    selected instance is then live-observed for fresh detail."""
-    doc = load_json([str(ROOT / "scripts/instance-view"), "--statuses"])
-    statuses = doc.get("statuses", {})
+    selected instance is then live-observed for fresh detail.
+    """
+    statuses = default_engine().instance_statuses()
     return statuses if isinstance(statuses, dict) else {}
 
 
@@ -136,11 +140,10 @@ PROVIDER_DEBUG_ACTION_IDS = frozenset({"status-details", "plan", "init"})
 
 
 def provider_pane_data() -> list[dict[str, Any]]:
-    doc = load_json([str(ROOT / "scripts/plugin-list"), "--kind", "provider", "--json"])
+    """Provider pane rows, from the warm Engine's provider plugin set."""
+    plugins = default_engine().plugin_list(kind="provider")
     result: list[dict[str, Any]] = []
-    for plugin in doc.get("plugins", []):
-        if not isinstance(plugin, dict):
-            continue
+    for plugin in plugins:
         plugin_id = str(plugin.get("id", ""))
         display_name = str(plugin.get("display_name") or plugin_id)
         actions: list[dict[str, Any]] = []

@@ -1,7 +1,0 @@
-#!/usr/bin/env sh
-set -eu
-if [ "$#" -gt 0 ] && [ "$1" = "--plan" ]; then
-  shift
-  exec "$(dirname "$0")/local-qemu" plan "$@"
-fi
-exec "$(dirname "$0")/local-qemu" up "$@"

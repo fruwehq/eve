@@ -1,4 +1,0 @@
-#!/usr/bin/env sh
-set -eu
-
-exec ./scripts/package-down-command kde-desktop 'sudo DEBIAN_FRONTEND=noninteractive apt-get remove -y kde-plasma-desktop krdp sddm || true'

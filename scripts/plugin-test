@@ -1,0 +1,69 @@
+#!/usr/bin/env python3
+"""Conformance harness entrypoint: validate a plugin against the published contract.
+
+Usage:
+  scripts/plugin-test <plugin-path>          # human-readable report
+  scripts/plugin-test <plugin-path> --json   # machine-readable JSON
+
+Exit 0 on PASS, non-zero on FAIL.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from eve_sdk.plugin_test import run_plugin_test  # noqa: E402
+
+
+def parser() -> argparse.ArgumentParser:
+    arg_parser = argparse.ArgumentParser(
+        prog="scripts/plugin-test",
+        usage="scripts/plugin-test <plugin-path> [--json]",
+        description="Validate a plugin against the published contract.",
+    )
+    arg_parser.add_argument("plugin_path", help="Path to a plugin directory or eve-plugin.yaml")
+    arg_parser.add_argument(
+        "--json",
+        action="store_true",
+        dest="json_output",
+        help="Emit machine-readable JSON results",
+    )
+    return arg_parser
+
+
+def main() -> int:
+    args = parser().parse_args()
+    result = run_plugin_test(args.plugin_path)
+
+    if args.json_output:
+        doc = {
+            "plugin_path": result.plugin_path,
+            "plugin_id": result.plugin_id,
+            "kind": result.kind,
+            "passed": result.passed,
+            "checks": [
+                {"name": check.name, "passed": check.passed, "message": check.message}
+                for check in result.checks
+            ],
+        }
+        print(json.dumps(doc, indent=2))
+    else:
+        label = f"{result.kind}:{result.plugin_id}" if result.kind and result.plugin_id else result.plugin_path
+        status = "PASS" if result.passed else "FAIL"
+        print(f"{status}  {label}")
+        print()
+        for check in result.checks:
+            mark = "[OK]  " if check.passed else "[FAIL]"
+            print(f"  {mark} {check.name}: {check.message}")
+
+    return 0 if result.passed else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,23 +1,18 @@
-#!/usr/bin/env bash
-# Validate external plugin synchronization without network access.
+#!/usr/bin/env python3
+# ruff: noqa: E501
+"""Validate external plugin synchronization without network access."""
 
-set -euo pipefail
-cd "$(git rev-parse --show-toplevel)"
+from __future__ import annotations
 
-tmp_root="$(mktemp -d "${TMPDIR:-/tmp}/eve-plugins-sync-test.XXXXXX")"
-trap 'rm -rf "$tmp_root"' EXIT
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
 
-source_repo="$tmp_root/source-repo"
-dest_root="$tmp_root/plugins"
-sources_file="$tmp_root/plugin-sources.yaml"
-unpinned_sources_file="$tmp_root/plugin-sources-unpinned.yaml"
-bad_sources_file="$tmp_root/plugin-sources-bad.yaml"
-sync_err="$tmp_root/sync.err"
-unpinned_err="$tmp_root/unpinned.err"
-bad_err="$tmp_root/bad.err"
+ROOT = Path(__file__).resolve().parents[1]
 
-mkdir -p "$source_repo/packages/sample"
-cat >"$source_repo/packages/sample/eve-plugin.yaml" <<'YAML'
+_SAMPLE_MANIFEST = """\
 api_version: eve.plugin/v1
 kind: package
 id: sample
@@ -29,57 +24,78 @@ commands:
 supports: {os_families: [ubuntu]}
 down: {destructive: false}
 env: []
-YAML
+"""
 
-git -C "$source_repo" init -q
-git -C "$source_repo" add packages/sample/eve-plugin.yaml
-git -C "$source_repo" -c user.email=eve@example.invalid -c user.name=eve commit -q -m "sample plugin"
-ref="$(git -C "$source_repo" rev-parse HEAD)"
 
-cat >"$sources_file" <<YAML
-sources:
-  - id: local
-    url: $source_repo
-    ref: $ref
-YAML
+def main() -> int:
+    tmp_root = Path(tempfile.mkdtemp(prefix="eve-plugins-sync-test."))
+    try:
+        source_repo = tmp_root / "source-repo"
+        dest_root = tmp_root / "plugins"
+        sources_file = tmp_root / "plugin-sources.yaml"
+        unpinned_file = tmp_root / "plugin-sources-unpinned.yaml"
+        bad_file = tmp_root / "plugin-sources-bad.yaml"
 
-if ./scripts/plugins-sync --sources "$sources_file" --dest "$dest_root" >/dev/null 2>"$sync_err" &&
-  [ -f "$dest_root/local/packages/sample/eve-plugin.yaml" ] &&
-  [ "$(git -C "$dest_root/local" rev-parse HEAD)" = "$ref" ]; then
-  printf '  [OK] plugins-sync clones pinned local source\n'
-else
-  printf '  [FAIL] plugins-sync clones pinned local source\n' >&2
-  cat "$sync_err" >&2
-  exit 1
-fi
+        # Create a source repo with a sample plugin.
+        pkg_dir = source_repo / "packages" / "sample"
+        pkg_dir.mkdir(parents=True)
+        (pkg_dir / "eve-plugin.yaml").write_text(_SAMPLE_MANIFEST, encoding="utf-8")
 
-cat >"$unpinned_sources_file" <<YAML
-sources:
-  - id: unpinned
-    url: $source_repo
-YAML
+        subprocess.run(["git", "init", "-q"], cwd=str(source_repo), check=True)
+        subprocess.run(["git", "add", "packages/sample/eve-plugin.yaml"], cwd=str(source_repo), check=True)
+        subprocess.run(
+            ["git", "-c", "user.email=eve@example.invalid", "-c", "user.name=eve", "commit", "-q", "-m", "sample plugin"],
+            cwd=str(source_repo), check=True,
+        )
+        ref = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(source_repo), capture_output=True, text=True, check=True).stdout.strip()
 
-if ./scripts/plugins-sync --sources "$unpinned_sources_file" --dest "$tmp_root/unpinned-dest" >/dev/null 2>"$unpinned_err"; then
-  printf '  [FAIL] plugins-sync accepted unpinned source without override\n' >&2
-  exit 1
-elif [ -e "$tmp_root/unpinned-dest/unpinned" ]; then
-  printf '  [FAIL] plugins-sync mutated destination for unpinned source\n' >&2
-  exit 1
-else
-  printf '  [OK] plugins-sync rejects unpinned source before mutation\n'
-fi
+        sources_file.write_text(f"sources:\n  - id: local\n    url: {source_repo}\n    ref: {ref}\n", encoding="utf-8")
 
-cat >"$bad_sources_file" <<'YAML'
-sources: not-a-list
-YAML
+        # 1. plugins-sync clones pinned local source.
+        sync_result = subprocess.run(
+            [sys.executable, str(ROOT / "scripts/plugins-sync"), "--sources", str(sources_file), "--dest", str(dest_root)],
+            cwd=str(ROOT), capture_output=True, text=True, check=False,
+        )
+        synced_manifest = dest_root / "local" / "packages" / "sample" / "eve-plugin.yaml"
+        synced_head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(dest_root / "local"), capture_output=True, text=True, check=False).stdout.strip()
+        if sync_result.returncode == 0 and synced_manifest.exists() and synced_head == ref:
+            print("  [OK] plugins-sync clones pinned local source")
+        else:
+            print("  [FAIL] plugins-sync clones pinned local source", file=sys.stderr)
+            print(sync_result.stderr, file=sys.stderr)
+            return 1
 
-if ./scripts/plugins-sync --sources "$bad_sources_file" --dest "$tmp_root/bad-dest" >/dev/null 2>"$bad_err"; then
-  printf '  [FAIL] plugins-sync accepted malformed sources list\n' >&2
-  exit 1
-elif grep -q "sources must be a list" "$bad_err" && [ ! -e "$tmp_root/bad-dest" ]; then
-  printf '  [OK] plugins-sync rejects malformed source file before mutation\n'
-else
-  printf '  [FAIL] plugins-sync rejects malformed source file before mutation\n' >&2
-  cat "$bad_err" >&2
-  exit 1
-fi
+        # 2. Rejects unpinned source.
+        unpinned_file.write_text(f"sources:\n  - id: unpinned\n    url: {source_repo}\n", encoding="utf-8")
+        unpinned_dest = tmp_root / "unpinned-dest"
+        up_result = subprocess.run(
+            [sys.executable, str(ROOT / "scripts/plugins-sync"), "--sources", str(unpinned_file), "--dest", str(unpinned_dest)],
+            cwd=str(ROOT), capture_output=True, text=True, check=False,
+        )
+        if up_result.returncode != 0 and not (unpinned_dest / "unpinned").exists():
+            print("  [OK] plugins-sync rejects unpinned source before mutation")
+        else:
+            print("  [FAIL] plugins-sync rejects unpinned source before mutation", file=sys.stderr)
+            return 1
+
+        # 3. Rejects malformed sources.
+        bad_file.write_text("sources: not-a-list\n", encoding="utf-8")
+        bad_dest = tmp_root / "bad-dest"
+        bad_result = subprocess.run(
+            [sys.executable, str(ROOT / "scripts/plugins-sync"), "--sources", str(bad_file), "--dest", str(bad_dest)],
+            cwd=str(ROOT), capture_output=True, text=True, check=False,
+        )
+        if bad_result.returncode != 0 and "sources must be a list" in bad_result.stderr and not bad_dest.exists():
+            print("  [OK] plugins-sync rejects malformed source file before mutation")
+        else:
+            print("  [FAIL] plugins-sync rejects malformed source file before mutation", file=sys.stderr)
+            print(bad_result.stderr, file=sys.stderr)
+            return 1
+
+        return 0
+    finally:
+        shutil.rmtree(tmp_root, ignore_errors=True)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

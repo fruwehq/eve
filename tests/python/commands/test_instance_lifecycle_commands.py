@@ -28,15 +28,15 @@ def test_instance_resolve_json_happy_path() -> None:
         "--registry",
         str(FIXTURE),
         "--instance",
-        "dev-a",
+        "mock-dev-a",
         "--emit",
         "json",
     )
 
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)
-    assert payload["instance"]["name"] == "dev-a"
-    assert payload["provider_plugin"] == "local-qemu"
+    assert payload["instance"]["name"] == "mock-dev-a"
+    assert payload["provider_plugin"] == "mock-cloud"
 
 
 def test_instance_resolve_rejects_missing_instance() -> None:
@@ -63,13 +63,13 @@ def test_instance_create_and_delete_happy_path(tmp_path: Path) -> None:
         "--instance",
         "demo-a",
         "--machine",
-        "local-qemu-medium",
+        "mock-small",
         "--os",
-        "ubuntu-26.04-arm64",
+        "mockos-1.0-arm64",
         "--location",
-        "tokyo",
+        "mock-tokyo",
         "--bundles",
-        "dev-ai",
+        "mock-dev",
         env={"EVE_STATE_DIR": str(tmp_path / "state")},
     )
     delete = run_cmd("scripts/instance-delete", "--registry", str(registry), "--instance", "demo-a")
@@ -89,11 +89,11 @@ def test_instance_delete_refuses_recorded_provider_state_without_observed_absent
         "--instance",
         "demo-a",
         "--machine",
-        "local-qemu-medium",
+        "mock-small",
         "--os",
-        "ubuntu-26.04-arm64",
+        "mockos-1.0-arm64",
         "--location",
-        "tokyo",
+        "mock-tokyo",
         env={"EVE_STATE_DIR": str(state_dir)},
     )
     record = run_cmd(
@@ -136,7 +136,7 @@ def test_instance_create_rejects_duplicate(tmp_path: Path) -> None:
                     {
                         "name": "demo-a",
                         "machine": "local-dev",
-                        "os": "ubuntu-26.04-amd64",
+                        "os": "mockos-1.0-amd64",
                         "init": "cloud-init",
                         "location": "local",
                     }
@@ -156,7 +156,7 @@ def test_instance_create_rejects_duplicate(tmp_path: Path) -> None:
         "--machine",
         "local-dev",
         "--os",
-        "ubuntu-26.04-amd64",
+        "mockos-1.0-amd64",
         "--location",
         "local",
     )
@@ -171,14 +171,14 @@ def test_instance_status_json_happy_path(tmp_path: Path) -> None:
         "--registry",
         str(FIXTURE),
         "--instance",
-        "dev-a",
+        "mock-dev-a",
         "--json",
         env={"EVE_STATE_DIR": str(tmp_path / "state")},
     )
 
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)
-    assert payload["instance"]["name"] == "dev-a"
+    assert payload["instance"]["name"] == "mock-dev-a"
     assert "packages" in payload
 
 
@@ -206,7 +206,7 @@ def test_instance_view_aggregate_happy_path(tmp_path: Path) -> None:
 
 
 def test_instance_view_rejects_unknown_emit() -> None:
-    result = run_cmd("scripts/instance-view", "--registry", str(FIXTURE), "--instance", "dev-a", "--emit", "text")
+    result = run_cmd("scripts/instance-view", "--registry", str(FIXTURE), "--instance", "mock-dev-a", "--emit", "text")
 
     assert result.returncode == 2
     assert "unsupported emit format" in result.stderr

@@ -1,4 +1,0 @@
-#!/usr/bin/env sh
-set -eu
-
-exec ./scripts/package-down-command xpra 'sudo systemctl disable --now xpra || true; sudo apt-get remove -y xpra || true'

@@ -1,37 +1,65 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/usr/bin/env python3
+"""Run terraform apply for a profile's stacks.
 
-# Run terraform apply for a profile's stacks.
-# Usage: scripts/tf-apply <instance>
+Usage: scripts/tf-apply <instance>
+"""
 
-PROFILE="${1:?Usage: scripts/tf-apply <instance>}"
-cd "$(git rev-parse --show-toplevel)"
+from __future__ import annotations
 
-RESOLVED_ENV=$(./scripts/profile-resolve --profile "$PROFILE" --emit env)
-ENGINE=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^ENGINE=/{print $2}')
+import os
+import subprocess
+import sys
+from pathlib import Path
 
-if [ "$ENGINE" != "terraform" ]; then
-  echo "[tf-apply] not supported for engine=$ENGINE"
-  exit 1
-fi
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
-TAGS=$(printf "%s\n" "$RESOLVED_ENV" | awk -F= '/^STACK_TAGS=/{print $2}')
-echo "[tf-apply] profile=$PROFILE tags=$TAGS"
+from eve_sdk.tf_dispatch import apply_tf_env, repo_root, resolve_env  # noqa: E402
 
-terramate generate
 
-eval "$(./scripts/tf-env "$PROFILE")"
+def main(argv: list[str]) -> int:
+    profile = argv[0] if argv else ""
+    if not profile:
+        print("Usage: scripts/tf-apply <instance>", file=sys.stderr)
+        return 2
+    root = repo_root()
 
-if [ -n "${EVE_INSTANCE_NAME:-}" ]; then
-  echo "[tf-apply] instance=$EVE_INSTANCE_NAME initializing backend before apply"
-  ./scripts/tf-init "$PROFILE"
-fi
+    resolved = resolve_env(root, profile)
+    engine = resolved.get("ENGINE", "")
+    if engine != "terraform":
+        print(f"[tf-apply] not supported for engine={engine}")
+        return 1
 
-TM_RUN_FLAGS=(
-  --disable-safeguards=git-untracked
-  --disable-safeguards=git-uncommitted
-  --disable-safeguards=git-out-of-sync
-  --disable-safeguards=outdated-code
-)
+    tags = resolved.get("STACK_TAGS", "")
+    print(f"[tf-apply] profile={profile} tags={tags}")
 
-terramate run "${TM_RUN_FLAGS[@]}" --tags="$TAGS" -- terraform apply -auto-approve
+    rc = subprocess.run(["terramate", "generate"], cwd=root).returncode
+    if rc != 0:
+        return rc
+
+    apply_tf_env(root, profile)
+
+    instance = os.environ.get("EVE_INSTANCE_NAME", "")
+    if instance:
+        print(f"[tf-apply] instance={instance} initializing backend before apply")
+        rc = subprocess.run(
+            [str(root / "scripts/tf-init"), profile], cwd=root,
+        ).returncode
+        if rc != 0:
+            return rc
+
+    tm_run_flags = [
+        "--disable-safeguards=git-untracked",
+        "--disable-safeguards=git-uncommitted",
+        "--disable-safeguards=git-out-of-sync",
+        "--disable-safeguards=outdated-code",
+    ]
+    return subprocess.run(
+        ["terramate", "run", *tm_run_flags, f"--tags={tags}", "--", "terraform", "apply",
+         "-auto-approve"],
+        cwd=root,
+    ).returncode
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

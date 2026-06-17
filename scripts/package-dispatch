@@ -1,26 +1,21 @@
 #!/usr/bin/env python3
+"""Package command dispatcher (install / status / down / reinstall).
+
+Thin cold wrapper around ``eve_sdk.package_dispatch.dispatch_package`` — the
+same in-process orchestration the warm Engine uses. This script parses fresh
+per invocation (``plugins=None, catalog=None``); the Engine passes its memoized
+sets so a multi-op session parses catalog/plugins exactly once.
+"""
+
 from __future__ import annotations
 
-import json
-import os
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from eve_sdk.dispatch import (  # noqa: E402
-    DispatchError,
-    command_vector,
-    load_plugin,
-    package_status_from_output,
-    prepare_overlay,
-    record_package_state,
-    resolve_instance,
-    stream_command,
-    validate_package_support,
-)
-from eve_sdk.schema import SchemaValidationError, validate_input  # noqa: E402
+from eve_sdk.package_dispatch import dispatch_package  # noqa: E402
 
 
 def usage() -> None:
@@ -36,7 +31,7 @@ def parse_args(argv: list[str]) -> tuple[str, str, str, str | None, bool, bool]:
     instance_name: str | None = None
     package_id: str | None = None
     command: str | None = None
-    registry_path = os.environ.get("EVE_INSTANCE_REGISTRY")
+    registry_path = __import__("os").environ.get("EVE_INSTANCE_REGISTRY")
     registry_path = str(Path(registry_path).resolve()) if registry_path else None
     dry_run = False
     yes = False
@@ -72,103 +67,16 @@ def parse_args(argv: list[str]) -> tuple[str, str, str, str | None, bool, bool]:
     return instance_name, package_id, command, registry_path, dry_run, yes
 
 
-def run_plugin(plugin: dict[str, object], command: str, resolved: dict[str, object], dry_run: bool) -> str:
-    commands = plugin.get("commands")
-    if not isinstance(commands, dict):
-        raise DispatchError(f"package plugin {plugin['id']} has no commands")
-    spec = commands.get(command)
-    if not isinstance(spec, dict):
-        raise DispatchError(f"package plugin {plugin['id']} has no command: {command}")
-
-    env = os.environ | {
-        "EVE_INSTANCE_NAME": resolved["instance"]["name"],  # type: ignore[index]
-        "EVE_PACKAGE_PLUGIN": str(plugin["id"]),
-        "EVE_PACKAGE_PLUGIN_ROOT": str(Path(str(plugin["path"])).parent),
-        "EVE_RESOLVED_JSON": json.dumps(resolved, separators=(",", ":")),
-    }
-    if dry_run:
-        env["EVE_PLUGIN_DRY_RUN"] = "1"
-
-    status, output = stream_command(
-        command_vector(plugin, spec),
-        env=env,
-        stdin_text=json.dumps(resolved, separators=(",", ":")),
-    )
-    if status != 0:
-        raise DispatchError(f"package command failed: {command}")
-    return output
-
-
-def dispatch(
-    instance_name: str,
-    package_id: str,
-    command: str,
-    registry_path: str | None,
-    dry_run: bool,
-    yes: bool,
-) -> None:
-    resolved = resolve_instance(instance_name, registry_path)
-    try:
-        validate_input(resolved)
-    except SchemaValidationError as error:
-        print(f"package-dispatch: {error}", file=sys.stderr)
-        raise SystemExit(1) from error
-
-    plugin = load_plugin("package", package_id)
-    validate_package_support(package_id, plugin, resolved)
-
-    destructive = bool(plugin.get("down", {}).get("destructive")) if isinstance(plugin.get("down"), dict) else False
-    destructive_confirmed = yes or os.environ.get("EVE_CONFIRM_DESTRUCTIVE") == "1"
-    if command in {"down", "reinstall"} and destructive and not destructive_confirmed:
-        raise DispatchError(f"package {package_id} down is destructive; pass --yes or EVE_CONFIRM_DESTRUCTIVE=1")
-
-    overlay = prepare_overlay(instance_name, registry_path)
-    os.environ["EVE_CATALOG_LOCAL"] = overlay
-    if registry_path:
-        os.environ["EVE_INSTANCE_REGISTRY"] = registry_path
-
-    if not dry_run:
-        record_package_state(instance_name, command, "running", package_id)
-
-    if command == "reinstall" and "reinstall" not in plugin.get("commands", {}):
-        run_plugin(plugin, "down", resolved, dry_run)
-        output = run_plugin(plugin, "install", resolved, dry_run)
-    else:
-        output = run_plugin(plugin, command, resolved, dry_run)
-
-    package_state = {
-        "install": "installed",
-        "down": "removed",
-        "reinstall": "reinstalled",
-    }.get(command)
-    if package_state is None:
-        package_state = package_status_from_output(output) or "unknown"
-    if not dry_run:
-        record_package_state(instance_name, command, "succeeded", package_id, package_state)
-
-
 def main(argv: list[str]) -> int:
     instance_name, package_id, command, registry_path, dry_run, yes = parse_args(argv)
-    try:
-        dispatch(instance_name, package_id, command, registry_path, dry_run, yes)
-        return 0
-    except SystemExit as error:
-        raise error
-    except Exception as error:
-        if instance_name and package_id and not dry_run:
-            try:
-                record_package_state(
-                    instance_name,
-                    command or "unknown",
-                    "failed",
-                    package_id,
-                    "failed",
-                    str(error),
-                )
-            except Exception as state_error:
-                print(f"package-dispatch: failed to record failure state: {state_error}", file=sys.stderr)
-        print(f"package-dispatch: {error}", file=sys.stderr)
-        return 1
+    return dispatch_package(
+        instance_name,
+        package_id,
+        command,
+        registry_path=registry_path,
+        dry_run=dry_run,
+        yes=yes,
+    )
 
 
 if __name__ == "__main__":

@@ -1,31 +1,26 @@
 #!/usr/bin/env python3
+"""Provider command dispatcher (instance-scoped + provider-level).
+
+Thin cold wrapper around ``eve_sdk.provider_command.dispatch_instance_command``
+and ``dispatch_provider_command`` — the same in-process orchestration the warm
+Engine uses. This script parses fresh per invocation; the Engine passes its
+memoized catalog/plugins so a multi-op session parses them exactly once.
+"""
+
 from __future__ import annotations
 
-import json
 import os
 import sys
 from pathlib import Path
-from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from eve_sdk.dispatch import (  # noqa: E402
-    DispatchError,
-    command_vector,
-    desired_state_for,
-    exec_cmd,
-    interactive_provider_command,
-    load_plugin,
-    prepare_overlay,
-    provider_state_for,
-    record_provider_state,
-    resolve_instance,
-    stream_command,
-    validate_provider_output,
+from eve_sdk.dispatch import desired_state_for, provider_state_for, record_provider_state  # noqa: E402
+from eve_sdk.provider_command import (  # noqa: E402
+    dispatch_instance_command,
+    dispatch_provider_command,
 )
-from eve_sdk.schema import validate_output  # noqa: E402
-from eve_sdk.secrets import Secrets  # noqa: E402
 
 
 def usage() -> None:
@@ -82,130 +77,21 @@ def parse_args(argv: list[str]) -> tuple[str | None, str | None, str | None, str
     return instance_name, provider_name, command, registry_path, dry_run, extra_args
 
 
-def inject_secrets(provider_name: str, plugin: dict[str, Any], env: dict[str, str]) -> dict[str, str]:
-    secrets = Secrets.read(provider_name)
-    if not secrets:
-        return env
-    schema_secrets = (plugin.get("config_schema") or {}).get("secrets") or {}
-    for secret_key, value in secrets.items():
-        env[secret_key] = value
-        schema_entry = schema_secrets.get(secret_key)
-        if isinstance(schema_entry, dict):
-            mapped = schema_entry.get("env_var")
-            if mapped:
-                env[mapped] = value
-    return env
-
-
-def provider_level(provider_name: str, command: str, dry_run: bool, extra_args: list[str]) -> None:
-    plugin = load_plugin("provider", provider_name)
-    spec = plugin.get("commands", {}).get(command)
-    if not isinstance(spec, dict):
-        raise DispatchError(f"provider plugin {provider_name} has no command: {command}")
-    cmd = command_vector(plugin, spec) + extra_args
-    env = inject_secrets(provider_name, plugin, dict(os.environ) | {"EVE_PROVIDER_PLUGIN": provider_name})
-    if dry_run:
-        env["EVE_PLUGIN_DRY_RUN"] = "1"
-        print(json.dumps({"kind": "provider", "provider": provider_name, "command": command, "dry_run": True}))
-        return
-    exec_cmd(cmd, env)
-
-
-def instance_level(
-    instance_name: str,
-    command: str,
-    registry_path: str | None,
-    dry_run: bool,
-    extra_args: list[str],
-) -> int:
-    resolved = resolve_instance(instance_name, registry_path)
-    provider = resolved["machine"]["provider"]
-    plugin = load_plugin("provider", provider)
-    spec = plugin.get("commands", {}).get(command)
-    if not isinstance(spec, dict):
-        raise DispatchError(f"provider plugin {provider} has no command: {command}")
-    cmd = command_vector(plugin, spec) + extra_args
-
-    if dry_run:
-        payload = {
-            "kind": "provider",
-            "provider": provider,
-            "command": command,
-            "instance": instance_name,
-            "profile": instance_name,
-            "engine": resolved["engine"],
-            "dry_run": True,
-        }
-        validate_output(payload, "provider_command_output")
-        print(json.dumps(payload, separators=(",", ":")))
-        return 0
-
-    overlay = prepare_overlay(instance_name, registry_path)
-    env = inject_secrets(provider, plugin, dict(os.environ) | {
-        "EVE_CATALOG_LOCAL": overlay,
-        "EVE_INSTANCE_NAME": instance_name,
-        "EVE_PROVIDER_PLUGIN": provider,
-        "EVE_RESOLVED_JSON": json.dumps(resolved, separators=(",", ":")),
-    })
-    if registry_path:
-        env["EVE_INSTANCE_REGISTRY"] = registry_path
-
-    if interactive_provider_command(plugin, command):
-        exec_cmd(cmd, env)
-
-    desired_state = desired_state_for(command)
-    record_provider_state(
-        instance_name,
-        command,
-        "running",
-        desired_state=desired_state,
-        provider_state=provider_state_for(command, "running"),
-    )
-
-    exit_status, output = stream_command(cmd, env=env, stdin_text=json.dumps(resolved, separators=(",", ":")))
-    if exit_status == 0:
-        try:
-            validate_provider_output(output)
-        except Exception as error:
-            record_provider_state(
-                instance_name,
-                command,
-                "failed",
-                error=f"invalid provider output: {error}",
-                desired_state=desired_state,
-                provider_state=provider_state_for(command, "failed"),
-            )
-            print(f"provider-dispatch: {error}", file=sys.stderr)
-            return 1
-        record_provider_state(
-            instance_name,
-            command,
-            "succeeded",
-            desired_state=desired_state,
-            provider_state=provider_state_for(command, "succeeded"),
-        )
-    else:
-        try:
-            record_provider_state(
-                instance_name,
-                command,
-                "failed",
-                error=f"exit {exit_status}",
-                desired_state=desired_state,
-                provider_state=provider_state_for(command, "failed"),
-            )
-        except Exception as error:
-            print(f"provider-dispatch: failed to record failure state: {error}", file=sys.stderr)
-    return exit_status
-
-
 def main(argv: list[str]) -> int:
     instance_name, provider_name, command, registry_path, dry_run, extra_args = parse_args(argv)
     try:
         if provider_name:
-            provider_level(provider_name, command or "", dry_run, extra_args)
+            dispatch_provider_command(
+                provider_name, command or "", dry_run=dry_run, extra_args=extra_args
+            )
             return 0
-        return instance_level(instance_name or "", command or "", registry_path, dry_run, extra_args)
+        return dispatch_instance_command(
+            instance_name or "",
+            command or "",
+            registry_path=registry_path,
+            dry_run=dry_run,
+            extra_args=extra_args,
+        )
     except Exception as error:
         if instance_name and not dry_run:
             try:
