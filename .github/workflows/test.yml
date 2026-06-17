@@ -21,6 +21,18 @@ jobs:
         with:
           fetch-depth: 0 # only used in PRs; don't use in default branches. This is used to identify the delta
 
+      - name: Clone sibling plugin repos
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          cd "$(dirname "$GITHUB_WORKSPACE")"
+          for repo in eve-providers eve-packages-linux eve-packages-windows; do
+            if [ ! -d "$repo" ]; then
+              gh repo clone "fruwehq/$repo" "$repo" -- --depth 1
+            fi
+          done
+
       - name: Initialize timing summary
         run: |
           printf 'EVE_CI_TIMINGS=%s/eve-ci-timings.tsv\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
