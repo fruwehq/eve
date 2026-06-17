@@ -57,7 +57,7 @@ _GROUP_VERBS: dict[str, list[str]] = {
                 "reinstall", "action", "provision", "verify"],
     "provider": ["list", "status", "action"],
     "bundle": ["list", "select", "unselect"],
-    "plugin": ["list", "validate", "sync", "test"],
+    "plugin": ["list", "validate", "sync", "test", "source"],
     "catalog": ["list"],
     "config": ["get", "list", "set", "unset"],
 }
@@ -299,6 +299,26 @@ def test_plugin_list_validate_sync_test() -> None:
     assert build_command(_ns(group="plugin", verb="test",
                              plugin_path="plugins/providers/aws", json=True)) == [
         "scripts/plugin-test", "plugins/providers/aws", "--json",
+    ]
+
+
+def test_plugin_source_translations() -> None:
+    assert build_command(_ns(group="plugin", verb="source", source_action="list", json=True)) == [
+        "scripts/plugin-source", "list", "--json",
+    ]
+    assert build_command(_ns(group="plugin", verb="source", source_action="recommended", json=False)) == [
+        "scripts/plugin-source", "recommended",
+    ]
+    assert build_command(_ns(
+        group="plugin", verb="source", source_action="add",
+        recommended="eve-providers",
+    )) == ["scripts/plugin-source", "add", "--recommended", "eve-providers"]
+    assert build_command(_ns(
+        group="plugin", verb="source", source_action="add",
+        url="https://x/y.git", recommended=None, id="y", ref="v1", subdir=None, auth="none",
+    )) == ["scripts/plugin-source", "add", "https://x/y.git", "--id", "y", "--ref", "v1", "--auth", "none"]
+    assert build_command(_ns(group="plugin", verb="source", source_action="remove", id="y")) == [
+        "scripts/plugin-source", "remove", "y",
     ]
 
 

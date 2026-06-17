@@ -43,7 +43,14 @@ pipx install "git+https://github.com/fruwehq/eve"
 ## Quickstart
 
 ```bash
-# Pull provider + package plugins (defined in config/plugin-sources.yaml)
+# Core ships no plugins. Add sources, then pull. See the curated first-party set:
+eve plugin source recommended
+eve plugin source add --recommended eve-providers
+eve plugin source add --recommended eve-packages-linux
+eve plugin source add --recommended eve-plugins-ai   # AI/dev packages
+# (or add any git repo: eve plugin source add <url> --ref <tag>)
+
+# Materialize the configured sources
 eve pull
 
 # Check which tools eve needs based on your pulled providers
@@ -117,7 +124,8 @@ eve instance   create|list|up|down|start|stop|ssh|ip|provision|status|view|delet
 eve package    list|select|install|status|down|action|verify
 eve provider   list|status|action
 eve bundle     list|select|unselect
-eve plugin     list|validate|sync|test
+eve plugin     list|validate|sync|test|source
+eve plugin source  list|recommended|add [--recommended ID]|remove
 eve catalog    list
 eve config     get|set|list
 eve doctor     [--json]
@@ -132,7 +140,9 @@ Run `eve <group> --help` for verb listings.
 
 - **Non-secret config:** `.eve/config.yaml` (structured, validated, TUI-editable)
 - **Secrets:** `.eve/secrets/<provider>.yaml` (mode 0600, gitignored)
-- **Plugin sources:** `config/plugin-sources.yaml` (pinned git repos)
+- **Plugin sources:** managed with `eve plugin source …` (writes the override
+  `.eve/plugin-sources.yaml`); core's `config/plugin-sources.yaml` ships empty.
+  Curated first-party repos: `config/recommended-sources.yaml`
 - **Instance registry:** `.eve/instances.yaml` (local, gitignored)
 
 Press `S` in the TUI to open Settings; on first run, a `FirstRunScreen` lists
@@ -147,8 +157,15 @@ git clone https://github.com/fruwehq/eve-plugin-template
 # Validate against the contract
 eve plugin test ./my-plugin
 
-# Publish: push to a git repo, add it to config/plugin-sources.yaml, eve pull
+# Publish: push to a git repo, then
+eve plugin source add https://github.com/you/your-plugins.git --ref v1.0.0
+eve pull
 ```
+
+A package has two execution contexts: **host-side `commands/`** (run on your
+machine by eve; portable `sh`) and **guest-side `provision/`** (run on the
+instance during install; ` ubuntu/*.sh` or `windows/*.ps1`). See
+[`docs/package-anatomy.md`](docs/package-anatomy.md).
 
 The contract (`core/schema/plugin-manifest.schema.json`) defines manifest
 shape, required commands, access rules, config schemas, and the manageable
