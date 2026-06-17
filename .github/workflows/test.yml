@@ -27,12 +27,14 @@ jobs:
           : > "$RUNNER_TEMP/eve-ci-timings.tsv"
 
       - name: Install Terraform
+        if: runner.os == 'Linux'
         uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: "1.14.9"
           terraform_wrapper: false
 
       - name: Install Terramate
+        if: runner.os == 'Linux'
         env:
           TERRAMATE_VERSION: "0.17.0"
         run: |
@@ -114,6 +116,7 @@ jobs:
           poetry install --no-interaction --no-root
 
       - name: Generate Terramate code
+        if: runner.os == 'Linux'
         run: |
           set -euo pipefail
           step_name="Generate Terramate code"
@@ -128,6 +131,7 @@ jobs:
           terramate generate
 
       - name: Run provision runner smoke
+        if: runner.os == 'Linux'
         run: |
           set -euo pipefail
           step_name="Run provision runner smoke"
@@ -142,6 +146,7 @@ jobs:
           poetry run make test.provision-runner
 
       - name: Run make test
+        if: runner.os == 'Linux'
         run: |
           set -euo pipefail
           step_name="Run make test"
@@ -154,6 +159,24 @@ jobs:
           }
           trap finish_timing EXIT
           poetry run make test
+
+      # macOS is a host orchestrator target (BSD vs GNU coreutils, dscacheutil
+      # vs getent, path/subprocess quirks). Run only the host-portability slice
+      # — doctor host hints + the Python suite — not the full Linux make test.
+      - name: Run macOS host-portability checks
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          step_name="Run macOS host-portability checks"
+          start="$(date +%s)"
+          finish_timing() {
+            status="$?"
+            end="$(date +%s)"
+            printf '%s\t%s\t%s\n' "$step_name" "$((end - start))" "$status" >> "$EVE_CI_TIMINGS"
+            exit "$status"
+          }
+          trap finish_timing EXIT
+          poetry run make test.doctor test.python
 
       - name: Timing summary
         if: always()

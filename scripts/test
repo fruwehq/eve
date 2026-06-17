@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 ALL_SUITES = [
     "catalog", "config-save", "core-boundary", "doctor",
-    "instances", "lifecycle", "os-portability", "plugins", "plugins-sync",
+    "instances", "lifecycle", "plugins", "plugins-sync",
     "provision-runner", "python", "schemas", "secrets", "shellcheck",
     "state-concurrency", "terraform", "tf-isolation", "tui", "lint",
 ]
@@ -31,7 +31,6 @@ SUITE_SCRIPTS: dict[str, list[str]] = {
     "doctor": ["scripts/test-doctor"],
     "instances": ["scripts/test-instances"],
     "lifecycle": ["scripts/test-lifecycle"],
-    "os-portability": ["scripts/test-os-portability"],
     "plugins": ["scripts/test-plugins"],
     "plugins-sync": ["scripts/test-plugins-sync"],
     "provision-runner": ["scripts/test-provision-runner"],
