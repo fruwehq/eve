@@ -2304,8 +2304,8 @@ def run() -> int:
     # Cap that join so quit returns promptly; an abandoned read is harmless.
     import asyncio.constants as _asyncio_constants
 
-    _asyncio_constants.THREAD_JOIN_TIMEOUT = min(
-        _asyncio_constants.THREAD_JOIN_TIMEOUT, 2.0
+    _asyncio_constants.THREAD_JOIN_TIMEOUT = min(  # type: ignore[misc]
+        _asyncio_constants.THREAD_JOIN_TIMEOUT, 2
     )
     EveTui().run()
     return 0
