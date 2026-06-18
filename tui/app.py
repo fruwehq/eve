@@ -1468,6 +1468,12 @@ class EveTui(App[None]):
         self.start_task(self.action_cancel_command())
 
     def action_new_instance(self) -> None:
+        if not self.catalog_options.get("platforms"):
+            self.notify(
+                "No platforms available — add a provider source (g) and pull first.",
+                severity="warning",
+            )
+            return
         self.push_screen(
             NewInstanceScreen(self.catalog_options),
             self.handle_new_instance,
@@ -2264,5 +2270,15 @@ class EveTui(App[None]):
 
 
 def run() -> int:
+    # A background `asyncio.to_thread` read (e.g. a live provider observe that
+    # shells out) can still be running at quit. asyncio's default-executor join
+    # on shutdown would otherwise block the process for THREAD_JOIN_TIMEOUT
+    # (300s) waiting for it — the TUI would clear but never return to the shell.
+    # Cap that join so quit returns promptly; an abandoned read is harmless.
+    import asyncio.constants as _asyncio_constants
+
+    _asyncio_constants.THREAD_JOIN_TIMEOUT = min(
+        _asyncio_constants.THREAD_JOIN_TIMEOUT, 2.0
+    )
     EveTui().run()
     return 0

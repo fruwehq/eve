@@ -1050,7 +1050,13 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
         self.focus_current_step()
 
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
-        if event.data_table.id == "platform-cards":
+        # An empty platform table (no providers installed) fires a highlight with
+        # cursor_row=-1 / row_key=None — guard before reading the key.
+        if (
+            event.data_table.id == "platform-cards"
+            and event.row_key is not None
+            and event.row_key.value is not None
+        ):
             self.selected_platform_id = str(event.row_key.value)
             self.update_wizard()
 
@@ -1063,7 +1069,11 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
             self.update_wizard()
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
-        if event.data_table.id == "platform-cards":
+        if (
+            event.data_table.id == "platform-cards"
+            and event.row_key is not None
+            and event.row_key.value is not None
+        ):
             self.selected_platform_id = str(event.row_key.value)
             self.set_step(2)
 

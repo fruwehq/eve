@@ -119,3 +119,35 @@ def test_plugin_toggle_add_then_flips_to_remove() -> None:
             assert str(toggle.label) == "Remove selected"
 
     asyncio.run(_run())
+
+
+def test_new_instance_gated_when_no_platforms() -> None:
+    from tui.app import EveTui
+    from tui.widgets import NewInstanceScreen
+
+    async def _run() -> None:
+        app = EveTui()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.catalog_options = {"providers": [], "platforms": [], "bundles": [], "packages": []}
+            app.action_new_instance()  # should notify, not open the wizard
+            await pilot.pause()
+            assert not any(isinstance(s, NewInstanceScreen) for s in app.screen_stack)
+
+    asyncio.run(_run())
+
+
+def test_new_instance_highlight_guard_no_crash() -> None:
+    # Empty platform table fires RowHighlighted(row_key=None) — must not crash.
+    from tui.widgets import NewInstanceScreen
+
+    screen = NewInstanceScreen({"providers": [], "platforms": [], "bundles": [], "packages": []})
+
+    class _FakeTable:
+        id = "platform-cards"
+
+    class _FakeEvent:
+        data_table = _FakeTable()
+        row_key = None
+
+    screen.on_data_table_row_highlighted(_FakeEvent())  # no exception
