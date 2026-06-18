@@ -74,3 +74,21 @@ def test_add_url_opens_prompt_modal() -> None:
             assert isinstance(app.screen, TextPromptScreen)
 
     asyncio.run(_run())
+
+
+def test_lists_bind_space_to_select() -> None:
+    # ListTable maps space to the same select_cursor action as enter (DataTable's
+    # enter binding), whose enter->focus-right-pane path is already exercised.
+    from tui.app import EveTui, ListTable
+
+    space = [b for b in ListTable.BINDINGS if getattr(b, "key", None) == "space"]
+    assert space and space[0].action == "select_cursor"
+
+    async def _run() -> None:
+        app = EveTui()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            for table_id in ("#instances", "#packages", "#bundles"):
+                assert isinstance(app.query_one(table_id), ListTable)
+
+    asyncio.run(_run())

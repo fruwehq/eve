@@ -90,6 +90,14 @@ APP_EXPANSION = "Ephemeral VM Environment"
 APP_TAGLINE = "create -> provision -> connect"
 
 
+class ListTable(DataTable[Any]):
+    """DataTable whose highlighted row is activated by space as well as enter."""
+
+    BINDINGS: ClassVar[list[Binding | tuple[str, str] | tuple[str, str, str]]] = [
+        Binding("space", "select_cursor", "Select", show=False),
+    ]
+
+
 class EveTui(App[None]):
     """Instance-first manager built on the existing v3 command surface."""
 
@@ -421,7 +429,7 @@ class EveTui(App[None]):
                     with Horizontal(id="instances-header"):
                         yield Static("Instances", classes="section-title")
                         yield Button("⟳", id="refresh")
-                    yield DataTable(id="instances")
+                    yield ListTable(id="instances")
                 with Vertical(id="right"):
                     yield Static(
                         "\n".join(
@@ -470,12 +478,12 @@ class EveTui(App[None]):
                                         yield Button("", id=f"pkg-action-{index}")
                         with Vertical(id="packages-tab"), Vertical(id="packages-pane"):
                             yield Static("Bundles", classes="section-title")
-                            yield DataTable(id="bundles")
+                            yield ListTable(id="bundles")
                             with Grid(id="bundle-actions"):
                                 yield Button("Add Bundle", id="bundle-select")
                                 yield Button("Remove Bundle", id="bundle-unselect")
                             yield Static("Packages", classes="section-title")
-                            yield DataTable(id="packages")
+                            yield ListTable(id="packages")
                             with Grid(id="package-actions"):
                                 yield Button("Status", id="package-status")
                                 yield Button("Add Extra", id="package-select")
