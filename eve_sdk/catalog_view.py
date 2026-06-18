@@ -129,6 +129,16 @@ def build_catalog_options(
             }
         )
 
+    # Locations are chosen at instance-create time (not part of a platform row
+    # since WS3). Each catalog location row carries per-provider data under
+    # provider-id keys, so a location's providers are its non-"name" keys.
+    locations: list[dict[str, Any]] = []
+    for location in catalog.get("locations", []):
+        if not isinstance(location, dict) or not location.get("name"):
+            continue
+        loc_providers = sorted(str(key) for key in location if key != "name")
+        locations.append({"name": str(location["name"]), "providers": loc_providers})
+
     return {
         "providers": providers,
         "platforms": sorted(
@@ -140,6 +150,7 @@ def build_catalog_options(
                 str(platform["init"]),
             ),
         ),
+        "locations": sorted(locations, key=lambda location: location["name"]),
         "bundles": sorted(bundles, key=lambda bundle: str(bundle.get("id"))),
         "packages": sorted(packages, key=lambda package: str(package.get("id"))),
     }

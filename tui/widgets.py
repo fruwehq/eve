@@ -525,6 +525,11 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
             for platform in options.get("platforms", [])
             if isinstance(platform, dict)
         ]
+        self.locations = [
+            cast(dict[str, Any], location)
+            for location in options.get("locations", [])
+            if isinstance(location, dict) and location.get("name")
+        ]
         self.bundles = [
             cast(dict[str, Any], bundle) for bundle in options.get("bundles", []) if isinstance(bundle, dict)
         ]
@@ -641,6 +646,16 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
 
     def selected_platform(self) -> dict[str, Any]:
         return self.platform_by_id.get(self.selected_platform_id, {})
+
+    def _default_location(self, provider: str) -> str:
+        """First catalog location that serves this provider (location is chosen at
+        create time since WS3; today providers share one location). Empty if none —
+        instance-create then reports a clear 'no location' error."""
+        for location in self.locations:
+            providers = location.get("providers")
+            if isinstance(providers, list) and provider in providers:
+                return str(location.get("name") or "")
+        return ""
 
     def support_values(self, package_id: str, key: str) -> list[str]:
         package = self.package_map.get(package_id, {})
@@ -1140,7 +1155,7 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
                 "machine": str(platform_choice.get("machine") or ""),
                 "os": str(platform_choice.get("os") or ""),
                 "init": str(platform_choice.get("init") or ""),
-                "location": str(platform_choice.get("location") or ""),
+                "location": self._default_location(str(platform_choice.get("provider") or "")),
                 "bundles": bundles,
                 "packages": packages,
                 "disk_gb": self.query_one("#new-disk", Input).value.strip(),

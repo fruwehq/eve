@@ -151,3 +151,14 @@ def test_new_instance_highlight_guard_no_crash() -> None:
         row_key = None
 
     screen.on_data_table_row_highlighted(_FakeEvent())  # no exception
+
+
+def test_new_instance_defaults_location_for_provider() -> None:
+    # Post-WS3 the wizard picks no location from the platform row; it defaults to
+    # a catalog location that serves the chosen provider so create gets a location.
+    from tui.commands import catalog_options
+    from tui.widgets import NewInstanceScreen
+
+    screen = NewInstanceScreen(catalog_options())
+    assert screen._default_location("mock-cloud") == "mock-tokyo"
+    assert screen._default_location("does-not-exist") == ""
