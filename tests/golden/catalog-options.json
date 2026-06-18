@@ -110,6 +110,15 @@
       }
     }
   ],
+  "locations": [
+    {
+      "name": "mock-tokyo",
+      "providers": [
+        "mock-cloud",
+        "mock-local"
+      ]
+    }
+  ],
   "bundles": [
     {
       "id": "mock-dev",

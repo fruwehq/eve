@@ -346,6 +346,15 @@ def stream_command(
 def read_resolved_from_env_or_stdin() -> dict[str, Any]:
     raw = os.environ.get("EVE_RESOLVED_JSON")
     if raw is None or raw == "":
+        # Instance-scoped commands need resolved JSON. Reading stdin on an
+        # interactive terminal would block forever (e.g. running an instance
+        # command provider-level by mistake) — fail fast with guidance instead.
+        if sys.stdin.isatty():
+            raise DispatchError(
+                "no resolved instance: this command is instance-scoped — set "
+                "EVE_RESOLVED_JSON or pipe resolved JSON on stdin (a provider-level "
+                "connectivity check is `provider-dispatch --provider <id> --command connectivity`)"
+            )
         raw = sys.stdin.read()
     try:
         parsed = json.loads(raw)

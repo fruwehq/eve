@@ -46,6 +46,14 @@ from tui.settings import (
 )
 
 
+class ListTable(DataTable[Any]):
+    """DataTable whose highlighted row is activated by space as well as enter."""
+
+    BINDINGS = [
+        Binding("space", "select_cursor", "Select", show=False),
+    ]
+
+
 class ProviderPane(Static):
     DEFAULT_CSS = """
     ProviderPane {
@@ -109,21 +117,23 @@ class ProviderPane(Static):
             display_name = str(provider.get("display_name", provider_id))
             self._actions[provider_id] = provider.get("actions", [])
 
+            # Configured and Reachable use the same glyphs: ✓ yes, ✗ no,
+            # — not yet checked.
             configured = self._configured.get(provider_id)
             if configured is True:
-                configured_text = "[success]yes[/]"
+                configured_text = "[success]✓[/]"
             elif configured is False:
-                configured_text = "[dim]no[/]"
+                configured_text = "[dim]✗[/]"
             else:
-                configured_text = "[dim]?[/]"
+                configured_text = "[dim]—[/]"
 
             reachable = self.reachability.get(provider_id)
             if reachable is True:
-                reach_text = "[success]●[/]"
+                reach_text = "[success]✓[/]"
             elif reachable is False:
-                reach_text = "[warning]○[/]"
+                reach_text = "[warning]✗[/]"
             else:
-                reach_text = "[dim]?[/]"
+                reach_text = "[dim]—[/]"
 
             table.add_row(display_name, configured_text, reach_text, key=provider_id)
 
@@ -515,6 +525,11 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
             for platform in options.get("platforms", [])
             if isinstance(platform, dict)
         ]
+        self.locations = [
+            cast(dict[str, Any], location)
+            for location in options.get("locations", [])
+            if isinstance(location, dict) and location.get("name")
+        ]
         self.bundles = [
             cast(dict[str, Any], bundle) for bundle in options.get("bundles", []) if isinstance(bundle, dict)
         ]
@@ -601,7 +616,7 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
         table = self.query_one("#platform-cards", DataTable)
         table.cursor_type = "row"
         table.clear(columns=True)
-        table.add_columns("Provider", "Machine", "OS", "Location", "Defaults")
+        table.add_columns("Provider", "Machine", "OS", "Defaults")
         for platform_choice in self.platforms:
             defaults = (
                 platform_choice.get("defaults", {}) if isinstance(platform_choice.get("defaults"), dict) else {}
@@ -620,7 +635,6 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
                 str(platform_choice.get("provider") or "-"),
                 str(platform_choice.get("machine") or "-"),
                 str(platform_choice.get("os") or "-"),
-                str(platform_choice.get("location") or "-"),
                 ", ".join(default_parts) if default_parts else "-",
                 key=str(platform_choice.get("id")),
             )
@@ -632,6 +646,16 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
 
     def selected_platform(self) -> dict[str, Any]:
         return self.platform_by_id.get(self.selected_platform_id, {})
+
+    def _default_location(self, provider: str) -> str:
+        """First catalog location that serves this provider (location is chosen at
+        create time since WS3; today providers share one location). Empty if none —
+        instance-create then reports a clear 'no location' error."""
+        for location in self.locations:
+            providers = location.get("providers")
+            if isinstance(providers, list) and provider in providers:
+                return str(location.get("name") or "")
+        return ""
 
     def support_values(self, package_id: str, key: str) -> list[str]:
         package = self.package_map.get(package_id, {})
@@ -937,7 +961,6 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
             f"Machine: {platform_choice.get('machine') or '-'}",
             f"OS: {platform_choice.get('os') or '-'}",
             f"Init: {platform_choice.get('init') or '-'}",
-            f"Location: {platform_choice.get('location') or '-'}",
             f"Defaults: disk {defaults.get('disk_gb') or '-'} GB, "
             f"memory {defaults.get('memory_mb') or '-'} MB, "
             f"CPU {defaults.get('cpus') or defaults.get('cpu_cores') or defaults.get('vcpus') or '-'}.",
@@ -1042,7 +1065,13 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
         self.focus_current_step()
 
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
-        if event.data_table.id == "platform-cards":
+        # An empty platform table (no providers installed) fires a highlight with
+        # cursor_row=-1 / row_key=None — guard before reading the key.
+        if (
+            event.data_table.id == "platform-cards"
+            and event.row_key is not None
+            and event.row_key.value is not None
+        ):
             self.selected_platform_id = str(event.row_key.value)
             self.update_wizard()
 
@@ -1055,7 +1084,11 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
             self.update_wizard()
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
-        if event.data_table.id == "platform-cards":
+        if (
+            event.data_table.id == "platform-cards"
+            and event.row_key is not None
+            and event.row_key.value is not None
+        ):
             self.selected_platform_id = str(event.row_key.value)
             self.set_step(2)
 
@@ -1122,7 +1155,7 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
                 "machine": str(platform_choice.get("machine") or ""),
                 "os": str(platform_choice.get("os") or ""),
                 "init": str(platform_choice.get("init") or ""),
-                "location": str(platform_choice.get("location") or ""),
+                "location": self._default_location(str(platform_choice.get("provider") or "")),
                 "bundles": bundles,
                 "packages": packages,
                 "disk_gb": self.query_one("#new-disk", Input).value.strip(),
@@ -1838,6 +1871,87 @@ class ProviderConfigScreen(ModalScreen[None]):
         self.dismiss(None)
 
 
+class TextPromptScreen(ModalScreen[str | None]):
+    """Minimal single-line text prompt. Dismisses with the entered text or None."""
+
+    CSS = """
+    TextPromptScreen {
+        align: center middle;
+    }
+
+    #prompt-dialog {
+        width: 72;
+        height: auto;
+        border: round $primary;
+        background: $surface;
+        padding: 1 2;
+    }
+
+    #prompt-label {
+        margin-bottom: 1;
+    }
+
+    #prompt-detail {
+        margin-bottom: 1;
+        color: $text-muted;
+    }
+
+    #prompt-input {
+        width: 100%;
+        margin-bottom: 1;
+    }
+
+    #prompt-actions {
+        height: 3;
+        align-horizontal: center;
+        background: transparent;
+    }
+
+    #prompt-actions Button {
+        margin: 0 1;
+    }
+    """
+
+    BINDINGS = [
+        Binding("escape", "dismiss_cancel", "Cancel"),
+    ]
+
+    def __init__(self, title: str, *, placeholder: str = "", detail: str = "") -> None:
+        super().__init__()
+        self._title = title
+        self._placeholder = placeholder
+        self._detail = detail
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="prompt-dialog"):
+            yield Label(f"[b]{self._title}[/b]", id="prompt-label")
+            if self._detail:
+                yield Static(self._detail, id="prompt-detail")
+            yield Input(placeholder=self._placeholder, id="prompt-input")
+            with Horizontal(id="prompt-actions"):
+                yield Button("Cancel", id="cancel")
+                yield Button("OK", id="ok", variant="primary")
+
+    def on_mount(self) -> None:
+        self.query_one("#prompt-input", Input).focus()
+
+    def _submit(self) -> None:
+        self.dismiss(self.query_one("#prompt-input", Input).value.strip() or None)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "ok":
+            self._submit()
+        else:
+            self.dismiss(None)
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        event.stop()
+        self._submit()
+
+    def action_dismiss_cancel(self) -> None:
+        self.dismiss(None)
+
+
 class PluginSourcesScreen(ModalScreen[None]):
     """Manage plugin sources: configured set + the recommended catalog.
 
@@ -1898,16 +2012,19 @@ class PluginSourcesScreen(ModalScreen[None]):
     def compose(self) -> ComposeResult:
         with Vertical(id="plugins-dialog"):
             yield Label("[b]Plugin sources[/b]", id="plugins-title")
-            table: DataTable[Any] = DataTable(id="plugins-table")
+            table = ListTable(id="plugins-table")
             table.add_columns("", "Source", "Ref", "Status", "Info")
             table.cursor_type = "row"
             yield table
             with Horizontal(id="plugins-controls"):
-                yield Input(placeholder="git url to add (pin with #ref)…", id="plugins-url")
-                yield Button("Add URL", id="plugins-add-url")
+                yield Button("Add selected", id="plugins-toggle", variant="primary")
+                yield Button("Add URL…", id="plugins-add-url")
                 yield Button("Pull", id="plugins-pull")
                 yield Button("Close", id="close")
-            yield Label("", id="plugins-status")
+            yield Label(
+                "↑/↓ select · space/enter or the button adds/removes the highlighted source · Add URL… for a custom repo",
+                id="plugins-status",
+            )
 
     def on_mount(self) -> None:
         self._reload()
@@ -1933,7 +2050,8 @@ class PluginSourcesScreen(ModalScreen[None]):
             table.add_row("[dim]+[/]", row["id"], row["ref"], "[dim]recommended[/]", info, key=f"rec:{row['id']}")
             self._rows.append(("rec", row["id"]))
         if not self._rows:
-            self._set_status("No sources or recommendations. Add a git url below.")
+            self._set_status("No sources or recommendations yet — use Add URL… to add one.")
+        self._update_toggle()
 
     def _current(self) -> tuple[str, str] | None:
         table = self.query_one("#plugins-table", DataTable)
@@ -1944,7 +2062,7 @@ class PluginSourcesScreen(ModalScreen[None]):
     def action_add_row(self) -> None:
         current = self._current()
         if current is None:
-            self._set_status("Highlight a recommended row to add, or type a url below.")
+            self._set_status("Highlight a recommended row, then Add selected — or use Add URL….")
             return
         kind, source_id = current
         if kind != "rec":
@@ -1968,6 +2086,33 @@ class PluginSourcesScreen(ModalScreen[None]):
         if ok:
             self._reload()
 
+    def _update_toggle(self) -> None:
+        """Toggle the main button between Add/Remove based on the highlighted row."""
+        current = self._current()
+        button = self.query_one("#plugins-toggle", Button)
+        if current is not None and current[0] == "cfg":
+            button.label = "Remove selected"
+            button.variant = "warning"
+        else:
+            button.label = "Add selected"
+            button.variant = "primary"
+
+    def _activate_current(self) -> None:
+        """Default action on the highlighted row: remove if configured, else add."""
+        current = self._current()
+        if current is None:
+            return
+        if current[0] == "cfg":
+            self.action_remove_row()
+        else:
+            self.action_add_row()
+
+    def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
+        self._update_toggle()
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        self._activate_current()
+
     def action_pull(self) -> None:
         self._set_status("Pulling…")
         ok, message = plugin_src.pull()
@@ -1975,28 +2120,32 @@ class PluginSourcesScreen(ModalScreen[None]):
         if ok:
             self._reload()
 
-    def _add_from_input(self) -> None:
-        field = self.query_one("#plugins-url", Input)
-        raw = field.value.strip()
-        if not raw:
-            self._set_status("Enter a git url (optionally url#ref).")
-            return
-        url, _, ref = raw.partition("#")
-        ok, message = plugin_src.add_url(url, ref=ref)
-        self._set_status(message)
-        if ok:
-            field.value = ""
-            self._reload()
+    def _open_add_url(self) -> None:
+        def on_result(value: str | None) -> None:
+            if not value:
+                return
+            url, _, ref = value.partition("#")
+            ok, message = plugin_src.add_url(url, ref=ref)
+            self._set_status(message)
+            if ok:
+                self._reload()
 
-    def on_input_submitted(self, event: Input.Submitted) -> None:
-        if event.input.id == "plugins-url":
-            self._add_from_input()
+        self.app.push_screen(
+            TextPromptScreen(
+                "Add plugin source",
+                placeholder="https://github.com/you/plugins.git#v1.0.0",
+                detail="Enter a git url. Pin a ref with url#ref (recommended).",
+            ),
+            on_result,
+        )
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "close":
             self.dismiss(None)
+        elif event.button.id == "plugins-toggle":
+            self._activate_current()
         elif event.button.id == "plugins-add-url":
-            self._add_from_input()
+            self._open_add_url()
         elif event.button.id == "plugins-pull":
             self.action_pull()
 

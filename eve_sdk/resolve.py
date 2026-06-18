@@ -226,6 +226,18 @@ def resolve_init(
     )
 
 
+def _selection_hint(catalog: dict[str, Any], section: str, key: str) -> str:
+    """Disambiguate a not-found selection: empty section ⇒ no plugins pulled."""
+    items = [entry for entry in (catalog.get(section) or []) if isinstance(entry, dict)]
+    if not items:
+        return (
+            "; no plugins are installed yet — add a source with "
+            "`eve plugin source add --recommended eve-providers` then run `eve pull`"
+        )
+    names = sorted(str(entry.get(key)) for entry in items if entry.get(key))
+    return f" (available: {', '.join(names)})" if names else ""
+
+
 def validate_catalog_selection(
     catalog: dict[str, Any],
     composition: dict[str, Any],
@@ -236,13 +248,23 @@ def validate_catalog_selection(
     bundle_packages: list[str],
 ) -> None:
     if not machine:
-        raise ResolveError(f"Machine not found: {composition.get('machine')}")
+        raise ResolveError(
+            f"Machine not found: {composition.get('machine')}"
+            f"{_selection_hint(catalog, 'machines', 'name')}"
+        )
     if not os_doc:
-        raise ResolveError(f"OS not found: {composition.get('os')}")
+        raise ResolveError(
+            f"OS not found: {composition.get('os')}{_selection_hint(catalog, 'oses', 'id')}"
+        )
     if not init:
-        raise ResolveError(f"Init not found: {composition.get('init')}")
+        raise ResolveError(
+            f"Init not found: {composition.get('init')}{_selection_hint(catalog, 'inits', 'id')}"
+        )
     if not location:
-        raise ResolveError(f"Location not found: {composition.get('location')}")
+        raise ResolveError(
+            f"Location not found: {composition.get('location')}"
+            f"{_selection_hint(catalog, 'locations', 'name')}"
+        )
     if init.get("os_family") and init.get("os_family") != os_doc.get("family"):
         raise ResolveError(f"Init/OS mismatch: init {init['id']} expects {init['os_family']}, got {os_doc['family']}")
     if not init_available_for_provider(init, machine["provider"]):

@@ -40,7 +40,9 @@ from tui.commands import (
     instance_observe_view,
     instance_statuses,
     instance_rows,
+    invalidate_caches,
     make_args,
+    package_action_args,
     package_make_args,
     provider_dispatch_args,
     provider_dispatch_provider_args,
@@ -72,6 +74,7 @@ from tui.widgets import (
     ConfirmScreen,
     DeleteConfirmScreen,
     FirstRunScreen,
+    ListTable,
     NewInstanceScreen,
     PluginSourcesScreen,
     ProviderConfigScreen,
@@ -152,8 +155,30 @@ class EveTui(App[None]):
         padding: 1;
     }
 
-    #refresh {
+    #instances-header {
+        height: 1;
         margin-bottom: 1;
+    }
+
+    #instances-header .section-title {
+        width: 1fr;
+        height: 1;
+        content-align: left middle;
+        margin-bottom: 0;
+    }
+
+    #refresh {
+        width: auto;
+        min-width: 0;
+        height: 1;
+        border: none;
+        padding: 0 1;
+        background: $panel;
+        color: $text;
+    }
+
+    #refresh:hover {
+        background: $primary;
     }
 
     #provider-pane {
@@ -406,9 +431,10 @@ class EveTui(App[None]):
                 with Vertical(id="left"):
                     yield Static("Providers", classes="section-title")
                     yield ProviderPane([], id="provider-pane")
-                    yield Static("Instances", classes="section-title")
-                    yield DataTable(id="instances")
-                    yield Button("Refresh", id="refresh", variant="primary")
+                    with Horizontal(id="instances-header"):
+                        yield Static("Instances", classes="section-title")
+                        yield Button("Refresh", id="refresh")
+                    yield ListTable(id="instances")
                 with Vertical(id="right"):
                     yield Static(
                         "\n".join(
@@ -457,12 +483,12 @@ class EveTui(App[None]):
                                         yield Button("", id=f"pkg-action-{index}")
                         with Vertical(id="packages-tab"), Vertical(id="packages-pane"):
                             yield Static("Bundles", classes="section-title")
-                            yield DataTable(id="bundles")
+                            yield ListTable(id="bundles")
                             with Grid(id="bundle-actions"):
                                 yield Button("Add Bundle", id="bundle-select")
                                 yield Button("Remove Bundle", id="bundle-unselect")
                             yield Static("Packages", classes="section-title")
-                            yield DataTable(id="packages")
+                            yield ListTable(id="packages")
                             with Grid(id="package-actions"):
                                 yield Button("Status", id="package-status")
                                 yield Button("Add Extra", id="package-select")
@@ -567,6 +593,16 @@ class EveTui(App[None]):
         except Exception as exc:
             self.log_line(f"[warning]catalog-options failed:[/] {exc}")
             self.catalog_options = {"providers": [], "platforms": [], "bundles": [], "packages": []}
+        # Footer lifecycle keys depend on whether providers are installed.
+        self.refresh_bindings()
+
+    def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
+        # Hide provider-lifecycle keys from the footer when no provider plugins
+        # are installed — nothing can be created or operated. Local actions
+        # (refresh, delete-local-entry, settings, plugins, quit) stay available.
+        if action in ("queue_provider", "queue_provision", "down_instance"):
+            return True if self.catalog_options.get("providers") else None
+        return True
 
     def trigger_blink(self) -> None:
         if self.current_instance is not None:
@@ -1421,7 +1457,21 @@ class EveTui(App[None]):
         self.push_screen(SettingsScreen())
 
     def action_open_plugins(self) -> None:
-        self.push_screen(PluginSourcesScreen())
+        # On close, reload the catalog/provider pane — the user may have added or
+        # pulled plugin sources, which changes the available providers/platforms.
+        self.push_screen(
+            PluginSourcesScreen(),
+            lambda _result: self.start_task(self.reload_after_plugin_change()),
+        )
+
+    async def reload_after_plugin_change(self) -> None:
+        self.log_line("[primary]Reloading plugins…[/]")
+        invalidate_caches()
+        await self.load_catalog_options()
+        await self.load_provider_pane_data()
+        await self.load_provider_health()
+        await self.refresh_instances(preserve_selection=True, quiet=True)
+        self.log_line("[success]Plugins reloaded.[/]")
 
     async def action_cancel_command(self) -> None:
         proc = self.current_process
@@ -1443,6 +1493,12 @@ class EveTui(App[None]):
         self.start_task(self.action_cancel_command())
 
     def action_new_instance(self) -> None:
+        if not self.catalog_options.get("platforms"):
+            self.notify(
+                "No platforms available — add a provider source (g) and pull first.",
+                severity="warning",
+            )
+            return
         self.push_screen(
             NewInstanceScreen(self.catalog_options),
             self.handle_new_instance,
@@ -1617,7 +1673,9 @@ class EveTui(App[None]):
 
     def on_provider_pane_test_connection_requested(self, event: ProviderPane.TestConnectionRequested) -> None:
         provider_id = event.provider_id
-        args = provider_dispatch_provider_args(provider_id, "status")
+        # Provider-level connectivity probe (not the instance-scoped `status`,
+        # which needs a resolved instance and would block).
+        args = provider_dispatch_provider_args(provider_id, "connectivity")
 
         async def _test() -> None:
             await self.stream_command(f"Test {provider_id}", args)
@@ -1842,14 +1900,7 @@ class EveTui(App[None]):
     ) -> None:
         code = await self.stream_command(
             f"package.action.{package}.{action_id}",
-            [
-                "make",
-                "--no-print-directory",
-                "package.action",
-                f"INSTANCE={instance}",
-                f"PACKAGE={package}",
-                f"ACTION={action_id}",
-            ],
+            package_action_args(instance, package, action_id),
             refresh_instance=instance,
             env=env,
         )
@@ -1951,7 +2002,6 @@ class EveTui(App[None]):
             "reboot",
             "provision",
             "connect-ssh",
-            "refresh",
             "update-tools",
             "upload",
             "show-password",
@@ -2000,6 +2050,10 @@ class EveTui(App[None]):
         provision_state = str(state.get("provision_state", "unknown"))
         display_provider_state = str(state.get("effective_provider_state", "unknown"))
         provider_available = provider_actions_available(cast(dict[str, Any], state))
+        # No provider plugins pulled ⇒ nothing can be created/operated. Gate all
+        # lifecycle controls on this so we don't offer up/stop/down/provision/
+        # recover for instances whose provider isn't installed.
+        providers_installed = bool(self.catalog_options.get("providers"))
         provider_busy = display_provider_state == "changing"
         self.current_provider_actions = self.provider_manifest_actions()
         self.current_remote_actions = self.installed_package_actions()
@@ -2025,13 +2079,20 @@ class EveTui(App[None]):
         provider_up.label = "Start" if display_provider_state == "stopped" else "Up"
         self.set_button(
             "provider-up",
-            disabled=busy or not has_instance or provider_busy or display_provider_state == "running",
+            disabled=(
+                busy
+                or not has_instance
+                or not providers_installed
+                or provider_busy
+                or display_provider_state == "running"
+            ),
         )
         self.set_button(
             "provider-stop",
             disabled=(
                 busy
                 or not has_instance
+                or not providers_installed
                 or provider_busy
                 or display_provider_state in {"unknown", "stopped", "absent"}
             ),
@@ -2045,6 +2106,7 @@ class EveTui(App[None]):
             disabled=(
                 busy
                 or not has_instance
+                or not providers_installed
                 or provider_busy
                 or provision_state == "provisioning"
             ),
@@ -2058,9 +2120,15 @@ class EveTui(App[None]):
         )
         self.set_button(
             "provider-down",
-            disabled=busy or not has_instance or provider_busy or display_provider_state in {"absent", "unknown"},
+            disabled=(
+                busy
+                or not has_instance
+                or not providers_installed
+                or provider_busy
+                or display_provider_state in {"absent", "unknown"}
+            ),
         )
-        self.set_button("instance-recover", disabled=busy or not has_instance)
+        self.set_button("instance-recover", disabled=busy or not has_instance or not providers_installed)
         self.set_button("delete-instance", disabled=busy or not has_instance)
         self.set_button("connect-ssh", disabled=busy or not has_instance or not provider_available)
         for index in range(PACKAGE_ACTION_BUTTONS):
@@ -2229,5 +2297,15 @@ class EveTui(App[None]):
 
 
 def run() -> int:
+    # A background `asyncio.to_thread` read (e.g. a live provider observe that
+    # shells out) can still be running at quit. asyncio's default-executor join
+    # on shutdown would otherwise block the process for THREAD_JOIN_TIMEOUT
+    # (300s) waiting for it — the TUI would clear but never return to the shell.
+    # Cap that join so quit returns promptly; an abandoned read is harmless.
+    import asyncio.constants as _asyncio_constants
+
+    _asyncio_constants.THREAD_JOIN_TIMEOUT = min(  # type: ignore[misc]
+        _asyncio_constants.THREAD_JOIN_TIMEOUT, 2
+    )
     EveTui().run()
     return 0

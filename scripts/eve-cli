@@ -22,12 +22,12 @@ so an N-op batch parses catalog/plugins exactly once for the read portion.
 Usage:
   eve <group> <verb> [args...]
   eve <group> --help
-  eve --help
-  eve                   # no args (or `eve tui`) opens the Textual TUI
+  eve --help            # no args also prints help
+  eve tui               # open the Textual TUI (no longer the default)
   eve batch [--file <path>]   # read ops from stdin or --file, one per line
 
-Groups: instance, package, provider, bundle, plugin, catalog, config,
-        doctor, tui, pull, batch
+Groups (alphabetical): batch, bundle, catalog, config, doctor, instance,
+        package, plugin, provider, pull, tui
 """
 
 from __future__ import annotations
@@ -677,7 +677,24 @@ def make_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.ArgumentP
     pull.add_argument("--if-stale", type=float, metavar="TTL",
                       help="skip if lockfile younger than TTL seconds")
 
+    _sort_subparsers(parser)
     return parser, group_parsers
+
+
+def _sort_subparsers(parser: argparse.ArgumentParser) -> None:
+    """Display groups/verbs alphabetically in --help and usage.
+
+    Sorts each sub-parsers action's display list + choice map (order is not
+    load-bearing — parsing is by key), recursively over every nested group.
+    """
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            choices_actions = getattr(action, "_choices_actions", None)
+            if choices_actions is not None:
+                choices_actions.sort(key=lambda item: item.dest)
+            action.choices = dict(sorted(action.choices.items()))
+            for subparser in action.choices.values():
+                _sort_subparsers(subparser)
 
 
 # ============================ entrypoint ================================== #
@@ -691,13 +708,11 @@ def _exec(cmd: list[str]) -> int:
 def main(argv: list[str] | None = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
-    # `eve` with no args opens the TUI (same as `eve tui`).
-    if not argv:
-        argv = ["tui"]
 
     parser, group_parsers = make_parser()
     args = parser.parse_args(argv)
 
+    # No args prints help; the TUI is explicit (`eve tui`).
     if args.group is None:
         parser.print_help()
         return 0
