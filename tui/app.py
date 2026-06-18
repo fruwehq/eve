@@ -152,8 +152,20 @@ class EveTui(App[None]):
         padding: 1;
     }
 
+    #instances-header {
+        height: 3;
+    }
+
+    #instances-header .section-title {
+        width: 1fr;
+        height: 3;
+        content-align: left middle;
+        margin-bottom: 0;
+    }
+
     #refresh {
-        margin-bottom: 1;
+        width: auto;
+        min-width: 7;
     }
 
     #provider-pane {
@@ -406,9 +418,10 @@ class EveTui(App[None]):
                 with Vertical(id="left"):
                     yield Static("Providers", classes="section-title")
                     yield ProviderPane([], id="provider-pane")
-                    yield Static("Instances", classes="section-title")
+                    with Horizontal(id="instances-header"):
+                        yield Static("Instances", classes="section-title")
+                        yield Button("⟳", id="refresh")
                     yield DataTable(id="instances")
-                    yield Button("Refresh", id="refresh", variant="primary")
                 with Vertical(id="right"):
                     yield Static(
                         "\n".join(
