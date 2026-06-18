@@ -41,6 +41,7 @@ from tui.commands import (
     instance_statuses,
     instance_rows,
     make_args,
+    package_action_args,
     package_make_args,
     provider_dispatch_args,
     provider_dispatch_provider_args,
@@ -1873,14 +1874,7 @@ class EveTui(App[None]):
     ) -> None:
         code = await self.stream_command(
             f"package.action.{package}.{action_id}",
-            [
-                "make",
-                "--no-print-directory",
-                "package.action",
-                f"INSTANCE={instance}",
-                f"PACKAGE={package}",
-                f"ACTION={action_id}",
-            ],
+            package_action_args(instance, package, action_id),
             refresh_instance=instance,
             env=env,
         )

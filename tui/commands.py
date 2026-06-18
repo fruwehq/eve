@@ -10,6 +10,14 @@ from typing import Any, cast
 from eve_sdk.engine import default_engine
 
 ROOT = Path(__file__).resolve().parents[1]
+SCRIPTS = ROOT / "scripts"
+
+# Former make targets the TUI drove are now called as the scripts the Makefile
+# delegated to — no `make` layer. (Scripts load config themselves, so make's
+# config-env injection isn't needed; the eve CLI calls them the same way.)
+_INSTANCE_RUN_VERBS = frozenset(
+    {"up", "down", "start", "stop", "ssh", "logs", "provision", "reboot", "ip"}
+)
 
 _provider_capabilities_cache: dict[str, list[str]] | None = None
 
@@ -90,9 +98,9 @@ def instance_statuses() -> dict[str, dict[str, Any]]:
 
 
 def provider_status_table() -> str:
-    code, out, err = run_command(["make", "--no-print-directory", "providers.status"])
+    code, out, err = run_command([str(SCRIPTS / "providers-status")])
     if code != 0:
-        raise RuntimeError(err.strip() or out.strip() or f"make providers.status exited {code}")
+        raise RuntimeError(err.strip() or out.strip() or f"providers-status exited {code}")
     return out.strip()
 
 
@@ -105,16 +113,32 @@ def upload_folders() -> list[str]:
 
 def instance_ip(instance: str) -> str:
     code, out, err = run_command(
-        ["make", "--no-print-directory", "ip", f"INSTANCE={instance}"],
+        [str(SCRIPTS / "instance-run"), "ip", instance],
         env={"EVE_DISABLE_STATE": "1"},
     )
     if code != 0:
-        raise RuntimeError(err.strip() or out.strip() or f"make ip exited {code}")
+        raise RuntimeError(err.strip() or out.strip() or f"instance-run ip exited {code}")
     return out.strip()
 
 
 def make_args(target: str, instance: str, *extra: str) -> list[str]:
-    return ["make", "--no-print-directory", target, f"INSTANCE={instance}", *extra]
+    """Script argv for a former `make <target> INSTANCE=...` instance op."""
+    if target in _INSTANCE_RUN_VERBS:
+        return [str(SCRIPTS / "instance-run"), target, instance]
+    if target == "upload":
+        names: list[str] = []
+        for item in extra:
+            if item.startswith("UPLOADS="):
+                value = item[len("UPLOADS=") :]
+                names = value.split(",") if value else []
+        return [str(SCRIPTS / "instance-run"), "upload", instance, *names]
+    if target == "status":
+        return [str(SCRIPTS / "instance-status"), "--instance", instance]
+    if target == "instance.delete":
+        return [str(SCRIPTS / "instance-delete"), "--instance", instance]
+    if target == "instance.provision":
+        return [str(SCRIPTS / "instance-provision"), "--instance", instance]
+    raise ValueError(f"make_args: unknown target {target!r}")
 
 
 def provider_dispatch_args(command: str, instance: str, *extra: str) -> list[str]:
@@ -129,11 +153,42 @@ def provider_dispatch_args(command: str, instance: str, *extra: str) -> list[str
 
 
 def package_make_args(target: str, instance: str, package: str, *extra: str) -> list[str]:
-    return ["make", "--no-print-directory", target, f"INSTANCE={instance}", f"PACKAGE={package}", *extra]
+    """Script argv for a former package make target."""
+    base = ["--instance", instance, "--package", package]
+    if target in ("package.select", "package.unselect"):
+        flag = "--add" if target == "package.select" else "--remove"
+        return [str(SCRIPTS / "package-selection"), *base, flag]
+    command = {
+        "package.install": "install",
+        "package.status": "status",
+        "package.down": "down",
+        "package.uninstall": "down",
+        "package.reinstall": "reinstall",
+    }.get(target)
+    if command is None:
+        raise ValueError(f"package_make_args: unknown target {target!r}")
+    args = [str(SCRIPTS / "package-dispatch"), *base, "--command", command]
+    if "YES=1" in extra:
+        args.append("--yes")
+    return args
+
+
+def package_action_args(instance: str, package: str, action: str) -> list[str]:
+    """Script argv for a package-defined action (former `make package.action`)."""
+    return [
+        str(SCRIPTS / "package-action"),
+        "--instance",
+        instance,
+        "--package",
+        package,
+        "--action",
+        action,
+    ]
 
 
 def bundle_make_args(target: str, instance: str, bundle: str) -> list[str]:
-    return ["make", "--no-print-directory", target, f"INSTANCE={instance}", f"BUNDLE={bundle}"]
+    flag = "--add" if target == "bundle.select" else "--remove"
+    return [str(SCRIPTS / "bundle-selection"), "--instance", instance, "--bundle", bundle, flag]
 
 
 PROVIDER_DEBUG_ACTION_IDS = frozenset({"status-details", "plan", "init"})
@@ -190,23 +245,17 @@ def create_instance_args(
     memory_mb: str,
     provider_ip: str = "",
 ) -> list[str]:
-    args = [
-        "make",
-        "--no-print-directory",
-        "instance.create",
-        f"INSTANCE={name}",
-        f"MACHINE={platform_choice.get('machine', '')}",
-        f"OS={platform_choice.get('os', '')}",
-        f"LOCATION={platform_choice.get('location', '')}",
-    ]
-    if bundles:
-        args.append(f"BUNDLES={bundles}")
-    if packages:
-        args.append(f"PACKAGES={packages}")
-    if disk_gb:
-        args.append(f"DISK_GB={disk_gb}")
-    if memory_mb:
-        args.append(f"MEMORY_MB={memory_mb}")
-    if provider_ip:
-        args.append(f"PROVIDER_IP={provider_ip}")
+    args = [str(SCRIPTS / "instance-create"), "--instance", name]
+    for flag, value in (
+        ("--machine", str(platform_choice.get("machine", ""))),
+        ("--os", str(platform_choice.get("os", ""))),
+        ("--location", str(platform_choice.get("location", ""))),
+        ("--bundles", bundles),
+        ("--packages", packages),
+        ("--disk-gb", disk_gb),
+        ("--memory-mb", memory_mb),
+        ("--provider-ip", provider_ip),
+    ):
+        if value:
+            args += [flag, value]
     return args
