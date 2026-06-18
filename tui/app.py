@@ -40,6 +40,7 @@ from tui.commands import (
     instance_observe_view,
     instance_statuses,
     instance_rows,
+    invalidate_caches,
     make_args,
     package_action_args,
     package_make_args,
@@ -155,19 +156,29 @@ class EveTui(App[None]):
     }
 
     #instances-header {
-        height: 3;
+        height: 1;
+        margin-bottom: 1;
     }
 
     #instances-header .section-title {
         width: 1fr;
-        height: 3;
+        height: 1;
         content-align: left middle;
         margin-bottom: 0;
     }
 
     #refresh {
         width: auto;
-        min-width: 7;
+        min-width: 0;
+        height: 1;
+        border: none;
+        padding: 0 1;
+        background: $panel;
+        color: $text;
+    }
+
+    #refresh:hover {
+        background: $primary;
     }
 
     #provider-pane {
@@ -422,7 +433,7 @@ class EveTui(App[None]):
                     yield ProviderPane([], id="provider-pane")
                     with Horizontal(id="instances-header"):
                         yield Static("Instances", classes="section-title")
-                        yield Button("⟳", id="refresh")
+                        yield Button("Refresh", id="refresh")
                     yield ListTable(id="instances")
                 with Vertical(id="right"):
                     yield Static(
@@ -1446,7 +1457,21 @@ class EveTui(App[None]):
         self.push_screen(SettingsScreen())
 
     def action_open_plugins(self) -> None:
-        self.push_screen(PluginSourcesScreen())
+        # On close, reload the catalog/provider pane — the user may have added or
+        # pulled plugin sources, which changes the available providers/platforms.
+        self.push_screen(
+            PluginSourcesScreen(),
+            lambda _result: self.start_task(self.reload_after_plugin_change()),
+        )
+
+    async def reload_after_plugin_change(self) -> None:
+        self.log_line("[primary]Reloading plugins…[/]")
+        invalidate_caches()
+        await self.load_catalog_options()
+        await self.load_provider_pane_data()
+        await self.load_provider_health()
+        await self.refresh_instances(preserve_selection=True, quiet=True)
+        self.log_line("[success]Plugins reloaded.[/]")
 
     async def action_cancel_command(self) -> None:
         proc = self.current_process

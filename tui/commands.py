@@ -22,6 +22,19 @@ _INSTANCE_RUN_VERBS = frozenset(
 _provider_capabilities_cache: dict[str, list[str]] | None = None
 
 
+def invalidate_caches() -> None:
+    """Drop memoized plugin/catalog/provider state after a mutation that may
+    change the installed plugin set (e.g. `eve pull`). The warm Engine also
+    auto-invalidates on a plugin fingerprint change, but module-level caches
+    (provider capabilities, settings schema) don't — clear them explicitly."""
+    global _provider_capabilities_cache
+    _provider_capabilities_cache = None
+    default_engine().reload()
+    from tui import settings as _settings
+
+    _settings._invalidate_cache()
+
+
 def run_command(args: list[str], *, env: dict[str, str] | None = None) -> tuple[int, str, str]:
     proc = subprocess.run(
         args,

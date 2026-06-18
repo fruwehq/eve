@@ -117,21 +117,23 @@ class ProviderPane(Static):
             display_name = str(provider.get("display_name", provider_id))
             self._actions[provider_id] = provider.get("actions", [])
 
+            # Configured and Reachable use the same glyphs: ✓ yes, ✗ no,
+            # — not yet checked.
             configured = self._configured.get(provider_id)
             if configured is True:
-                configured_text = "[success]yes[/]"
+                configured_text = "[success]✓[/]"
             elif configured is False:
-                configured_text = "[dim]no[/]"
+                configured_text = "[dim]✗[/]"
             else:
-                configured_text = "[dim]?[/]"
+                configured_text = "[dim]—[/]"
 
             reachable = self.reachability.get(provider_id)
             if reachable is True:
-                reach_text = "[success]●[/]"
+                reach_text = "[success]✓[/]"
             elif reachable is False:
-                reach_text = "[warning]○[/]"
+                reach_text = "[warning]✗[/]"
             else:
-                reach_text = "[dim]?[/]"
+                reach_text = "[dim]—[/]"
 
             table.add_row(display_name, configured_text, reach_text, key=provider_id)
 
@@ -609,7 +611,7 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
         table = self.query_one("#platform-cards", DataTable)
         table.cursor_type = "row"
         table.clear(columns=True)
-        table.add_columns("Provider", "Machine", "OS", "Location", "Defaults")
+        table.add_columns("Provider", "Machine", "OS", "Defaults")
         for platform_choice in self.platforms:
             defaults = (
                 platform_choice.get("defaults", {}) if isinstance(platform_choice.get("defaults"), dict) else {}
@@ -628,7 +630,6 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
                 str(platform_choice.get("provider") or "-"),
                 str(platform_choice.get("machine") or "-"),
                 str(platform_choice.get("os") or "-"),
-                str(platform_choice.get("location") or "-"),
                 ", ".join(default_parts) if default_parts else "-",
                 key=str(platform_choice.get("id")),
             )
@@ -945,7 +946,6 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
             f"Machine: {platform_choice.get('machine') or '-'}",
             f"OS: {platform_choice.get('os') or '-'}",
             f"Init: {platform_choice.get('init') or '-'}",
-            f"Location: {platform_choice.get('location') or '-'}",
             f"Defaults: disk {defaults.get('disk_gb') or '-'} GB, "
             f"memory {defaults.get('memory_mb') or '-'} MB, "
             f"CPU {defaults.get('cpus') or defaults.get('cpu_cores') or defaults.get('vcpus') or '-'}.",
