@@ -73,6 +73,7 @@ from tui.widgets import (
     ConfirmScreen,
     DeleteConfirmScreen,
     FirstRunScreen,
+    ListTable,
     NewInstanceScreen,
     PluginSourcesScreen,
     ProviderConfigScreen,
@@ -89,14 +90,6 @@ PROVIDER_ACTION_BUTTONS = 5
 APP_NAME = "Eve"
 APP_EXPANSION = "Ephemeral VM Environment"
 APP_TAGLINE = "create -> provision -> connect"
-
-
-class ListTable(DataTable[Any]):
-    """DataTable whose highlighted row is activated by space as well as enter."""
-
-    BINDINGS: ClassVar[list[Binding | tuple[str, str] | tuple[str, str, str]]] = [
-        Binding("space", "select_cursor", "Select", show=False),
-    ]
 
 
 class EveTui(App[None]):

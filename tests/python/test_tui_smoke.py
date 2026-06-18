@@ -92,3 +92,30 @@ def test_lists_bind_space_to_select() -> None:
                 assert isinstance(app.query_one(table_id), ListTable)
 
     asyncio.run(_run())
+
+
+def test_plugin_toggle_add_then_flips_to_remove() -> None:
+    from textual.widgets import Button
+
+    from tui import plugins as p
+    from tui.app import EveTui
+    from tui.widgets import PluginSourcesScreen
+
+    async def _run() -> None:
+        app = EveTui()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            screen = PluginSourcesScreen()
+            await app.push_screen(screen)
+            await pilot.pause()
+            toggle = screen.query_one("#plugins-toggle", Button)
+            assert str(toggle.label) == "Add selected"
+            assert screen._rows[0][0] == "rec"  # empty override -> all recommended
+            sid = screen._rows[0][1]
+            screen._activate_current()  # space/enter/button on a recommended row -> add
+            await pilot.pause()
+            assert any(r["id"] == sid for r in p.configured_rows())
+            # the added source is now configured at row 0 -> button flips
+            assert str(toggle.label) == "Remove selected"
+
+    asyncio.run(_run())

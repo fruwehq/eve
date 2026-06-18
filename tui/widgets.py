@@ -46,6 +46,14 @@ from tui.settings import (
 )
 
 
+class ListTable(DataTable[Any]):
+    """DataTable whose highlighted row is activated by space as well as enter."""
+
+    BINDINGS = [
+        Binding("space", "select_cursor", "Select", show=False),
+    ]
+
+
 class ProviderPane(Static):
     DEFAULT_CSS = """
     ProviderPane {
@@ -1979,17 +1987,19 @@ class PluginSourcesScreen(ModalScreen[None]):
     def compose(self) -> ComposeResult:
         with Vertical(id="plugins-dialog"):
             yield Label("[b]Plugin sources[/b]", id="plugins-title")
-            table: DataTable[Any] = DataTable(id="plugins-table")
+            table = ListTable(id="plugins-table")
             table.add_columns("", "Source", "Ref", "Status", "Info")
             table.cursor_type = "row"
             yield table
             with Horizontal(id="plugins-controls"):
-                yield Button("Add selected", id="plugins-add-sel", variant="primary")
+                yield Button("Add selected", id="plugins-toggle", variant="primary")
                 yield Button("Add URL…", id="plugins-add-url")
-                yield Button("Remove", id="plugins-remove")
                 yield Button("Pull", id="plugins-pull")
                 yield Button("Close", id="close")
-            yield Label("↑/↓ select · a/Add selected · x removes · Add URL… for a custom repo", id="plugins-status")
+            yield Label(
+                "↑/↓ select · space/enter or the button adds/removes the highlighted source · Add URL… for a custom repo",
+                id="plugins-status",
+            )
 
     def on_mount(self) -> None:
         self._reload()
@@ -2016,6 +2026,7 @@ class PluginSourcesScreen(ModalScreen[None]):
             self._rows.append(("rec", row["id"]))
         if not self._rows:
             self._set_status("No sources or recommendations yet — use Add URL… to add one.")
+        self._update_toggle()
 
     def _current(self) -> tuple[str, str] | None:
         table = self.query_one("#plugins-table", DataTable)
@@ -2050,6 +2061,33 @@ class PluginSourcesScreen(ModalScreen[None]):
         if ok:
             self._reload()
 
+    def _update_toggle(self) -> None:
+        """Toggle the main button between Add/Remove based on the highlighted row."""
+        current = self._current()
+        button = self.query_one("#plugins-toggle", Button)
+        if current is not None and current[0] == "cfg":
+            button.label = "Remove selected"
+            button.variant = "warning"
+        else:
+            button.label = "Add selected"
+            button.variant = "primary"
+
+    def _activate_current(self) -> None:
+        """Default action on the highlighted row: remove if configured, else add."""
+        current = self._current()
+        if current is None:
+            return
+        if current[0] == "cfg":
+            self.action_remove_row()
+        else:
+            self.action_add_row()
+
+    def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
+        self._update_toggle()
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        self._activate_current()
+
     def action_pull(self) -> None:
         self._set_status("Pulling…")
         ok, message = plugin_src.pull()
@@ -2079,12 +2117,10 @@ class PluginSourcesScreen(ModalScreen[None]):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "close":
             self.dismiss(None)
-        elif event.button.id == "plugins-add-sel":
-            self.action_add_row()
+        elif event.button.id == "plugins-toggle":
+            self._activate_current()
         elif event.button.id == "plugins-add-url":
             self._open_add_url()
-        elif event.button.id == "plugins-remove":
-            self.action_remove_row()
         elif event.button.id == "plugins-pull":
             self.action_pull()
 
