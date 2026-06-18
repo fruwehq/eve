@@ -1974,7 +1974,6 @@ class EveTui(App[None]):
             "reboot",
             "provision",
             "connect-ssh",
-            "refresh",
             "update-tools",
             "upload",
             "show-password",
