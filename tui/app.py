@@ -1673,7 +1673,9 @@ class EveTui(App[None]):
 
     def on_provider_pane_test_connection_requested(self, event: ProviderPane.TestConnectionRequested) -> None:
         provider_id = event.provider_id
-        args = provider_dispatch_provider_args(provider_id, "status")
+        # Provider-level connectivity probe (not the instance-scoped `status`,
+        # which needs a resolved instance and would block).
+        args = provider_dispatch_provider_args(provider_id, "connectivity")
 
         async def _test() -> None:
             await self.stream_command(f"Test {provider_id}", args)
