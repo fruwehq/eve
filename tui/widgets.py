@@ -230,7 +230,7 @@ class DeleteConfirmScreen(ModalScreen[dict[str, Any] | None]):
 
     #delete-dialog {
         width: 72;
-        height: 14;
+        height: 16;
         border: round $error;
         background: $surface;
         padding: 1 2;
@@ -272,7 +272,8 @@ class DeleteConfirmScreen(ModalScreen[dict[str, Any] | None]):
                 id="delete-message",
             )
             with Vertical(id="delete-options"):
-                yield Checkbox("Purge local workdir and state", id="delete-purge", value=True)
+                yield Checkbox("Down instance first (destroy provider resources)", id="delete-down", value=False)
+                yield Checkbox("Purge local workdir and state", id="delete-purge", value=False)
                 yield Checkbox("Force (skip provider state check)", id="delete-force", value=False)
             with Horizontal(id="delete-actions"):
                 yield Button("Cancel", id="cancel")
@@ -280,9 +281,10 @@ class DeleteConfirmScreen(ModalScreen[dict[str, Any] | None]):
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "confirm":
+            down = self.query_one("#delete-down", Checkbox).value
             purge = self.query_one("#delete-purge", Checkbox).value
             force = self.query_one("#delete-force", Checkbox).value
-            self.dismiss({"confirmed": True, "purge": purge, "force": force})
+            self.dismiss({"confirmed": True, "down": down, "purge": purge, "force": force})
         else:
             self.dismiss(None)
 

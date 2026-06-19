@@ -1565,11 +1565,18 @@ class EveTui(App[None]):
 
     async def perform_delete_instance(self, instance: str, options: dict[str, Any] | None = None) -> None:
         opts = options or {}
+        if opts.get("down"):
+            code = await self.stream_command(
+                "provider.down", make_args("down", instance), refresh_instance=instance
+            )
+            if code != 0:
+                self.log_line("[warning]Down failed — leaving the instance in place (not deleted).[/]")
+                return
         args = make_args("instance.delete", instance)
-        if opts.get("purge", True):
-            args.append("PURGE=1")
+        if opts.get("purge", False):
+            args.append("--purge")
         if opts.get("force", False):
-            args.append("FORCE=1")
+            args.append("--force")
         await self.stream_command("instance.delete", args)
         if self.current_instance == instance:
             self.current_instance = None
