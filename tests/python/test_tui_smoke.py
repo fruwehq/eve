@@ -134,6 +134,38 @@ def test_footer_bindings_are_app_level_only() -> None:
     assert by_key.get("q") == "quit"
 
 
+def test_new_instance_provider_select_filters_and_location() -> None:
+    # Picking a provider filters the platform list to that provider, and the
+    # location comes from the provider's declared locations (not hardcoded).
+    from textual.widgets import Select
+
+    from tui.app import EveTui
+    from tui.commands import catalog_options
+    from tui.widgets import NewInstanceScreen
+
+    async def _run() -> None:
+        app = EveTui()
+        screen = NewInstanceScreen(catalog_options())
+        async with app.run_test() as pilot:
+            await app.push_screen(screen)
+            await pilot.pause()
+            assert screen.providers
+            assert screen.filtered_platforms()
+            assert all(p["provider"] == screen.selected_provider_id for p in screen.filtered_platforms())
+            locations = screen._locations_for(screen.selected_provider_id)
+            if locations:
+                assert screen.selected_location() in locations
+            provider_ids = [str(p["id"]) for p in screen.providers]
+            if len(provider_ids) > 1:
+                other = next(pid for pid in provider_ids if pid != screen.selected_provider_id)
+                screen.query_one("#provider-select", Select).value = other
+                await pilot.pause()
+                assert screen.selected_provider_id == other
+                assert all(p["provider"] == other for p in screen.filtered_platforms())
+
+    asyncio.run(_run())
+
+
 def test_new_instance_gated_when_no_platforms() -> None:
     from tui.app import EveTui
     from tui.widgets import NewInstanceScreen

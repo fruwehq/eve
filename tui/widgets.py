@@ -15,6 +15,7 @@ from textual.widgets import (
     DataTable,
     Input,
     Label,
+    Select,
     SelectionList,
     Static,
     TextArea,
@@ -508,6 +509,10 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
         height: 1fr;
     }
 
+    .wizard-select {
+        margin-bottom: 1;
+    }
+
     #platform-cards {
         height: 16;
         margin-bottom: 1;
@@ -561,6 +566,15 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
             for platform in options.get("platforms", [])
             if isinstance(platform, dict)
         ]
+        # catalog-options emits providers as id strings; tolerate dicts too.
+        self.providers: list[dict[str, Any]] = []
+        for provider in options.get("providers", []):
+            if isinstance(provider, dict) and provider.get("id"):
+                self.providers.append(
+                    {"id": str(provider["id"]), "display_name": str(provider.get("display_name") or provider["id"])}
+                )
+            elif isinstance(provider, str) and provider:
+                self.providers.append({"id": provider, "display_name": provider})
         self.locations = [
             cast(dict[str, Any], location)
             for location in options.get("locations", [])
@@ -578,6 +592,12 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
         self.package_map = {str(package.get("id")): package for package in self.packages if package.get("id")}
         self.package_ids = sorted(self.package_map)
         self.step = 0
+        if self.providers:
+            self.selected_provider_id = str(self.providers[0]["id"])
+        elif self.platforms:
+            self.selected_provider_id = str(self.platforms[0].get("provider") or "")
+        else:
+            self.selected_provider_id = ""
         self.selected_platform_id = ""
         self.highlighted_bundle_id = ""
         self.highlighted_package_id = ""
@@ -606,9 +626,12 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
                 yield Input(placeholder="instance name", id="new-name")
                 yield Static("Use a short lowercase name, for example dev-a or windows-test.", classes="muted")
             with Vertical(id="step-platform"):
-                yield Static("Choose a supported provider / machine / OS / location combination.", classes="muted")
+                yield Static("Pick a provider, then a machine/OS, then a location it offers.", classes="muted")
+                yield Select([], prompt="Provider", id="provider-select", classes="wizard-select")
                 yield DataTable(id="platform-cards")
                 yield Static("", id="platform-defaults")
+                yield Static("Location", classes="muted")
+                yield Select([], prompt="Location", id="location-select", classes="wizard-select")
             with Vertical(id="step-content"):
                 yield Static("Bundles  -  ↑↓ browse, space to add/remove", classes="muted")
                 with Horizontal(id="bundle-row"):
@@ -646,12 +669,25 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
 
     def on_mount(self) -> None:
         self.populate_platform_cards()
+        self.populate_provider_select()
+        self.populate_location_select()
         # Keep the read-only detail panels out of the tab order so Tab moves
         # bundles -> packages (the scroll containers are focusable by default;
         # mouse-wheel scrolling still works without keyboard focus).
         for panel in self.query(".detail-column"):
             panel.can_focus = False
         self.update_wizard()
+
+    def on_select_changed(self, event: Select.Changed) -> None:
+        if event.select.id == "provider-select":
+            new_provider = "" if event.value is Select.BLANK else str(event.value)
+            if new_provider and new_provider != self.selected_provider_id:
+                self.selected_provider_id = new_provider
+                self.populate_platform_cards()
+                self.populate_location_select()
+                self.update_wizard()
+        elif event.select.id == "location-select":
+            self.update_wizard()
 
     def bundle_label(self, bundle: dict[str, Any]) -> str:
         includes = bundle.get("includes", [])
@@ -669,12 +705,22 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
                 parts.append(f"[dim]{label}[/]")
         return "[b]New Instance[/b]  " + " [dim]->[/] ".join(parts)
 
+    def filtered_platforms(self) -> list[dict[str, Any]]:
+        if not self.selected_provider_id:
+            return self.platforms
+        return [
+            platform_choice
+            for platform_choice in self.platforms
+            if str(platform_choice.get("provider") or "") == self.selected_provider_id
+        ]
+
     def populate_platform_cards(self) -> None:
         table = self.query_one("#platform-cards", DataTable)
         table.cursor_type = "row"
         table.clear(columns=True)
-        table.add_columns("Provider", "Machine", "OS", "Defaults")
-        for platform_choice in self.platforms:
+        table.add_columns("Machine", "OS", "Defaults")
+        platforms = self.filtered_platforms()
+        for platform_choice in platforms:
             defaults = (
                 platform_choice.get("defaults", {}) if isinstance(platform_choice.get("defaults"), dict) else {}
             )
@@ -689,17 +735,49 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
             if memory:
                 default_parts.append(f"{memory} MB")
             table.add_row(
-                str(platform_choice.get("provider") or "-"),
                 str(platform_choice.get("machine") or "-"),
                 str(platform_choice.get("os") or "-"),
                 ", ".join(default_parts) if default_parts else "-",
                 key=str(platform_choice.get("id")),
             )
-        if self.platforms:
-            self.selected_platform_id = str(self.platforms[0].get("id"))
+        if platforms:
+            self.selected_platform_id = str(platforms[0].get("id"))
             table.move_cursor(row=0, column=0, animate=False)
         else:
             self.selected_platform_id = ""
+
+    def _locations_for(self, provider: str) -> list[str]:
+        return [
+            str(location.get("name"))
+            for location in self.locations
+            if isinstance(location.get("providers"), list) and provider in location["providers"]
+        ]
+
+    def populate_provider_select(self) -> None:
+        select = self.query_one("#provider-select", Select)
+        options = [(str(provider.get("display_name") or provider["id"]), str(provider["id"])) for provider in self.providers]
+        if not options:
+            return
+        select.set_options(options)
+        if self.selected_provider_id:
+            select.value = self.selected_provider_id
+
+    def populate_location_select(self) -> None:
+        select = self.query_one("#location-select", Select)
+        names = self._locations_for(self.selected_provider_id)
+        select.set_options([(name, name) for name in names])
+        if names:
+            default = self._default_location(self.selected_provider_id)
+            select.value = default if default in names else names[0]
+
+    def selected_location(self) -> str:
+        try:
+            value = self.query_one("#location-select", Select).value
+        except Exception:
+            value = None
+        if value is None or value is Select.BLANK:
+            return self._default_location(str(self.selected_platform().get("provider") or ""))
+        return str(value)
 
     def selected_platform(self) -> dict[str, Any]:
         return self.platform_by_id.get(self.selected_platform_id, {})
@@ -1156,6 +1234,7 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
                 [
                     f"Instance: {name}",
                     *self.platform_default_lines(platform_choice),
+                    f"Location: {self.selected_location() or '(none available)'}",
                     *([f"Provider IP: {provider_ip or '(required)'}"] if provider_ip_required else []),
                     f"Bundles: {bundle_text}",
                     f"Bundle packages: {bundled_text}",
@@ -1321,7 +1400,7 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
                 "machine": str(platform_choice.get("machine") or ""),
                 "os": str(platform_choice.get("os") or ""),
                 "init": str(platform_choice.get("init") or ""),
-                "location": self._default_location(str(platform_choice.get("provider") or "")),
+                "location": self.selected_location(),
                 "bundles": bundles,
                 "packages": packages,
                 "disk_gb": self.query_one("#new-disk", Input).value.strip(),
