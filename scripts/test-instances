@@ -34,7 +34,7 @@ for _v in _UNSET:
 def _run(*args, env=None, timeout=120):
     e = {**os.environ, **(env or {})}
     cmd = list(args)
-    if cmd and not cmd[0].startswith(("/", "make", "python", "rg")):
+    if cmd and not cmd[0].startswith(("/", "python", "rg")):
         cmd[0] = str(ROOT / cmd[0])
     return subprocess.run(cmd, cwd=str(ROOT), env=e, capture_output=True, text=True, check=False, timeout=timeout)
 
@@ -220,7 +220,7 @@ def main():
               os_j is not None and os_j["observed_state"]["ip"] == "10.0.0.10")
 
         # --- instance.status ---
-        sj = _run_json("make", "--no-print-directory", "instance.status", "INSTANCE=mock-dev-a", "EMIT=json",
+        sj = _run_json("scripts/instance-status", "--instance", "mock-dev-a", "--json",
                        env={"EVE_INSTANCE_REGISTRY": FIXTURE, "EVE_INSTANCE_WORKDIR": f"{tmp_dir}/run", "EVE_STATE_DIR": f"{tmp_dir}/state"})
         _check("instance.status combines metadata, state, packages, and paths",
               sj is not None and sj.get("instance", {}).get("name") == "mock-dev-a" and

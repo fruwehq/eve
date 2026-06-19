@@ -179,34 +179,24 @@ def print_dry_run(plans: list[dict[str, Any]], emit_json: bool) -> None:
 
 def live_commands(plan: dict[str, Any]) -> list[list[str]]:
     instance = plan["instance"]
+    inst_run = str(ROOT / "scripts/instance-run")
+    dispatch = str(ROOT / "scripts/package-dispatch")
     commands = [
-        ["validate", "make", "--no-print-directory", "instance.validate", f"INSTANCE={instance}"],
-        ["up", "make", "--no-print-directory", "up", f"INSTANCE={instance}"],
-        ["ssh.wait", "make", "--no-print-directory", "ssh.wait", f"INSTANCE={instance}"],
-        ["provision", "make", "--no-print-directory", "instance.provision", f"INSTANCE={instance}"],
-        ["status", "make", "--no-print-directory", "instance.status", f"INSTANCE={instance}", "EMIT=json"],
+        ["validate", str(ROOT / "scripts/instance-resolve"), "--instance", instance, "--validate"],
+        ["up", inst_run, "up", instance],
+        ["ssh.wait", inst_run, "ssh.wait", instance],
+        ["provision", str(ROOT / "scripts/instance-provision"), "--instance", instance],
+        ["status", str(ROOT / "scripts/instance-status"), "--instance", instance, "--json"],
     ]
     for package in plan["package_smoke_packages"]:
         commands.append(
-            [
-                "package.install." + package,
-                "make",
-                "--no-print-directory",
-                "package.install",
-                f"INSTANCE={instance}",
-                f"PACKAGE={package}",
-            ]
+            ["package.install." + package, dispatch, "--instance", instance,
+             "--package", package, "--command", "install"]
         )
     for package in sorted(set(plan["selected_packages"] + plan["package_smoke_packages"])):
         commands.append(
-            [
-                "package.status." + package,
-                "make",
-                "--no-print-directory",
-                "package.status",
-                f"INSTANCE={instance}",
-                f"PACKAGE={package}",
-            ]
+            ["package.status." + package, dispatch, "--instance", instance,
+             "--package", package, "--command", "status"]
         )
     return commands
 
@@ -237,17 +227,12 @@ def run_live(
                 break
 
         if cleanup:
-            cleanup_commands = [["cleanup.down", "make", "--no-print-directory", "down", f"INSTANCE={instance}"]]
+            cleanup_commands = [
+                ["cleanup.down", str(ROOT / "scripts/instance-run"), "down", instance]
+            ]
             if delete_instances:
                 cleanup_commands.append(
-                    [
-                        "cleanup.delete",
-                        "make",
-                        "--no-print-directory",
-                        "instance.delete",
-                        f"INSTANCE={instance}",
-                        "PURGE=1",
-                    ]
+                    ["cleanup.delete", str(ROOT / "scripts/instance-delete"), "--instance", instance, "--purge"]
                 )
             for name, *cmd in cleanup_commands:
                 print()
