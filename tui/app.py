@@ -1127,7 +1127,7 @@ class EveTui(App[None]):
         dress: list[str],
         blinking: bool,
     ) -> list[list[tuple[str | None, str]]]:
-        eye = "#ffffff"
+        eye = "#1f1f1f"  # black eyes on the skin-tone face (inverted)
         if blinking:
             eye_8_l: tuple[str, str] = (skin, "      ")
             eye_8_r: tuple[str, str] = (skin, "     ")
@@ -1183,7 +1183,7 @@ class EveTui(App[None]):
         dress: list[str],
         blinking: bool,
     ) -> list[list[tuple[str | None, str]]]:
-        eye = "#ffffff"
+        eye = "#1f1f1f"  # black eyes on the skin-tone face (inverted)
         if blinking:
             eye_4_l: tuple[str, str] = (skin, "    ")
             eye_4_r: tuple[str, str] = (skin, "    ")
