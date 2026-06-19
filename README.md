@@ -22,6 +22,7 @@ sudo tar -C /usr/local/bin -xzf /tmp/tm.tar.gz terramate
 
 git clone https://github.com/fruwehq/eve.git && cd eve
 poetry install
+make install   # put the `eve` launcher on your PATH (~/.local/bin)
 ```
 
 **Ubuntu:**
@@ -32,6 +33,7 @@ curl -sSL https://install.python-poetry.org | python3.14 -
 # Terraform + Terramate: see their install docs
 git clone https://github.com/fruwehq/eve.git && cd eve
 poetry install
+make install   # put the `eve` launcher on your PATH (~/.local/bin)
 ```
 
 **pipx (when published):**
