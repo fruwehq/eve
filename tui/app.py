@@ -1530,6 +1530,16 @@ class EveTui(App[None]):
             self.set_detail_tab("overview", focus=False)
             await self.refresh_instances(preserve_selection=True)
             self.select_instance_row(result["name"])
+            # Land on the new instance's Provision button — the next step.
+            self.call_after_refresh(self._focus_provision)
+
+    def _focus_provision(self) -> None:
+        try:
+            button = self.query_one("#provision", Button)
+        except Exception:
+            return
+        if not button.disabled and button.display:
+            button.focus()
 
     def select_instance_row(self, instance_name: str) -> None:
         table = self.query_one("#instances", DataTable)
