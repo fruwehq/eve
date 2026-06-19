@@ -266,6 +266,34 @@ def test_new_instance_has_resources_step_with_prefilled_defaults() -> None:
     asyncio.run(_run())
 
 
+def test_new_instance_resource_prefill_not_marked_touched_user_edit_is() -> None:
+    # The prefill's own write must NOT mark the field touched (otherwise a later
+    # platform change can't refresh the default); a real keystroke must.
+    from textual.widgets import Input
+
+    from tui.app import EveTui
+    from tui.commands import catalog_options
+    from tui.widgets import NewInstanceScreen
+
+    async def _run() -> None:
+        app = EveTui()
+        screen = NewInstanceScreen(catalog_options())
+        async with app.run_test() as pilot:
+            await app.push_screen(screen)
+            await pilot.pause()
+            screen.set_step(3)
+            await pilot.pause()
+            assert screen._disk_touched is False
+            assert screen._memory_touched is False
+            disk = screen.query_one("#new-disk", Input)
+            disk.focus()
+            await pilot.press("9")
+            await pilot.pause()
+            assert screen._disk_touched is True
+
+    asyncio.run(_run())
+
+
 def test_new_instance_detail_panels_update_on_highlight() -> None:
     from textual.widgets import DataTable, Static
 

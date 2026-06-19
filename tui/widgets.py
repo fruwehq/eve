@@ -574,7 +574,8 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
         self.selected_package_ids: set[str] = set()
         self._disk_touched = False
         self._memory_touched = False
-        self._prefilling_resources = False
+        self._prefilled_disk = ""
+        self._prefilled_memory = ""
         self.platform_by_id = {
             str(platform_choice.get("id")): platform_choice
             for platform_choice in self.platforms
@@ -1017,14 +1018,16 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
         memory_default = "" if defaults.get("memory_mb") is None else str(defaults.get("memory_mb"))
         disk_input = self.query_one("#new-disk", Input)
         memory_input = self.query_one("#new-memory", Input)
-        self._prefilling_resources = True
-        try:
-            if not self._disk_touched and disk_input.value != disk_default:
-                disk_input.value = disk_default
-            if not self._memory_touched and memory_input.value != memory_default:
-                memory_input.value = memory_default
-        finally:
-            self._prefilling_resources = False
+        # Record the value we write so the resulting Input.Changed (delivered
+        # asynchronously, after this returns) is recognized as prefill, not a
+        # user edit — otherwise the prefill would mark the field "touched" and a
+        # later platform change couldn't refresh its default.
+        if not self._disk_touched and disk_input.value != disk_default:
+            self._prefilled_disk = disk_default
+            disk_input.value = disk_default
+        if not self._memory_touched and memory_input.value != memory_default:
+            self._prefilled_memory = memory_default
+            memory_input.value = memory_default
 
     def platform_default_lines(self, platform_choice: dict[str, Any]) -> list[str]:
         defaults = platform_choice.get("defaults", {}) if isinstance(platform_choice.get("defaults"), dict) else {}
@@ -1196,9 +1199,11 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
         self.update_wizard()
 
     def on_input_changed(self, event: Input.Changed) -> None:
-        if event.input.id == "new-disk" and not self._prefilling_resources:
+        # A user edit marks the field "touched" so a later platform change won't
+        # overwrite it; ignore the prefill's own write (value we just recorded).
+        if event.input.id == "new-disk" and event.value != self._prefilled_disk:
             self._disk_touched = True
-        elif event.input.id == "new-memory" and not self._prefilling_resources:
+        elif event.input.id == "new-memory" and event.value != self._prefilled_memory:
             self._memory_touched = True
         if event.input.id in {"new-name", "new-disk", "new-memory", "provider-ip"}:
             self.update_wizard()
