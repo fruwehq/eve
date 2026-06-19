@@ -136,20 +136,20 @@ def build_plans(
                 "package_smoke": "all-supported" if all_packages else "selected-only",
                 "package_smoke_packages": package_smoke_packages,
                 "commands": [
-                    f"make instance.validate INSTANCE={instance}",
-                    f"make up INSTANCE={instance}",
-                    f"make ssh.wait INSTANCE={instance}",
-                    f"make instance.provision INSTANCE={instance}",
-                    f"make instance.status INSTANCE={instance} EMIT=json",
+                    f"eve instance validate --instance {instance}",
+                    f"eve instance up --instance {instance}",
+                    f"eve instance ssh-wait --instance {instance}",
+                    f"eve instance provision --instance {instance}",
+                    f"eve instance status --instance {instance} --json",
                     *[
-                        f"make package.install INSTANCE={instance} PACKAGE={package}"
+                        f"eve package install --instance {instance} --package {package}"
                         for package in package_smoke_packages
                     ],
-                    *[f"make package.status INSTANCE={instance} PACKAGE={package}" for package in status_packages],
+                    *[f"eve package status --instance {instance} --package {package}" for package in status_packages],
                 ],
                 "manual_checks": [
                     "Confirm SSH command execution works.",
-                    f"Review make instance.status INSTANCE={instance} for provider/provision/package state.",
+                    f"Review eve instance status --instance {instance} for provider/provision/package state.",
                     "Package status confirms the package probe reports installed; GUI/remote-access packages "
                     "still need their package action or manual connection smoke.",
                     "Confirm Sunshine/RustDesk access and a smooth 3D app or game launch."

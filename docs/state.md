@@ -41,7 +41,7 @@ guest without changing lifecycle intent:
 Refresh it with:
 
 ```bash
-make instance.observe INSTANCE=<name>
+eve instance observe --instance <name>
 ```
 
 Observation refreshes set `EVE_DISABLE_STATE=1` while calling provider
@@ -76,11 +76,11 @@ If the host process or TUI exits while an operation is marked `running`, recover
 the local state before retrying:
 
 ```bash
-make instance.recover INSTANCE=<name>
+eve instance recover --instance <name>
 ```
 
 This marks the last running operation as `failed`, records a recovery error, and
 sets `provider_state` or `provision_state` to `error` when the interrupted
 operation belongs to that surface. It does not destroy or change remote
-resources. After recovery, run `make instance.status INSTANCE=<name>` and retry
+resources. After recovery, run `eve instance status --instance <name>` and retry
 the relevant lifecycle/provision/package command.

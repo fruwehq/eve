@@ -7,7 +7,7 @@
 #   - Installs a systemd unit so provisioning resumes after reboot.
 #   - Kicks off runner.sh for the first pass.
 #
-# Intended to be uploaded by `make profile.provision` and run once per host.
+# Intended to be uploaded by the provisioning flow (eve instance provision) and run once per host.
 
 set -euo pipefail
 

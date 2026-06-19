@@ -132,7 +132,7 @@ def main() -> int:
         test_steps = []
     test_step_names = step_names(test_steps)
     checks.assert_check("test job installs Terramate", "Install Terramate" in test_step_names)
-    checks.assert_check("test job runs make test", "Run make test" in test_step_names)
+    checks.assert_check("test job runs the test suite", "Run test suite" in test_step_names)
     checks.assert_check("test job publishes timing summary", "Timing summary" in test_step_names)
     checks.assert_check(
         "test job writes timing summary to GITHUB_STEP_SUMMARY",

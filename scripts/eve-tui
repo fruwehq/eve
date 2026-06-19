@@ -46,7 +46,7 @@ def run_tui() -> int:
             print(
                 "Textual is required for the TUI.\n"
                 "Install it with: poetry install\n"
-                "The non-TUI v3 commands still work through make targets.",
+                "The non-TUI commands still work through the eve CLI.",
                 file=sys.stderr,
             )
             return 2

@@ -103,7 +103,7 @@ def test_missing_required_arg_exits_2(args: list[str], needle: str) -> None:
 
 # ============================ command-vector (pure) ======================= #
 # build_command is pure: it returns the underlying argv relative to the repo
-# root without executing anything. Assert it matches the Makefile invocation
+# root without executing anything. Assert it matches the underlying script invocation
 # for each verb, covering positional instance + flag translation.
 
 def test_instance_run_verbs_route_through_instance_run() -> None:

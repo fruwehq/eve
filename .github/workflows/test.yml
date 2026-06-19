@@ -143,13 +143,13 @@ jobs:
             exit "$status"
           }
           trap finish_timing EXIT
-          poetry run make test.provision-runner
+          poetry run ./scripts/test provision-runner
 
-      - name: Run make test
+      - name: Run test suite
         if: runner.os == 'Linux'
         run: |
           set -euo pipefail
-          step_name="Run make test"
+          step_name="Run test suite"
           start="$(date +%s)"
           finish_timing() {
             status="$?"
@@ -158,11 +158,11 @@ jobs:
             exit "$status"
           }
           trap finish_timing EXIT
-          poetry run make test
+          poetry run ./scripts/test
 
       # macOS is a host orchestrator target (BSD vs GNU coreutils, dscacheutil
       # vs getent, path/subprocess quirks). Run only the host-portability slice
-      # — doctor host hints + the Python suite — not the full Linux make test.
+      # — doctor host hints + the Python suite — not the full Linux suite.
       - name: Run macOS host-portability checks
         if: runner.os == 'macOS'
         run: |
@@ -176,7 +176,7 @@ jobs:
             exit "$status"
           }
           trap finish_timing EXIT
-          poetry run make test.doctor test.python
+          poetry run ./scripts/test doctor python
 
       - name: Timing summary
         if: always()

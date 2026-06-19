@@ -30,16 +30,16 @@ YES=1 scripts/integration-test --live \
 
 The runner performs:
 
-1. `make instance.validate`
-2. `make up`
-3. `make ssh.wait`
-4. `make instance.provision`
-5. `make instance.status EMIT=json`
-6. `make package.status` for every selected package
-7. `make down` cleanup for each tested instance
+1. `eve instance validate`
+2. `eve instance up`
+3. `eve instance ssh-wait`
+4. `eve instance provision`
+5. `eve instance status --json`
+6. `eve package status` for every selected package
+7. `eve instance down` cleanup for each tested instance
 
 With `--all-packages`, the runner additionally inserts
-`make package.install` for every installable package supported by the resolved
+`eve package install` for every installable package supported by the resolved
 OS family, architecture, and version, then status-checks the selected and
 smoked packages.
 
@@ -56,16 +56,16 @@ YES=1 scripts/integration-test --live --delete-instances \
   --instance windows-smoke
 ```
 
-The equivalent make target is:
+The equivalent command is:
 
 ```bash
-YES=1 DELETE_INSTANCES=1 make integration.test INSTANCES=linux-smoke,windows-smoke
+YES=1 ./scripts/integration-test --live --instance linux-smoke --instance windows-smoke --delete-instances
 ```
 
 For the heavier package sweep:
 
 ```bash
-YES=1 DELETE_INSTANCES=1 make integration.packages INSTANCES=linux-smoke,windows-smoke
+YES=1 ./scripts/integration-test --live --all-packages --instance linux-smoke --instance windows-smoke --delete-instances
 ```
 
 Package status is a necessary smoke signal, not a complete usability proof. It

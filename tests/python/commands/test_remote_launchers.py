@@ -27,7 +27,7 @@ from eve_sdk import remote_launch as rl
 def _scrub_ephemeral_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Make every command-vector test hermetic.
 
-    The launcher builders read EPHEMERAL_* env knobs. Under the full `make test`
+    The launcher builders read EPHEMERAL_* env knobs. Under the full test suite
     run these can be present in the inherited environment (e.g. config-derived
     vars from `config-env --shell`, or a prior suite that exports
     EPHEMERAL_DISPLAY_RESOLUTION), which would non-deterministically perturb the

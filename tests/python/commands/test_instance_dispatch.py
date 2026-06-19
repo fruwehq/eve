@@ -176,7 +176,7 @@ def test_instance_run_missing_instance(instance_env: dict[str, str]) -> None:
     result = _run("instance-run", "env", env=instance_env)
     assert result.returncode == 2
     assert "instance-run: INSTANCE is required" in result.stderr
-    assert "Usage: make env INSTANCE=<name>" in result.stderr
+    assert "Usage: ./scripts/instance-run env <name>" in result.stderr
 
 
 def test_instance_run_unsupported_target(instance_env: dict[str, str]) -> None:

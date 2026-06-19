@@ -60,7 +60,7 @@ def main() -> int:
     if not instances:
         print(
             "No instances found. Create one with: "
-            "make instance.create INSTANCE=<name> MACHINE=<machine> OS=<os> LOCATION=<location>"
+            "eve instance create --instance <name> --machine <machine> --os <os> --location <location>"
         )
         return 0
 

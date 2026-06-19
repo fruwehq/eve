@@ -129,18 +129,18 @@ def main(argv: list[str]) -> int:
                         observed = state.get("observed_state", {})
                         observed_status = observed.get("provider_status") if isinstance(observed, dict) else None
                         if observed_status != "absent":
-                            suffix = " PURGE=1" if purge else ""
+                            suffix = " --purge" if purge else ""
                             print(
                                 f"instance-delete: refusing to delete {instance_name}; "
                                 f"provider_state={provider_state}.\n"
                                 "Provider resources may still exist (cloud VM, terraform state, etc.).\n"
                                 "\n"
                                 "Recommended:\n"
-                                f"  make down INSTANCE={instance_name}     # destroys provider resources\n"
-                                f"  make instance.delete INSTANCE={instance_name}{suffix}\n"
+                                f"  eve instance down --instance {instance_name}     # destroys provider resources\n"
+                                f"  eve instance delete --instance {instance_name}{suffix}\n"
                                 "\n"
                                 "Or bypass this check if you have already destroyed the cloud side:\n"
-                                f"  make instance.delete INSTANCE={instance_name}{suffix} FORCE=1",
+                                f"  eve instance delete --instance {instance_name}{suffix} --force",
                                 file=sys.stderr,
                             )
                             return 1

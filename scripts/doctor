@@ -210,7 +210,7 @@ def print_report(report: dict[str, Any]) -> None:
     subprocess.run(["./scripts/providers-status"], cwd=ROOT, check=False)
     print_section("state")
     print(f"  [OK] state directory: {report['state']['dir']}")
-    print("  [INFO] recover interrupted state with: make instance.recover INSTANCE=<name>")
+    print("  [INFO] recover interrupted state with: eve instance recover --instance <name>")
     required = report["required_fields"]
     print_section("required fields")
     if required["ok"]:
