@@ -177,6 +177,179 @@ def test_new_instance_defaults_location_for_provider() -> None:
     assert screen._default_location("does-not-exist") == ""
 
 
+def test_new_instance_package_highlight_does_not_select_space_toggles() -> None:
+    from textual.widgets import DataTable
+
+    from tui.app import EveTui
+    from tui.commands import catalog_options
+    from tui.widgets import NewInstanceScreen
+
+    async def _run() -> None:
+        app = EveTui()
+        screen = NewInstanceScreen(catalog_options())
+        async with app.run_test() as pilot:
+            await app.push_screen(screen)
+            await pilot.pause()
+            screen.set_step(2)
+            await pilot.pause()
+            table = screen.query_one("#package-select", DataTable)
+            table.focus()
+            table.move_cursor(row=1, column=0, animate=False)
+            await pilot.pause()
+            assert screen.highlighted_package_id
+            assert screen.selected_package_ids == set()
+            await pilot.press("space")
+            await pilot.pause()
+            assert screen.selected_package_ids == {screen.highlighted_package_id}
+
+    asyncio.run(_run())
+
+
+def test_new_instance_unsupported_package_highlightable_not_selectable(monkeypatch: pytest.MonkeyPatch) -> None:
+    from textual.widgets import DataTable
+
+    from tui.app import EveTui
+    from tui.commands import catalog_options
+    from tui.widgets import NewInstanceScreen
+
+    notifications: list[str] = []
+
+    async def _run() -> None:
+        app = EveTui()
+        screen = NewInstanceScreen(catalog_options())
+        monkeypatch.setattr(screen, "notify", lambda message, **_: notifications.append(str(message)))
+        async with app.run_test() as pilot:
+            await app.push_screen(screen)
+            await pilot.pause()
+            screen.set_step(2)
+            await pilot.pause()
+            table = screen.query_one("#package-select", DataTable)
+            unsupported = next(package for package in screen.package_ids if screen.package_select_reason(package))
+            table.focus()
+            table.move_cursor(row=screen.package_ids.index(unsupported), column=0, animate=False)
+            await pilot.pause()
+            assert screen.highlighted_package_id == unsupported
+            await pilot.press("space")
+            await pilot.pause()
+            assert unsupported not in screen.selected_package_ids
+            assert notifications
+
+    asyncio.run(_run())
+
+
+def test_new_instance_tab_moves_bundles_to_packages() -> None:
+    # The read-only detail panels must stay out of the tab order, so Tab on the
+    # bundle list lands on the package list (not the side detail panel).
+    from textual.widgets import DataTable
+
+    from tui.app import EveTui
+    from tui.commands import catalog_options
+    from tui.widgets import NewInstanceScreen
+
+    async def _run() -> None:
+        app = EveTui()
+        screen = NewInstanceScreen(catalog_options())
+        async with app.run_test() as pilot:
+            await app.push_screen(screen)
+            await pilot.pause()
+            screen.set_step(2)
+            await pilot.pause()
+            for panel in screen.query(".detail-column"):
+                assert panel.can_focus is False
+            screen.query_one("#bundle-select", DataTable).focus()
+            await pilot.pause()
+            await pilot.press("tab")
+            await pilot.pause()
+            assert app.focused is screen.query_one("#package-select", DataTable)
+
+    asyncio.run(_run())
+
+
+def test_new_instance_has_resources_step_with_prefilled_defaults() -> None:
+    from textual.widgets import Button, Input
+
+    from tui.app import EveTui
+    from tui.commands import catalog_options
+    from tui.widgets import NewInstanceScreen
+
+    async def _run() -> None:
+        app = EveTui()
+        screen = NewInstanceScreen(catalog_options())
+        async with app.run_test() as pilot:
+            await app.push_screen(screen)
+            await pilot.pause()
+            assert "5 Review" in screen.wizard_step_label()
+            screen.set_step(3)
+            await pilot.pause()
+            defaults = screen.selected_platform().get("defaults", {})
+            assert screen.query_one("#new-disk", Input).value == str(defaults["disk_gb"])
+            assert screen.query_one("#new-memory", Input).value == str(defaults["memory_mb"])
+            assert screen.query_one("#next", Button).display is True
+            assert screen.query_one("#create", Button).display is False
+            screen.set_step(4)
+            await pilot.pause()
+            assert screen.query_one("#next", Button).display is False
+            assert screen.query_one("#create", Button).display is True
+
+    asyncio.run(_run())
+
+
+def test_new_instance_resource_prefill_not_marked_touched_user_edit_is() -> None:
+    # The prefill's own write must NOT mark the field touched (otherwise a later
+    # platform change can't refresh the default); a real keystroke must.
+    from textual.widgets import Input
+
+    from tui.app import EveTui
+    from tui.commands import catalog_options
+    from tui.widgets import NewInstanceScreen
+
+    async def _run() -> None:
+        app = EveTui()
+        screen = NewInstanceScreen(catalog_options())
+        async with app.run_test() as pilot:
+            await app.push_screen(screen)
+            await pilot.pause()
+            screen.set_step(3)
+            await pilot.pause()
+            assert screen._disk_touched is False
+            assert screen._memory_touched is False
+            disk = screen.query_one("#new-disk", Input)
+            disk.focus()
+            await pilot.press("9")
+            await pilot.pause()
+            assert screen._disk_touched is True
+
+    asyncio.run(_run())
+
+
+def test_new_instance_detail_panels_update_on_highlight() -> None:
+    from textual.widgets import DataTable, Static
+
+    from tui.app import EveTui
+    from tui.commands import catalog_options
+    from tui.widgets import NewInstanceScreen
+
+    async def _run() -> None:
+        app = EveTui()
+        screen = NewInstanceScreen(catalog_options())
+        async with app.run_test() as pilot:
+            await app.push_screen(screen)
+            await pilot.pause()
+            screen.set_step(2)
+            await pilot.pause()
+            bundle_detail = screen.query_one("#bundle-detail", Static)
+            package_detail = screen.query_one("#package-detail", Static)
+            assert str(bundle_detail.render())
+            assert str(package_detail.render())
+            package_table = screen.query_one("#package-select", DataTable)
+            before = str(package_detail.render())
+            package_table.move_cursor(row=1, column=0, animate=False)
+            await pilot.pause()
+            assert str(package_detail.render()) != before
+
+    asyncio.run(_run())
+
+
 def test_delete_confirm_defaults_and_result() -> None:
     from textual.widgets import Button, Checkbox
 

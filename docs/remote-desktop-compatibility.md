@@ -13,6 +13,15 @@ The desktop packages set `conflicts_with` in their manifests, and
 `instance-resolve`, `package-list`, and Eve use that metadata to prevent
 accidentally selecting multiple desktops together.
 
+## No desktop selected → XFCE default
+
+Selecting `rdp` or `vnc` on Ubuntu without an explicit desktop package targets
+XFCE / X11 by default. The compatibility resolver reports XFCE / X11 for that
+case, and both remote packages have supported matrix rows for it. Provisioning
+installs XFCE when needed: `vnc` installs TigerVNC on display `:1`, while `rdp`
+configures `xrdp` with XFCE and a display manager. RDP still requires a login
+password from `VM_USER_PASSWORD` or `RDP_GATE_PASSWORD`.
+
 | Bundle | Desktop package | RDP backend | Display/session | Status | Notes |
 |---|---|---|---|---|---|
 | `desktop-xfce` | `xfce-desktop` | `xrdp`/`xorgxrdp` | XFCE / X11 | supported | LightDM autologin with a local graphical session. |
