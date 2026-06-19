@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Dump all provisioning log files. Invoked remotely by `make profile.logs`.
+# Dump all provisioning log files. Invoked remotely by the provisioning flow.
 set -euo pipefail
 
 PROVISION_ROOT="${PROVISION_ROOT:-$HOME/provision}"

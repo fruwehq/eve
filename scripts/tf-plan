@@ -54,7 +54,7 @@ def main(argv: list[str]) -> int:
     ).returncode
     if rc != 0:
         print(
-            f"  [FAIL] Services plan failed. Apply shared first: make apply PROFILE={profile}",
+            f"  [FAIL] Services plan failed. Apply shared first: eve instance up --instance {profile}",
             file=sys.stderr,
         )
         fail = 1

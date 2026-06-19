@@ -138,7 +138,7 @@ def main(argv: list[str]) -> int:
             run_result = remote_ssh(f"SchTasks /Run /TN {sctask_shadow}")
             if run_result.returncode != 0:
                 print("remote-xpra: remote xpra shadow failed to start", file=sys.stderr)
-                print(f"  Is xpra installed? Run: make provision PROFILE={profile}", file=sys.stderr)
+                print(f"  Is xpra installed? Run: eve instance provision --instance {profile}", file=sys.stderr)
                 return 1
             print(
                 f"[remote-xpra] shadow server started in interactive session "
@@ -149,11 +149,11 @@ def main(argv: list[str]) -> int:
             start_result = remote_ssh(f"xpra start :{display_num}")
             if start_result.returncode != 0:
                 print(f"remote-xpra: remote 'xpra start :{display_num}' failed", file=sys.stderr)
-                print(f"  Is xpra installed? Run: make provision PROFILE={profile}", file=sys.stderr)
+                print(f"  Is xpra installed? Run: eve instance provision --instance {profile}", file=sys.stderr)
                 return 1
         print(
             f"[remote-xpra] server running. Attach from the TUI package action, or run: "
-            f"make package.action INSTANCE={profile} PACKAGE=xpra ACTION=xpra-attach"
+            f"eve package action --instance {profile} --package xpra --action xpra-attach"
         )
         return 0
 

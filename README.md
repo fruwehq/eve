@@ -27,7 +27,7 @@ poetry install
 **Ubuntu:**
 
 ```bash
-sudo apt-get install -y jq make python3.14 python3.14-venv ripgrep shellcheck yq
+sudo apt-get install -y jq python3.14 python3.14-venv ripgrep shellcheck yq
 curl -sSL https://install.python-poetry.org | python3.14 -
 # Terraform + Terramate: see their install docs
 git clone https://github.com/fruwehq/eve.git && cd eve
@@ -176,9 +176,9 @@ boundary. See [`docs/v4.0-roadmap.md`](docs/v4.0-roadmap.md) and
 
 ```bash
 poetry install
-make test           # full suite (hermetic — no sibling repos needed)
-make test.python    # ruff + mypy + pytest only
-make test.lint      # yaml/terraform/terramate lint
+./scripts/test            # full suite (hermetic — no sibling repos needed)
+./scripts/test python     # ruff + mypy + pytest only
+./scripts/test lint       # yaml/terraform/terramate lint
 ```
 
 The test suite is fully self-contained: synthetic fixture plugins under

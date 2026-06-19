@@ -14,13 +14,13 @@ Built-in plugins live under:
 External plugins may be synchronized into `.eve/plugins/<source-id>/` with:
 
 ```bash
-make plugins.sync
+eve plugin sync
 ```
 
 Additional local roots can be tested without syncing:
 
 ```bash
-EVE_PLUGIN_ROOTS=examples/plugins/packages/hello-package make plugins.validate
+EVE_PLUGIN_ROOTS=examples/plugins/packages/hello-package eve plugin validate
 ```
 
 If two plugins use the same `kind:id`, validation fails unless
@@ -227,7 +227,7 @@ External repositories should contain the same manifest shape as built-ins. A
 provider repository can expose one or more directories with
 `eve-plugin.yaml`; a package repository can do the same. Keep command
 implementations inside the plugin directory when possible so relative `exec`
-paths remain portable after `make plugins.sync`.
+paths remain portable after `eve plugin sync`.
 
 Recommended repository layout:
 
@@ -248,7 +248,7 @@ my-eve-plugins/
 Development loop:
 
 ```bash
-EVE_PLUGIN_ROOTS=/path/to/my-eve-plugins/packages/my-package make plugins.validate
+EVE_PLUGIN_ROOTS=/path/to/my-eve-plugins/packages/my-package eve plugin validate
 EVE_PLUGIN_ROOTS=/path/to/my-eve-plugins/packages/my-package \
   ./scripts/package-dispatch --instance dev-a --package my-package --command status --dry-run
 ```
@@ -256,8 +256,8 @@ EVE_PLUGIN_ROOTS=/path/to/my-eve-plugins/packages/my-package \
 Before running a new external plugin against a real instance, run:
 
 ```bash
-make doctor
-make instance.validate INSTANCE=<name>
+eve doctor
+eve instance validate --instance <name>
 ```
 
 ## Examples

@@ -21,7 +21,7 @@ from tui.state import action_allowed_for_instance, password_supported, provider_
 
 
 def test_render_helpers_preserve_existing_labels() -> None:
-    assert command_label(["make", "ssh", "INSTANCE=dev a"]) == "make ssh 'INSTANCE=dev a'"
+    assert command_label(["ssh", "host", "arg with space"]) == "ssh host 'arg with space'"
     assert glyph_for_status("running") == "●"
     assert glyph_for_status("stopped") == "○"
     assert glyph_for_status("failed") == "!"

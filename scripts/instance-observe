@@ -84,13 +84,15 @@ def main(argv: list[str]) -> int:
             "expires_at": (now + timedelta(seconds=ttl)).isoformat().replace("+00:00", "Z"),
         }
         env = {"EVE_DISABLE_STATE": "1"}
-        status = run_command(env, "make", "--no-print-directory", "provider.status", f"INSTANCE={instance}")
+        status = run_command(
+            env, str(ROOT / "scripts/provider-dispatch"), "--instance", instance, "--command", "status"
+        )
         if status.returncode == 0:
             observed.update(parse_status_output(status.stdout))
             observed["provider_status_raw"] = status.stdout.strip()
             observed["refresh_error"] = None
             if observed.get("provider_status") == "running" and not observed.get("ip"):
-                ip = run_command(env, "make", "--no-print-directory", "ip", f"INSTANCE={instance}")
+                ip = run_command(env, str(ROOT / "scripts/instance-run"), "ip", instance)
                 if ip.returncode == 0 and ip.stdout.strip():
                     observed["ip"] = ip.stdout.strip()
                 else:

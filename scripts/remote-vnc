@@ -86,7 +86,7 @@ def main(argv: list[str]) -> int:
             print("[remote-vnc] Check that the instance is running and reachable, then retry.", file=sys.stderr)
             return check.returncode
         print(f"[remote-vnc] Nothing listening on remote port {vnc_port}.", file=sys.stderr)
-        print(f"[remote-vnc] Run: make provision INSTANCE={profile}", file=sys.stderr)
+        print(f"[remote-vnc] Run: eve instance provision --instance {profile}", file=sys.stderr)
         return 1
 
     print(f"[remote-vnc] Setting up SSH tunnel for VNC (local:{local_port} -> remote:{vnc_port})")

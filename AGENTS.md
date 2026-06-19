@@ -28,7 +28,6 @@ When the user asks to commit:
 
 Keep all lists alphabetically sorted unless there is an explicit ordering requirement (e.g. provisioning step numbers). This applies to:
 
-- `Makefile` — `export` block, `.PHONY` targets, target definitions
 - `.env` — section headers and variable declarations within each section
 - `config/catalog.yaml` — entries within `machines`, `oses`, `inits`, `packages`, `bundles`, `locations`
 - `scripts/provision` — the `state/env` heredoc
@@ -68,7 +67,7 @@ oses/<catalog-os-id>/provision/       # Bash state-machine runner (systemd unit)
 oses/windows-server-2025/provision/             # PowerShell state-machine runner (Scheduled Task)
   scripts/bootstrap.ps1 / runner.ps1 / lib/*.ps1 / steps/NN_*.ps1
 tests/golden/                  # Frozen instance env snapshots
-.github/workflows/test.yml     # CI: runs make test
+.github/workflows/test.yml     # CI: runs ./scripts/test
 .env                           # Canonical defaults (committed, no secrets)
 .env.local                     # Personal secrets and overrides (git-ignored)
 ```
@@ -76,16 +75,16 @@ tests/golden/                  # Frozen instance env snapshots
 ## Adding a new env variable
 
 1. Add it (commented, with its default) to `.env` with a short inline comment.
-2. Export it in the `Makefile` export block.
+2. Map it in `eve_sdk/config.py` (`ConfigEnv.MAPPINGS`) so `config-env` exports it and scripts pick it up via runtime env.
 3. Thread it through the provider plugin's `tf-env` command as a `TF_VAR_*` if terraform needs it, or use it directly via the exported environment.
 4. Do **not** use `${VAR:-fallback}` in scripts — the fallback belongs in `.env`.
 
 ## Adding a new machine / OS / init / bundle
 
 1. Edit `config/catalog.yaml` — add entries under the relevant top-level key (`machines`, `oses`, `inits`, `bundles`, `packages`, or `locations`).
-2. Run `make catalog.list` to confirm the provider/platform/content choices are exposed as expected.
-3. If instance resolution changes emitted env, run `make test.update-golden` to refresh `tests/golden/instances/<name>.env`.
-4. Run `make test` — all suites must pass before committing.
+2. Run `eve catalog list` to confirm the provider/platform/content choices are exposed as expected.
+3. If instance resolution changes emitted env, run `UPDATE_GOLDEN=1 ./scripts/test instances` to refresh `tests/golden/instances/<name>.env`.
+4. Run `./scripts/test` — all suites must pass before committing.
 
 ## Init model
 
@@ -127,7 +126,7 @@ See [docs/raspberry-pi-provider.md](docs/raspberry-pi-provider.md) for the metal
 - **Core orchestration:** Python. All new orchestration scripts under `scripts/` must be Python (`#!/usr/bin/env python3`) unless they are narrowly scoped shell wrappers around external tools.
 - **Guest-side provisioning:** bash under `oses/<catalog-os-id>/provision/` for Linux, PowerShell under `oses/windows-server-2025/provision/` for Windows. These are the only places new bash is acceptable.
 - **TUI:** Python. The TUI (`scripts/eve-tui`) stays Python because Textual is Python.
-- **No new bash in `scripts/`.** The boundary lint (`make test.core-boundary`) enforces this; existing bash scripts are enumerated in `scripts/test-core-boundary.allowlist` and will be ported to Python or moved into provider/package plugins over time.
+- **No new bash in `scripts/`.** The boundary lint (`./scripts/test core-boundary`) enforces this; existing bash scripts are enumerated in `scripts/test-core-boundary.allowlist` and will be ported to Python or moved into provider/package plugins over time.
 
 ## Post-boot provisioning
 
@@ -139,10 +138,10 @@ Per-instance post-boot provisioning is OS-family driven:
 Both use the same shape: `bootstrap` registers a runner (systemd unit or Scheduled Task), the runner walks a sorted `steps/` directory, and a `state.json` file tracks `currentStep` so provisioning is resumable across reboots. Steps are package-aware: a Linux step exits 0 early if its package id is not selected for the instance.
 
 Entry points:
-- `make provision INSTANCE=…` — uploads the right `<os>/provision/` tree and runs bootstrap. Dispatches by `os_family` resolved from the instance.
-- `make ssh INSTANCE=…` — SSH using the correct user (`ubuntu` for Linux, `Administrator` for Windows) and resolved IP.
-- `make ip INSTANCE=…` — print the instance IP (terraform output or `vagrant ssh-config`).
-- `make logs INSTANCE=…` — stream remote provisioning logs.
+- `eve instance provision --instance …` — uploads the right `<os>/provision/` tree and runs bootstrap. Dispatches by `os_family` resolved from the instance.
+- `eve instance ssh --instance …` — SSH using the correct user (`ubuntu` for Linux, `Administrator` for Windows) and resolved IP.
+- `eve instance ip --instance …` — print the instance IP (terraform output or `vagrant ssh-config`).
+- `eve instance logs --instance …` — stream remote provisioning logs.
 
 Adding a new Linux step:
 1. Drop `oses/<catalog-os-id>/provision/scripts/steps/NN_<name>.sh` (NN controls order).
@@ -152,7 +151,7 @@ Adding a new Linux step:
 
 ## Testing
 
-`make test` runs the suites from `scripts/test`:
+`./scripts/test` runs the suites:
 
 - **catalog** (`test-catalog`) — validates provider/platform/content choice emission and provider-specific OS image metadata gating.
 - **core-boundary** (`test-core-boundary`) — fails if central `scripts/` reference provider or catalog OS IDs outside a committed allowlist of known violations.
@@ -168,7 +167,7 @@ Adding a new Linux step:
 
 CI runs the same target via [.github/workflows/test.yml](.github/workflows/test.yml) on push to `main` and every pull request.
 
-When adding a shell script: ensure `#!/usr/bin/env bash|sh`, run `make test.shellcheck` locally, and fix warnings (or add a narrow `# shellcheck disable=SCnnnn` with a one-line justification).
+When adding a shell script: ensure `#!/usr/bin/env bash|sh`, run `./scripts/test shellcheck` locally, and fix warnings (or add a narrow `# shellcheck disable=SCnnnn` with a one-line justification).
 
 ## TrueNAS VM lifecycle
 

@@ -257,7 +257,7 @@ Given the current Terramate/Terraform layout:
 ## Phase 2: New instance target
 
 - Implement `aws-ubuntu-dev-headless` end-to-end.
-- Add `make plan INSTANCE=aws-ubuntu-dev-headless` etc.
+- Add `eve instance up --instance aws-ubuntu-dev-headless` etc.
 
 ## Phase 3: GUI and remote access bundles
 
@@ -326,7 +326,7 @@ Provide a simple control plane that uses the same backend instance engine (no se
 
 - **Web GUI first** (fastest iteration, easiest sharing)
 - Optional desktop wrapper later (Tauri/Electron) if needed
-- Backend should call existing instance commands/resolver (`scripts/instance-resolve`, `make instance.*`) instead of duplicating orchestration logic
+- Backend should call existing instance commands/resolver (`scripts/instance-resolve`, `eve instance ...`) instead of duplicating orchestration logic
 
 ### Minimal backend API contract
 
@@ -370,24 +370,23 @@ Use job IDs for long-running actions (`plan/apply/destroy`) and expose:
 
 ## Phase 6: Control plane UI
 
-- add lightweight API wrapper over `instance-resolve` + `make instance.*`
+- add lightweight API wrapper over `instance-resolve` + `eve instance ...`
 - add web GUI for instance lifecycle and observability
 - keep CLI parity (GUI is additive, not replacement)
 
 ---
 
-## Makefile direction
+## CLI direction
 
 Keep commands instance-first:
 
 ```bash
-make catalog.list
-make instance.create INSTANCE=aws-dev-a MACHINE=aws-cheap-x86 OS=ubuntu-26.04-amd64 LOCATION=tokyo BUNDLES=dev-ai
-make instance.validate INSTANCE=aws-dev-a
-make plan INSTANCE=aws-dev-a
-make up INSTANCE=aws-dev-a
-make provision INSTANCE=aws-dev-a
-make down INSTANCE=aws-dev-a
+eve catalog list
+eve instance create --instance aws-dev-a --machine aws-cheap-x86 --os ubuntu-26.04-amd64 --location tokyo --bundles dev-ai
+eve instance validate --instance aws-dev-a
+eve instance up --instance aws-dev-a
+eve instance provision --instance aws-dev-a
+eve instance down --instance aws-dev-a
 ```
 
 ---
