@@ -742,22 +742,43 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
             return os_family in [str(value) for value in installable_os_families]
         return False
 
+    def package_requires_desktop(self, package_id: str) -> bool:
+        """Whether a package needs a desktop package selected (e.g. rdp/vnc).
+
+        True when the package enforces compatibility and every supported row for
+        the selected OS family names a desktop — i.e. it cannot run without one.
+        Scoped to ubuntu, where the desktop packages (DESKTOP_PACKAGE_IDS) live;
+        on Windows, RDP uses the native session and needs no desktop package.
+        """
+        platform_choice = self.selected_platform()
+        if str(platform_choice.get("os_family") or "") != "ubuntu":
+            return False
+        package = self.package_map.get(package_id, {})
+        if package.get("compatibility_enforced") is not True:
+            return False
+        entries = [entry for entry in package.get("compatibility", []) if isinstance(entry, dict)]
+        family_supported = [
+            entry
+            for entry in entries
+            if str(entry.get("status") or "") == "supported" and str(entry.get("platform") or "") == "ubuntu"
+        ]
+        if not family_supported:
+            return False
+        return all(str(entry.get("desktop") or "") for entry in family_supported)
+
     def package_select_reason(self, package_id: str) -> str | None:
         reason = self.support_reason(package_id)
         if reason:
             return reason
-        conflict_reason = self.package_conflict_reason(
-            package_id,
-            self.content_package_ids(extra_package_id=package_id),
-        )
+        prospective = self.content_package_ids(extra_package_id=package_id)
+        conflict_reason = self.package_conflict_reason(package_id, prospective)
         if conflict_reason:
             return conflict_reason
         if not self.package_installable_on_platform(package_id):
             return "native action only on this OS"
-        compatibility_reason = self.package_compatibility_reason(
-            package_id,
-            self.content_package_ids(extra_package_id=package_id),
-        )
+        if self.package_requires_desktop(package_id) and not (prospective & DESKTOP_PACKAGE_IDS):
+            return "requires a desktop package (e.g. xfce-desktop)"
+        compatibility_reason = self.package_compatibility_reason(package_id, prospective)
         if compatibility_reason:
             return compatibility_reason
         return None
@@ -771,6 +792,8 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
             conflict_reason = self.package_conflict_reason(package_id, prospective_packages)
             if conflict_reason:
                 return f"{package_id}: {conflict_reason}"
+            if self.package_requires_desktop(package_id) and not (prospective_packages & DESKTOP_PACKAGE_IDS):
+                return f"{package_id}: requires a desktop package (e.g. xfce-desktop)"
             compatibility_reason = self.package_compatibility_reason(package_id, prospective_packages)
             if compatibility_reason:
                 return f"{package_id}: {compatibility_reason}"
@@ -1010,8 +1033,6 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
         reason = self.package_select_reason(package_id)
         if reason:
             lines.append(f"Cannot add on this platform: {reason}")
-        if package_id in {"rdp", "vnc"} and not (self.content_package_ids() & DESKTOP_PACKAGE_IDS):
-            lines.append("No desktop selected — installs XFCE (X11) by default.")
         return "\n".join(lines)
 
     def prefill_resource_defaults(self) -> None:
@@ -1044,6 +1065,28 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
             f"CPU {defaults.get('cpus') or defaults.get('cpu_cores') or defaults.get('vcpus') or '-'}.",
         ]
 
+    def prune_unsatisfied_selections(self) -> None:
+        """Auto-deselect packages/bundles whose requirements are no longer met.
+
+        Mirrors the rule: rdp/vnc (and anything needing a desktop) are blocked
+        until their requirement is satisfied, and are dropped if it stops being
+        satisfied — e.g. after the last desktop is deselected or the platform
+        changes. Conflicts can't coexist (the toggle blocks adding them), so any
+        selected entry with a reason here genuinely became unsatisfiable.
+        """
+        removed_packages = [pid for pid in sorted(self.selected_package_ids) if self.package_select_reason(pid)]
+        for package_id in removed_packages:
+            self.selected_package_ids.discard(package_id)
+        removed_bundles = [bid for bid in sorted(self.selected_bundle_ids) if self.bundle_support_reason(bid)]
+        for bundle_id in removed_bundles:
+            self.selected_bundle_ids.discard(bundle_id)
+        removed = removed_packages + removed_bundles
+        if removed:
+            self.notify(
+                "Deselected (requirements no longer met): " + ", ".join(removed),
+                severity="warning",
+            )
+
     def update_wizard(self) -> None:
         self.query_one("#wizard-steps", Label).update(self.wizard_step_label())
         for index, widget_id in enumerate(("step-name", "step-platform", "step-content", "step-resources", "step-review")):
@@ -1059,6 +1102,7 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
         defaults = platform_choice.get("defaults", {}) if isinstance(platform_choice.get("defaults"), dict) else {}
         if self.step == 3:
             self.prefill_resource_defaults()
+        self.prune_unsatisfied_selections()
         self.sync_bundle_options()
         self.sync_package_options()
         self.query_one("#platform-defaults", Static).update("\n".join(self.platform_default_lines(platform_choice)))

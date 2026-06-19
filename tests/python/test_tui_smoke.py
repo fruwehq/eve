@@ -237,6 +237,42 @@ def test_new_instance_unsupported_package_highlightable_not_selectable(monkeypat
     asyncio.run(_run())
 
 
+def test_new_instance_desktop_required_package_blocks_and_auto_deselects() -> None:
+    # rdp/vnc-style packages (compatibility_enforced, all supported rows name a
+    # desktop) are blocked until a desktop is selected, and auto-deselected when
+    # the desktop requirement stops being met. Uses a synthetic catalog because
+    # the hermetic fixtures don't ship rdp/vnc/xfce-desktop.
+    from tui.widgets import NewInstanceScreen
+
+    options = {
+        "platforms": [{"id": "p", "provider": "mock", "machine": "m", "os": "ubuntu-x",
+                       "os_family": "ubuntu", "init": "i", "defaults": {}}],
+        "locations": [],
+        "bundles": [],
+        "packages": [
+            {"id": "rdp", "compatibility_enforced": True, "installable_os_families": ["ubuntu"],
+             "compatibility": [{"platform": "ubuntu", "desktop": "XFCE", "session": "X11", "status": "supported"}]},
+            {"id": "xfce-desktop", "installable_os_families": ["ubuntu"],
+             "compatibility": [{"platform": "ubuntu", "desktop": "XFCE", "session": "X11", "status": "supported"}]},
+        ],
+    }
+    screen = NewInstanceScreen(options)
+    screen.selected_platform_id = "p"
+    screen.notify = lambda *a, **k: None  # type: ignore[assignment, method-assign]
+
+    assert screen.package_requires_desktop("rdp") is True
+    assert screen.package_select_reason("rdp") == "requires a desktop package (e.g. xfce-desktop)"
+
+    # a selected desktop satisfies the requirement
+    screen.selected_package_ids = {"xfce-desktop", "rdp"}
+    assert screen.package_select_reason("rdp") is None
+
+    # removing the desktop auto-deselects rdp on the next prune
+    screen.selected_package_ids = {"rdp"}
+    screen.prune_unsatisfied_selections()
+    assert "rdp" not in screen.selected_package_ids
+
+
 def test_new_instance_tab_moves_bundles_to_packages() -> None:
     # The read-only detail panels must stay out of the tab order, so Tab on the
     # bundle list lands on the package list (not the side detail panel).
