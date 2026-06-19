@@ -262,6 +262,7 @@ def create_instance_args(
     for flag, value in (
         ("--machine", str(platform_choice.get("machine", ""))),
         ("--os", str(platform_choice.get("os", ""))),
+        ("--init", str(platform_choice.get("init", ""))),
         ("--location", str(platform_choice.get("location", ""))),
         ("--bundles", bundles),
         ("--packages", packages),

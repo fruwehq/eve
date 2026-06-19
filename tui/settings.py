@@ -147,7 +147,7 @@ CONFIG_SECTIONS: list[dict[str, str]] = [
 
 FIELD_LABELS: dict[str, str] = {
     "vm_user_name": "VM Username",
-    "my_ip": "My IP (CIDR)",
+    "my_ip": "My IP",
     "ssh_public_key_file": "SSH Public Key",
     "timezone": "Timezone",
     "provision_user": "Provision User",
@@ -190,3 +190,123 @@ FIELD_LABELS: dict[str, str] = {
 
 def field_label(section_id: str, field_id: str) -> str:
     return FIELD_LABELS.get(field_id, field_id.replace("_", " ").title())
+
+
+# Description + example for the static (non-provider) config fields. Provider
+# fields (aws/gcp/truenas) carry their own description/default in the plugin
+# manifest's config_schema; these cover the core sections the manifest can't.
+# Keyed "<section>.<field>".
+FIELD_META: dict[str, dict[str, str]] = {
+    "global.my_ip": {
+        "description": "Your public IPv4 address — used to allow inbound SSH to cloud VMs "
+        "(a /32 CIDR is appended automatically, so enter a plain IP).",
+        "example": "203.0.113.42",
+    },
+    "global.provision_user": {
+        "description": "User that runs provisioning over SSH. Defaults to the provider's "
+        "bootstrap user when unset.",
+        "example": "ubuntu",
+    },
+    "global.ssh_public_key_file": {
+        "description": "Path to the SSH public key injected into new VMs for access.",
+        "example": "~/.ssh/id_ed25519.pub",
+    },
+    "global.timezone": {
+        "description": "IANA timezone applied inside provisioned VMs.",
+        "example": "Europe/Berlin",
+    },
+    "global.vm_user_name": {
+        "description": "Login user created on the VM; overrides the provider's default "
+        "access user.",
+        "example": "chris",
+    },
+    "display.fps": {
+        "description": "Target frames per second for the remote desktop stream.",
+        "example": "60",
+    },
+    "display.resolution": {
+        "description": "Remote desktop resolution, WIDTHxHEIGHT.",
+        "example": "2560x1440",
+    },
+    "moonlight.bitrate_kbps": {
+        "description": "Moonlight client streaming bitrate, in kilobits per second.",
+        "example": "20000",
+    },
+    "moonlight.display_mode": {
+        "description": "Moonlight window mode.",
+        "example": "fullscreen | borderless | windowed",
+    },
+    "moonlight.video_codec": {
+        "description": "Preferred Moonlight video codec.",
+        "example": "auto | H.264 | HEVC | AV1",
+    },
+    "moonlight.video_decoder": {
+        "description": "Moonlight video decoder selection.",
+        "example": "auto | hardware | software",
+    },
+    "sunshine.max_bitrate_kbps": {
+        "description": "Maximum Sunshine host streaming bitrate, in kilobits per second.",
+        "example": "50000",
+    },
+    "sunshine.password": {
+        "description": "Password for the Sunshine web UI / Moonlight pairing flow.",
+        "example": "",
+    },
+    "sunshine.version": {
+        "description": "Sunshine version to install (pinned).",
+        "example": "2025.924.154138",
+    },
+    "rdp.gate_user": {
+        "description": "Username for the RDP gateway login on GNOME desktops.",
+        "example": "rdpuser",
+    },
+    "rustdesk.server": {
+        "description": "RustDesk relay/ID server address. Leave unset to use the public servers.",
+        "example": "rustdesk.example.com",
+    },
+    "thinlinc.accept_eula": {
+        "description": "Set to 1 to accept the ThinLinc server EULA during install.",
+        "example": "1",
+    },
+    "thinlinc.agent_hostname": {
+        "description": "Hostname the ThinLinc agent advertises to clients.",
+        "example": "vm.example.com",
+    },
+    "thinlinc.server_bundle_path": {
+        "description": "Local path to a downloaded ThinLinc server bundle.",
+        "example": "~/Downloads/thinlinc-server.zip",
+    },
+    "thinlinc.server_bundle_url": {
+        "description": "URL to download the ThinLinc server bundle from.",
+        "example": "https://example.com/thinlinc-server.zip",
+    },
+    "thinlinc.webaccess_port": {
+        "description": "Port for ThinLinc Web Access.",
+        "example": "300",
+    },
+    "raspberry_pi.hdmi_connector": {
+        "description": "Which HDMI connector to force output on.",
+        "example": "0 | 1",
+    },
+    "raspberry_pi.hdmi_mode": {
+        "description": "Forced HDMI display mode.",
+        "example": "1920x1080@60",
+    },
+    "raspberry_pi.host": {
+        "description": "SSH hostname of the Raspberry Pi.",
+        "example": "raspberrypi.local",
+    },
+    "raspberry_pi.ip": {
+        "description": "IP address of the Raspberry Pi.",
+        "example": "192.168.1.50",
+    },
+    "vagrant.show_console": {
+        "description": "Show the VM console window when starting a local Vagrant VM.",
+        "example": "1",
+    },
+}
+
+
+def field_meta(section_id: str, field_id: str) -> dict[str, str]:
+    """Static description/example for a config field (``{}`` when unknown)."""
+    return FIELD_META.get(f"{section_id}.{field_id}", {})

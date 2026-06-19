@@ -369,23 +369,19 @@ class EveTui(App[None]):
     """
 
     BINDINGS: ClassVar[list[Binding | tuple[str, str] | tuple[str, str, str]]] = [
-        Binding("?", "help", "Help", show=True),
+        # Instance-lifecycle actions (up/stop/down/provision/delete) live as
+        # buttons in the instance pane, not as global hotkeys — keeping the
+        # footer to safe, app-level actions.
         Binding("h", "toggle_hidden", "Hidden"),
         Binding("r", "queue_refresh", "Refresh"),
-        Binding("u", "queue_provider('up')", "Up"),
-        Binding("t", "queue_provider('stop')", "Stop"),
-        Binding("p", "queue_provision", "Provision"),
-        Binding("x", "down_instance", "Down"),
-        Binding("d", "delete_instance", "Delete Local Entry"),
         Binding("c", "queue_cancel_command", "Cancel", priority=True),
         Binding("ctrl+c", "queue_cancel_command", "Cancel", priority=True),
         Binding("escape", "queue_cancel_command", "Cancel"),
-        Binding("l", "focus_log", "Log", priority=True),
         Binding("y", "copy_log", "Copy Log", priority=True),
         Binding("ctrl+y", "copy_log", "Copy Log", priority=True),
         Binding("q", "quit", "Quit"),
         Binding("s", "open_settings", "Settings"),
-        Binding("g", "open_plugins", "Plugins"),
+        Binding("p", "open_plugins", "Plugins"),
     ]
 
     def __init__(self) -> None:
@@ -597,11 +593,9 @@ class EveTui(App[None]):
         self.refresh_bindings()
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
-        # Hide provider-lifecycle keys from the footer when no provider plugins
-        # are installed — nothing can be created or operated. Local actions
-        # (refresh, delete-local-entry, settings, plugins, quit) stay available.
-        if action in ("queue_provider", "queue_provision", "down_instance"):
-            return True if self.catalog_options.get("providers") else None
+        # The footer now carries only app-level actions (refresh, settings,
+        # plugins, copy-log, quit); instance-lifecycle actions are pane buttons,
+        # so there's nothing to gate on the installed provider set here.
         return True
 
     def trigger_blink(self) -> None:
@@ -1530,6 +1524,16 @@ class EveTui(App[None]):
             self.set_detail_tab("overview", focus=False)
             await self.refresh_instances(preserve_selection=True)
             self.select_instance_row(result["name"])
+            # Land on the new instance's Provision button — the next step.
+            self.call_after_refresh(self._focus_provision)
+
+    def _focus_provision(self) -> None:
+        try:
+            button = self.query_one("#provision", Button)
+        except Exception:
+            return
+        if not button.disabled and button.display:
+            button.focus()
 
     def select_instance_row(self, instance_name: str) -> None:
         table = self.query_one("#instances", DataTable)
@@ -1565,11 +1569,18 @@ class EveTui(App[None]):
 
     async def perform_delete_instance(self, instance: str, options: dict[str, Any] | None = None) -> None:
         opts = options or {}
+        if opts.get("down"):
+            code = await self.stream_command(
+                "provider.down", make_args("down", instance), refresh_instance=instance
+            )
+            if code != 0:
+                self.log_line("[warning]Down failed — leaving the instance in place (not deleted).[/]")
+                return
         args = make_args("instance.delete", instance)
-        if opts.get("purge", True):
-            args.append("PURGE=1")
+        if opts.get("purge", False):
+            args.append("--purge")
         if opts.get("force", False):
-            args.append("FORCE=1")
+            args.append("--force")
         await self.stream_command("instance.delete", args)
         if self.current_instance == instance:
             self.current_instance = None
@@ -2190,13 +2201,13 @@ class EveTui(App[None]):
             summary.update(f"[warning]Running {label}[/]  [dim]press Ctrl-C or c to cancel; y copies output[/dim]")
             output_help.update(
                 "Output is expanded while the command runs.\n"
-                "Press Ctrl-C or c to cancel, l to focus/scroll, y to copy selected/all log text."
+                "Press Ctrl-C or c to cancel, y to copy selected/all log text."
             )
         else:
             root.remove_class("busy")
             summary.update(format_aggregate(self._cached_aggregate))
             output_help.update(
-                "Output  |  press l to focus, arrows/PageUp/PageDown to scroll, y to copy selected/all log text"
+                "Output  |  arrows/PageUp/PageDown to scroll, y to copy selected/all log text"
             )
 
     def action_focus_log(self) -> None:
@@ -2281,19 +2292,9 @@ class EveTui(App[None]):
         if event.key in {"left", "right", "up", "down"} and self.focus_button_relative(event.key):
             event.stop()
             return
-        if event.key == "l":
-            event.stop()
-            self.action_focus_log()
-        elif event.key == "y":
+        if event.key == "y":
             event.stop()
             self.action_copy_log()
-
-    async def action_help(self) -> None:
-        self.log_line(
-            "[b]Keys[/b] / filter, h show/hide disabled, l log, y copy log, r refresh, u up, t stop, "
-            "p provision, d delete, q quit. "
-            "Select << New Instance >> to create an instance."
-        )
 
 
 def run() -> int:

@@ -241,37 +241,32 @@ def emit_env(resolved: dict[str, Any]) -> str:
     os_doc = resolved["os"]
     bundle_packages = resolved.get("bundle_packages") or []
 
-    # Resolve provision/human user from the provider manifest's access rules.
-    # Profile-resolve only uses the env-var name from the rule (not the full
-    # value/location/fallback chain that resolve_access evaluates) — this
-    # preserves the legacy emission exactly.
+    # Resolve provision/human user from the provider manifest's access rules,
+    # using the same env→value→location→fallback chain instance-resolve uses
+    # (resolve_access_value). The old legacy emit only honored a rule's env-var
+    # name, so a provider's static user (e.g. local-qemu ubuntu's
+    # `{env: VM_USER_NAME, value: ubuntu}`) was dropped whenever the rule also
+    # named an env var — leaving SSH_USER / HUMAN_USER_NAME empty and breaking
+    # the remote-* launchers (VNC/RDP) that consume this output.
     from eve_sdk.plugin_manifest import PluginManifest
+    from eve_sdk.resolve import resolve_access_value
 
     provider_plugins = PluginManifest.load_all("provider")
     pp = next((p for p in provider_plugins if p["id"] == provider), None)
     os_family = os_doc.get("family") or ""
 
-    def _access_rule(field: str) -> dict[str, Any] | None:
-        access = (pp or {}).get("access") or {}
-        rules = access.get(os_family) or access.get("default") or {}
+    access_rules = (pp or {}).get("access") or {}
+    rules = access_rules.get(os_family) or access_rules.get("default") or {}
+    if not isinstance(rules, dict):
+        rules = {}
+    resolved_users: dict[str, str] = {}
+    for field in ("bootstrap_user", "provision_user", "human_user"):
         rule = rules.get(field)
-        return rule if isinstance(rule, dict) else None
-
-    def _provision_user_value() -> str:
-        rule = _access_rule("provision_user")
-        if rule and "value" in rule and "env" not in rule:
-            return str(rule["value"])  # windows: {value: Administrator}
-        env_name = str((rule or {}).get("env") or "VM_USER_NAME")
-        return _env_or(env_name, "")
-
-    def _human_user_value() -> str:
-        rule = _access_rule("human_user")
-        env_name = str((rule or {}).get("env") or "VM_USER_NAME")
-        human = _env_or(env_name, "")
-        return human if human else _provision_user_value()
-
-    provision_user_value = _provision_user_value()
-    human_user_value = _human_user_value()
+        resolved_users[field] = (
+            resolve_access_value(rule, resolved_users, locp) if isinstance(rule, dict) else ""
+        )
+    provision_user_value = resolved_users.get("provision_user", "")
+    human_user_value = resolved_users.get("human_user", "")
 
     # Provider-specific keys from provider-declared env_emission entries.
     from eve_sdk.env_emission import evaluate_provider_env

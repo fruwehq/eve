@@ -121,6 +121,19 @@ def test_plugin_toggle_add_then_flips_to_remove() -> None:
     asyncio.run(_run())
 
 
+def test_footer_bindings_are_app_level_only() -> None:
+    # Instance-lifecycle hotkeys were removed; Plugins moved g -> p; ?/help gone.
+    from tui.app import EveTui
+
+    by_key = {b.key: b.action for b in EveTui.BINDINGS}
+    assert by_key.get("p") == "open_plugins"
+    for removed in ("g", "?", "u", "t", "x", "d", "l"):
+        assert removed not in by_key, f"binding {removed!r} should be removed"
+    assert by_key.get("s") == "open_settings"
+    assert by_key.get("r") == "queue_refresh"
+    assert by_key.get("q") == "quit"
+
+
 def test_new_instance_gated_when_no_platforms() -> None:
     from tui.app import EveTui
     from tui.widgets import NewInstanceScreen
@@ -162,3 +175,29 @@ def test_new_instance_defaults_location_for_provider() -> None:
     screen = NewInstanceScreen(catalog_options())
     assert screen._default_location("mock-cloud") == "mock-tokyo"
     assert screen._default_location("does-not-exist") == ""
+
+
+def test_delete_confirm_defaults_and_result() -> None:
+    from textual.widgets import Button, Checkbox
+
+    from tui.app import EveTui
+    from tui.widgets import DeleteConfirmScreen
+
+    captured: dict[str, object] = {}
+
+    async def _run() -> None:
+        app = EveTui()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            screen = DeleteConfirmScreen("foo")
+            await app.push_screen(screen, lambda r: captured.update(r or {}))
+            await pilot.pause()
+            # purge is OFF by default; down-first is a new opt-in option
+            assert screen.query_one("#delete-purge", Checkbox).value is False
+            assert screen.query_one("#delete-down", Checkbox).value is False
+            screen.query_one("#delete-down", Checkbox).value = True
+            screen.query_one("#confirm", Button).press()
+            await pilot.pause()
+
+    asyncio.run(_run())
+    assert captured == {"confirmed": True, "down": True, "purge": False, "force": False}
