@@ -444,10 +444,15 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
     #new-dialog {
         width: 118;
         max-width: 96%;
-        height: auto;
+        height: 90%;
+        max-height: 48;
         border: round $primary;
         background: $surface;
         padding: 1 2;
+    }
+
+    #step-content {
+        height: 1fr;
     }
 
     Input,
@@ -469,15 +474,23 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
         margin-bottom: 1;
     }
 
-    #bundle-row,
-    #package-row {
+    #bundle-row {
         height: 17;
         margin-bottom: 1;
     }
 
-    #bundle-select,
-    #package-select {
+    /* Packages fill the remaining space down to the bottom of the dialog. */
+    #package-row {
+        height: 1fr;
+        margin-bottom: 1;
+    }
+
+    #bundle-select {
         height: 15;
+    }
+
+    #package-select {
+        height: 1fr;
     }
 
     #bundle-detail,
@@ -492,6 +505,7 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
 
     .detail-column {
         width: 1fr;
+        height: 1fr;
     }
 
     #platform-cards {
