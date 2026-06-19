@@ -36,6 +36,7 @@ from tui.render import (
 from tui.settings import (
     CONFIG_SECTIONS,
     field_label,
+    field_meta,
     load_missing_fields,
     load_provider_schema,
     load_provider_secret_keys,
@@ -1186,6 +1187,11 @@ class EditFieldScreen(ModalScreen[str | None]):
         margin-bottom: 1;
     }
 
+    #edit-description {
+        margin-bottom: 1;
+        color: $text;
+    }
+
     #edit-detail {
         margin-bottom: 1;
         color: $text-muted;
@@ -1219,44 +1225,48 @@ class EditFieldScreen(ModalScreen[str | None]):
         *,
         password: bool = False,
         description: str = "",
+        example: str = "",
         default: str = "",
-        field_type: str = "",
-        user_value: str = "",
-        is_default_in_use: bool = False,
-        is_unset: bool = False,
+        source: str = "",
     ) -> None:
         super().__init__()
         self.field_label_text = label
         self.current_value = current
         self.password_mode = password
         self.field_description = description
+        self.field_example = example
         self.field_default = default
-        self.field_type = field_type
-        self.user_value = user_value
-        self.is_default_in_use = is_default_in_use
-        self.is_unset = is_unset
+        self.field_source = source
+
+    def detail_markup(self) -> str:
+        """VS Code-style status: state the effective default and whether the
+        current value overrides it \u2014 no vague "custom value" wording."""
+        lines: list[str] = []
+        default_display = self.field_default or "\u2014 none \u2014"
+        if self.field_source == "config.yaml":
+            lines.append(f"[success]\u25cf Modified[/] \u2014 overriding default ([i]{default_display}[/])")
+        elif self.field_source == "env":
+            lines.append(f"[cyan]\u25cf From environment[/] \u2014 default is [i]{default_display}[/]")
+        elif self.field_source == "default":
+            lines.append(f"[dim]Using default ([i]{default_display}[/])[/]")
+        else:
+            lines.append("[warning]\u25cb Not set[/] \u2014 no default available")
+        if self.field_example:
+            lines.append(f"[dim]Example: {self.field_example}[/]")
+        return "\n".join(lines)
 
     def compose(self) -> ComposeResult:
         with Vertical(id="edit-dialog"):
             yield Label(f"[b]{self.field_label_text}[/b]", id="edit-label")
-            detail_lines: list[str] = []
-            if self.is_unset:
-                detail_lines.append("[warning]Unset (no value available)[/]")
-            elif self.is_default_in_use:
-                detail_lines.append("[dim]Using default value[/]")
-            else:
-                detail_lines.append("[success]Using a custom value[/]")
-            if self.password_mode:
-                detail_lines.append(f"Your value: {'set' if self.user_value else '\u2014'}")
-            else:
-                detail_lines.append(f"Your value: {self.user_value or '\u2014'}")
-            detail_lines.append(f"Default: {self.field_default or '\u2014'}")
-            if self.field_type:
-                detail_lines.append(f"Type: {self.field_type}")
             if self.field_description:
-                detail_lines.append(self.field_description)
-            yield Static("\n".join(detail_lines), id="edit-detail")
-            yield Input(value=self.current_value, id="edit-input", password=self.password_mode)
+                yield Static(self.field_description, id="edit-description")
+            yield Static(self.detail_markup(), id="edit-detail")
+            yield Input(
+                value=self.current_value,
+                placeholder=self.field_default or self.field_example,
+                id="edit-input",
+                password=self.password_mode,
+            )
             with Horizontal(id="edit-actions"):
                 yield Button("Cancel", id="cancel")
                 yield Button("Save", id="save", variant="primary")
@@ -1302,8 +1312,12 @@ class SettingsScreen(ModalScreen[None]):
 
     #settings-actions {
         height: 3;
-        width: 24;
+        width: auto;
         background: transparent;
+    }
+
+    #settings-actions Button {
+        margin-right: 2;
     }
     """
 
@@ -1335,26 +1349,37 @@ class SettingsScreen(ModalScreen[None]):
                 if default:
                     self._schema_defaults[key] = default
 
-    def _field_description(self, section_id: str, field_id: str) -> str:
+    def _field_detail(
+        self, section_id: str, field_id: str, info: dict[str, Any] | None = None
+    ) -> dict[str, str]:
+        """Resolve description/example/default for a field.
+
+        Provider fields carry description/default in their manifest schema;
+        core fields get description/example from the static FIELD_META table.
+        A core field's default is its built-in value (surfaced when the
+        effective source is ``default``).
+        """
         key = f"{section_id}:{field_id}"
-        desc = self._schema_descriptions.get(key, "")
+        description = self._schema_descriptions.get(key, "")
         default = self._schema_defaults.get(key, "")
-        parts = []
-        if desc:
-            parts.append(desc)
-        if default:
-            parts.append(f"[dim]default: {default}[/]")
-        return "  ".join(parts) if parts else "-"
+        meta = field_meta(section_id, field_id)
+        if not description:
+            description = meta.get("description", "")
+        example = meta.get("example", "")
+        if not default and info and info.get("source") == "default":
+            default = str(info.get("value") or "")
+        return {"description": description, "example": example, "default": default}
 
     def compose(self) -> ComposeResult:
         with Vertical(id="settings-dialog"):
             yield Label("[b]Settings[/b]", id="settings-title")
             table: DataTable[Any] = DataTable(id="settings-table")
-            table.add_columns("Section", "Field", "Value", "Source", "Description")
+            table.add_columns("Section", "Field", "Value", "Source")
             table.cursor_type = "row"
             yield table
             with Horizontal(id="settings-actions"):
-                yield Button("Reset", id="settings-reset", variant="warning")
+                yield Button("Edit", id="settings-edit", variant="primary")
+                yield Button("Reset to default", id="settings-reset", variant="warning")
                 yield Button("Close", id="close")
 
     BINDINGS = [
@@ -1364,6 +1389,9 @@ class SettingsScreen(ModalScreen[None]):
 
     def on_mount(self) -> None:
         self._load_values()
+        # Keep the table focused so arrow keys navigate rows and enter/space
+        # opens the editor; the blue "Edit" button is the primary action.
+        self.query_one("#settings-table", DataTable).focus()
 
     def _load_values(self) -> None:
         try:
@@ -1391,13 +1419,11 @@ class SettingsScreen(ModalScreen[None]):
                 self._required_entries[key] = entry
                 self._row_keys.append(key)
                 label = field_label(provider_id.replace("-", "_"), field)
-                desc = self._field_description(provider_id, field)
                 table.add_row(
                     f"[bold]{provider_id}[/bold]",
                     f"[bold]{label}[/bold]",
                     "[bold red]\u2014 required \u2014[/bold red]",
                     f"[{scope}]",
-                    desc,
                     key=key,
                 )
         except Exception:
@@ -1415,14 +1441,21 @@ class SettingsScreen(ModalScreen[None]):
                 source = info.get("source") or "unset"
                 label = field_label(section_id, field_id)
                 source_display = f"[{source}]"
-                desc = self._field_description(section_id, field_id)
                 key = f"{section_id}.{field_id}"
                 self._row_keys.append(key)
-                table.add_row(section_label, label, value or "\u2014", source_display, desc, key=key)
+                table.add_row(section_label, label, value or "\u2014", source_display, key=key)
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
-        row_key = str(event.row_key.value)
+        self._edit_row(str(event.row_key.value))
 
+    def _edit_selected_row(self) -> None:
+        table = self.query_one("#settings-table", DataTable)
+        row = table.cursor_row
+        if row is None or row < 0 or row >= len(self._row_keys):
+            return
+        self._edit_row(self._row_keys[row])
+
+    def _edit_row(self, row_key: str) -> None:
         if row_key in self._required_entries:
             entry = self._required_entries[row_key]
             provider_id = entry.get("provider", "")
@@ -1430,6 +1463,7 @@ class SettingsScreen(ModalScreen[None]):
             field = entry.get("field", "")
             label = field_label(provider_id.replace("-", "_"), field)
             password = scope == "secrets"
+            detail = self._field_detail(provider_id, field)
 
             def handle_required_edit(result: str | None) -> None:
                 if result is not None:
@@ -1444,7 +1478,16 @@ class SettingsScreen(ModalScreen[None]):
                         self.notify(f"Save failed: {e}", severity="error")
 
             self.app.push_screen(
-                EditFieldScreen(label, "", password=password), handle_required_edit
+                EditFieldScreen(
+                    label,
+                    "",
+                    password=password,
+                    description=detail["description"],
+                    example=detail["example"],
+                    default=detail["default"],
+                    source="unset",
+                ),
+                handle_required_edit,
             )
             return
 
@@ -1453,6 +1496,8 @@ class SettingsScreen(ModalScreen[None]):
         fields = self._structured.get(section, {})
         info = fields.get(field, {})
         current = info.get("value") or ""
+        source = info.get("source") or "unset"
+        detail = self._field_detail(section, field, info)
 
         def handle_edit(result: str | None) -> None:
             if result is not None:
@@ -1463,11 +1508,23 @@ class SettingsScreen(ModalScreen[None]):
                 except Exception as e:
                     self.notify(f"Save failed: {e}", severity="error")
 
-        self.app.push_screen(EditFieldScreen(label, current), handle_edit)
+        self.app.push_screen(
+            EditFieldScreen(
+                label,
+                current,
+                description=detail["description"],
+                example=detail["example"],
+                default=detail["default"],
+                source=source,
+            ),
+            handle_edit,
+        )
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "close":
             self.dismiss(None)
+        elif event.button.id == "settings-edit":
+            self._edit_selected_row()
         elif event.button.id == "settings-reset":
             self._reset_selected_field()
 
@@ -1790,35 +1847,25 @@ class ProviderConfigScreen(ModalScreen[None]):
         label = field_label(self.provider_id, field)
         description = str(spec.get("description") or "")
         schema_default = str(spec.get("default") or "")
-        field_type = str(spec.get("type") or "")
+        example = field_meta(self.provider_id, field).get("example", "")
 
         is_secret = scope == "secret"
         current = ""
-        user_value = ""
-        is_default_in_use = False
-        is_unset = False
+        source = "unset"
 
         if not is_secret:
             try:
                 structured = load_structured()
                 section_data = structured.get(self.provider_id.replace("-", "_"), {})
                 field_info = section_data.get(field, {})
-                current = str(field_info.get("value") or "") if field_info.get("value") else ""
-                user_value = current
+                current = str(field_info.get("value") or "")
                 source = str(field_info.get("source") or "unset")
-                if source == "config":
-                    is_default_in_use = False
-                elif source == "default":
-                    is_default_in_use = True
-                else:
-                    is_unset = not schema_default
-                    is_default_in_use = bool(schema_default)
             except Exception:
-                is_unset = not schema_default
+                source = "unset"
         else:
-            is_set = field in self._secret_keys_set
-            user_value = "set" if is_set else ""
-            is_unset = not is_set
+            # Secrets aren't in config-env's structured output; derive modified
+            # vs. not-set from whether the key already has a stored value.
+            source = "config.yaml" if field in self._secret_keys_set else "unset"
 
         def handle_edit(result: str | None) -> None:
             if result is not None:
@@ -1840,14 +1887,12 @@ class ProviderConfigScreen(ModalScreen[None]):
         self.app.push_screen(
             EditFieldScreen(
                 label,
-                current,
+                current if not is_secret else "",
                 password=is_secret,
                 description=description,
+                example=example,
                 default=schema_default,
-                field_type=field_type,
-                user_value=user_value if not is_secret else "",
-                is_default_in_use=is_default_in_use,
-                is_unset=is_unset,
+                source=source,
             ),
             handle_edit,
         )

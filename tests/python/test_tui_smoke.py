@@ -121,6 +121,19 @@ def test_plugin_toggle_add_then_flips_to_remove() -> None:
     asyncio.run(_run())
 
 
+def test_footer_bindings_are_app_level_only() -> None:
+    # Instance-lifecycle hotkeys were removed; Plugins moved g -> p; ?/help gone.
+    from tui.app import EveTui
+
+    by_key = {b.key: b.action for b in EveTui.BINDINGS}
+    assert by_key.get("p") == "open_plugins"
+    for removed in ("g", "?", "u", "t", "x", "d", "l"):
+        assert removed not in by_key, f"binding {removed!r} should be removed"
+    assert by_key.get("s") == "open_settings"
+    assert by_key.get("r") == "queue_refresh"
+    assert by_key.get("q") == "quit"
+
+
 def test_new_instance_gated_when_no_platforms() -> None:
     from tui.app import EveTui
     from tui.widgets import NewInstanceScreen
