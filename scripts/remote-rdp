@@ -62,7 +62,15 @@ def main(argv: list[str]) -> int:
         pw = _instance_password(root, profile)
         admin_session = 1
     elif os_family == "ubuntu":
-        vm_username = resolved.get("VM_USER_NAME", "")
+        # Prefer an explicit VM_USER_NAME, else the resolved human/login user
+        # (HUMAN_USER_NAME/ACCESS_HUMAN_USER/SSH_USER) — e.g. local-qemu ubuntu
+        # resolves to "ubuntu" with no VM_USER_NAME configured.
+        vm_username = (
+            resolved.get("VM_USER_NAME")
+            or resolved.get("HUMAN_USER_NAME")
+            or resolved.get("ACCESS_HUMAN_USER")
+            or resolved.get("SSH_USER", "")
+        )
         if has_package(resolved, "gnome-desktop") or has_package(resolved, "gnome-desktop-headless"):
             username = os.environ.get("RDP_GATE_USER", "rdpuser")
             pw = os.environ.get("RDP_GATE_PASSWORD") or os.environ.get("VM_USER_PASSWORD", "")

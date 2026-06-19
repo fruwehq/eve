@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from eve_sdk.dispatch import DispatchError, exec_cmd, open_url, prepare_overlay, run_json  # noqa: E402
+from eve_sdk.instance_dispatch import load_runtime_env  # noqa: E402
 from eve_sdk.workdir import Workdir  # noqa: E402
 
 
@@ -118,6 +119,10 @@ def run_action_target(target: str, instance_name: str) -> None:
 
 def main(argv: list[str]) -> int:
     instance_name, package_id, action_id, dry_run = parse_args(argv)
+    # The remote-* launchers this dispatches to read config-derived env (e.g.
+    # VM_USER_NAME for Ubuntu RDP/VNC). The old `make` layer injected config-env
+    # before every recipe; without it, load it here like instance-run does.
+    load_runtime_env(Workdir.repo_root())
     try:
         doc = run_json(str(Workdir.repo_root() / "scripts/package-list"), "--instance", instance_name, "--json")
         package = next((entry for entry in doc["packages"] if entry["id"] == package_id), None)

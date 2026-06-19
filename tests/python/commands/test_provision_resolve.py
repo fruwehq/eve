@@ -43,13 +43,15 @@ _CATALOG = dedent(
 )
 
 # Exact KEY=value lines for the ubuntu-qemu profile, resolved against the
-# hermetic mock fixtures (machine mock-vm -> provider mock-local, engine qemu;
-# VM_USER_NAME unset so access users are blank). This is the deterministic
-# golden for the decoupled, self-contained test suite.
+# hermetic mock fixtures (machine mock-vm -> provider mock-local, engine qemu).
+# VM_USER_NAME is unset, so the access users resolve through the rule's static
+# `value`/`fallback` (mock-local ubuntu -> "vagrant") via the same chain
+# instance-resolve uses. VM_USER_NAME itself stays env-sourced (blank). This is
+# the deterministic golden for the decoupled, self-contained test suite.
 _EXPECTED_ENV_LINES = [
-    "ACCESS_BOOTSTRAP_USER=",
-    "ACCESS_HUMAN_USER=",
-    "ACCESS_PROVISION_USER=",
+    "ACCESS_BOOTSTRAP_USER=vagrant",
+    "ACCESS_HUMAN_USER=vagrant",
+    "ACCESS_PROVISION_USER=vagrant",
     "PROFILE_NAME=pr-ubuntu-qemu",
     "ENGINE=qemu",
     "PROVIDER=mock-local",
@@ -80,10 +82,10 @@ _EXPECTED_ENV_LINES = [
     "LOCATION_REGION=",
     "LOCATION_AVAILABILITY_ZONE=",
     "LOCATION_ZONE=",
-    "SSH_USER=",
+    "SSH_USER=vagrant",
     "CLOUD_IMAGE_URL=",
-    "HUMAN_USER_NAME=",
-    "PROVISION_USER_NAME=",
+    "HUMAN_USER_NAME=vagrant",
+    "PROVISION_USER_NAME=vagrant",
     "RASPBERRY_PI_HOST=",
     "RASPBERRY_PI_IP=",
     "TRUENAS_HOST=",
