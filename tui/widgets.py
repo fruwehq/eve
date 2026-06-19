@@ -975,7 +975,7 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
             "legacy": "LEGACY",
         }
         lines = [f"{display_name} compatibility:"]
-        for entry in ordered[:4]:
+        for entry in ordered:
             status = status_labels.get(str(entry.get("status") or ""), str(entry.get("status") or "-").upper())
             platform = str(entry.get("platform") or "-")
             desktop = str(entry.get("desktop") or "-")
@@ -983,8 +983,6 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
             notes = str(entry.get("notes") or "")
             current = " (selected platform)" if platform == current_family else ""
             lines.append(f"{status}: {platform} / {desktop} / {session}{current} - {notes}")
-        if len(ordered) > 4:
-            lines.append(f"... {len(ordered) - 4} more rows in docs.")
         return "\n".join(lines)
 
     def bundle_detail_text(self, bundle_id: str) -> str:
