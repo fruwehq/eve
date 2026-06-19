@@ -237,6 +237,34 @@ def test_new_instance_unsupported_package_highlightable_not_selectable(monkeypat
     asyncio.run(_run())
 
 
+def test_new_instance_tab_moves_bundles_to_packages() -> None:
+    # The read-only detail panels must stay out of the tab order, so Tab on the
+    # bundle list lands on the package list (not the side detail panel).
+    from textual.widgets import DataTable
+
+    from tui.app import EveTui
+    from tui.commands import catalog_options
+    from tui.widgets import NewInstanceScreen
+
+    async def _run() -> None:
+        app = EveTui()
+        screen = NewInstanceScreen(catalog_options())
+        async with app.run_test() as pilot:
+            await app.push_screen(screen)
+            await pilot.pause()
+            screen.set_step(2)
+            await pilot.pause()
+            for panel in screen.query(".detail-column"):
+                assert panel.can_focus is False
+            screen.query_one("#bundle-select", DataTable).focus()
+            await pilot.pause()
+            await pilot.press("tab")
+            await pilot.pause()
+            assert app.focused is screen.query_one("#package-select", DataTable)
+
+    asyncio.run(_run())
+
+
 def test_new_instance_has_resources_step_with_prefilled_defaults() -> None:
     from textual.widgets import Button, Input
 

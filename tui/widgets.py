@@ -632,6 +632,11 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
 
     def on_mount(self) -> None:
         self.populate_platform_cards()
+        # Keep the read-only detail panels out of the tab order so Tab moves
+        # bundles -> packages (the scroll containers are focusable by default;
+        # mouse-wheel scrolling still works without keyboard focus).
+        for panel in self.query(".detail-column"):
+            panel.can_focus = False
         self.update_wizard()
 
     def bundle_label(self, bundle: dict[str, Any]) -> str:
