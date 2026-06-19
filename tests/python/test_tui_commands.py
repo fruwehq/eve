@@ -77,9 +77,14 @@ def test_package_action_and_bundle() -> None:
 
 def test_create_instance_args_flags() -> None:
     argv = c.create_instance_args(
-        "myvm", {"machine": "m", "os": "o", "location": "l"}, "dev-ai", "vscode", "50", "8192", "1.2.3.4"
+        "myvm",
+        {"machine": "m", "os": "o", "init": "ssh-cloud-init", "location": "l"},
+        "dev-ai", "vscode", "50", "8192", "1.2.3.4",
     )
     assert argv[:3] == [str(SCRIPTS / "instance-create"), "--instance", "myvm"]
+    # init must be passed — otherwise the created instance fails up/down schema
+    # validation ('init' is a required property).
+    assert argv[argv.index("--init") + 1] == "ssh-cloud-init"
     assert "--machine" in argv and "--bundles" in argv and "--disk-gb" in argv and "--provider-ip" in argv
     # empty optionals are omitted
     argv2 = c.create_instance_args("m2", {"machine": "m", "os": "o", "location": "l"}, "", "", "", "")
