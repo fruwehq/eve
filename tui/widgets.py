@@ -7,7 +7,7 @@ from typing import Any, Literal, cast
 
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import (
     Button,
@@ -53,6 +53,18 @@ class ListTable(DataTable[Any]):
     BINDINGS = [
         Binding("space", "select_cursor", "Select", show=False),
     ]
+
+
+DESKTOP_PACKAGE_IDS = frozenset(
+    {
+        "gnome-desktop",
+        "gnome-desktop-headless",
+        "kde-desktop",
+        "kde-desktop-headless",
+        "xfce-desktop",
+        "xfce-desktop-headless",
+    }
+)
 
 
 class ProviderPane(Static):
@@ -439,7 +451,8 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
     }
 
     Input,
-    SelectionList {
+    SelectionList,
+    ListTable {
         margin-bottom: 1;
     }
 
@@ -456,9 +469,20 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
         margin-bottom: 1;
     }
 
-    #content-selects {
-        height: 18;
+    #bundle-row,
+    #package-row {
+        height: 17;
         margin-bottom: 1;
+    }
+
+    #bundle-select,
+    #package-select {
+        height: 15;
+    }
+
+    #bundle-detail,
+    #package-detail {
+        height: auto;
     }
 
     .content-column {
@@ -466,21 +490,16 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
         margin-right: 1;
     }
 
+    .detail-column {
+        width: 1fr;
+    }
+
     #platform-cards {
         height: 16;
         margin-bottom: 1;
     }
 
-    #bundle-select {
-        height: 10;
-    }
-
-    #package-select {
-        height: 14;
-    }
-
-    #bundle-preview {
-        height: 4;
+    #resource-defaults {
         margin-bottom: 1;
     }
 
@@ -551,6 +570,11 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
         self.rendered_bundle_signature: tuple[Any, ...] | None = None
         self.rendered_bundled_package_ids: set[str] = set()
         self.rendered_package_signature: tuple[Any, ...] | None = None
+        self.selected_bundle_ids: set[str] = set()
+        self.selected_package_ids: set[str] = set()
+        self._disk_touched = False
+        self._memory_touched = False
+        self._prefilling_resources = False
         self.platform_by_id = {
             str(platform_choice.get("id")): platform_choice
             for platform_choice in self.platforms
@@ -571,18 +595,28 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
                 yield DataTable(id="platform-cards")
                 yield Static("", id="platform-defaults")
             with Vertical(id="step-content"):
+                yield Static("Bundles  -  ↑↓ browse, space to add/remove", classes="muted")
+                with Horizontal(id="bundle-row"):
+                    with Vertical(classes="content-column"):
+                        bundle_table: DataTable[Any] = ListTable(id="bundle-select")
+                        bundle_table.add_columns("✓", "Bundle")
+                        bundle_table.cursor_type = "row"
+                        yield bundle_table
+                    with VerticalScroll(classes="detail-column"):
+                        yield Static("", id="bundle-detail", classes="muted")
+                yield Static("Packages  -  ↑↓ browse, space to add/remove", classes="muted")
+                with Horizontal(id="package-row"):
+                    with Vertical(classes="content-column"):
+                        package_table: DataTable[Any] = ListTable(id="package-select")
+                        package_table.add_columns("✓", "Package")
+                        package_table.cursor_type = "row"
+                        yield package_table
+                    with VerticalScroll(classes="detail-column"):
+                        yield Static("", id="package-detail", classes="muted")
+                yield Static("", id="included-packages", classes="muted")
+            with Vertical(id="step-resources"):
                 yield Input(placeholder="Provider IP address", id="provider-ip")
                 yield Static("Required for metal instances that need a provider IP. The shared SSH key remains global.", id="provider-ip-help", classes="muted")
-                with Horizontal(id="content-selects"):
-                    with Vertical(classes="content-column"):
-                        yield Static("Bundles", classes="muted")
-                        yield SelectionList(id="bundle-select", disabled=not self.bundles)
-                        yield Static("", id="bundle-preview", classes="muted")
-                    with Vertical(classes="content-column"):
-                        yield Static("Additional packages", classes="muted")
-                        yield SelectionList(id="package-select", disabled=not self.package_ids)
-                        yield Static("", id="package-compatibility", classes="muted")
-                yield Static("", id="included-packages", classes="muted")
                 yield Static("", id="resource-defaults")
                 with Horizontal(id="override-row"):
                     yield Input(placeholder="disk GB override", id="new-disk")
@@ -606,7 +640,7 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
 
     def wizard_step_label(self) -> str:
         parts = []
-        for index, label in enumerate(("1 Name", "2 Platform", "3 Content", "4 Review")):
+        for index, label in enumerate(("1 Name", "2 Platform", "3 Content", "4 Resources", "5 Review")):
             if index == self.step:
                 parts.append(f"[b][primary]▶ {label}[/][/b]")
             elif index < self.step:
@@ -740,12 +774,10 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
         return [bundle_id for bundle_id in self.selected_bundles() if not self.bundle_support_reason(bundle_id)]
 
     def raw_selected_bundles(self) -> list[str]:
-        selected = self.query_one("#bundle-select", SelectionList).selected
-        return [str(bundle) for bundle in selected]
+        return sorted(self.selected_bundle_ids)
 
     def raw_selected_packages(self) -> list[str]:
-        selected = self.query_one("#package-select", SelectionList).selected
-        return [str(package) for package in selected]
+        return sorted(self.selected_package_ids)
 
     def content_package_ids(self, extra_bundle_id: str = "", extra_package_id: str = "") -> set[str]:
         packages = set(self.raw_selected_packages())
@@ -813,16 +845,17 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
         return f"no supported {target_label} row"
 
     def selected_packages(self) -> list[str]:
-        selected = self.query_one("#package-select", SelectionList).selected
+        bundled = set(self.bundled_packages())
         return [
             str(package)
-            for package in selected
-            if self.package_installable_on_platform(str(package)) and self.package_select_reason(str(package)) is None
+            for package in sorted(self.selected_package_ids)
+            if package not in bundled
+            and self.package_installable_on_platform(str(package))
+            and self.package_select_reason(str(package)) is None
         ]
 
     def selected_bundles(self) -> list[str]:
-        selected = self.query_one("#bundle-select", SelectionList).selected
-        return [str(bundle) for bundle in selected if not self.bundle_support_reason(str(bundle))]
+        return [str(bundle) for bundle in sorted(self.selected_bundle_ids) if not self.bundle_support_reason(str(bundle))]
 
     def bundled_packages(self) -> list[str]:
         packages: list[str] = []
@@ -840,84 +873,75 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
             return [str(package) for package in includes]
         return []
 
-    def bundle_option_label(self, bundle: dict[str, Any], reason: str | None) -> str:
-        label = self.bundle_label(bundle)
-        if reason:
-            return f"{label}\n  unsupported on this platform: {reason}"
-        return label
-
-    def package_option_label(self, package_id: str, reason: str | None) -> str:
-        if reason:
-            return f"{package_id}  ({reason})"
-        return package_id
-
     def sync_bundle_options(self) -> None:
-        bundle_list = self.query_one("#bundle-select", SelectionList)
+        bundle_list = self.query_one("#bundle-select", DataTable)
         selected = set(self.selected_bundles())
         reasons = {str(bundle.get("id")): self.bundle_support_reason(str(bundle.get("id"))) for bundle in self.bundles}
         signature = (
             self.selected_platform_id,
+            tuple(sorted(self.selected_bundle_ids)),
             tuple(sorted((bundle_id, reason or "") for bundle_id, reason in reasons.items())),
         )
-        if signature == self.rendered_bundle_signature and bundle_list.option_count:
+        if signature == self.rendered_bundle_signature and bundle_list.row_count:
             return
 
-        highlighted = bundle_list.highlighted
-        bundle_options: list[Any] = []
+        cursor_row = bundle_list.cursor_row
+        bundle_ids: list[str] = []
+        bundle_list.clear()
         for bundle in self.bundles:
             bundle_id = str(bundle.get("id") or "")
             if not bundle_id:
                 continue
-            reason = reasons.get(bundle_id)
-            bundle_options.append(
-                Selection(
-                    self.bundle_option_label(bundle, reason),
-                    bundle_id,
-                    bundle_id in selected and reason is None,
-                    disabled=reason is not None,
-                )
-            )
-        bundle_list.set_options(bundle_options)
-        if isinstance(highlighted, int) and bundle_options:
-            bundle_list.highlighted = min(highlighted, len(bundle_options) - 1)
-        bundle_list.disabled = bundle_list.option_count == 0
+            bundle_ids.append(bundle_id)
+            bundle_list.add_row("✓" if bundle_id in selected else "", bundle_id, key=bundle_id)
+        if bundle_ids:
+            if self.highlighted_bundle_id not in bundle_ids:
+                self.highlighted_bundle_id = bundle_ids[0]
+            target_row = bundle_ids.index(self.highlighted_bundle_id)
+            if isinstance(cursor_row, int) and 0 <= cursor_row < len(bundle_ids):
+                target_row = cursor_row
+                self.highlighted_bundle_id = bundle_ids[target_row]
+            bundle_list.move_cursor(row=target_row, column=0, animate=False)
+        else:
+            self.highlighted_bundle_id = ""
         self.rendered_bundle_signature = signature
 
     def sync_package_options(self) -> None:
-        package_list = self.query_one("#package-select", SelectionList)
+        package_list = self.query_one("#package-select", DataTable)
         bundled = set(self.bundled_packages())
         selected = set(self.selected_packages())
         reasons = {package_id: self.package_select_reason(package_id) for package_id in self.package_ids}
         signature = (
             self.selected_platform_id,
             tuple(sorted(bundled)),
+            tuple(sorted(self.selected_package_ids)),
             tuple(sorted((package_id, reason or "") for package_id, reason in reasons.items())),
         )
         if (
             bundled == self.rendered_bundled_package_ids
             and signature == self.rendered_package_signature
-            and package_list.option_count
+            and package_list.row_count
         ):
             return
 
-        highlighted = package_list.highlighted
-        package_options: list[Any] = [
-            Selection(
-                self.package_option_label(package, reasons.get(package)),
-                package,
-                package in selected and reasons.get(package) is None,
-                disabled=reasons.get(package) is not None,
-            )
-            for package in self.package_ids
-            if package not in bundled
-        ]
-        option_values = [str(option.value) for option in package_options]
-        package_list.set_options(package_options)
-        if isinstance(highlighted, int) and package_options:
-            package_list.highlighted = min(highlighted, len(package_options) - 1)
-        if self.highlighted_package_id not in option_values:
-            self.highlighted_package_id = option_values[0] if option_values else ""
-        package_list.disabled = package_list.option_count == 0
+        cursor_row = package_list.cursor_row
+        package_values: list[str] = []
+        package_list.clear()
+        for package_id in self.package_ids:
+            if package_id in bundled:
+                continue
+            package_values.append(package_id)
+            package_list.add_row("✓" if package_id in selected else "", package_id, key=package_id)
+        if package_values:
+            if self.highlighted_package_id not in package_values:
+                self.highlighted_package_id = package_values[0]
+            target_row = package_values.index(self.highlighted_package_id)
+            if isinstance(cursor_row, int) and 0 <= cursor_row < len(package_values):
+                target_row = cursor_row
+                self.highlighted_package_id = package_values[target_row]
+            package_list.move_cursor(row=target_row, column=0, animate=False)
+        else:
+            self.highlighted_package_id = ""
         self.rendered_bundled_package_ids = bundled
         self.rendered_package_signature = signature
 
@@ -957,6 +981,51 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
             lines.append(f"... {len(ordered) - 4} more rows in docs.")
         return "\n".join(lines)
 
+    def bundle_detail_text(self, bundle_id: str) -> str:
+        if not bundle_id:
+            return "Highlight a bundle to preview included packages before selecting it."
+        includes = self.bundle_includes(bundle_id)
+        lines = [
+            str(bundle_id),
+            f"Includes: {', '.join(includes) if includes else '(none)'}",
+        ]
+        reason = self.bundle_support_reason(bundle_id)
+        if reason:
+            lines.append(f"Unsupported on this platform: {reason}")
+        return "\n".join(lines)
+
+    def package_detail_text(self, package_id: str) -> str:
+        if not package_id:
+            return "Highlight a package to see desktop/session compatibility."
+        package = self.package_map.get(package_id, {})
+        display_name = str(package.get("display_name") or package_id)
+        lines = [
+            display_name,
+            self.package_compatibility_text(package_id),
+        ]
+        reason = self.package_select_reason(package_id)
+        if reason:
+            lines.append(f"Cannot add on this platform: {reason}")
+        if package_id in {"rdp", "vnc"} and not (self.content_package_ids() & DESKTOP_PACKAGE_IDS):
+            lines.append("No desktop selected — installs XFCE (X11) by default.")
+        return "\n".join(lines)
+
+    def prefill_resource_defaults(self) -> None:
+        platform_choice = self.selected_platform()
+        defaults = platform_choice.get("defaults", {}) if isinstance(platform_choice.get("defaults"), dict) else {}
+        disk_default = "" if defaults.get("disk_gb") is None else str(defaults.get("disk_gb"))
+        memory_default = "" if defaults.get("memory_mb") is None else str(defaults.get("memory_mb"))
+        disk_input = self.query_one("#new-disk", Input)
+        memory_input = self.query_one("#new-memory", Input)
+        self._prefilling_resources = True
+        try:
+            if not self._disk_touched and disk_input.value != disk_default:
+                disk_input.value = disk_default
+            if not self._memory_touched and memory_input.value != memory_default:
+                memory_input.value = memory_default
+        finally:
+            self._prefilling_resources = False
+
     def platform_default_lines(self, platform_choice: dict[str, Any]) -> list[str]:
         defaults = platform_choice.get("defaults", {}) if isinstance(platform_choice.get("defaults"), dict) else {}
         return [
@@ -971,7 +1040,7 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
 
     def update_wizard(self) -> None:
         self.query_one("#wizard-steps", Label).update(self.wizard_step_label())
-        for index, widget_id in enumerate(("step-name", "step-platform", "step-content", "step-review")):
+        for index, widget_id in enumerate(("step-name", "step-platform", "step-content", "step-resources", "step-review")):
             self.query_one(f"#{widget_id}", Vertical).display = index == self.step
 
         platform_choice = self.selected_platform()
@@ -982,11 +1051,13 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
         provider_ip_widget.display = provider_ip_required
         provider_ip_help.display = provider_ip_required
         defaults = platform_choice.get("defaults", {}) if isinstance(platform_choice.get("defaults"), dict) else {}
+        if self.step == 3:
+            self.prefill_resource_defaults()
         self.sync_bundle_options()
         self.sync_package_options()
         self.query_one("#platform-defaults", Static).update("\n".join(self.platform_default_lines(platform_choice)))
         self.query_one("#resource-defaults", Static).update(
-            "Leave overrides empty to use platform defaults: "
+            "Using platform defaults unless edited: "
             f"disk {defaults.get('disk_gb') or '-'} GB, "
             f"memory {defaults.get('memory_mb') or '-'} MB, "
             f"CPU {defaults.get('cpus') or defaults.get('cpu_cores') or defaults.get('vcpus') or '-'}."
@@ -999,26 +1070,11 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
         selected_bundles = self.selected_bundles()
         bundled_packages = self.bundled_packages()
         selected_packages = self.selected_packages()
-        highlighted_bundle_id = self.highlighted_bundle_id or (selected_bundles[0] if selected_bundles else "")
-        highlighted_includes = self.bundle_includes(highlighted_bundle_id)
         package_text = ", ".join(selected_packages) if selected_packages else "(none)"
         bundled_text = ", ".join(bundled_packages) if bundled_packages else "(none)"
         bundle_text = ", ".join(selected_bundles) if selected_bundles else "(none)"
-        if highlighted_bundle_id:
-            support_note = self.bundle_support_reason(highlighted_bundle_id)
-            preview_text = (
-                f"Highlighted bundle: {highlighted_bundle_id}\n"
-                f"Includes: {', '.join(highlighted_includes) if highlighted_includes else '(none)'}"
-            )
-            if support_note:
-                preview_text += f"\nUnsupported on this platform: {support_note}"
-        else:
-            preview_text = "Highlight a bundle to preview included packages before selecting it."
-        self.query_one("#bundle-preview", Static).update(preview_text)
-        highlighted_package_id = self.highlighted_package_id or (selected_packages[0] if selected_packages else "")
-        self.query_one("#package-compatibility", Static).update(
-            self.package_compatibility_text(highlighted_package_id)
-        )
+        self.query_one("#bundle-detail", Static).update(self.bundle_detail_text(self.highlighted_bundle_id))
+        self.query_one("#package-detail", Static).update(self.package_detail_text(self.highlighted_package_id))
         self.query_one("#included-packages", Static).update(
             "Included by selected bundles (locked): " + bundled_text
         )
@@ -1049,8 +1105,8 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
         )
 
         self.query_one("#back", Button).disabled = self.step == 0
-        self.query_one("#next", Button).display = self.step < 3
-        self.query_one("#create", Button).display = self.step == 3
+        self.query_one("#next", Button).display = self.step < 4
+        self.query_one("#create", Button).display = self.step == 4
 
     def focus_current_step(self) -> None:
         if self.step == 0:
@@ -1058,12 +1114,14 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
         elif self.step == 1:
             self.query_one("#platform-cards", DataTable).focus()
         elif self.step == 2:
-            self.query_one("#bundle-select", SelectionList).focus()
+            self.query_one("#bundle-select", DataTable).focus()
+        elif self.step == 3:
+            self.query_one("#new-disk", Input).focus()
         else:
             self.query_one("#create", Button).focus()
 
     def set_step(self, step: int) -> None:
-        self.step = max(0, min(3, step))
+        self.step = max(0, min(4, step))
         self.update_wizard()
         self.focus_current_step()
 
@@ -1077,13 +1135,19 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
         ):
             self.selected_platform_id = str(event.row_key.value)
             self.update_wizard()
-
-    def on_selection_list_selection_highlighted(self, event: SelectionList.SelectionHighlighted[Any]) -> None:
-        if event.selection_list.id == "bundle-select":
-            self.highlighted_bundle_id = str(event.selection.value)
+        elif (
+            event.data_table.id == "bundle-select"
+            and event.row_key is not None
+            and event.row_key.value is not None
+        ):
+            self.highlighted_bundle_id = str(event.row_key.value)
             self.update_wizard()
-        elif event.selection_list.id == "package-select":
-            self.highlighted_package_id = str(event.selection.value)
+        elif (
+            event.data_table.id == "package-select"
+            and event.row_key is not None
+            and event.row_key.value is not None
+        ):
+            self.highlighted_package_id = str(event.row_key.value)
             self.update_wizard()
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
@@ -1094,11 +1158,48 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
         ):
             self.selected_platform_id = str(event.row_key.value)
             self.set_step(2)
+            return
+        if (
+            event.data_table.id == "bundle-select"
+            and event.row_key is not None
+            and event.row_key.value is not None
+        ):
+            bundle_id = str(event.row_key.value)
+            reason = self.bundle_support_reason(bundle_id)
+            if reason:
+                self.notify(f"Bundle cannot be added: {reason}", severity="error")
+            elif bundle_id in self.selected_bundle_ids:
+                self.selected_bundle_ids.remove(bundle_id)
+            else:
+                self.selected_bundle_ids.add(bundle_id)
+            self.update_wizard()
+            event.stop()
+            return
+        if (
+            event.data_table.id == "package-select"
+            and event.row_key is not None
+            and event.row_key.value is not None
+        ):
+            package_id = str(event.row_key.value)
+            reason = self.package_select_reason(package_id)
+            if reason:
+                self.notify(f"Package cannot be added: {reason}", severity="error")
+            elif package_id in self.selected_package_ids:
+                self.selected_package_ids.remove(package_id)
+            else:
+                self.selected_package_ids.add(package_id)
+            self.update_wizard()
+            event.stop()
+            return
 
     def on_selection_list_selected_changed(self, event: Any) -> None:
         self.update_wizard()
 
     def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id == "new-disk" and not self._prefilling_resources:
+            self._disk_touched = True
+        elif event.input.id == "new-memory" and not self._prefilling_resources:
+            self._memory_touched = True
         if event.input.id in {"new-name", "new-disk", "new-memory", "provider-ip"}:
             self.update_wizard()
 
@@ -1128,13 +1229,9 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
             if self.step == 1 and not self.selected_platform():
                 self.notify("Platform is required", severity="error")
                 return
-            if (
-                self.step == 2
-                and provider_has_capability(
-                    str(self.selected_platform().get("provider") or ""), "needs-provider-ip"
-                )
-                and not self.query_one("#provider-ip", Input).value.strip()
-            ):
+            if self.step == 3 and provider_has_capability(
+                str(self.selected_platform().get("provider") or ""), "needs-provider-ip"
+            ) and not self.query_one("#provider-ip", Input).value.strip():
                 self.notify("Provider IP address is required", severity="error")
                 return
             self.set_step(self.step + 1)
