@@ -1126,6 +1126,7 @@ class EveTui(App[None]):
         skin = "#f5c8a9"
         brow = "#5a3d5a"
         mouth = "#e07a8a"
+        sparkle = "#ffffff"
         dress = [
             "#7fd3e3", "#82cde2", "#84c6e0", "#87c0df",
             "#8ab9dd", "#8db3dc", "#8faddb", "#92a6da",
@@ -1145,9 +1146,9 @@ class EveTui(App[None]):
             left = min(58, term // 2)
             container_width = max(term - left - 4, 0)
         if container_width >= 60:
-            hero_art_rows = self._large_hero_rows(hair, skin, brow, dress, mouth, blinking)
+            hero_art_rows = self._large_hero_rows(hair, skin, brow, dress, mouth, sparkle, blinking)
         elif container_width >= 32:
-            hero_art_rows = self._compact_hero_rows(hair, skin, brow, dress, mouth, blinking)
+            hero_art_rows = self._compact_hero_rows(hair, skin, brow, dress, mouth, sparkle, blinking)
         else:
             hero_art_rows = []
 
@@ -1189,24 +1190,25 @@ class EveTui(App[None]):
         brow: str,
         dress: list[str],
         mouth: str,
+        sparkle: str,
         blinking: bool,
     ) -> list[list[tuple[str | None, str]]]:
         eye = "#1f1f1f"  # black pupils on the solid skin-tone face
         if blinking:
             eye_8_l: list[tuple[str, str]] = [(skin, "██████")]
             eye_8_r: list[tuple[str, str]] = [(skin, "█████")]
-            eye_9_l: list[tuple[str, str]] = [(skin, "██"), (brow, "‿‿"), (skin, "██")]
-            eye_9_r: list[tuple[str, str]] = [(brow, "‿‿"), (skin, "████")]
+            eye_9_l: list[tuple[str, str]] = [(skin, "█"), (brow, "‿‿‿‿"), (skin, "█")]
+            eye_9_r: list[tuple[str, str]] = [(brow, "‿‿‿‿"), (skin, "██")]
             eye_10_l: list[tuple[str, str]] = [(skin, "██████")]
             eye_10_r: list[tuple[str, str]] = [(skin, "███")]
         else:
-            # Solid skin-tone face; small black pupils read clearly on it.
-            eye_8_l = [(skin, "██"), (eye, "██"), (skin, "██")]
-            eye_8_r = [(skin, "█"), (eye, "██"), (skin, "██")]
-            eye_9_l = [(skin, "██"), (eye, "██"), (skin, "██")]
-            eye_9_r = [(eye, "██"), (skin, "████")]
-            eye_10_l = [(skin, "██████")]
-            eye_10_r = [(skin, "███")]
+            # Big anime eyes: tall black almonds with a white sparkle highlight.
+            eye_8_l = [(skin, "██"), (sparkle, "█"), (eye, "██"), (skin, "█")]
+            eye_8_r = [(skin, "█"), (eye, "██"), (sparkle, "█"), (skin, "█")]
+            eye_9_l = [(skin, "█"), (eye, "████"), (skin, "█")]
+            eye_9_r = [(eye, "████"), (skin, "██")]
+            eye_10_l = [(skin, "██"), (eye, "██"), (skin, "██")]
+            eye_10_r = [(eye, "██"), (skin, "█")]
         return [
             [(hair, "               ████                ")],
             [(hair, "           ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓ ▓▓▓▓▓▓▓▓▓▓▓▓            ")],
@@ -1220,8 +1222,8 @@ class EveTui(App[None]):
             [(hair, " █▓██▓"), *eye_9_l, (skin, "████████"), *eye_9_r, (hair, "▓██▓▓▓▓▓█▓▓▓▒▒░░▒▒▒▓▓█        ")],
             [(hair, " █▓██ "), *eye_10_l, (skin, "█████████"), *eye_10_r, (skin, "██"), (hair, "██▓▓▓▒▒▓█▓▓▓▒▒▒▒░▒▒▓▓▓        ")],
             [(hair, " █▓▓█"), (skin, "████████████████████"), (hair, "█▓▓▒▒▒▓▓▓█▓▓▓▓▓▓▓▓██           ")],
-            [(hair, "   █▓█ █"), (skin, "██████"), (mouth, "‿‿"), (skin, "█████"), (hair, "█▓▓▒▓█▓▓▓▒▒▒▓▓███▓▓▓██             ")],
-            [(hair, "    ██  "), (skin, "███████████"), (hair, "▓██▓▒▒▓▓█▓▓▓▓▒░▒▓▓▓▓█▓▓▓▓            ")],
+            [(hair, "   █▓█ █"), (skin, "███████"), (mouth, "ω"), (skin, "█████"), (hair, "█▓▓▒▓█▓▓▓▒▒▒▓▓███▓▓▓██             ")],
+            [(hair, "        ██"), (skin, "█████████"), (hair, "▓██▓▒▒▓▓█▓▓▓▓▒░▒▓▓▓▓█▓▓▓▓            ")],
             [(None, "            "), (dress[0], "▓▒░▒▓▓▓█▓▓▒▒▓"), (hair, "▓█▓█▓█▓▓▓▒▒▓▓▓█▓▓▓█"), (None, "            ")],
             [(None, "       "), (dress[1], "▓▓▓▓▓▓▓▒▓▓▓▓▓▓▓██▒"), (hair, "█▓█▓▓▒█▓▓▓▓▓▓▓█▓██▓█"), (None, "           ")],
             [(None, "     "), (dress[2], "▓▓▒▒▒▒▓▒▓▓▓▓▒▒▓▓█▓▓▓"), (hair, "█▓▓█▓▓▓▒█▓▓▒▓▓██"), (None, "               ")],
@@ -1247,6 +1249,7 @@ class EveTui(App[None]):
         brow: str,
         dress: list[str],
         mouth: str,
+        sparkle: str,
         blinking: bool,
     ) -> list[list[tuple[str | None, str]]]:
         eye = "#1f1f1f"  # black pupils on the solid skin-tone face
@@ -1256,11 +1259,11 @@ class EveTui(App[None]):
             eye_5_l: list[tuple[str, str]] = [(skin, "█"), (brow, "‿‿"), (skin, "█")]
             eye_5_r: list[tuple[str, str]] = [(skin, "█"), (brow, "‿‿"), (skin, "█")]
         else:
-            # Solid skin-tone face; small black pupils read clearly on it.
-            eye_4_l = [(skin, "█"), (eye, "█"), (skin, "██")]
-            eye_4_r = [(skin, "██"), (eye, "█"), (skin, "█")]
-            eye_5_l = [(skin, "████")]
-            eye_5_r = [(skin, "████")]
+            # Big anime eyes: black with a white sparkle highlight.
+            eye_4_l = [(skin, "█"), (eye, "█"), (sparkle, "█"), (eye, "█")]
+            eye_4_r = [(eye, "█"), (sparkle, "█"), (eye, "█"), (skin, "█")]
+            eye_5_l = [(skin, "█"), (eye, "███")]
+            eye_5_r = [(eye, "███"), (skin, "█")]
         return [
             [(hair, "            ████            ")],
             [(hair, "         ▓▓▓▓▓▓▓▓▓▓         ")],
@@ -1269,7 +1272,7 @@ class EveTui(App[None]):
             [(hair, "     ▓▓"), (skin, "██"), *eye_4_l, (skin, "██"), *eye_4_r, (skin, "██"), (hair, "▓▓     ")],
             [(hair, "     ▓▓"), (skin, "██"), *eye_5_l, (skin, "██"), *eye_5_r, (skin, "██"), (hair, "▓▓     ")],
             [(hair, "     ▓▓"), (skin, "██████████████"), (hair, "▓▓     ")],
-            [(hair, "      ▓▓"), (skin, "█████"), (mouth, "‿"), (skin, "██████"), (hair, "▓▓      ")],
+            [(hair, "      ▓▓"), (skin, "█████"), (mouth, "ω"), (skin, "██████"), (hair, "▓▓      ")],
             [(hair, "        ▓▓"), (skin, "████████"), (hair, "▓▓        ")],
             [(hair, "         ▓▓"), (skin, "██████"), (hair, "▓▓         ")],
             [(hair, "    ▓▓"), (dress[2], "████████████████"), (hair, "▓▓    ")],
