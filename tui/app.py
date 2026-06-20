@@ -105,6 +105,66 @@ def _strip_markup(text: str) -> str:
     return _MARKUP_RE.sub("", text)
 
 
+# Eve's empty-state portrait, rendered as colored Unicode braille (each cell is a
+# 2x4 dot grid, ~8x the resolution of block art). Generated offline by dithering
+# a drawn anime face and quantizing to a small palette: EVE_BRAILLE holds the
+# glyphs (' ' = empty) and EVE_COLORS the matching per-cell palette index.
+EVE_PALETTE = ['#f6ddcc', '#f3c5a4', '#ecb3ae', '#f4a4bb', '#f79bbb', '#f592b5', '#f38fb1', '#e394a4', '#f289ad', '#f07fa7', '#e97ba2', '#ca679e', '#4c306e', '#000000']  # noqa: E501
+EVE_BRAILLE = [
+    '            ⢀⡀⡠⣄⢤⡠⣄⢤⡠⡄⣀             ',
+    '        ⢀⢠⡰⣜⢞⢮⡫⣞⢵⡫⣞⢵⡫⡯⣺⡹⣕⢆⡄⡀        ',
+    '      ⢀⢔⡵⣫⢞⡵⣫⡳⣝⢮⣳⢽⣪⢷⢝⡮⣳⢝⢮⡳⣝⢮⡢⡀      ',
+    '     ⡰⡕⡯⣺⡪⣗⢽⡪⡯⣺⢝⡮⣳⡳⡽⣕⣟⢮⣫⡳⣝⢮⡳⣹⡪⡆     ',
+    '    ⡸⣜⣝⢮⡳⣝⢮⡳⡽⣝⠾⠝⠞⠓⠙⠽⠺⢪⢗⣗⢽⡪⣗⣝⢮⡺⣪⡣    ',
+    '   ⢬⡫⡮⣪⡳⣝⢮⣳⠝⣉⣀⡠⡤⡤⣠⢤⣠⢄⣄⢈⡘⠳⣝⢞⡼⡵⣝⢮⡺⣅   ',
+    '  ⢨⡳⣕⢯⡺⣪⢗⣝⢮⣺⡪⣞⣞⡽⡽⡽⣵⣫⢯⣺⢵⣫⡳⣕⢯⡺⣕⢗⡳⣝⣜⠆  ',
+    ' ⢀⢕⢧⡳⡳⡝⣎⢗⢵⡳⣕⢯⢞⣞⣞⡽⣽⣺⡺⣝⡮⣗⢗⡽⣪⡳⣝⢼⢕⢯⢮⡪⣳  ',
+    ' ⢨⢫⡺⡪⡯⣺⡪⣫⡣⡯⢮⣫⡳⣣⢷⢝⣞⢮⡫⣗⢽⡪⣗⢽⡪⡞⡮⣪⣫⡳⡵⡝⣎⠇ ',
+    ' ⣜⢵⡹⡝⣮⡳⣝⢎⢞⢎⣗⣧⡫⣞⢵⢯⢮⢳⢽⢮⡳⡝⡾⣵⣝⢎⢗⡵⣳⢝⢮⡺⡪⣇ ',
+    ' ⡎⡧⡳⣝⢞⡮⣗⢿⡱⣭⣖⣶⣜⣔⣭⣹⣪⣳⣹⢥⣣⣵⢵⡵⣬⣫⣻⢮⡳⣏⡗⣝⢞⣜ ',
+    ' ⣎⢯⢺⡪⡯⣞⣗⣟⣯⣷⣿⣾⢷⣿⣽⣯⣷⢿⣽⣟⣿⡾⣿⣿⣽⣞⣷⡫⣟⡞⡮⡳⣕⢵ ',
+    '⠰⡕⣗⢳⡹⡽⣵⣳⣻⣾⣿⢃⠆⣵⣬⢿⡾⣯⣿⢷⡟⢅⠢⣶⣝⢿⣷⣗⡯⣗⡯⡳⣝⢜⢮⡂',
+    '⢘⢮⡪⣳⡹⣺⢵⡳⣗⣿⡇⠆⠁⠈⠙⢌⣿⣿⡽⣿⡑⠌ ⠉⠣⣹⣿⡾⡽⡵⣫⢏⢮⢝⢮⡂',
+    ' ⣕⢝⡜⡮⣳⣫⢞⣯⢿⣿⡨⢠⢈⠌⣼⣟⣾⣻⣟⣎⠔⡈⡠⢡⣿⢿⢽⣝⢽⣕⢏⢧⡫⢮ ',
+    ' ⡪⣣⡫⡮⡳⡵⣫⡳⡳⣝⢷⢧⢶⣺⣷⣻⡽⣷⣻⣽⢷⡬⡶⣟⣝⢮⡳⡳⣝⢮⡫⢮⡪⡳ ',
+    ' ⢝⡲⡱⡳⡹⣝⢎⣯⢯⡾⣝⡾⣯⢷⣻⣞⣿⢽⣗⣿⢽⡯⣷⣳⡵⣯⢾⢝⢮⡳⡹⡜⡎⡗ ',
+    ' ⢘⢜⢵⢹⡹⣜⢵⢽⢽⡽⣽⡽⣽⢯⡜⡕⠿⢽⢚⢥⣻⡽⣗⣟⡾⣽⡝⡮⣳⢹⢜⢎⢧⡃ ',
+    ' ⠈⢇⢯⢪⡺⣸⢪⡺⠹⣽⣳⣻⡽⣽⢯⢿⢽⢾⢽⢯⣷⣻⡽⡾⣽⠓⡝⡮⡪⡇⡯⡪⣓⠂ ',
+    '  ⠣⡳⡱⡣⡳⡱⡕⠄ ⠻⢺⣽⢽⡽⡯⡿⡽⡯⣟⣾⣺⠽⠏⠁ ⢎⢎⢧⢫⡪⡺⡘  ',
+    '  ⠈⡎⣇⢯⢪⡃     ⠈⠉⠋⠛⠽⠻⠙⠋⠊      ⢘⡜⣕⢕⡝⠂  ',
+    '   ⠨⡪⡪⣪⠂                    ⢐⢕⡕⡵⠁   ',
+    '    ⠈⢎⢎⠇                    ⠨⣪⠪⠂    ',
+    '      ⠑⠁                    ⠈⠊      ',
+]
+EVE_COLORS = [
+    '            56546555546             ',
+    '        65655565555556555656        ',
+    '      668665555544445555566866      ',
+    '     68866554444444444445566886     ',
+    '    6866655444343333444445566888    ',
+    '   888665544444444434444445566888   ',
+    '  88866556644443333334444665566888  ',
+    ' 988866986654433333333445668966888  ',
+    ' 9888669988655444444445568899668889 ',
+    ' 8988545998328845663568326995458898 ',
+    ' 99884341b2727722662277771714346899 ',
+    ' 8988433110000000000000000113346898 ',
+    '989964331003cb0000000bc000013336998a',
+    'a9998433100cc00b0000bc 0b0013348999a',
+    ' 9998443100cccc200002cccc0014448999 ',
+    ' aa995457630322111111223036654599aa ',
+    ' 9aa9868222211111111111122218689aa9 ',
+    ' 9aaa98921111117712271111112989aaa9 ',
+    ' a9aaa9a9111111117111111111aa9aaaaa ',
+    '  aaaaaaaa 111111111111111 aaaaaaa  ',
+    '  aaaaaa     111111111      aaaaaa  ',
+    '   aaaaa                    aaaa9   ',
+    '    9aaa                    aaaa    ',
+    '      aa                    aa      ',
+]
+_PALETTE_IDX = {ch: i for i, ch in enumerate("0123456789abcdefghijklmnopqrstuv")}
+
+
 class EveTui(App[None]):
     """Instance-first manager built on the existing v3 command surface."""
 
@@ -1121,49 +1181,51 @@ class EveTui(App[None]):
         self.render_packages(status)
         self.render_ops(status)
 
-    def render_empty_state(self) -> None:
-        hair = "#ff8fb1"
-        skin = "#f5c8a9"
-        brow = "#5a3d5a"
-        mouth = "#e07a8a"
-        sparkle = "#ffffff"
-        dress = [
-            "#7fd3e3", "#82cde2", "#84c6e0", "#87c0df",
-            "#8ab9dd", "#8db3dc", "#8faddb", "#92a6da",
-            "#95a0d9", "#9799d8", "#9a93d7", "#9d8cd6",
-        ]
-        blinking = self._eye_blinking
+    def _eve_portrait(self) -> str:
+        """Build the colored-braille portrait markup from EVE_BRAILLE/EVE_COLORS,
+        merging runs of same-color cells into single markup segments."""
+        out: list[str] = []
+        for glyphs, colors in zip(EVE_BRAILLE, EVE_COLORS):
+            segments: list[str] = []
+            i = 0
+            width = len(glyphs)
+            while i < width:
+                if glyphs[i] == " ":
+                    j = i
+                    while j < width and glyphs[j] == " ":
+                        j += 1
+                    segments.append(glyphs[i:j])
+                    i = j
+                else:
+                    idx = colors[i]
+                    j = i
+                    while j < width and glyphs[j] != " " and colors[j] == idx:
+                        j += 1
+                    color = EVE_PALETTE[_PALETTE_IDX.get(idx, len(EVE_PALETTE) - 1)]
+                    segments.append(f"[{color}]{glyphs[i:j]}[/]")
+                    i = j
+            out.append("".join(segments))
+        return "\n".join(out)
 
+    def render_empty_state(self) -> None:
         container_width = self.query_one("#empty-state", Static).size.width
         if container_width <= 0:
             # On the very first paint the layout hasn't settled and the
             # empty-state width reads as 0. Estimate it from the terminal
             # width using the same split as the CSS (#left caps at 50% / width
             # 58, #right fills the rest, minus its border+padding) so the
-            # mascot paints immediately at the correct tier instead of waiting
-            # for the first animation tick. Real width is used on later renders.
+            # portrait paints immediately instead of waiting for the first tick.
             term = self.size.width if self.size else 80
             left = min(58, term // 2)
             container_width = max(term - left - 4, 0)
-        # Only show the mascot when there's room for the full portrait; on
-        # narrow terminals just show the text (the compact portrait wasn't cute).
-        if container_width >= 60:
-            hero_art_rows = self._large_hero_rows(hair, skin, brow, dress, mouth, sparkle, blinking)
-        else:
-            hero_art_rows = []
-
-        def render_segment(color: str | None, text: str) -> str:
-            return f"[{color}]{text}[/]" if color and text else text
 
         lines: list[str] = []
-        if hero_art_rows:
-            lines.append(
-                "\n".join(
-                    "".join(render_segment(color, text) for color, text in row)
-                    for row in hero_art_rows
-                )
-            )
-        # The art is pre-formatted; wrap only the caption lines to the pane
+        # Show the braille portrait only when the pane is wide enough for it; on
+        # narrow terminals just show the text.
+        portrait_width = len(EVE_BRAILLE[0]) if EVE_BRAILLE else 0
+        if container_width >= portrait_width + 2:
+            lines.append(self._eve_portrait())
+        # Wrap only the caption lines to the pane
         # width so narrow terminals wrap instead of truncating.
         text_width = max(container_width - 2, 16)
         caption_lines = [
@@ -1182,66 +1244,6 @@ class EveTui(App[None]):
                 # shows the mascot; only plain captions ever need wrapping.
                 lines.extend(textwrap.wrap(visible, text_width) or [""])
         self.query_one("#empty-state", Static).update("\n".join(lines))
-
-    def _large_hero_rows(
-        self,
-        hair: str,
-        skin: str,
-        brow: str,
-        dress: list[str],
-        mouth: str,
-        sparkle: str,
-        blinking: bool,
-    ) -> list[list[tuple[str | None, str]]]:
-        eye = "#1f1f1f"  # black pupils on the solid skin-tone face
-        if blinking:
-            eye_8_l: list[tuple[str, str]] = [(skin, "██████")]
-            eye_8_r: list[tuple[str, str]] = [(skin, "█████")]
-            eye_9_l: list[tuple[str, str]] = [(brow, "‿‿‿‿‿"), (skin, "█")]
-            eye_9_r: list[tuple[str, str]] = [(brow, "‿‿‿‿‿"), (skin, "█")]
-            eye_10_l: list[tuple[str, str]] = [(skin, "██████")]
-            eye_10_r: list[tuple[str, str]] = [(skin, "███")]
-        else:
-            # Big anime eyes: tall black almonds (widest in the middle row)
-            # with a white sparkle highlight inside.
-            eye_8_l = [(skin, "█"), (eye, "██"), (sparkle, "█"), (eye, "██")]
-            eye_8_r = [(eye, "██"), (sparkle, "█"), (eye, "██")]
-            eye_9_l = [(eye, "█████"), (skin, "█")]
-            eye_9_r = [(eye, "█████"), (skin, "█")]
-            eye_10_l = [(skin, "█"), (eye, "████"), (skin, "█")]
-            eye_10_r = [(eye, "███")]
-        return [
-            [(hair, "               ████                ")],
-            [(hair, "           ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓ ▓▓▓▓▓▓▓▓▓▓▓▓            ")],
-            [(hair, "       █ ▓▓▓▓▓▓▒▒▒▒▒▒▒▒▓▒▒▒▒▒▒▓▓▓▓█▓▓▓▒▒▒▒▒▒▓▓█        ")],
-            [(hair, "    ▓▓▓▓▓▒▒▒▒░░ ░░ ░ ░░░░░ ░░▒▒░▒▒▓▓▓█▓▓▒░▒▒▓▓▓▓     ░▓")],
-            [(hair, "  █▓▓▓▓▓▓▒░  ░▒▒▓▓██▓▓▓▓██▓▒░ ░▒▓▓▓▓█▓▓▓▒░▒▓██▓▓▓▓▓███ ")],
-            [(hair, " ▓▓▓▒▒▒░░▒▒▒▓▓▓██▓▓▓▓██▓██▓▒▒░▒▒▓▓▓█▓▓▓▒▒░▒▓██████     ")],
-            [(hair, " █▓▓▓▒▒▓▓▓▓▓▓▓▓██▓██▓▒▒▓▓▓██▓▓▓▒▒▓▓▓█▓▓▒▒░▒▒▒▓▓▓▓      ")],
-            [(hair, "░  █▓▓▓▓▓"), (brow, "████"), (hair, "▓"), (skin, "██████████"), (hair, "▒▓▓▓▓▓▓▓▒▒▓█▓▓▓▒▒░ ▒▒▒▒▓▓▓      ")],
-            [(hair, " █▓██ "), *eye_8_l, (skin, "███████"), *eye_8_r, (hair, "███▓██▓▓▓▓█▓▓▒▒░  ░▒▓▓▓█        ")],
-            [(hair, " █▓██▓"), *eye_9_l, (skin, "████████"), *eye_9_r, (hair, "▓██▓▓▓▓▓█▓▓▓▒▒░░▒▒▒▓▓█        ")],
-            [(hair, " █▓██ "), *eye_10_l, (skin, "█████████"), *eye_10_r, (skin, "██"), (hair, "██▓▓▓▒▒▓█▓▓▓▒▒▒▒░▒▒▓▓▓        ")],
-            [(hair, " █▓▓█"), (skin, "██"), ("#f4a9b6", "██"), (skin, "████████████"), ("#f4a9b6", "██"), (skin, "██"), (hair, "█▓▓▒▒▒▓▓▓█▓▓▓▓▓▓▓▓██           ")],
-            [(hair, "   █▓█ █"), (skin, "████"), (mouth, "█"), (skin, "███"), (mouth, "█"), (skin, "████"), (hair, "█▓▓▒▓█▓▓▓▒▒▒▓▓███▓▓▓██             ")],
-            [(hair, "        ██"), (skin, "██"), (mouth, "███"), (skin, "████"), (hair, "▓██▓▒▒▓▓█▓▓▓▓▒░▒▓▓▓▓█▓▓▓▓            ")],
-            [(None, "            "), (dress[0], "▓▒░▒▓▓▓█▓▓▒▒▓"), (hair, "▓█▓█▓█▓▓▓▒▒▓▓▓█▓▓▓█"), (None, "            ")],
-            [(None, "       "), (dress[1], "▓▓▓▓▓▓▓▒▓▓▓▓▓▓▓██▒"), (hair, "█▓█▓▓▒█▓▓▓▓▓▓▓█▓██▓█"), (None, "           ")],
-            [(None, "     "), (dress[2], "▓▓▒▒▒▒▓▒▓▓▓▓▒▒▓▓█▓▓▓"), (hair, "█▓▓█▓▓▓▒█▓▓▒▓▓██"), (None, "               ")],
-            [(None, "    "), (dress[3], "▓▓▒▒▒▒▒▓▓▓▓▒▓▓▓█▓▓▓██"), (hair, "▓▓▓▓▓▓▓▓██▓▓▓▓▓█░"), (None, "              ")],
-            [(None, "    "), (dress[4], "▓▓▒▒▒▓██▓▓▓▓▓▒▒▓▓▓▓▓▓"), (hair, "▓▓██▓▓▓▓▓██"), (None, "   "), (hair, "▓"), (None, "                ")],
-            [(None, "     "), (dress[5], "██▓▓▒▒▒▓██▓▓▓▒▓▓▓▓▓█"), (hair, "█▓▓▓▓██"), (None, " "), (hair, "█▓█"), (None, "                    ")],
-            [(None, "       "), (dress[6], "▓▒▒▒▒▒██▓▓▓▒▓▓▓▓██"), (None, " "), (hair, "█▓▓▓▓██"), (None, "  "), (hair, "██"), (None, "                   ")],
-            [(None, "      "), (dress[7], "▓▓▒▒▒▒▒▓███▓▓▓██▓▓█"), (None, "   "), (skin, "█▓▒▓▓"), (None, "                       ")],
-            [(None, "     "), (dress[8], "█▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓██"), (None, "   "), (skin, "█▓▓▓▓▓"), (None, "                      ")],
-            [(None, "     "), (dress[9], "█▓▓▓▓▓▓▓▓██████▓▓██"), (None, "       "), (skin, "██████"), (None, "                   ")],
-            [(dress[10], "      █▓▓▓▓▓▓██▓▓▓▓▓██                                  ")],
-            [(dress[11], "      ░▓▓▓▒▒▓█▓▓▒▒▓█░                                   ")],
-            [(dress[11], "       █▓▓▓▓▓█▓▓▓▓▓█                                    ")],
-            [(dress[11], "        █▓▓▓▓█▓▓█▓                                      ")],
-            [(dress[11], "         ██▓▓▓▓██                                       ")],
-            [(dress[11], "            ███                                         ")],
-        ]
 
     def selected_bundle_ids(self, status: dict[str, Any]) -> set[str]:
         instance = status.get("instance", {})
