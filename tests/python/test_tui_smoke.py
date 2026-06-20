@@ -127,6 +127,7 @@ def test_footer_bindings_are_app_level_only() -> None:
 
     by_key = {b.key: b.action for b in EveTui.BINDINGS}
     assert by_key.get("p") == "open_plugins"
+    assert by_key.get("n") == "new_instance"
     for removed in ("g", "?", "u", "t", "x", "d", "l"):
         assert removed not in by_key, f"binding {removed!r} should be removed"
     assert by_key.get("s") == "open_settings"

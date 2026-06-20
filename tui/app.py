@@ -18,6 +18,7 @@ from typing import Any, ClassVar, Literal, cast
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Grid, Horizontal, Vertical
+from textual.css.query import NoMatches
 from textual.screen import ModalScreen
 from textual.widgets import (
     Button,
@@ -372,6 +373,7 @@ class EveTui(App[None]):
         # Instance-lifecycle actions (up/stop/down/provision/delete) live as
         # buttons in the instance pane, not as global hotkeys — keeping the
         # footer to safe, app-level actions.
+        Binding("n", "new_instance", "New"),
         Binding("h", "toggle_hidden", "Hidden"),
         Binding("r", "queue_refresh", "Refresh"),
         Binding("c", "queue_cancel_command", "Cancel", priority=True),
@@ -598,8 +600,22 @@ class EveTui(App[None]):
         # so there's nothing to gate on the installed provider set here.
         return True
 
+    def _empty_state_widgets_ready(self) -> bool:
+        """The hero/empty-state widgets live on the main screen; they are briefly
+        unqueryable while a modal screen is transitioning or during teardown. The
+        hero/blink timers are purely cosmetic, so a tick that can't find them
+        should skip silently instead of crashing the app."""
+        try:
+            self.query_one("#hero", Static)
+            self.query_one("#empty-state", Static)
+        except NoMatches:
+            return False
+        return True
+
     def trigger_blink(self) -> None:
         if self.current_instance is not None:
+            return
+        if not self._empty_state_widgets_ready():
             return
         self._eye_blinking = True
         self.render_empty_state()
@@ -607,10 +623,12 @@ class EveTui(App[None]):
 
     def _end_blink(self) -> None:
         self._eye_blinking = False
-        if self.current_instance is None:
+        if self.current_instance is None and self._empty_state_widgets_ready():
             self.render_empty_state()
 
     def animate_hero(self) -> None:
+        if not self._empty_state_widgets_ready():
+            return
         frames = [
             f"[primary]◇[/] {APP_NAME}  [dim]{APP_EXPANSION}[/]  [success]ready[/]  [dim]{APP_TAGLINE}[/dim]",
             f"[primary]◈[/] {APP_NAME}  [dim]{APP_EXPANSION}[/]  [success]ready[/]  [dim]{APP_TAGLINE}[/dim]",
@@ -1489,7 +1507,7 @@ class EveTui(App[None]):
     def action_new_instance(self) -> None:
         if not self.catalog_options.get("platforms"):
             self.notify(
-                "No platforms available — add a provider source (g) and pull first.",
+                "No platforms available — add a provider source (p) and pull first.",
                 severity="warning",
             )
             return
