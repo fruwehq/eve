@@ -1145,10 +1145,10 @@ class EveTui(App[None]):
             term = self.size.width if self.size else 80
             left = min(58, term // 2)
             container_width = max(term - left - 4, 0)
+        # Only show the mascot when there's room for the full portrait; on
+        # narrow terminals just show the text (the compact portrait wasn't cute).
         if container_width >= 60:
             hero_art_rows = self._large_hero_rows(hair, skin, brow, dress, mouth, sparkle, blinking)
-        elif container_width >= 32:
-            hero_art_rows = self._compact_hero_rows(hair, skin, brow, dress, mouth, sparkle, blinking)
         else:
             hero_art_rows = []
 
@@ -1223,8 +1223,8 @@ class EveTui(App[None]):
             [(hair, " █▓██▓"), *eye_9_l, (skin, "████████"), *eye_9_r, (hair, "▓██▓▓▓▓▓█▓▓▓▒▒░░▒▒▒▓▓█        ")],
             [(hair, " █▓██ "), *eye_10_l, (skin, "█████████"), *eye_10_r, (skin, "██"), (hair, "██▓▓▓▒▒▓█▓▓▓▒▒▒▒░▒▒▓▓▓        ")],
             [(hair, " █▓▓█"), (skin, "██"), ("#f4a9b6", "██"), (skin, "████████████"), ("#f4a9b6", "██"), (skin, "██"), (hair, "█▓▓▒▒▒▓▓▓█▓▓▓▓▓▓▓▓██           ")],
-            [(hair, "   █▓█ █"), (skin, "████"), (mouth, "╰‿‿‿╯"), (skin, "████"), (hair, "█▓▓▒▓█▓▓▓▒▒▒▓▓███▓▓▓██             ")],
-            [(hair, "        ██"), (skin, "█████████"), (hair, "▓██▓▒▒▓▓█▓▓▓▓▒░▒▓▓▓▓█▓▓▓▓            ")],
+            [(hair, "   █▓█ █"), (skin, "████"), (mouth, "█"), (skin, "███"), (mouth, "█"), (skin, "████"), (hair, "█▓▓▒▓█▓▓▓▒▒▒▓▓███▓▓▓██             ")],
+            [(hair, "        ██"), (skin, "██"), (mouth, "███"), (skin, "████"), (hair, "▓██▓▒▒▓▓█▓▓▓▓▒░▒▓▓▓▓█▓▓▓▓            ")],
             [(None, "            "), (dress[0], "▓▒░▒▓▓▓█▓▓▒▒▓"), (hair, "▓█▓█▓█▓▓▓▒▒▓▓▓█▓▓▓█"), (None, "            ")],
             [(None, "       "), (dress[1], "▓▓▓▓▓▓▓▒▓▓▓▓▓▓▓██▒"), (hair, "█▓█▓▓▒█▓▓▓▓▓▓▓█▓██▓█"), (None, "           ")],
             [(None, "     "), (dress[2], "▓▓▒▒▒▒▓▒▓▓▓▓▒▒▓▓█▓▓▓"), (hair, "█▓▓█▓▓▓▒█▓▓▒▓▓██"), (None, "               ")],
@@ -1241,43 +1241,6 @@ class EveTui(App[None]):
             [(dress[11], "        █▓▓▓▓█▓▓█▓                                      ")],
             [(dress[11], "         ██▓▓▓▓██                                       ")],
             [(dress[11], "            ███                                         ")],
-        ]
-
-    def _compact_hero_rows(
-        self,
-        hair: str,
-        skin: str,
-        brow: str,
-        dress: list[str],
-        mouth: str,
-        sparkle: str,
-        blinking: bool,
-    ) -> list[list[tuple[str | None, str]]]:
-        eye = "#1f1f1f"  # black pupils on the solid skin-tone face
-        if blinking:
-            eye_4_l: list[tuple[str, str]] = [(skin, "████")]
-            eye_4_r: list[tuple[str, str]] = [(skin, "████")]
-            eye_5_l: list[tuple[str, str]] = [(brow, "‿‿‿"), (skin, "█")]
-            eye_5_r: list[tuple[str, str]] = [(brow, "‿‿‿"), (skin, "█")]
-        else:
-            # Big anime eyes: black with a white sparkle highlight.
-            eye_4_l = [(eye, "██"), (sparkle, "█"), (eye, "█")]
-            eye_4_r = [(eye, "█"), (sparkle, "█"), (eye, "██")]
-            eye_5_l = [(eye, "████")]
-            eye_5_r = [(eye, "████")]
-        return [
-            [(hair, "            ████            ")],
-            [(hair, "         ▓▓▓▓▓▓▓▓▓▓         ")],
-            [(hair, "      ▓▓▓▓"), (brow, "▒▒▒▒▒▒▒▒"), (hair, "▓▓▓▓      ")],
-            [(hair, "     ▓▓"), (skin, "██████████████"), (hair, "▓▓     ")],
-            [(hair, "     ▓▓"), (skin, "██"), *eye_4_l, (skin, "██"), *eye_4_r, (skin, "██"), (hair, "▓▓     ")],
-            [(hair, "     ▓▓"), (skin, "██"), *eye_5_l, (skin, "██"), *eye_5_r, (skin, "██"), (hair, "▓▓     ")],
-            [(hair, "     ▓▓"), (skin, "██████████████"), (hair, "▓▓     ")],
-            [(hair, "      ▓▓"), (skin, "████"), (mouth, "╰‿‿╯"), (skin, "████"), (hair, "▓▓      ")],
-            [(hair, "        ▓▓"), (skin, "████████"), (hair, "▓▓        ")],
-            [(hair, "         ▓▓"), (skin, "██████"), (hair, "▓▓         ")],
-            [(hair, "    ▓▓"), (dress[2], "████████████████"), (hair, "▓▓    ")],
-            [(hair, "     ▓▓"), (dress[8], "██████████████"), (hair, "▓▓     ")],
         ]
 
     def selected_bundle_ids(self, status: dict[str, Any]) -> set[str]:
