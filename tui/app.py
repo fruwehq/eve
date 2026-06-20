@@ -18,6 +18,7 @@ from typing import Any, ClassVar, Literal, cast
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Grid, Horizontal, Vertical
+from textual.css.query import NoMatches
 from textual.screen import ModalScreen
 from textual.widgets import (
     Button,
@@ -598,8 +599,22 @@ class EveTui(App[None]):
         # so there's nothing to gate on the installed provider set here.
         return True
 
+    def _empty_state_widgets_ready(self) -> bool:
+        """The hero/empty-state widgets live on the main screen; they are briefly
+        unqueryable while a modal screen is transitioning or during teardown. The
+        hero/blink timers are purely cosmetic, so a tick that can't find them
+        should skip silently instead of crashing the app."""
+        try:
+            self.query_one("#hero", Static)
+            self.query_one("#empty-state", Static)
+        except NoMatches:
+            return False
+        return True
+
     def trigger_blink(self) -> None:
         if self.current_instance is not None:
+            return
+        if not self._empty_state_widgets_ready():
             return
         self._eye_blinking = True
         self.render_empty_state()
@@ -607,10 +622,12 @@ class EveTui(App[None]):
 
     def _end_blink(self) -> None:
         self._eye_blinking = False
-        if self.current_instance is None:
+        if self.current_instance is None and self._empty_state_widgets_ready():
             self.render_empty_state()
 
     def animate_hero(self) -> None:
+        if not self._empty_state_widgets_ready():
+            return
         frames = [
             f"[primary]◇[/] {APP_NAME}  [dim]{APP_EXPANSION}[/]  [success]ready[/]  [dim]{APP_TAGLINE}[/dim]",
             f"[primary]◈[/] {APP_NAME}  [dim]{APP_EXPANSION}[/]  [success]ready[/]  [dim]{APP_TAGLINE}[/dim]",
@@ -1082,6 +1099,7 @@ class EveTui(App[None]):
         hair = "#ff8fb1"
         skin = "#f5c8a9"
         brow = "#5a3d5a"
+        mouth = "#e07a8a"
         dress = [
             "#7fd3e3", "#82cde2", "#84c6e0", "#87c0df",
             "#8ab9dd", "#8db3dc", "#8faddb", "#92a6da",
@@ -1093,9 +1111,9 @@ class EveTui(App[None]):
         if container_width <= 0:
             container_width = self.size.width if self.size else 80
         if container_width >= 60:
-            hero_art_rows = self._large_hero_rows(hair, skin, brow, dress, blinking)
+            hero_art_rows = self._large_hero_rows(hair, skin, brow, dress, mouth, blinking)
         elif container_width >= 32:
-            hero_art_rows = self._compact_hero_rows(hair, skin, brow, dress, blinking)
+            hero_art_rows = self._compact_hero_rows(hair, skin, brow, dress, mouth, blinking)
         else:
             hero_art_rows = []
 
@@ -1125,23 +1143,24 @@ class EveTui(App[None]):
         skin: str,
         brow: str,
         dress: list[str],
+        mouth: str,
         blinking: bool,
     ) -> list[list[tuple[str | None, str]]]:
-        eye = "#1f1f1f"  # black eyes on the skin-tone face (inverted)
+        eye = "#1f1f1f"  # small black pupils on the skin-tone face
         if blinking:
-            eye_8_l: tuple[str, str] = (skin, "      ")
-            eye_8_r: tuple[str, str] = (skin, "     ")
-            eye_9_l: tuple[str, str] = (brow, "‿‿‿‿‿‿")
-            eye_9_r: tuple[str, str] = (brow, "‿‿‿‿‿‿")
-            eye_10_l: tuple[str, str] = (skin, "      ")
-            eye_10_r: tuple[str, str] = (skin, "   ")
+            eye_8_l: list[tuple[str, str]] = [(skin, "      ")]
+            eye_8_r: list[tuple[str, str]] = [(skin, "     ")]
+            eye_9_l: list[tuple[str, str]] = [(skin, "░░"), (brow, "‿‿"), (skin, "░░")]
+            eye_9_r: list[tuple[str, str]] = [(brow, "‿‿"), (skin, "░░░░")]
+            eye_10_l: list[tuple[str, str]] = [(skin, "      ")]
+            eye_10_r: list[tuple[str, str]] = [(skin, "   ")]
         else:
-            eye_8_l = (eye, " ▓ █░░")
-            eye_8_r = (eye, "░▓ █ ")
-            eye_9_l = (eye, "░▓░▓█ ")
-            eye_9_r = (eye, "░█▓ ▓░")
-            eye_10_l = (eye, " █▓█  ")
-            eye_10_r = (eye, "█▓█")
+            eye_8_l = [(skin, "░░"), (eye, "██"), (skin, "░░")]
+            eye_8_r = [(skin, "░"), (eye, "██"), (skin, "░░")]
+            eye_9_l = [(skin, "░░"), (eye, "██"), (skin, "░░")]
+            eye_9_r = [(eye, "██"), (skin, "░░░░")]
+            eye_10_l = [(skin, "░░░░░░")]
+            eye_10_r = [(skin, "░░░")]
         return [
             [(hair, "               ████                ")],
             [(hair, "           ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓ ▓▓▓▓▓▓▓▓▓▓▓▓            ")],
@@ -1151,11 +1170,11 @@ class EveTui(App[None]):
             [(hair, " ▓▓▓▒▒▒░░▒▒▒▓▓▓██▓▓▓▓██▓██▓▒▒░▒▒▓▓▓█▓▓▓▒▒░▒▓██████     ")],
             [(hair, " █▓▓▓▒▒▓▓▓▓▓▓▓▓██▓██▓▒▒▓▓▓██▓▓▓▒▒▓▓▓█▓▓▒▒░▒▒▒▓▓▓▓      ")],
             [(hair, "░  █▓▓▓▓▓"), (brow, "████"), (hair, "▓"), (skin, "▒░░░░  ░░░"), (hair, "▒▓▓▓▓▓▓▓▒▒▓█▓▓▓▒▒░ ▒▒▒▒▓▓▓      ")],
-            [(hair, " █▓██ "), eye_8_l, (skin, "       "), eye_8_r, (hair, "███▓██▓▓▓▓█▓▓▒▒░  ░▒▓▓▓█        ")],
-            [(hair, " █▓██▓"), eye_9_l, (skin, "        "), eye_9_r, (hair, "▓██▓▓▓▓▓█▓▓▓▒▒░░▒▒▒▓▓█        ")],
-            [(hair, " █▓██ "), eye_10_l, (skin, "         "), eye_10_r, (skin, "  "), (hair, "██▓▓▓▒▒▓█▓▓▓▒▒▒▒░▒▒▓▓▓        ")],
+            [(hair, " █▓██ "), *eye_8_l, (skin, "       "), *eye_8_r, (hair, "███▓██▓▓▓▓█▓▓▒▒░  ░▒▓▓▓█        ")],
+            [(hair, " █▓██▓"), *eye_9_l, (skin, "        "), *eye_9_r, (hair, "▓██▓▓▓▓▓█▓▓▓▒▒░░▒▒▒▓▓█        ")],
+            [(hair, " █▓██ "), *eye_10_l, (skin, "         "), *eye_10_r, (skin, "  "), (hair, "██▓▓▓▒▒▓█▓▓▓▒▒▒▒░▒▒▓▓▓        ")],
             [(hair, " █▓▓█"), (skin, "░░░               ░░"), (hair, "█▓▓▒▒▒▓▓▓█▓▓▓▓▓▓▓▓██           ")],
-            [(hair, "   █▓█ █"), (skin, "▒░░        ░░"), (hair, "█▓▓▒▓█▓▓▓▒▒▒▓▓███▓▓▓██             ")],
+            [(hair, "   █▓█ █"), (skin, "▒░░   "), (mouth, "‿‿"), (skin, "   ░░"), (hair, "█▓▓▒▓█▓▓▓▒▒▒▓▓███▓▓▓██             ")],
             [(hair, "    ██  "), (skin, "░░▓▓▒▒░░░▒▒"), (hair, "▓██▓▒▒▓▓█▓▓▓▓▒░▒▓▓▓▓█▓▓▓▓            ")],
             [(None, "            "), (dress[0], "▓▒░▒▓▓▓█▓▓▒▒▓"), (hair, "▓█▓█▓█▓▓▓▒▒▓▓▓█▓▓▓█"), (None, "            ")],
             [(None, "       "), (dress[1], "▓▓▓▓▓▓▓▒▓▓▓▓▓▓▓██▒"), (hair, "█▓█▓▓▒█▓▓▓▓▓▓▓█▓██▓█"), (None, "           ")],
@@ -1181,28 +1200,29 @@ class EveTui(App[None]):
         skin: str,
         brow: str,
         dress: list[str],
+        mouth: str,
         blinking: bool,
     ) -> list[list[tuple[str | None, str]]]:
-        eye = "#1f1f1f"  # black eyes on the skin-tone face (inverted)
+        eye = "#1f1f1f"  # small black pupils on the skin-tone face
         if blinking:
-            eye_4_l: tuple[str, str] = (skin, "    ")
-            eye_4_r: tuple[str, str] = (skin, "    ")
-            eye_5_l: tuple[str, str] = (brow, "‿‿‿‿")
-            eye_5_r: tuple[str, str] = (brow, "‿‿‿‿")
+            eye_4_l: list[tuple[str, str]] = [(skin, "    ")]
+            eye_4_r: list[tuple[str, str]] = [(skin, "    ")]
+            eye_5_l: list[tuple[str, str]] = [(skin, "░"), (brow, "‿‿"), (skin, "░")]
+            eye_5_r: list[tuple[str, str]] = [(skin, "░"), (brow, "‿‿"), (skin, "░")]
         else:
-            eye_4_l = (eye, "██▓▓")
-            eye_4_r = (eye, "▓▓██")
-            eye_5_l = (eye, "██▒▒")
-            eye_5_r = (eye, "▒▒██")
+            eye_4_l = [(skin, "░"), (eye, "●"), (skin, "░░")]
+            eye_4_r = [(skin, "░░"), (eye, "●"), (skin, "░")]
+            eye_5_l = [(skin, "░░░░")]
+            eye_5_r = [(skin, "░░░░")]
         return [
             [(hair, "            ████            ")],
             [(hair, "         ▓▓▓▓▓▓▓▓▓▓         ")],
             [(hair, "      ▓▓▓▓"), (brow, "▒▒▒▒▒▒▒▒"), (hair, "▓▓▓▓      ")],
             [(hair, "     ▓▓"), (skin, "░░░░░░░░░░░░░░"), (hair, "▓▓     ")],
-            [(hair, "     ▓▓"), (skin, "░░"), eye_4_l, (skin, "░░"), eye_4_r, (skin, "░░"), (hair, "▓▓     ")],
-            [(hair, "     ▓▓"), (skin, "░░"), eye_5_l, (skin, "░░"), eye_5_r, (skin, "░░"), (hair, "▓▓     ")],
+            [(hair, "     ▓▓"), (skin, "░░"), *eye_4_l, (skin, "░░"), *eye_4_r, (skin, "░░"), (hair, "▓▓     ")],
+            [(hair, "     ▓▓"), (skin, "░░"), *eye_5_l, (skin, "░░"), *eye_5_r, (skin, "░░"), (hair, "▓▓     ")],
             [(hair, "     ▓▓"), (skin, "▒▒░░░░░░░░░░▒▒"), (hair, "▓▓     ")],
-            [(hair, "      ▓▓"), (skin, "░░░░░░░░░░░░"), (hair, "▓▓      ")],
+            [(hair, "      ▓▓"), (skin, "░░░░░"), (mouth, "‿"), (skin, "░░░░░░"), (hair, "▓▓      ")],
             [(hair, "        ▓▓"), (skin, "░░░░░░░░"), (hair, "▓▓        ")],
             [(hair, "         ▓▓"), (skin, "██████"), (hair, "▓▓         ")],
             [(hair, "    ▓▓"), (dress[2], "████████████████"), (hair, "▓▓    ")],
