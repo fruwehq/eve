@@ -1134,13 +1134,17 @@ class EveTui(App[None]):
         blinking = self._eye_blinking
 
         container_width = self.query_one("#empty-state", Static).size.width
-        # On the very first paint the layout hasn't settled and the width is 0;
-        # rendering against the full app width then would paint an oversized
-        # mascot into a narrow pane. Skip the art until the real width is known
-        # (on_mount schedules a re-render once panes are sized).
         if container_width <= 0:
-            hero_art_rows = []
-        elif container_width >= 60:
+            # On the very first paint the layout hasn't settled and the
+            # empty-state width reads as 0. Estimate it from the terminal
+            # width using the same split as the CSS (#left caps at 50% / width
+            # 58, #right fills the rest, minus its border+padding) so the
+            # mascot paints immediately at the correct tier instead of waiting
+            # for the first animation tick. Real width is used on later renders.
+            term = self.size.width if self.size else 80
+            left = min(58, term // 2)
+            container_width = max(term - left - 4, 0)
+        if container_width >= 60:
             hero_art_rows = self._large_hero_rows(hair, skin, brow, dress, mouth, blinking)
         elif container_width >= 32:
             hero_art_rows = self._compact_hero_rows(hair, skin, brow, dress, mouth, blinking)
@@ -1187,21 +1191,23 @@ class EveTui(App[None]):
         mouth: str,
         blinking: bool,
     ) -> list[list[tuple[str | None, str]]]:
-        eye = "#1f1f1f"  # small black pupils on the skin-tone face
+        eye = "#1f1f1f"  # black pupils...
         if blinking:
-            eye_8_l: list[tuple[str, str]] = [(skin, "      ")]
-            eye_8_r: list[tuple[str, str]] = [(skin, "     ")]
-            eye_9_l: list[tuple[str, str]] = [(skin, "░░"), (brow, "‿‿"), (skin, "░░")]
-            eye_9_r: list[tuple[str, str]] = [(brow, "‿‿"), (skin, "░░░░")]
-            eye_10_l: list[tuple[str, str]] = [(skin, "      ")]
-            eye_10_r: list[tuple[str, str]] = [(skin, "   ")]
+            eye_8_l: list[tuple[str, str]] = [(skin, " █    ")]
+            eye_8_r: list[tuple[str, str]] = [(skin, "█    ")]
+            eye_9_l: list[tuple[str, str]] = [(skin, " █"), (brow, "‿‿"), (skin, "█ ")]
+            eye_9_r: list[tuple[str, str]] = [(brow, "‿‿"), (skin, "████")]
+            eye_10_l: list[tuple[str, str]] = [(skin, " █    ")]
+            eye_10_r: list[tuple[str, str]] = [(skin, "█  ")]
         else:
-            eye_8_l = [(skin, "░░"), (eye, "██"), (skin, "░░")]
-            eye_8_r = [(skin, "░"), (eye, "██"), (skin, "░░")]
-            eye_9_l = [(skin, "░░"), (eye, "██"), (skin, "░░")]
-            eye_9_r = [(eye, "██"), (skin, "░░░░")]
-            eye_10_l = [(skin, "░░░░░░")]
-            eye_10_r = [(skin, "░░░")]
+            # Solid skin flanks the black pupils so they read as black eyes on
+            # the skin face instead of vanishing into the panel's black bg.
+            eye_8_l = [(skin, "░█"), (eye, "██"), (skin, "█░")]
+            eye_8_r = [(skin, "█"), (eye, "██"), (skin, "█░")]
+            eye_9_l = [(skin, "░█"), (eye, "██"), (skin, "█░")]
+            eye_9_r = [(eye, "██"), (skin, "█░░░")]
+            eye_10_l = [(skin, "░▒▒▒▒░")]
+            eye_10_r = [(skin, "▒░░")]
         return [
             [(hair, "               ████                ")],
             [(hair, "           ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓ ▓▓▓▓▓▓▓▓▓▓▓▓            ")],
@@ -1244,17 +1250,18 @@ class EveTui(App[None]):
         mouth: str,
         blinking: bool,
     ) -> list[list[tuple[str | None, str]]]:
-        eye = "#1f1f1f"  # small black pupils on the skin-tone face
+        eye = "#1f1f1f"  # black pupils...
         if blinking:
-            eye_4_l: list[tuple[str, str]] = [(skin, "    ")]
-            eye_4_r: list[tuple[str, str]] = [(skin, "    ")]
-            eye_5_l: list[tuple[str, str]] = [(skin, "░"), (brow, "‿‿"), (skin, "░")]
-            eye_5_r: list[tuple[str, str]] = [(skin, "░"), (brow, "‿‿"), (skin, "░")]
+            eye_4_l: list[tuple[str, str]] = [(skin, " █  ")]
+            eye_4_r: list[tuple[str, str]] = [(skin, "  █ ")]
+            eye_5_l: list[tuple[str, str]] = [(skin, "█"), (brow, "‿‿"), (skin, "░")]
+            eye_5_r: list[tuple[str, str]] = [(skin, "░"), (brow, "‿‿"), (skin, "█")]
         else:
-            eye_4_l = [(skin, "░"), (eye, "●"), (skin, "░░")]
-            eye_4_r = [(skin, "░░"), (eye, "●"), (skin, "░")]
-            eye_5_l = [(skin, "░░░░")]
-            eye_5_r = [(skin, "░░░░")]
+            # Solid skin flanks the black pupils so they read on the black bg.
+            eye_4_l = [(skin, "█"), (eye, "█"), (skin, "░░")]
+            eye_4_r = [(skin, "░░"), (eye, "█"), (skin, "█")]
+            eye_5_l = [(skin, "█░░░")]
+            eye_5_r = [(skin, "░░█░")]
         return [
             [(hair, "            ████            ")],
             [(hair, "         ▓▓▓▓▓▓▓▓▓▓         ")],
