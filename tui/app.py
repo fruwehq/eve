@@ -5,10 +5,12 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import shutil
 import signal
 import subprocess
 import sys
+import textwrap
 import time
 from collections.abc import Coroutine
 from contextlib import suppress
@@ -19,6 +21,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Grid, Horizontal, Vertical
 from textual.css.query import NoMatches
+from textual.events import Resize
 from textual.screen import ModalScreen
 from textual.widgets import (
     Button,
@@ -94,6 +97,14 @@ APP_EXPANSION = "Ephemeral VM Environment"
 APP_TAGLINE = "create -> provision -> connect"
 
 
+_MARKUP_RE = re.compile(r"\[/?[^]]+\]")
+
+
+def _strip_markup(text: str) -> str:
+    """Remove Textual markup tags ([b], [/b], [dim], [color], ...) for measuring."""
+    return _MARKUP_RE.sub("", text)
+
+
 class EveTui(App[None]):
     """Instance-first manager built on the existing v3 command surface."""
 
@@ -151,7 +162,8 @@ class EveTui(App[None]):
 
     #left {
         width: 58;
-        min-width: 52;
+        max-width: 50%;
+        min-width: 24;
         border-right: solid $primary;
         padding: 1;
     }
@@ -189,6 +201,7 @@ class EveTui(App[None]):
 
     #right {
         width: 1fr;
+        min-width: 16;
         padding: 1;
     }
 
@@ -328,7 +341,8 @@ class EveTui(App[None]):
     }
 
     #output {
-        height: 16;
+        height: 1fr;
+        min-height: 6;
         border-top: solid $primary;
         padding: 1;
         background: $boost;
@@ -540,7 +554,19 @@ class EveTui(App[None]):
         self.start_task(self.load_initial_data())
         self.start_task(self.load_provider_health())
         self.park_terminal_cursor()
+        # The first animate_hero() runs before the layout settles; the mascot
+        # re-renders at the correct tier once panes are sized (on_resize fires
+        # through the initial layout pass and again whenever the terminal is
+        # resized), and on each 1.2s animation tick thereafter.
         self.call_after_refresh(self._check_first_run)
+
+    def on_resize(self, event: Resize) -> None:
+        # Keep the empty-state mascot on the right tier as the terminal resizes
+        # (this also fires through the initial layout pass, so the mascot paints
+        # at the correct size once the panes are laid out instead of on the
+        # first 1.2s tick). Skipped while a modal is open or no instance space.
+        if self.current_instance is None and self._empty_state_widgets_ready():
+            self.render_empty_state()
 
     async def load_initial_data(self) -> None:
         await self.load_catalog_options()
@@ -1108,9 +1134,13 @@ class EveTui(App[None]):
         blinking = self._eye_blinking
 
         container_width = self.query_one("#empty-state", Static).size.width
+        # On the very first paint the layout hasn't settled and the width is 0;
+        # rendering against the full app width then would paint an oversized
+        # mascot into a narrow pane. Skip the art until the real width is known
+        # (on_mount schedules a re-render once panes are sized).
         if container_width <= 0:
-            container_width = self.size.width if self.size else 80
-        if container_width >= 60:
+            hero_art_rows = []
+        elif container_width >= 60:
             hero_art_rows = self._large_hero_rows(hair, skin, brow, dress, mouth, blinking)
         elif container_width >= 32:
             hero_art_rows = self._compact_hero_rows(hair, skin, brow, dress, mouth, blinking)
@@ -1128,13 +1158,24 @@ class EveTui(App[None]):
                     for row in hero_art_rows
                 )
             )
-        lines += [
+        # The art is pre-formatted; wrap only the caption lines to the pane
+        # width so narrow terminals wrap instead of truncating.
+        text_width = max(container_width - 2, 16)
+        caption_lines = [
             f"[b]EVE[/b] [dim]{APP_EXPANSION}[/]",
             "",
             "[b]Please, select an instance[/b]",
             "Highlight an instance to preview and manage it.",
             "Press Enter on << New Instance >> to create a VM.",
         ]
+        for caption in caption_lines:
+            visible = _strip_markup(caption)
+            if len(visible) <= text_width:
+                lines.append(caption)
+            else:
+                # Markup-bearing captions are short enough to fit any tier that
+                # shows the mascot; only plain captions ever need wrapping.
+                lines.extend(textwrap.wrap(visible, text_width) or [""])
         self.query_one("#empty-state", Static).update("\n".join(lines))
 
     def _large_hero_rows(
