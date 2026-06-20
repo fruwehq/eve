@@ -36,6 +36,65 @@ def test_app_mounts_and_renders() -> None:
     asyncio.run(_run())
 
 
+def test_app_mounts_at_small_sizes_without_overflow() -> None:
+    # The two-pane layout must stay usable on small terminals (target ~80x24,
+    # stretch 50x20): every pane has to fit within the screen and the empty
+    # state must render without raising.
+    from textual.widgets import Static
+
+    from tui.app import EveTui
+
+    async def _run() -> None:
+        for size in ((80, 24), (50, 20)):
+            app = EveTui()
+            async with app.run_test(size=size) as pilot:
+                await pilot.pause()
+                await pilot.pause()
+                screen_w = app.size.width
+                screen_h = app.size.height
+                for selector in ("#body", "#left", "#right", "#output"):
+                    widget = app.query_one(selector)
+                    assert widget.outer_size.width <= screen_w, (size, selector)
+                    assert widget.outer_size.height <= screen_h, (size, selector)
+                # the empty state renders through its width tiers without crashing
+                empty = app.query_one("#empty-state", Static)
+                assert empty.outer_size.width <= screen_w
+                app.render_empty_state()
+
+    asyncio.run(_run())
+
+
+def test_new_instance_wizard_mounts_at_small_sizes_without_overflow() -> None:
+    # The New Instance wizard is the densest modal; on small terminals its
+    # dialog must not exceed the screen and it must mount without raising.
+    from tui.app import EveTui
+    from tui.commands import catalog_options
+    from tui.widgets import NewInstanceScreen
+
+    options = catalog_options()
+
+    async def _run() -> None:
+        for size in ((80, 24), (50, 20)):
+            app = EveTui()
+            screen = NewInstanceScreen(options)
+            async with app.run_test(size=size) as pilot:
+                await app.push_screen(screen)
+                await pilot.pause()
+                await pilot.pause()
+                screen_w = app.size.width
+                screen_h = app.size.height
+                dialog = screen.query_one("#new-dialog")
+                assert dialog.outer_size.width <= screen_w, (size, "width")
+                assert dialog.outer_size.height <= screen_h, (size, "height")
+                # walking every wizard step must not overflow or crash
+                for step in range(5):
+                    screen.set_step(step)
+                    await pilot.pause()
+                    assert dialog.outer_size.height <= screen_h
+
+    asyncio.run(_run())
+
+
 def test_plugin_screen_opens_and_lists_recommended() -> None:
     from textual.widgets import DataTable
 
