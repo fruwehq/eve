@@ -189,8 +189,10 @@ class ConfirmScreen(ModalScreen[bool]):
     }
 
     #confirm-dialog {
-        width: 72;
-        height: 12;
+        width: 90%;
+        max-width: 72;
+        height: auto;
+        max-height: 12;
         border: round $error;
         background: $surface;
         padding: 1 2;
@@ -202,7 +204,7 @@ class ConfirmScreen(ModalScreen[bool]):
 
     #confirm-actions {
         height: 3;
-        width: 28;
+        width: auto;
         background: transparent;
     }
 
@@ -243,8 +245,10 @@ class DeleteConfirmScreen(ModalScreen[dict[str, Any] | None]):
     }
 
     #delete-dialog {
-        width: 72;
-        height: 16;
+        width: 90%;
+        max-width: 72;
+        height: auto;
+        max-height: 16;
         border: round $error;
         background: $surface;
         padding: 1 2;
@@ -260,7 +264,7 @@ class DeleteConfirmScreen(ModalScreen[dict[str, Any] | None]):
 
     #delete-actions {
         height: 3;
-        width: 28;
+        width: auto;
         background: transparent;
     }
 
@@ -313,8 +317,10 @@ class ChoiceScreen(ModalScreen[str | None]):
     }
 
     #choice-dialog {
-        width: 72;
-        height: 13;
+        width: 90%;
+        max-width: 72;
+        height: auto;
+        max-height: 13;
         border: round $primary;
         background: $surface;
         padding: 1 2;
@@ -374,21 +380,24 @@ class UploadScreen(ModalScreen[list[str] | None]):
     }
 
     #upload-dialog {
-        width: 72;
-        height: 20;
+        width: 90%;
+        max-width: 72;
+        height: 90%;
+        max-height: 20;
         border: round $primary;
         background: $surface;
         padding: 1 2;
     }
 
     #upload-list {
-        height: 10;
+        height: 1fr;
+        max-height: 10;
         margin: 1 0;
     }
 
     #upload-actions {
         height: 3;
-        width: 40;
+        width: auto;
         background: transparent;
     }
 
@@ -443,8 +452,8 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
     }
 
     #new-dialog {
-        width: 118;
-        max-width: 96%;
+        width: 90%;
+        max-width: 118;
         height: 90%;
         max-height: 48;
         border: round $primary;
@@ -476,18 +485,20 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
     }
 
     #bundle-row {
-        height: 17;
+        height: 1fr;
+        min-height: 6;
         margin-bottom: 1;
     }
 
     /* Packages fill the remaining space down to the bottom of the dialog. */
     #package-row {
         height: 1fr;
+        min-height: 6;
         margin-bottom: 1;
     }
 
     #bundle-select {
-        height: 15;
+        height: 1fr;
     }
 
     #package-select {
@@ -514,7 +525,8 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
     }
 
     #platform-cards {
-        height: 16;
+        height: 1fr;
+        min-height: 6;
         margin-bottom: 1;
     }
 
@@ -529,13 +541,13 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
 
     #wizard-actions {
         height: 3;
-        width: 52;
+        width: auto;
         background: transparent;
     }
 
     #wizard-actions Button {
         width: 12;
-        min-width: 12;
+        min-width: 9;
     }
 
     .wizard-hidden {
@@ -1417,9 +1429,10 @@ class EditFieldScreen(ModalScreen[str | None]):
     }
 
     #edit-dialog {
-        width: 64;
+        width: 90%;
+        max-width: 64;
         height: auto;
-        max-height: 28;
+        max-height: 90%;
         border: round $primary;
         background: $surface;
         padding: 1 2;
@@ -1804,9 +1817,10 @@ class FirstRunScreen(ModalScreen[None]):
     }
 
     #fr-dialog {
-        width: 96;
+        width: 90%;
         max-width: 100;
-        height: 30;
+        height: 90%;
+        max-height: 30;
         border: round $warning;
         background: $surface;
         padding: 1 2;
@@ -1822,13 +1836,14 @@ class FirstRunScreen(ModalScreen[None]):
     }
 
     #fr-missing {
-        height: 14;
+        height: 1fr;
+        max-height: 14;
         margin-bottom: 1;
     }
 
     #fr-actions {
         height: 3;
-        width: 60;
+        width: auto;
         background: transparent;
     }
 
@@ -1965,13 +1980,13 @@ class ProviderConfigScreen(ModalScreen[None]):
 
     #pc-actions {
         height: 3;
-        width: 48;
+        width: auto;
         background: transparent;
     }
 
     #pc-actions Button {
-        width: 16;
-        min-width: 16;
+        width: 1fr;
+        min-width: 12;
     }
     """
 
@@ -2169,7 +2184,8 @@ class TextPromptScreen(ModalScreen[str | None]):
     }
 
     #prompt-dialog {
-        width: 72;
+        width: 90%;
+        max-width: 72;
         height: auto;
         border: round $primary;
         background: $surface;

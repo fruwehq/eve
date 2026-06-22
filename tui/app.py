@@ -5,10 +5,12 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import shutil
 import signal
 import subprocess
 import sys
+import textwrap
 import time
 from collections.abc import Coroutine
 from contextlib import suppress
@@ -19,6 +21,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Grid, Horizontal, Vertical
 from textual.css.query import NoMatches
+from textual.events import Resize
 from textual.screen import ModalScreen
 from textual.widgets import (
     Button,
@@ -94,6 +97,101 @@ APP_EXPANSION = "Ephemeral VM Environment"
 APP_TAGLINE = "create -> provision -> connect"
 
 
+_MARKUP_RE = re.compile(r"\[/?[^]]+\]")
+
+
+def _strip_markup(text: str) -> str:
+    """Remove Textual markup tags ([b], [/b], [dim], [color], ...) for measuring."""
+    return _MARKUP_RE.sub("", text)
+
+
+# Eve's empty-state portrait: a colored pixel figure (pink hair, skin face,
+# blue->purple dress, dark shoes), one terminal cell per pixel as [color]█[/]
+# runs on the dark background ('.' background cells are blank spaces). Two
+# sizes: FULL (shown when the pane has the room) and SMALL (downscaled).
+# Generated offline from a reference portrait.
+EVE_ART_FULL = [
+    "                                   [#6e3450]███████████[/]                     [#6e3450]█████[/]",
+    "                               [#6e3450]██[/][#b05a82]██████████████[/][#6e3450]██[/][#b05a82]██[/][#6e3450]██[/]          [#6e3450]█[/][#b05a82]█████████[/][#6e3450]██[/]",
+    "                           [#b05a82]████████████████████████████[/]     [#b05a82]█████████████████[/]",
+    "              [#6e3450]██[/]        [#6e3450]██[/][#b05a82]██████████[/][#e57ba0]███[/][#b05a82]█████[/][#e57ba0]██[/][#b05a82]██████████[/][#6e3450]██[/][#b05a82]██████████[/][#e57ba0]██[/][#b05a82]███████[/][#6e3450]██[/]",
+    "                [#6e3450]████[/]  [#6e3450]██[/][#b05a82]█████████[/][#e57ba0]██[/][#b05a82]█[/][#e57ba0]███[/][#b05a82]████[/][#e57ba0]██████[/][#b05a82]█████████[/][#6e3450]██[/][#b05a82]█████[/][#e57ba0]████████[/][#b05a82]██████[/][#6e3450]██[/]",
+    "              [#b05a82]██████████[/][#e57ba0]█████████[/][#ff9cba]█████[/][#e57ba0]█[/][#ff9cba]██[/][#ffd4e4]██[/][#ff9cba]████████[/][#e57ba0]██[/][#ff9cba]██[/][#e57ba0]███[/][#b05a82]█████[/][#6e3450]█[/][#b05a82]████[/][#e57ba0]█[/][#ff9cba]█[/][#e57ba0]███████[/][#b05a82]██████[/]          [#ff9cba]█[/][#b05a82]████[/]",
+    "            [#6e3450]██[/][#b05a82]██████████[/][#e57ba0]███[/][#ff9cba]██[/][#ffd4e4]████[/][#ff9cba]███[/][#e57ba0]█████████████████[/][#ffd4e4]██[/][#ff9cba]█[/][#e57ba0]████[/][#b05a82]████[/][#6e3450]█[/][#b05a82]███[/][#e57ba0]██[/][#ff9cba]██[/][#e57ba0]███[/][#b05a82]███████████[/]   [#ff9cba]██[/][#6e3450]███[/][#b05a82]██[/][#6e3450]█[/]",
+    "          [#6e3450]██[/][#b05a82]██████████[/][#e57ba0]████[/][#ff9cba]█[/][#ffd4e4]████[/][#ff9cba]███[/][#e57ba0]████[/][#b05a82]█[/][#e57ba0]███████[/][#b05a82]███[/][#e57ba0]████[/][#ff9cba]██[/][#ffd4e4]█[/][#ff9cba]██[/][#e57ba0]██[/][#b05a82]████[/][#6e3450]█[/][#b05a82]████[/][#e57ba0]█[/][#ff9cba]███[/][#e57ba0]██[/][#b05a82]████[/][#6e3450]██[/][#e57ba0]██[/][#b05a82]███[/][#6e3450]█████[/][#b05a82]████[/]",
+    "        [#6e3450]██[/][#b05a82]████[/][#e57ba0]████[/][#b05a82]██[/][#e57ba0]████[/][#ff9cba]███[/][#ffd4e4]██[/][#ff9cba]██[/][#e57ba0]███[/][#b05a82]█[/][#e57ba0]█[/][#b05a82]█[/][#6e3450]█[/][#b05a82]████████[/][#6e3450]███[/][#b05a82]████[/][#e57ba0]████████[/][#b05a82]███[/][#6e3450]█[/][#b05a82]███████[/][#e57ba0]█[/][#ff9cba]██[/][#e57ba0]██[/][#b05a82]████████████[/][#6e3450]██[/][#e57ba0]██[/]",
+    "      [#b05a82]██████[/][#e57ba0]██████████[/][#ff9cba]████[/][#e57ba0]█[/][#ff9cba]██[/][#e57ba0]█████[/][#b05a82]███[/][#6e3450]█[/][#b05a82]██████[/][#6e3450]██[/][#b05a82]█[/][#6e3450]██[/][#b05a82]████[/][#e57ba0]███[/][#ff9cba]██[/][#e57ba0]███[/][#b05a82]████[/][#6e3450]██[/][#b05a82]███[/][#e57ba0]███[/][#ff9cba]██[/][#e57ba0]████[/][#b05a82]██[/][#6e3450]████████[/][#e57ba0]██[/]",
+    "      [#6e3450]██[/][#b05a82]██████[/][#e57ba0]██████[/][#ff9cba]██[/][#e57ba0]███████████[/][#b05a82]███[/][#6e3450]█[/][#b05a82]███████[/][#6e3450]██[/][#b05a82]█[/][#6e3450]██[/][#b05a82]████[/][#e57ba0]███[/][#ff9cba]██[/][#e57ba0]█████[/][#b05a82]██[/][#6e3450]██[/][#b05a82]██[/][#e57ba0]████[/][#ff9cba]██[/][#e57ba0]████[/][#b05a82]████[/][#6e3450]█[/][#ff9cba]█████[/]",
+    "  [#ff9cba]██[/][#6e3450]██[/]  [#6e3450]██[/][#b05a82]████[/][#e57ba0]██[/][#b05a82]██[/][#e57ba0]██[/][#b05a82]███████████[/][#6e3450]███[/][#b05a82]██[/][#e57ba0]█[/][#6e3450]█[/][#e57ba0]███[/][#ff9cba]███[/][#e57ba0]██[/][#b05a82]███[/][#6e3450]██[/][#b05a82]█████████[/][#e57ba0]███[/][#b05a82]██[/][#6e3450]██[/][#b05a82]███[/][#e57ba0]███[/][#ff9cba]████[/][#e57ba0]████[/][#b05a82]█████[/]",
+    "[#b05a82]██[/][#e57ba0]██[/][#ff9cba]██[/]  [#6e3450]██[/][#b05a82]██████████[/][#6e3450]██[/][#3a2a3a]████[/][#d09a7a]█████[/][#ecb896]███[/][#f5cba8]███████[/][#fbdcc2]██[/][#f5cba8]███[/][#ff9cba]███[/][#e57ba0]██[/][#b05a82]█████████[/][#e57ba0]███[/][#b05a82]█[/][#6e3450]█[/][#b05a82]████[/][#e57ba0]████[/][#ff9cba]████[/][#e57ba0]██████[/][#b05a82]████[/]",
+    "          [#6e3450]██[/][#b05a82]██████[/][#6e3450]████[/][#3a2a3a]████[/][#ecb896]█████[/][#f5cba8]█████[/][#fbdcc2]███████[/][#3a2a3a]███[/][#6e3450]███[/][#ff9cba]██[/][#e57ba0]██[/][#b05a82]███[/][#6e3450]██[/][#b05a82]███[/][#e57ba0]██[/][#b05a82]█[/][#6e3450]█[/][#b05a82]████[/][#e57ba0]████[/][#ff9cba]██[/][#ffd4e4]██[/][#ff9cba]██[/][#e57ba0]████[/][#b05a82]███[/][#6e3450]█[/]",
+    "          [#6e3450]██[/][#b05a82]██[/][#6e3450]██████[/][#ffd4e4]██[/][#d09a7a]██[/][#fbdcc2]██[/][#3a2a3a]█[/][#f5cba8]██████[/][#fbdcc2]██████[/][#f5cba8]██[/][#d09a7a]██[/][#fbdcc2]█[/][#3a2a3a]██[/][#ffd4e4]█[/][#6e3450]█████████[/][#b05a82]████████[/][#6e3450]█[/][#b05a82]███[/][#e57ba0]████[/][#ff9cba]█[/][#ffd4e4]██████[/][#ff9cba]██[/][#e57ba0]██[/][#b05a82]███[/][#6e3450]█[/]",
+    "          [#6e3450]██[/][#b05a82]██[/][#6e3450]████[/][#e57ba0]██[/][#6e3450]██[/][#fbdcc2]██[/][#3a2a3a]███[/][#fbdcc2]████████████[/][#f5cba8]██[/][#3a2a3a]███[/][#fbdcc2]██[/][#6e3450]█[/][#e57ba0]██[/][#6e3450]██[/][#ff9cba]██[/][#6e3450]██[/][#b05a82]█████[/][#e57ba0]█[/][#b05a82]███[/][#6e3450]█[/][#b05a82]███[/][#e57ba0]████[/][#ff9cba]███[/][#ffd4e4]██[/][#ff9cba]████[/][#e57ba0]██[/][#b05a82]███[/][#6e3450]█[/]",
+    "        [#6e3450]██[/][#b05a82]██[/][#6e3450]████[/][#b05a82]██[/][#ff9cba]██[/][#e57ba0]██[/][#f5cba8]████[/][#ecb896]█[/][#fbdcc2]██████████████[/][#ecb896]██[/][#f5cba8]███[/][#e57ba0]█[/][#ff9cba]██[/][#b05a82]██[/][#6e3450]██[/][#b05a82]█████[/][#e57ba0]██[/][#b05a82]███[/][#6e3450]█[/][#b05a82]████[/][#e57ba0]████[/][#ff9cba]███████[/][#e57ba0]██[/][#b05a82]█████[/]",
+    "        [#6e3450]██[/][#b05a82]██[/][#6e3450]██████[/][#ffd4e4]██[/][#6e3450]██[/][#d09a7a]████[/][#3a2a3a]█[/][#fbdcc2]██████████████[/][#3a2a3a]██[/][#d09a7a]███[/][#6e3450]█[/][#ffd4e4]██[/][#6e3450]████[/][#b05a82]█████[/][#e57ba0]███[/][#b05a82]███[/][#6e3450]█[/][#b05a82]████[/][#e57ba0]████████[/][#ff9cba]██[/][#e57ba0]██[/][#b05a82]█████[/]",
+    "        [#6e3450]██[/][#b05a82]██[/][#6e3450]████[/][#ff9cba]██[/][#ffd4e4]████[/][#d09a7a]██[/][#ecb896]██[/][#fbdcc2]█████████████████[/][#ecb896]█[/][#3a2a3a]██[/][#ffd4e4]███[/][#6e3450]██[/][#b05a82]█████[/][#e57ba0]███████[/][#b05a82]██[/][#6e3450]██[/][#b05a82]███[/][#e57ba0]███████████[/][#b05a82]███[/]",
+    "        [#6e3450]██[/][#b05a82]████[/][#6e3450]██[/][#ff9cba]██████[/][#fbdcc2]██████████[/][#c4747c]██[/][#fbdcc2]████████████[/][#ff9cba]███[/][#6e3450]██[/][#b05a82]████[/][#e57ba0]██████[/][#b05a82]████[/][#6e3450]██[/][#b05a82]███[/][#e57ba0]███[/][#b05a82]██[/][#e57ba0]████[/][#b05a82]██[/][#6e3450]███[/]",
+    "          [#6e3450]██████[/]  [#6e3450]████[/][#d09a7a]██[/][#ecb896]██[/][#f5cba8]███[/][#fbdcc2]████████████[/][#f5cba8]███[/][#ecb896]██[/][#6e3450]█[/][#b05a82]████[/][#e57ba0]██[/][#6e3450]██[/][#b05a82]██████[/][#e57ba0]███[/][#ff9cba]█[/][#e57ba0]██[/][#b05a82]███[/][#6e3450]██[/][#b05a82]███████[/][#6e3450]██[/]",
+    "            [#6e3450]████[/][#b05a82]██[/]  [#ff9cba]████[/][#b05a82]██[/][#d09a7a]█[/][#ecb896]██████[/][#f5cba8]█████[/][#ecb896]███[/][#e57ba0]██[/][#b05a82]█[/][#6e3450]███[/][#b05a82]██[/][#e57ba0]████[/][#b05a82]██[/][#6e3450]█[/][#b05a82]█████[/][#e57ba0]██[/][#b05a82]█[/][#ff9cba]█[/][#e57ba0]██[/][#b05a82]█████[/][#6e3450]█[/][#b05a82]██[/][#e57ba0]██[/][#b05a82]████[/]",
+    "              [#6e3450]████[/]         [#3a2a3a]█████████████[/][#6e3450]█[/][#b05a82]██[/][#ffd4e4]█[/][#6e3450]██[/][#b05a82]███[/][#e57ba0]██[/][#b05a82]██[/][#6e3450]██[/][#e57ba0]█[/][#6e3450]████[/][#b05a82]█████[/][#e57ba0]█████[/][#b05a82]███[/][#6e3450]██[/][#b05a82]██████[/]",
+    "                [#6e3450]██[/]               [#d09a7a]█[/][#ecb896]█[/][#f5cba8]██[/][#ecb896]█[/][#d09a7a]█[/][#b05a82]████[/][#6e3450]█[/][#b05a82]███[/][#e57ba0]████[/][#b05a82]██[/][#6e3450]██[/][#b05a82]█[/][#6e3450]██[/][#b05a82]██[/][#6e3450]█[/][#b05a82]██████[/][#ff9cba]█[/][#e57ba0]█[/][#b05a82]████[/][#6e3450]██[/][#b05a82]██████[/][#6e3450]██[/]",
+    "                          [#78c8d7]█████[/][#92f2ff]███[/][#78c8d7]███[/][#92f2ff]█[/][#78c8d7]█[/][#6e3450]██[/][#b05a82]███[/][#e57ba0]██[/][#b05a82]█████[/][#6e3450]██[/][#b05a82]██[/][#6e3450]█[/][#b05a82]████[/][#6e3450]█[/][#b05a82]████[/][#6e3450]███[/][#b05a82]██[/][#e57ba0]██[/][#b05a82]█████[/][#6e3450]██[/]  [#6e3450]███[/][#b05a82]███[/]",
+    "                        [#78c8d7]████[/][#92f2ff]███████[/][#78c8d7]█[/][#92f2ff]█[/][#b05a82]██████[/][#e57ba0]███[/][#b05a82]███[/][#6e3450]██[/][#b05a82]████[/][#6e3450]█[/][#b05a82]████[/][#6e3450]█[/][#b05a82]██████[/][#e57ba0]█[/][#6e3450]█[/][#b05a82]███[/][#e57ba0]█[/][#b05a82]████[/][#6e3450]██[/]",
+    "                      [#78c8d7]█████[/][#92f2ff]█████████[/][#6e3450]█[/][#b05a82]██████[/][#e57ba0]█[/][#b05a82]███[/][#6e3450]██[/][#b05a82]████[/][#6e3450]██[/][#b05a82]██████[/][#6e3450]███[/][#b05a82]███[/][#e57ba0]█[/][#6e3450]█[/][#b05a82]████████[/][#6e3450]██[/]",
+    "                      [#7bc2d6]████[/][#95ebff]█████████[/][#b05a82]███[/][#e57ba0]█[/][#b05a82]███████[/][#6e3450]█[/][#b05a82]████[/][#e57ba0]██[/][#6e3450]██[/][#b05a82]███[/][#e57ba0]██[/][#b05a82]████[/][#6e3450]█[/][#b05a82]██[/][#6e3450]█[/][#b05a82]█████[/][#6e3450]██[/]",
+    "                      [#b6ffff]██[/][#7bc2d6]███[/][#95ebff]███████[/][#6e3450]█[/][#b05a82]███[/][#e57ba0]███[/][#b05a82]█████[/][#6e3450]█[/][#b05a82]██████[/][#6e3450]██[/][#b05a82]███[/][#e57ba0]██[/][#b05a82]████[/][#6e3450]███[/][#b05a82]███[/][#6e3450]███[/]",
+    "                        [#b8ffff]█[/][#7dbcd4]████[/][#97e3ff]████[/][#7dbcd4]█[/][#6e3450]█[/][#b05a82]████[/][#e57ba0]████[/][#b05a82]████[/][#6e3450]██[/][#b05a82]████[/][#6e3450]██[/][#b05a82]███[/][#e57ba0]██[/][#b05a82]████[/][#6e3450]███[/][#b05a82]██[/][#6e3450]█[/][#ff9cba]██[/]",
+    "                         [#b8ffff]█[/][#7dbcd4]███████[/][#97e3ff]█[/][#7dbcd4]█[/][#6e3450]█[/][#b05a82]███[/][#e57ba0]████[/][#b05a82]██████████[/][#6e3450]██[/][#b05a82]████████[/][#6e3450]█[/]   [#ff9cba]█[/][#b05a82]█[/]",
+    "                          [#bdffff]█[/][#80b6d3]█████[/][#9bdcff]███[/][#80b6d3]█[/][#6e3450]█[/][#b05a82]████████████[/][#6e3450]██[/][#b05a82]████[/][#6e3450]███[/][#b05a82]███[/][#6e3450]██[/]",
+    "                          [#43606f]█[/][#80b6d3]███[/][#9bdcff]█████[/][#80b6d3]█[/][#6e3450]█[/][#b05a82]████[/][#e57ba0]██[/][#b05a82]██████[/][#6e3450]██[/][#b05a82]████[/][#6e3450]█[/]  [#6e3450]██[/][#b05a82]█[/][#6e3450]██[/]",
+    "                          [#83afd1]███[/][#9ed4fe]███████[/][#6e3450]█[/][#b05a82]████[/][#e57ba0]██[/][#b05a82]████[/][#6e3450]██[/]  [#3a2a3a]██[/][#d09a7a]███[/][#3a2a3a]██[/]  [#f5cba8]█[/][#3a2a3a]███[/]",
+    "                        [#c1ffff]██[/][#83afd1]█████[/][#9ed4fe]██[/][#83afd1]█████[/][#6e3450]█[/][#b05a82]█████[/][#6e3450]██[/][#83afd1]███[/][#6e3450]█[/][#3a2a3a]█[/]   [#3a2a3a]█[/][#d09a7a]█[/][#ecb896]██[/][#d09a7a]███[/]",
+    "                        [#46596e]██[/][#85aad1]███████████[/][#6e3450]█[/][#b05a82]███[/][#6e3450]██[/][#85aad1]████[/][#6e3450]███[/]     [#f5cba8]█[/][#3a2a3a]████[/][#d09a7a]██[/]",
+    "                        [#46596e]██[/][#85aad1]███████████[/][#6e3450]████[/][#85aad1]█████[/][#6e3450]██[/]          [#f5cba8]█[/][#3a2a3a]█████[/]",
+    "                        [#46596e]██[/][#85aad1]███████████[/][#6e3450]████[/][#85aad1]█████[/][#6e3450]██[/]           [#f5cba8]█[/]  [#ecb896]█[/][#f5cba8]██[/]",
+    "                        [#c8f2ff]██[/][#87a4d0]███████████[/][#6e3450]██[/][#87a4d0]███████[/][#6e3450]█[/]",
+    "                          [#47566d]█[/][#87a4d0]████[/][#a4c6fb]██[/][#87a4d0]██[/][#47566d]█[/][#87a4d0]████████[/][#6e3450]██[/]",
+    "                          [#cce8ff]█[/][#8a9dcf]████[/][#a7befa]███[/][#8a9dcf]█[/][#49536d]█[/][#8a9dcf]██[/][#a7befa]███[/][#8a9dcf]██[/][#49536d]█[/][#cce8ff]██[/]",
+    "                           [#8a9dcf]████[/][#a7befa]██[/][#8a9dcf]██[/][#49536d]█[/][#8a9dcf]██[/][#a7befa]█[/][#8a9dcf]█████[/]",
+    "                           [#4a506c]██[/][#8d98ce]██████[/][#4a506c]█[/][#8d98ce]███████[/][#6e3450]█[/]",
+    "                             [#4a506c]██[/][#8d98ce]█████[/][#4a506c]█[/][#8d98ce]██████[/]",
+    "                             [#4b4c6c]██[/][#8f91cd]█████[/][#4b4c6c]█[/][#8f91cd]██████[/]",
+    "                             [#261e2a]██[/][#4a3c48]█████[/][#261e2a]█[/][#4a3c48]██████[/]",
+    "                               [#261e2a]███[/][#4a3c48]████[/][#261e2a]█████[/]",
+    "                                 [#261e2a]████[/][#4a3c48]█[/][#261e2a]█[/][#4a3c48]██[/]",
+    "                                  [#261e2a]█████[/]",
+]
+EVE_ART_SMALL = [
+    "               [#6e3450]█[/][#8f4769]█[/][#9a4d71]█[/][#8f4769]████████[/][#6e3450]█[/]    [#6e3450]█[/][#b05a82]█[/][#9a4d71]█[/][#8f4769]███[/][#6e3450]█[/]",
+    "       [#6e3450]█[/]    [#6e3450]█[/][#b05a82]█████[/][#ca6a91]█[/][#bd6289]█[/][#b05a82]██[/][#ca6a91]█[/][#b05a82]█████[/][#6e3450]█[/][#b05a82]█████[/][#ca6a91]█[/][#b05a82]███[/][#9a4d71]█[/][#6e3450]█[/]",
+    "       [#b05a82]█[/][#8f4769]██[/][#b05a82]█[/][#8f4769]█[/][#ca6a91]████[/][#de7b9f]█[/][#e483a5]█[/][#f28bad]█[/][#de7b9f]█[/][#d789a8]█[/][#e491b0]█[/][#f28bad]██[/][#e483a5]█[/][#d17297]███[/][#ca6a91]█[/][#8f4769]█[/][#b05a82]█[/][#9f5075]█[/][#bd6289]█[/][#ca6a91]█[/][#eb83a6]█[/][#e57ba0]█[/][#d77298]█[/][#ca6a91]█[/][#bd6289]█[/][#9f5075]█[/][#9a4d71]█[/][#b05a82]█[/]    [#ff9cba]█[/][#b05a82]██[/]",
+    "     [#6e3450]█[/][#8f4769]█[/][#b05a82]████[/][#ca6a91]█[/][#e57ba0]█[/][#f8a1be]█[/][#ffc6d9]██[/][#ffaac4]█[/][#f28bad]█[/][#e57ba0]█[/][#d77298]█[/][#e57ba0]███[/][#ca6a91]█[/][#d77298]█[/][#e57ba0]█[/][#f299b7]█[/][#ffb8cf]█[/][#f28bad]█[/][#e57ba0]█[/][#b05a82]██[/][#8f4769]█[/][#b05a82]█[/][#d77298]█[/][#ff9cba]█[/][#eb83a6]█[/][#ca6a91]█[/][#b05a82]█[/][#9f5075]█[/][#ac587d]█[/][#bd6289]█[/][#b05a82]█[/][#6e3450]█[/][#9e5673]█[/][#a25777]█[/][#8f4769]█[/][#b05a82]█[/][#6e3450]█[/]",
+    "   [#b05a82]█[/][#8f4769]█[/][#b05a82]█[/][#ca6a91]█[/][#e57ba0]██[/][#ca6a91]█[/][#e57ba0]█[/][#f28bad]█[/][#ff9cba]█[/][#f8a1be]██[/][#eb83a6]█[/][#e57ba0]█[/][#bd6289]█[/][#8f4769]█[/][#b05a82]███[/][#8f4769]█[/][#7e3d5c]█[/][#8f4769]█[/][#b05a82]█[/][#ca6a91]█[/][#e57ba0]█[/][#f28bad]█[/][#e57ba0]█[/][#ca6a91]█[/][#b05a82]█[/][#8f4769]█[/][#9f5075]█[/][#b05a82]█[/][#ca6a91]█[/][#f28bad]██[/][#d77298]█[/][#bd6289]█[/][#9f5075]█[/][#8f4769]███[/][#9c4f70]█[/][#bd6385]█[/][#e57ba0]█[/]",
+    " [#ff9cba]█[/][#6e3450]██[/][#8f4769]█[/][#b05a82]██[/][#e57ba0]█[/][#ca6a91]█[/][#e57ba0]█[/][#d77b9e]█[/][#ca6a91]████[/][#ba6184]█[/][#9c4f70]█[/][#b05a82]█[/][#9c4f70]█[/][#ca6a91]█[/][#d17297]█[/][#d77b9e]█[/][#a95778]█[/][#9f5075]█[/][#8f4769]█[/][#9f5075]█[/][#bd6289]█[/][#ca6a91]█[/][#d77b9e]█[/][#ca6a91]█[/][#e57ba0]█[/][#ca6a91]█[/][#8f4769]██[/][#bd6289]█[/][#e57ba0]█[/][#f28bad]█[/][#f893b3]█[/][#eb83a6]█[/][#d77298]█[/][#bd6289]█[/][#9f5075]█[/][#d77b9e]█[/][#ff9cba]██[/]",
+    "[#b05a82]█[/][#e57ba0]█[/][#ff9cba]█[/] [#6e3450]█[/][#8f4769]█[/][#b05a82]███[/][#8f4769]█[/][#6e3450]█[/][#3a2a3a]██[/][#dea988]██[/][#e7b593]█[/][#f0c19f]█[/][#f5cba8]█[/][#f8d3b5]██[/][#f9d7bb]█[/][#c9ab99]█[/][#977a71]█[/][#b66885]█[/][#d47999]█[/][#de7b9f]█[/][#bd6289]█[/][#b05a82]█[/][#8f4769]█[/][#b05a82]█[/][#d77298]█[/][#ca6a91]█[/][#8f4769]█[/][#b05a82]█[/][#ca6a91]█[/][#e57ba0]█[/][#f28bad]█[/][#ffaac4]█[/][#f8a1be]█[/][#eb83a6]█[/][#e57ba0]█[/][#ca6a91]█[/][#b05a82]█[/][#8f4769]█[/]",
+    "     [#6e3450]█[/][#b05a82]█[/][#6e3450]██[/][#a95778]█[/][#b6849a]█[/][#e5bb9e]█[/][#9a837e]█[/][#997e77]█[/][#f8d3b5]██[/][#f9d7bb]█[/][#fbdcc2]██[/][#f8d3b5]█[/][#bd9681]█[/][#8f726c]█[/][#9a837e]█[/][#b06d89]█[/][#8b4564]█[/][#924e6a]██[/][#7e3d5c]█[/][#b05a82]██[/][#bd6289]█[/][#b05a82]█[/][#8f4769]█[/][#b05a82]█[/][#e57ba0]██[/][#ffaac4]█[/][#ffc6d9]██[/][#ffaac4]█[/][#f28bad]█[/][#ca6a91]█[/][#b05a82]█[/][#6e3450]█[/]",
+    "    [#6e3450]█[/][#b05a82]█[/][#6e3450]██[/][#8f4769]█[/][#ffb8cf]█[/][#a95778]█[/][#e2b291]██[/][#c7a695]█[/][#fbdcc2]██████[/][#c7a695]█[/][#ba917c]█[/][#e2b291]█[/][#d487a3]█[/][#c77f9c]█[/][#7e3d5c]█[/][#8f4769]█[/][#b05a82]██[/][#e57ba0]█[/][#bd6289]█[/][#9f5075]██[/][#b05a82]█[/][#d77298]█[/][#e57ba0]█[/][#f28bad]██[/][#f893b3]█[/][#f28bad]█[/][#ca6a91]█[/][#b05a82]██[/]",
+    "    [#6e3450]█[/][#b05a82]█[/][#8f4769]█[/][#6e3450]█[/][#ff9cba]█[/][#ffb8cf]██[/][#e5bb9e]█[/][#f3caac]█[/][#fbdcc2]███[/][#dfa89f]█[/][#fbdcc2]████[/][#f7d3b7]█[/][#9a837e]█[/][#ffb8cf]█[/][#b6768f]█[/][#8f4769]█[/][#b05a82]█[/][#bd6289]█[/][#e57ba0]██[/][#d77298]█[/][#bd6289]█[/][#8f4769]██[/][#b05a82]█[/][#e57ba0]█[/][#d77298]██[/][#e57ba0]█[/][#d77298]█[/][#ac587d]█[/][#8f4769]█[/]",
+    "     [#6e3450]███[/][#b05a82]█[/][#6e3450]█[/][#b66885]█[/][#e79b9a]█[/][#ce898c]█[/][#e9ba98]█[/][#f2c5a5]█[/][#f3caac]█[/][#f5ceb0]█[/][#f8d3b5]██[/][#f3caac]█[/][#f0b6a8]█[/][#df9a9c]█[/][#ad7673]█[/][#8f4769]█[/][#bd6289]█[/][#d77298]█[/][#ba6184]█[/][#8f4769]█[/][#b05a82]██[/][#ca6a91]█[/][#d77298]█[/][#f28bad]█[/][#ca6a91]█[/][#b05a82]█[/][#8f4769]█[/][#9f5075]█[/][#bd6289]██[/][#9f5075]█[/][#8f4769]█[/]",
+    "       [#6e3450]██[/]    [#3a2a3a]███[/][#6c4f4f]█[/][#95756c]██[/][#7d525c]█[/][#9f5075]█[/][#b36f8e]█[/][#8f4769]█[/][#bd6289]█[/][#d77298]█[/][#ca6a91]█[/][#8f4769]█[/][#9c4f70]█[/][#6e3450]█[/][#8f4769]█[/][#9f5075]█[/][#b05a82]█[/][#bd6289]█[/][#de7b9f]█[/][#d77298]█[/][#b05a82]█[/][#8f4769]██[/][#b05a82]██[/][#9a4d71]█[/][#6e3450]█[/]",
+    "            [#78c8d7]██[/][#85ddeb]█[/][#8be7f5]█[/][#92f2ff]█[/][#7ed2e1]█[/][#93c1d5]█[/][#916c8a]█[/][#9f5075]█[/][#bd6289]█[/][#e57ba0]█[/][#b05a82]█[/][#9f5075]█[/][#8f4769]█[/][#9f5075]█[/][#8f4769]█[/][#b05a82]██[/][#8f4769]█[/][#b05a82]█[/][#9f5075]█[/][#9c4f70]█[/][#9f5075]█[/][#ca6a91]█[/][#bd6289]█[/][#b05a82]█[/][#8f4769]█[/][#6e3450]███[/][#b05a82]██[/]",
+    "           [#79c5d6]██[/][#8de4f5]█[/][#93eeff]███[/][#9acadf]█[/][#9f5075]█[/][#bd6289]█[/][#b05a82]█[/][#bd6289]█[/][#b05a82]█[/][#8f4769]█[/][#9f5075]█[/][#bd6289]█[/][#9c4f70]█[/][#8f4769]█[/][#b05a82]█[/][#ca6a91]█[/][#9f5075]█[/][#8f4769]█[/][#9f5075]█[/][#ac587d]█[/][#9f5075]█[/][#b05a82]█[/][#9f5075]█[/][#9a4d71]█[/][#8f4769]█[/][#6e3450]█[/]",
+    "           [#b6ffff]█[/][#8acfdf]█[/][#82c9df]█[/][#8fddf4]█[/][#96e7ff]█[/][#8fddf4]█[/][#8f4769]█[/][#b05a82]█[/][#d77298]██[/][#bd6289]█[/][#b05a82]█[/][#8f4769]█[/][#9f5075]█[/][#b05a82]█[/][#8f4769]██[/][#b05a82]█[/][#e57ba0]█[/][#b05a82]██[/][#6e3450]█[/][#8f4769]█[/][#9f5075]█[/][#b66885]█[/][#6e3450]█[/]",
+    "            [#b8ffff]█[/][#8dcbde]█[/][#7eb9d3]██[/][#92d5f4]█[/][#81a0bd]█[/][#9f5075]█[/][#bd6289]█[/][#ca6a91]█[/][#bd6289]█[/][#b05a82]██[/][#9f5075]███[/][#8f4769]██[/][#b05a82]█[/][#9f5075]█[/][#844060]█[/] [#ff9cba]█[/][#b05a82]█[/]",
+    "             [#729db9]█[/][#88bbdd]█[/][#9cd8fe]██[/][#95cef3]█[/][#8f4769]█[/][#b05a82]█[/][#ca6a91]██[/][#b05a82]█[/][#9f5075]█[/][#844060]█[/][#723d59]█[/][#9a5e6e]█[/][#af7071]█[/][#3a2a3a]█[/][#6e3450]█[/][#93606d]█[/][#4b2d41]█[/]",
+    "            [#83acb6]█[/][#84acd1]██[/][#8ab5dc]██[/][#84acd1]█[/][#7e8fb0]█[/][#9f5075]██[/][#946489]█[/][#796f90]█[/][#7e8fb0]█[/][#735270]█[/][#3a2a3a]█[/] [#aa8574]█[/][#937168]█[/][#85625a]█[/][#d09a7a]█[/]",
+    "            [#46596e]█[/][#85aad1]█████[/][#796f90]█[/][#6e3450]█[/][#796f90]█[/][#85aad1]██[/][#6e3450]█[/]     [#b69583]█[/][#3a2a3a]█[/][#95756c]█[/][#f5cba8]█[/]",
+    "            [#c8f2ff]█[/][#7790b7]█[/][#87a4d0]█[/][#8eacda]██[/][#7790b7]█[/][#8088b0]██[/][#87a4d0]██[/][#7a6c90]█[/][#6e3450]█[/]",
+    "             [#a0b6df]█[/][#8a9dcf]█[/][#98ade4]█[/][#9fb5ef]█[/][#69789e]█[/][#8a9dcf]█[/][#9fb5ef]█[/][#91a5d9]█[/][#798ab6]█[/][#cce8ff]█[/]",
+    "             [#4a506c]█[/][#60688c]█[/][#7c86b5]█[/][#8d98ce]█[/][#7c86b5]██[/][#8d98ce]██[/][#8276a4]█[/]",
+    "              [#38354b]█[/][#524d6a]█[/][#6c668a]██[/][#524d6a]█[/][#6c668a]███[/]",
+    "               [#261e2a]██[/][#382d39]█[/][#413440]█[/][#2f2531]█[/][#322834]█[/][#261e2a]█[/]",
+    "                 [#261e2a]███[/]",
+]
+EVE_FULL_WIDTH = max((len(_strip_markup(l)) for l in EVE_ART_FULL), default=0)
+EVE_SMALL_WIDTH = max((len(_strip_markup(l)) for l in EVE_ART_SMALL), default=0)
+
+
 class EveTui(App[None]):
     """Instance-first manager built on the existing v3 command surface."""
 
@@ -146,14 +244,22 @@ class EveTui(App[None]):
     }
 
     #body {
-        height: 2fr;
+        height: 5fr;
     }
 
     #left {
         width: 58;
-        min-width: 52;
+        max-width: 50%;
+        min-width: 24;
         border-right: solid $primary;
         padding: 1;
+    }
+
+    #empty-hint {
+        height: auto;
+        margin-top: 1;
+        padding-top: 1;
+        border-top: solid $primary 40%;
     }
 
     #instances-header {
@@ -189,6 +295,7 @@ class EveTui(App[None]):
 
     #right {
         width: 1fr;
+        min-width: 16;
         padding: 1;
     }
 
@@ -328,7 +435,8 @@ class EveTui(App[None]):
     }
 
     #output {
-        height: 16;
+        height: 1fr;
+        min-height: 6;
         border-top: solid $primary;
         padding: 1;
         background: $boost;
@@ -433,6 +541,7 @@ class EveTui(App[None]):
                         yield Static("Instances", classes="section-title")
                         yield Button("Refresh", id="refresh")
                     yield ListTable(id="instances")
+                    yield Static("", id="empty-hint")
                 with Vertical(id="right"):
                     yield Static(
                         "\n".join(
@@ -541,7 +650,19 @@ class EveTui(App[None]):
         self.start_task(self.load_initial_data())
         self.start_task(self.load_provider_health())
         self.park_terminal_cursor()
+        # The first animate_hero() runs before the layout settles; the mascot
+        # re-renders at the correct tier once panes are sized (on_resize fires
+        # through the initial layout pass and again whenever the terminal is
+        # resized), and on each 1.2s animation tick thereafter.
         self.call_after_refresh(self._check_first_run)
+
+    def on_resize(self, event: Resize) -> None:
+        # Keep the empty-state mascot on the right tier as the terminal resizes
+        # (this also fires through the initial layout pass, so the mascot paints
+        # at the correct size once the panes are laid out instead of on the
+        # first 1.2s tick). Skipped while a modal is open or no instance space.
+        if self.current_instance is None and self._empty_state_widgets_ready():
+            self.render_empty_state()
 
     async def load_initial_data(self) -> None:
         await self.load_catalog_options()
@@ -1035,6 +1156,7 @@ class EveTui(App[None]):
 
     def render_empty_detail(self) -> None:
         self.query_one("#empty-state", Static).display = True
+        self.query_one("#empty-hint", Static).display = True
         self.query_one("#instance-detail", Vertical).display = False
         self.render_empty_state()
         self.query_one("#provider-pill", Static).update("Provider\nunknown")
@@ -1048,6 +1170,7 @@ class EveTui(App[None]):
 
     def render_loading_detail(self, instance_name: str) -> None:
         self.query_one("#empty-state", Static).display = False
+        self.query_one("#empty-hint", Static).display = False
         self.query_one("#instance-detail", Vertical).display = True
         self.query_one("#title", Static).update(f"{instance_name}  loading status...")
         self.query_one("#provider-pill", Static).update("Provider\nloading")
@@ -1067,6 +1190,7 @@ class EveTui(App[None]):
                 self.render_empty_detail()
             return
         self.query_one("#empty-state", Static).display = False
+        self.query_one("#empty-hint", Static).display = False
         self.query_one("#instance-detail", Vertical).display = True
         status = self.current_status or {}
         instance = status.get("instance", {})
@@ -1096,136 +1220,58 @@ class EveTui(App[None]):
         self.render_packages(status)
         self.render_ops(status)
 
-    def render_empty_state(self) -> None:
-        hair = "#ff8fb1"
-        skin = "#f5c8a9"
-        brow = "#5a3d5a"
-        dress = [
-            "#7fd3e3", "#82cde2", "#84c6e0", "#87c0df",
-            "#8ab9dd", "#8db3dc", "#8faddb", "#92a6da",
-            "#95a0d9", "#9799d8", "#9a93d7", "#9d8cd6",
-        ]
-        blinking = self._eye_blinking
-
-        container_width = self.query_one("#empty-state", Static).size.width
-        if container_width <= 0:
-            container_width = self.size.width if self.size else 80
-        if container_width >= 60:
-            hero_art_rows = self._large_hero_rows(hair, skin, brow, dress, blinking)
-        elif container_width >= 32:
-            hero_art_rows = self._compact_hero_rows(hair, skin, brow, dress, blinking)
+    def _eve_portrait(self, rows: int, cols: int) -> str:
+        """Return Eve's portrait markup, picking the full-size figure when the
+        pane is tall (>= 30 rows) and wide enough, else the smaller one. The
+        chosen art is clipped to `rows` so the bottom scrolls off rather than
+        overflowing the pane."""
+        if rows >= 30 and cols >= EVE_FULL_WIDTH:
+            art = EVE_ART_FULL
         else:
-            hero_art_rows = []
+            art = EVE_ART_SMALL
+        if rows > 0:
+            art = art[:rows]
+        return "\n".join(art)
 
-        def render_segment(color: str | None, text: str) -> str:
-            return f"[{color}]{text}[/]" if color and text else text
+    def render_empty_state(self) -> None:
+        empty = self.query_one("#empty-state", Static)
+        cols = empty.size.width
+        rows = empty.size.height
+        if cols <= 0 or rows <= 0:
+            # First paint: the layout hasn't settled and the size reads as 0.
+            # Estimate from the terminal so the portrait paints immediately
+            # instead of waiting for the first tick. #left caps at 58 / 50%, the
+            # right pane fills the rest; #body is 5/6 of the flex height (the
+            # rest is hero/summary/output/footer).
+            term_w = self.size.width if self.size else 80
+            term_h = self.size.height if self.size else 24
+            left = min(58, term_w // 2)
+            cols = max(term_w - left - 4, 0)
+            rows = max((term_h - 6) * 5 // 6 - 2, 0)
 
-        lines: list[str] = []
-        if hero_art_rows:
-            lines.append(
-                "\n".join(
-                    "".join(render_segment(color, text) for color, text in row)
-                    for row in hero_art_rows
-                )
-            )
-        lines += [
+        # The caption now lives on the left (under the instances list); the whole
+        # right pane is Eve's. Wrap the caption to the hint pane's width.
+        hint = self.query_one("#empty-hint", Static)
+        text_width = max(hint.size.width - 2, 16)
+        caption_lines = [
             f"[b]EVE[/b] [dim]{APP_EXPANSION}[/]",
             "",
             "[b]Please, select an instance[/b]",
             "Highlight an instance to preview and manage it.",
             "Press Enter on << New Instance >> to create a VM.",
         ]
-        self.query_one("#empty-state", Static).update("\n".join(lines))
+        hint_lines: list[str] = []
+        for caption in caption_lines:
+            visible = _strip_markup(caption)
+            if len(visible) <= text_width:
+                hint_lines.append(caption)
+            else:
+                hint_lines.extend(textwrap.wrap(visible, text_width) or [""])
+        hint.update("\n".join(hint_lines))
 
-    def _large_hero_rows(
-        self,
-        hair: str,
-        skin: str,
-        brow: str,
-        dress: list[str],
-        blinking: bool,
-    ) -> list[list[tuple[str | None, str]]]:
-        eye = "#1f1f1f"  # black eyes on the skin-tone face (inverted)
-        if blinking:
-            eye_8_l: tuple[str, str] = (skin, "      ")
-            eye_8_r: tuple[str, str] = (skin, "     ")
-            eye_9_l: tuple[str, str] = (brow, "‿‿‿‿‿‿")
-            eye_9_r: tuple[str, str] = (brow, "‿‿‿‿‿‿")
-            eye_10_l: tuple[str, str] = (skin, "      ")
-            eye_10_r: tuple[str, str] = (skin, "   ")
-        else:
-            eye_8_l = (eye, " ▓ █░░")
-            eye_8_r = (eye, "░▓ █ ")
-            eye_9_l = (eye, "░▓░▓█ ")
-            eye_9_r = (eye, "░█▓ ▓░")
-            eye_10_l = (eye, " █▓█  ")
-            eye_10_r = (eye, "█▓█")
-        return [
-            [(hair, "               ████                ")],
-            [(hair, "           ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓ ▓▓▓▓▓▓▓▓▓▓▓▓            ")],
-            [(hair, "       █ ▓▓▓▓▓▓▒▒▒▒▒▒▒▒▓▒▒▒▒▒▒▓▓▓▓█▓▓▓▒▒▒▒▒▒▓▓█        ")],
-            [(hair, "    ▓▓▓▓▓▒▒▒▒░░ ░░ ░ ░░░░░ ░░▒▒░▒▒▓▓▓█▓▓▒░▒▒▓▓▓▓     ░▓")],
-            [(hair, "  █▓▓▓▓▓▓▒░  ░▒▒▓▓██▓▓▓▓██▓▒░ ░▒▓▓▓▓█▓▓▓▒░▒▓██▓▓▓▓▓███ ")],
-            [(hair, " ▓▓▓▒▒▒░░▒▒▒▓▓▓██▓▓▓▓██▓██▓▒▒░▒▒▓▓▓█▓▓▓▒▒░▒▓██████     ")],
-            [(hair, " █▓▓▓▒▒▓▓▓▓▓▓▓▓██▓██▓▒▒▓▓▓██▓▓▓▒▒▓▓▓█▓▓▒▒░▒▒▒▓▓▓▓      ")],
-            [(hair, "░  █▓▓▓▓▓"), (brow, "████"), (hair, "▓"), (skin, "▒░░░░  ░░░"), (hair, "▒▓▓▓▓▓▓▓▒▒▓█▓▓▓▒▒░ ▒▒▒▒▓▓▓      ")],
-            [(hair, " █▓██ "), eye_8_l, (skin, "       "), eye_8_r, (hair, "███▓██▓▓▓▓█▓▓▒▒░  ░▒▓▓▓█        ")],
-            [(hair, " █▓██▓"), eye_9_l, (skin, "        "), eye_9_r, (hair, "▓██▓▓▓▓▓█▓▓▓▒▒░░▒▒▒▓▓█        ")],
-            [(hair, " █▓██ "), eye_10_l, (skin, "         "), eye_10_r, (skin, "  "), (hair, "██▓▓▓▒▒▓█▓▓▓▒▒▒▒░▒▒▓▓▓        ")],
-            [(hair, " █▓▓█"), (skin, "░░░               ░░"), (hair, "█▓▓▒▒▒▓▓▓█▓▓▓▓▓▓▓▓██           ")],
-            [(hair, "   █▓█ █"), (skin, "▒░░        ░░"), (hair, "█▓▓▒▓█▓▓▓▒▒▒▓▓███▓▓▓██             ")],
-            [(hair, "    ██  "), (skin, "░░▓▓▒▒░░░▒▒"), (hair, "▓██▓▒▒▓▓█▓▓▓▓▒░▒▓▓▓▓█▓▓▓▓            ")],
-            [(None, "            "), (dress[0], "▓▒░▒▓▓▓█▓▓▒▒▓"), (hair, "▓█▓█▓█▓▓▓▒▒▓▓▓█▓▓▓█"), (None, "            ")],
-            [(None, "       "), (dress[1], "▓▓▓▓▓▓▓▒▓▓▓▓▓▓▓██▒"), (hair, "█▓█▓▓▒█▓▓▓▓▓▓▓█▓██▓█"), (None, "           ")],
-            [(None, "     "), (dress[2], "▓▓▒▒▒▒▓▒▓▓▓▓▒▒▓▓█▓▓▓"), (hair, "█▓▓█▓▓▓▒█▓▓▒▓▓██"), (None, "               ")],
-            [(None, "    "), (dress[3], "▓▓▒▒▒▒▒▓▓▓▓▒▓▓▓█▓▓▓██"), (hair, "▓▓▓▓▓▓▓▓██▓▓▓▓▓█░"), (None, "              ")],
-            [(None, "    "), (dress[4], "▓▓▒▒▒▓██▓▓▓▓▓▒▒▓▓▓▓▓▓"), (hair, "▓▓██▓▓▓▓▓██"), (None, "   "), (hair, "▓"), (None, "                ")],
-            [(None, "     "), (dress[5], "██▓▓▒▒▒▓██▓▓▓▒▓▓▓▓▓█"), (hair, "█▓▓▓▓██"), (None, " "), (hair, "█▓█"), (None, "                    ")],
-            [(None, "       "), (dress[6], "▓▒▒▒▒▒██▓▓▓▒▓▓▓▓██"), (None, " "), (hair, "█▓▓▓▓██"), (None, "  "), (hair, "██"), (None, "                   ")],
-            [(None, "      "), (dress[7], "▓▓▒▒▒▒▒▓███▓▓▓██▓▓█"), (None, "   "), (skin, "█▓▒▓▓"), (None, "                       ")],
-            [(None, "     "), (dress[8], "█▓▓▓▓▓▓▓▓██▓▓▓▓▓▓▓██"), (None, "   "), (skin, "█▓▓▓▓▓"), (None, "                      ")],
-            [(None, "     "), (dress[9], "█▓▓▓▓▓▓▓▓██████▓▓██"), (None, "       "), (skin, "██████"), (None, "                   ")],
-            [(dress[10], "      █▓▓▓▓▓▓██▓▓▓▓▓██                                  ")],
-            [(dress[11], "      ░▓▓▓▒▒▓█▓▓▒▒▓█░                                   ")],
-            [(dress[11], "       █▓▓▓▓▓█▓▓▓▓▓█                                    ")],
-            [(dress[11], "        █▓▓▓▓█▓▓█▓                                      ")],
-            [(dress[11], "         ██▓▓▓▓██                                       ")],
-            [(dress[11], "            ███                                         ")],
-        ]
-
-    def _compact_hero_rows(
-        self,
-        hair: str,
-        skin: str,
-        brow: str,
-        dress: list[str],
-        blinking: bool,
-    ) -> list[list[tuple[str | None, str]]]:
-        eye = "#1f1f1f"  # black eyes on the skin-tone face (inverted)
-        if blinking:
-            eye_4_l: tuple[str, str] = (skin, "    ")
-            eye_4_r: tuple[str, str] = (skin, "    ")
-            eye_5_l: tuple[str, str] = (brow, "‿‿‿‿")
-            eye_5_r: tuple[str, str] = (brow, "‿‿‿‿")
-        else:
-            eye_4_l = (eye, "██▓▓")
-            eye_4_r = (eye, "▓▓██")
-            eye_5_l = (eye, "██▒▒")
-            eye_5_r = (eye, "▒▒██")
-        return [
-            [(hair, "            ████            ")],
-            [(hair, "         ▓▓▓▓▓▓▓▓▓▓         ")],
-            [(hair, "      ▓▓▓▓"), (brow, "▒▒▒▒▒▒▒▒"), (hair, "▓▓▓▓      ")],
-            [(hair, "     ▓▓"), (skin, "░░░░░░░░░░░░░░"), (hair, "▓▓     ")],
-            [(hair, "     ▓▓"), (skin, "░░"), eye_4_l, (skin, "░░"), eye_4_r, (skin, "░░"), (hair, "▓▓     ")],
-            [(hair, "     ▓▓"), (skin, "░░"), eye_5_l, (skin, "░░"), eye_5_r, (skin, "░░"), (hair, "▓▓     ")],
-            [(hair, "     ▓▓"), (skin, "▒▒░░░░░░░░░░▒▒"), (hair, "▓▓     ")],
-            [(hair, "      ▓▓"), (skin, "░░░░░░░░░░░░"), (hair, "▓▓      ")],
-            [(hair, "        ▓▓"), (skin, "░░░░░░░░"), (hair, "▓▓        ")],
-            [(hair, "         ▓▓"), (skin, "██████"), (hair, "▓▓         ")],
-            [(hair, "    ▓▓"), (dress[2], "████████████████"), (hair, "▓▓    ")],
-            [(hair, "     ▓▓"), (dress[8], "██████████████"), (hair, "▓▓     ")],
-        ]
+        # Paint Eve only when the pane is wide enough for the smaller figure;
+        # otherwise leave it blank (the left hint still explains what to do).
+        empty.update(self._eve_portrait(rows, cols) if cols >= EVE_SMALL_WIDTH else "")
 
     def selected_bundle_ids(self, status: dict[str, Any]) -> set[str]:
         instance = status.get("instance", {})
