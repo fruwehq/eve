@@ -481,6 +481,7 @@ class EveTui(App[None]):
         # Instance-lifecycle actions (up/stop/down/provision/delete) live as
         # buttons in the instance pane, not as global hotkeys — keeping the
         # footer to safe, app-level actions.
+        Binding("n", "new_instance", "New"),
         Binding("h", "toggle_hidden", "Hidden"),
         Binding("r", "queue_refresh", "Refresh"),
         Binding("c", "queue_cancel_command", "Cancel", priority=True),
@@ -1552,7 +1553,7 @@ class EveTui(App[None]):
     def action_new_instance(self) -> None:
         if not self.catalog_options.get("platforms"):
             self.notify(
-                "No platforms available — add a provider source (g) and pull first.",
+                "No platforms available — add a provider source (p) and pull first.",
                 severity="warning",
             )
             return
