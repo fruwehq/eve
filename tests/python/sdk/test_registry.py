@@ -158,23 +158,28 @@ def test_sync_prunes_orphan_exposures(tmp_path: Path) -> None:
     assert not (plugins / "b").exists()
 
 
-def test_prune_plugins_only_removes_symlinks(tmp_path: Path) -> None:
+def test_prune_plugins_removes_orphan_symlinks_and_dirs(tmp_path: Path) -> None:
+    # The synced plugins root is eve-owned: reconciliation removes every entry
+    # not backed by a configured source, whether symlink or real directory, and
+    # keeps the configured source's entry.
     plugins = tmp_path / "plugins"
     plugins.mkdir()
-    # A symlink sync would have exposed (orphaned: not in the configured set).
-    orphan = plugins / "orphan"
-    orphan.symlink_to(tmp_path)
-    # A real directory the user created — must be left alone even though its
-    # name is not a configured source id.
-    keep_dir = plugins / "my-stuff"
-    keep_dir.mkdir()
-    (keep_dir / "file").write_text("x", encoding="utf-8")
+    orphan_link = plugins / "orphan-link"
+    orphan_link.symlink_to(tmp_path)
+    orphan_dir = plugins / "orphan-dir"  # stale real-dir materialization
+    orphan_dir.mkdir()
+    (orphan_dir / "marker").write_text("x", encoding="utf-8")
+    configured = plugins / "configured-src"
+    configured.mkdir()
+    (configured / "marker").write_text("x", encoding="utf-8")
+    src = Source(id="configured-src", url="u", subdir="", ref="main", auth="none")
 
-    pruned = prune_plugins([], plugins_dir=plugins)
+    pruned = prune_plugins([src], plugins_dir=plugins)
 
-    assert pruned == ["orphan"]
-    assert not orphan.exists()
-    assert keep_dir.exists()
+    assert set(pruned) == {"orphan-link", "orphan-dir"}
+    assert not orphan_link.exists()
+    assert not orphan_dir.exists()
+    assert configured.exists()  # configured source is kept
 
 
 def test_lock_roundtrip(tmp_path: Path) -> None:

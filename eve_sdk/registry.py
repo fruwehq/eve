@@ -222,12 +222,23 @@ def prune_plugins(
 ) -> list[str]:
     """Remove materialized exposures whose source id is no longer configured.
 
-    Only symlinks (what ``_expose_subdir`` creates at ``plugins_dir/<id>``) are
-    removed, so a user's real files/dirs under the plugins root are never
-    touched. Returns the ids of the pruned entries. Safe to call on its own —
-    e.g. the TUI prunes locally after a source is removed so the provider list
-    updates without a network pull.
+    The synced plugins root (``.eve/plugins/``) is fully eve-owned — it is
+    materialized entirely by :func:`sync` — so reconciliation removes **any**
+    entry not backed by a currently-configured source, whether a symlink or a
+    real directory. A stale real-dir materialization (e.g. left behind by a
+    previously-disabled source, or by an older eve that materialized dirs) is
+    removed too, so the next pull re-downloads it fresh and it stops showing in
+    the Providers list. Returns the ids of the pruned entries.
+
+    The safety boundary is **scope, not file type**: pass only the eve-managed
+    synced root (the default, :meth:`Workdir.plugins_dir`). User-owned plugin
+    roots (``EVE_PLUGIN_ROOTS``) live in a separate root that is never passed
+    here and must never be pruned. Safe to call on its own — e.g. the TUI prunes
+    locally after a source is removed so the provider list updates without a
+    network pull.
     """
+    import shutil
+
     dest_root = plugins_dir or Workdir.plugins_dir()
     if not dest_root.exists():
         return []
@@ -238,10 +249,12 @@ def prune_plugins(
             continue
         if entry.name in keep:
             continue
-        # Only remove the symlinks sync exposes; leave anything else alone.
-        if not entry.is_symlink():
-            continue
-        entry.unlink()
+        # The synced root is eve-owned: remove anything not in the configured
+        # source set, regardless of file type.
+        if entry.is_dir() and not entry.is_symlink():
+            shutil.rmtree(entry)
+        else:
+            entry.unlink()  # symlink or regular file
         pruned.append(entry.name)
     return pruned
 
