@@ -9,7 +9,7 @@
 # once available. All are public, so auth is `none`.
 recommended:
   - id: eve-providers
-    description: First-party providers (aws, gcp, vultr, truenas, raspberry-pi, local-qemu, docker).
+    description: First-party provider plugins repo (each provider in its own subfolder).
     url: https://github.com/fruwehq/eve-providers.git
     ref: main
     auth: none

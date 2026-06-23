@@ -180,7 +180,7 @@
     },
 
     "os": {
-      "description": "Resolved catalog OS entry. Core/engine image selectors are named; provider-specific image fields (aws_ami_*, gcp_image_*, vultr_os_id, …) flow through additionalProperties, contributed by each provider's catalog.",
+      "description": "Resolved catalog OS entry. Core/engine image selectors are named; provider-specific image selectors (an AMI pattern, a cloud image id, etc.) flow through additionalProperties, contributed by each provider's catalog.",
       "type": "object",
       "required": ["id", "family", "version", "arch"],
       "additionalProperties": true,

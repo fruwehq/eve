@@ -63,8 +63,8 @@ def main(argv: list[str]) -> int:
         admin_session = 1
     elif os_family == "ubuntu":
         # Prefer an explicit VM_USER_NAME, else the resolved human/login user
-        # (HUMAN_USER_NAME/ACCESS_HUMAN_USER/SSH_USER) — e.g. local-qemu ubuntu
-        # resolves to "ubuntu" with no VM_USER_NAME configured.
+        # (HUMAN_USER_NAME/ACCESS_HUMAN_USER/SSH_USER) — e.g. a provider whose
+        # bootstrap user is "ubuntu" resolves to it with no VM_USER_NAME set.
         vm_username = (
             resolved.get("VM_USER_NAME")
             or resolved.get("HUMAN_USER_NAME")

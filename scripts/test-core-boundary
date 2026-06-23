@@ -68,7 +68,13 @@ def all_ids() -> list[str]:
 # --- scan scope ------------------------------------------------------------
 
 def scan_paths() -> list[Path]:
-    """Core files scanned for provider/OS id references (Check 1)."""
+    """Core files scanned for provider/OS id references (Check 1).
+
+    Covers every core surface that must stay plugin-agnostic: ``scripts/``,
+    ``eve_sdk/``, the TUI (``tui/``), the config layer (``config/``), and the
+    core JSON schemas (``core/schema/``). Test fixtures and plugin manifests
+    are out of scope (they legitimately name provider/package ids).
+    """
     files: list[Path] = []
     for entry in sorted((REPO / "scripts").iterdir()):
         if entry.is_dir():
@@ -77,6 +83,9 @@ def scan_paths() -> list[Path]:
             continue
         files.append(entry)
     files.extend(sorted(REPO.glob("eve_sdk/**/*.py")))
+    files.extend(sorted(REPO.glob("tui/**/*.py")))
+    files.extend(sorted(p for p in (REPO / "config").iterdir() if p.is_file()))
+    files.extend(sorted(p for p in (REPO / "core" / "schema").iterdir() if p.is_file()))
     for sub in ("plugins/providers/_common", "plugins/providers/_terraform-common"):
         base = REPO / sub
         if base.is_dir():
