@@ -2,38 +2,18 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://ephemeral.dev/schemas/config.schema.json",
   "title": "Eve Configuration",
-  "description": "Schema for config/defaults.yaml and .eve/config.yaml. All fields are optional; null/empty values signal 'use a lower-precedence layer'.",
+  "description": "Schema for config/defaults.yaml and .eve/config.yaml. Only TRUE-core sections are defined here; provider and package config fields, defaults, and validation come from each plugin's manifest config_schema. All fields are optional; null/empty values signal 'use a lower-precedence layer'.",
 
   "type": "object",
   "additionalProperties": false,
 
   "properties": {
-    "aws": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "config_file":              { "$ref": "#/$defs/path" },
-        "profile":                  { "$ref": "#/$defs/nullable_string" },
-        "region":                   { "$ref": "#/$defs/nullable_string" },
-        "shared_credentials_file":  { "$ref": "#/$defs/path" }
-      }
-    },
-
     "display": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "fps":        { "$ref": "#/$defs/nullable_positive_integer" },
         "resolution": { "$ref": "#/$defs/nullable_resolution" }
-      }
-    },
-
-    "gcp": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "application_credentials": { "$ref": "#/$defs/path" },
-        "project":                 { "$ref": "#/$defs/nullable_string" }
       }
     },
 
@@ -65,92 +45,6 @@
         "display_mode":  { "$ref": "#/$defs/nullable_moonlight_display_mode" },
         "video_codec":   { "$ref": "#/$defs/nullable_moonlight_video_codec" },
         "video_decoder": { "$ref": "#/$defs/nullable_moonlight_video_decoder" }
-      }
-    },
-
-    "nomachine": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "version": { "$ref": "#/$defs/nullable_string" }
-      }
-    },
-
-    "raspberry-pi": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "hdmi_connector": { "$ref": "#/$defs/nullable_hdmi_connector" },
-        "hdmi_mode":      { "$ref": "#/$defs/nullable_string" },
-        "host":           { "$ref": "#/$defs/nullable_host" },
-        "ip":             { "$ref": "#/$defs/nullable_string" }
-      }
-    },
-
-    "rdp": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "gate_password": { "$ref": "#/$defs/nullable_string" },
-        "gate_user":     { "$ref": "#/$defs/nullable_string" }
-      }
-    },
-
-    "rustdesk": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "password": { "$ref": "#/$defs/nullable_string" },
-        "server":   { "$ref": "#/$defs/nullable_host" }
-      }
-    },
-
-    "splashtop": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "email":         { "$ref": "#/$defs/nullable_string" },
-        "password":      { "$ref": "#/$defs/nullable_string" },
-        "streamer_path": { "$ref": "#/$defs/path" },
-        "streamer_url":  { "$ref": "#/$defs/nullable_url" }
-      }
-    },
-
-    "sunshine": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "max_bitrate_kbps": { "$ref": "#/$defs/nullable_bitrate_kbps" },
-        "password":         { "$ref": "#/$defs/nullable_string" },
-        "version":          { "$ref": "#/$defs/nullable_string" }
-      }
-    },
-
-    "thinlinc": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "accept_eula":        { "$ref": "#/$defs/nullable_boolean" },
-        "agent_hostname":     { "$ref": "#/$defs/nullable_string" },
-        "server_bundle_path": { "$ref": "#/$defs/path" },
-        "server_bundle_url":  { "$ref": "#/$defs/nullable_url" },
-        "webaccess_port":     { "$ref": "#/$defs/nullable_port" }
-      }
-    },
-
-    "truenas": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "api_user":                 { "$ref": "#/$defs/nullable_string" },
-        "host":                     { "$ref": "#/$defs/nullable_host" },
-        "ssh_host_key_fingerprint": { "$ref": "#/$defs/nullable_string" },
-        "ssh_port":                 { "$ref": "#/$defs/nullable_port" },
-        "ssh_private_key_file":     { "$ref": "#/$defs/path" },
-        "ssh_user":                 { "$ref": "#/$defs/nullable_string" },
-        "vm_base_dir":              { "$ref": "#/$defs/path" },
-        "vm_pool":                  { "$ref": "#/$defs/nullable_string" },
-        "vm_zvol_prefix":           { "$ref": "#/$defs/nullable_string" }
       }
     },
 
@@ -189,11 +83,6 @@
       "anyOf": [{ "type": "integer", "minimum": 1 }, { "type": "null" }]
     },
 
-    "nullable_port": {
-      "description": "TCP/UDP port number.",
-      "anyOf": [{ "type": "integer", "minimum": 1, "maximum": 65535 }, { "type": "null" }]
-    },
-
     "nullable_cidr": {
       "description": "IP address or CIDR notation for access rules.",
       "anyOf": [{ "type": "string" }, { "type": "null" }]
@@ -204,24 +93,9 @@
       "anyOf": [{ "type": "string" }, { "type": "null" }]
     },
 
-    "nullable_url": {
-      "description": "Absolute URL.",
-      "anyOf": [{ "type": "string", "format": "uri" }, { "type": "null" }]
-    },
-
-    "nullable_host": {
-      "description": "Hostname or IP address.",
-      "anyOf": [{ "type": "string" }, { "type": "null" }]
-    },
-
     "nullable_resolution": {
       "description": "Display resolution in WxH format (e.g. 1920x1080).",
       "anyOf": [{ "type": "string", "pattern": "^[0-9]+x[0-9]+$" }, { "type": "null" }]
-    },
-
-    "nullable_hdmi_connector": {
-      "description": "Raspberry Pi HDMI connector name.",
-      "anyOf": [{ "type": "string", "enum": ["HDMI-A-1", "HDMI-A-2"] }, { "type": "null" }]
     },
 
     "nullable_moonlight_display_mode": {
