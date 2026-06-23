@@ -62,11 +62,11 @@ def load_structured() -> dict[str, dict[str, dict[str, Any]]]:
 
 
 def load_provider_schema(provider_id: str) -> dict[str, Any]:
-    """Provider ``config_schema``, served from the warm Engine's plugin set.
+    """A plugin's ``config_schema`` (provider or package), served from the warm Engine.
 
-    Subprocess-ing ``plugin-list`` per settings-screen open re-parsed every
-    provider manifest; the Engine memoizes them once per TUI process. The 5s
-    TTL cache is preserved so repeated opens stay instant.
+    Matched by plugin id across all plugins, so the settings UI can surface a
+    package's config descriptions exactly like a provider's. The Engine memoizes
+    manifests once per TUI process; the 5s TTL cache keeps repeated opens instant.
     """
     cache_key = ("load_provider_schema", (provider_id,))
     now = time.monotonic()
@@ -74,7 +74,7 @@ def load_provider_schema(provider_id: str) -> dict[str, Any]:
         ts, cached = _cache[cache_key]
         if now - ts < _CACHE_TTL:
             return cast("dict[str, Any]", cached)
-    for plugin in default_engine().plugin_list(kind="provider"):
+    for plugin in default_engine().plugin_list():
         if plugin.get("id") == provider_id:
             schema: dict[str, Any] = plugin.get("config_schema", {})
             _cache[cache_key] = (now, schema)
@@ -130,18 +130,13 @@ def load_missing_fields() -> list[dict[str, Any]]:
         return []
 
 
+# True-core settings sections only. Provider and package sections are rendered
+# dynamically by the settings screen from the installed plugins (their
+# display_name becomes the section label), so core hardcodes none of them.
 CONFIG_SECTIONS: list[dict[str, str]] = [
     {"id": "global", "label": "Global"},
     {"id": "display", "label": "Display"},
     {"id": "moonlight", "label": "Moonlight"},
-    {"id": "sunshine", "label": "Sunshine"},
-    {"id": "rdp", "label": "RDP"},
-    {"id": "rustdesk", "label": "RustDesk"},
-    {"id": "thinlinc", "label": "ThinLinc"},
-    {"id": "aws", "label": "AWS"},
-    {"id": "gcp", "label": "GCP"},
-    {"id": "truenas", "label": "TrueNAS"},
-    {"id": "raspberry-pi", "label": "Raspberry Pi"},
     {"id": "vagrant", "label": "Vagrant"},
 ]
 
@@ -192,10 +187,10 @@ def field_label(section_id: str, field_id: str) -> str:
     return FIELD_LABELS.get(field_id, field_id.replace("_", " ").title())
 
 
-# Description + example for the static (non-provider) config fields. Provider
-# fields (aws/gcp/truenas) carry their own description/default in the plugin
-# manifest's config_schema; these cover the core sections the manifest can't.
-# Keyed "<section>.<field>".
+# Description + example for the TRUE-core config fields (sections no provider
+# or package plugin owns). Provider and package fields carry their own
+# description/default in their manifest's config_schema, surfaced dynamically;
+# core names none of them here. Keyed "<section>.<field>".
 FIELD_META: dict[str, dict[str, str]] = {
     "global.my_ip": {
         "description": "Your public IPv4 address — used to allow inbound SSH to cloud VMs "
@@ -243,62 +238,6 @@ FIELD_META: dict[str, dict[str, str]] = {
     "moonlight.video_decoder": {
         "description": "Moonlight video decoder selection.",
         "example": "auto | hardware | software",
-    },
-    "sunshine.max_bitrate_kbps": {
-        "description": "Maximum Sunshine host streaming bitrate, in kilobits per second.",
-        "example": "50000",
-    },
-    "sunshine.password": {
-        "description": "Password for the Sunshine web UI / Moonlight pairing flow.",
-        "example": "",
-    },
-    "sunshine.version": {
-        "description": "Sunshine version to install (pinned).",
-        "example": "2025.924.154138",
-    },
-    "rdp.gate_user": {
-        "description": "Username for the RDP gateway login on GNOME desktops.",
-        "example": "rdpuser",
-    },
-    "rustdesk.server": {
-        "description": "RustDesk relay/ID server address. Leave unset to use the public servers.",
-        "example": "rustdesk.example.com",
-    },
-    "thinlinc.accept_eula": {
-        "description": "Set to 1 to accept the ThinLinc server EULA during install.",
-        "example": "1",
-    },
-    "thinlinc.agent_hostname": {
-        "description": "Hostname the ThinLinc agent advertises to clients.",
-        "example": "vm.example.com",
-    },
-    "thinlinc.server_bundle_path": {
-        "description": "Local path to a downloaded ThinLinc server bundle.",
-        "example": "~/Downloads/thinlinc-server.zip",
-    },
-    "thinlinc.server_bundle_url": {
-        "description": "URL to download the ThinLinc server bundle from.",
-        "example": "https://example.com/thinlinc-server.zip",
-    },
-    "thinlinc.webaccess_port": {
-        "description": "Port for ThinLinc Web Access.",
-        "example": "300",
-    },
-    "raspberry-pi.hdmi_connector": {
-        "description": "Which HDMI connector to force output on.",
-        "example": "0 | 1",
-    },
-    "raspberry-pi.hdmi_mode": {
-        "description": "Forced HDMI display mode.",
-        "example": "1920x1080@60",
-    },
-    "raspberry-pi.host": {
-        "description": "SSH hostname of the Raspberry Pi.",
-        "example": "raspberrypi.local",
-    },
-    "raspberry-pi.ip": {
-        "description": "IP address of the Raspberry Pi.",
-        "example": "192.168.1.50",
     },
     "vagrant.show_console": {
         "description": "Show the VM console window when starting a local Vagrant VM.",

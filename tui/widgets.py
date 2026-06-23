@@ -1657,19 +1657,18 @@ class SettingsScreen(ModalScreen[None]):
 
         self._schema_descriptions = {}
         self._schema_defaults = {}
-        # Provider descriptions/defaults come from each installed provider's
-        # manifest config_schema, not a core hardcode — so this covers every
-        # pulled provider automatically, whatever its id.
+        # Descriptions/defaults come from each installed plugin's manifest
+        # config_schema (provider OR package), not a core hardcode. Collect
+        # display_name → section label for every plugin so core names none.
+        plugin_labels: dict[str, str] = {}
         try:
-            provider_sections = {
-                str(plugin["id"])
-                for plugin in default_engine().plugin_list(kind="provider")
-                if plugin.get("id")
-            }
+            for plugin in default_engine().plugin_list():
+                pid = str(plugin.get("id") or "")
+                if pid:
+                    plugin_labels[pid] = str(plugin.get("display_name") or pid)
+                    self._load_schema_for_provider(pid)
         except Exception:
-            provider_sections = set()
-        for provider_id in provider_sections:
-            self._load_schema_for_provider(provider_id)
+            pass
 
         table = self.query_one("#settings-table", DataTable)
         table.clear()
@@ -1695,7 +1694,17 @@ class SettingsScreen(ModalScreen[None]):
         except Exception:
             pass
 
-        for section_info in CONFIG_SECTIONS:
+        # Core sections first (defined order), then provider/package sections
+        # contributed by installed plugins (alphabetical), labeled by display_name.
+        core_ids = {section["id"] for section in CONFIG_SECTIONS}
+        ordered_sections: list[dict[str, str]] = list(CONFIG_SECTIONS)
+        for section_id in sorted(self._structured):
+            if section_id in core_ids:
+                continue
+            label = plugin_labels.get(section_id, section_id.replace("-", " ").title())
+            ordered_sections.append({"id": section_id, "label": label})
+
+        for section_info in ordered_sections:
             section_id = section_info["id"]
             section_label = section_info["label"]
             fields = self._structured.get(section_id, {})
