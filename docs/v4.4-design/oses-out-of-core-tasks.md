@@ -90,7 +90,7 @@ manifests (already there). Commit per OS family.
 
 ## Phase 4 — delete the real `oses/` from core  *(eve core; after Phase 3)*
 
-Once every real OS family is an `eve-oses` plugin and parity-green:
+Once every real OS family is an `eve-providers/oses/` plugin and parity-green:
 1. Delete `oses/ubuntu-26.04*` and `oses/windows-server-2025` from core. Keep
    only `oses/mockos-*` and `oses/mockwin-*` as test fixtures.
 2. Remove the in-repo `oses/<id>` fallback added in Phase 2 — discovery is now
