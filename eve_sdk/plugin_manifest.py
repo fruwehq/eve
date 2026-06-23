@@ -84,17 +84,55 @@ class PluginManifest:
 
     @classmethod
     def plugin_paths(cls) -> list[Path]:
+        synced_root = Workdir.plugins_dir()
+        configured_ids = cls._configured_source_ids()
         paths: list[Path] = []
         for root in cls.plugin_roots():
             if not root.exists():
                 continue
+            # The synced root (.eve/plugins) is source-managed: only descend
+            # into exposures backed by a currently-configured source, so the
+            # installed set mirrors the configured set exactly and stale
+            # materializations stop appearing. Other roots (the legacy repo
+            # plugins dir, EVE_PLUGIN_ROOTS extras) are user/dev-owned and
+            # walked in full. Hermetic tests set EVE_PLUGIN_ROOTS_EXCLUSIVE=1,
+            # which excludes the synced root from plugin_roots() entirely.
+            if root == synced_root and configured_ids is not None:
+                for source_id in configured_ids:
+                    paths.extend(cls._manifests_under(root / source_id))
+                continue
             # os.walk(followlinks=True): synced sources are exposed as symlinks
             # under .eve/plugins/<id>; we must descend into them to find manifests.
             # (pathlib's ** symlink-following is 3.13+; this stays 3.12-compatible.)
-            for dirpath, _dirs, files in os.walk(root, followlinks=True):
-                if "eve-plugin.yaml" in files:
-                    paths.append(Path(dirpath) / "eve-plugin.yaml")
+            paths.extend(cls._manifests_under(root))
         return sorted(paths)
+
+    @classmethod
+    def _manifests_under(cls, root: Path) -> list[Path]:
+        found: list[Path] = []
+        if not root.is_dir():
+            return found
+        for dirpath, _dirs, files in os.walk(root, followlinks=True):
+            if "eve-plugin.yaml" in files:
+                found.append(Path(dirpath) / "eve-plugin.yaml")
+        return found
+
+    @staticmethod
+    def _configured_source_ids() -> set[str] | None:
+        """Ids of configured plugin sources, or ``None`` if resolution failed.
+
+        The synced plugins root is source-aware: only exposures whose id is in
+        the configured set are discovered. ``None`` is the safe fallback — a
+        malformed sources file should not make every plugin invisible, so the
+        caller walks the synced root in full instead. (An empty-but-valid
+        source list returns ``set()``, correctly yielding no plugins.)
+        """
+        try:
+            from eve_sdk.registry import load_sources
+
+            return {source.id for source in load_sources()}
+        except Exception:
+            return None
 
     @classmethod
     def load(cls, path: str | os.PathLike[str]) -> dict[str, Any]:
