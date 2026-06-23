@@ -8,10 +8,7 @@ def test_config_env_expands_provider_path_field(monkeypatch: pytest.MonkeyPatch,
     """A provider's type:path config field gets ~ expansion without core naming it."""
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     defaults = tmp_path / "defaults.yaml"
-    # mock-cloud declares region (string) -> MOCK_REGION. Add a path-typed
-    # provider field via a local override to exercise expansion.
-    defaults.write_text("mock-cloud:\n  region: r1\n", encoding="utf-8")
-    # SSH key (core, is_path) still expands.
+    # SSH key (core, is_path) expands; mock-cloud region (string) does not.
     defaults.write_text(
         "global:\n  ssh_public_key_file: ~/id.pub\nmock-cloud:\n  region: r1\n",
         encoding="utf-8",
