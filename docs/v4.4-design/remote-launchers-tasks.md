@@ -102,12 +102,26 @@ and `scripts/remote-*`):
    (e.g. rustdesk requires `capture:unattended`; the GNOME/wayland desktop bundle
    provides `session:wayland` and not unattended capture).
 
-Health gate: in the package repos, plus cross-repo parity from eve (Phase 6 check
-can be run early). Commit per repo: `feat(packages): own remote launchers + config (v4.4 §8)`.
+**Commit one package at a time** — `feat(<pkg>): own remote launcher + config (v4.4 §8)`.
+Each package migration is independently safe: once a package's actions declare
+`exec`, the generic path serves it and the core fallback serves the rest, so the
+tree stays green after every package. This makes the phase resumable — running out
+of budget just leaves more packages on the fallback, never a broken tree. Do
+sunshine first (proven), then the SSH-dance clients (vnc/rustdesk/rdp/xpra), then
+the rest.
 
-## Phase 4 — delete the core leaks  *(eve core; merges with Phase 3)*
+**Verification standard — argv-parity, not live-VM.** The current core launchers
+are not live-VM tested; they are argv-parity tested (the `remote_launch.py` builder
+tests assert exact command vectors). Port those parity tests alongside each package
+launcher so the migrated client reaches the *same* confidence the core code had.
+Live-VM launch is out of scope and not required to land §8 — do not treat its
+absence as a blocker.
 
-Now that packages own everything:
+## Phase 4 — delete the core leaks  *(eve core; ONLY after all packages migrated)*
+
+This is the one all-or-nothing step — do it only once **every** launcher-owning
+package (sunshine, rdp, rustdesk, vnc, xpra, waypipe, thinlinc, nomachine,
+splashtop) declares `exec` and is parity-green. Now that packages own everything:
 
 1. Delete `eve_sdk/remote_launch.py` client builders (keep only the generic spine
    helpers still used by the dispatcher; move them if cleaner) and delete
