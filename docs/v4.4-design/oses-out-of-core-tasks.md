@@ -36,10 +36,12 @@ Therefore: a **new `os` plugin kind**. An OS plugin owns one OS family's generic
 `provision/` tree; core discovers it from the installed plugin set, exactly like
 providers/packages. Provider manifests keep only their image/boot specifics.
 
-**Home: a new `eve-oses` repo** (consistent with `eve-providers` /
-`eve-packages-*` / `eve-plugins-*`). The user creates the repo; the real OS
-families move there as `os` plugins. Mock OSes stay in-repo as test fixtures
-(discovered via `EVE_PLUGIN_ROOTS_EXCLUSIVE`, like the `mock-cloud` provider).
+**Home: the `eve-providers` repo, under a shared `oses/` directory** (no new
+repo). The real OS families move to `eve-providers/oses/<id>/` as `os` plugins —
+a shared, non-per-provider location alongside the repo's existing `_common`/
+`_catalog-base` shared dirs, so the generic provision tree is **not** duplicated
+into each provider. Mock OSes stay in eve core as test fixtures (discovered via
+`EVE_PLUGIN_ROOTS_EXCLUSIVE`, like the `mock-cloud` provider).
 
 ## Health gate (every phase)
 
@@ -78,13 +80,13 @@ test that an `os`-plugin-provided provision tree is discovered and used.
 
 Commit: `feat(provision): discover OS provision trees from os plugins (§14)`.
 
-## Phase 3 — move the real OS families to `eve-oses`  *(new repo; release-coupled)*
+## Phase 3 — move the real OS families to `eve-providers/oses/`  *(release-coupled)*
 
 For each real OS family (`ubuntu-26.04*`, `windows-server-2025`): create an `os`
-plugin in `eve-oses` with an `eve-plugin.yaml` (`kind: os`, the family id, arch
-`supports`) and its `provision/` tree moved verbatim from core. Port any provision
-tests. The provider image catalog entries stay in the provider manifests
-(already there). Commit per OS family.
+plugin at `eve-providers/oses/<id>/` with an `eve-plugin.yaml` (`kind: os`, the
+family id, arch `supports`) and its `provision/` tree moved verbatim from core.
+Port any provision tests. The provider image catalog entries stay in the provider
+manifests (already there). Commit per OS family.
 
 ## Phase 4 — delete the real `oses/` from core  *(eve core; after Phase 3)*
 
@@ -100,13 +102,13 @@ Commit: `refactor(core): drop real OS families; discovery is plugin-only (§14)`
 ## Phase 5 — cross-repo parity
 
 ```
-EVE_PLUGIN_ROOTS_EXCLUSIVE=1 EVE_PLUGIN_ROOTS="<eve-oses>:<providers>:<pkgs>" \
+EVE_PLUGIN_ROOTS_EXCLUSIVE=1 EVE_PLUGIN_ROOTS="<eve-providers>:<pkgs>" \
   PATH="$PWD/.venv/bin:$PATH" .venv/bin/python -m pytest tests/python -q
 ```
 
 Confirm provisioning still resolves + runs steps for a real OS family sourced
-from `eve-oses`, and the mock OSes still work as in-repo fixtures. No fallback
-paths — a missing OS plugin must fail loudly.
+from `eve-providers/oses/`, and the mock OSes still work as in-repo fixtures. No
+fallback paths — a missing OS plugin must fail loudly.
 
 ## Phase 6 — extend the §11 lint to ban OS-family ids  *(eve core; LAST)*
 
@@ -118,6 +120,6 @@ Commit: `chore(lint): ban OS-family ids in core; v4.4 §14 done`.
 
 ## Merge discipline
 
-eve `v4.4` + `eve-oses` (+ the already-coupled providers/packages PRs) merge as
-one set. Core-first (Phase 4 before `eve-oses` exists) breaks provisioning. Run
-Phase 5 parity green before any merge.
+eve `v4.4` + `eve-providers` (the `oses/` addition, alongside #7) + the coupled
+packages PRs merge as one set. Core-first (Phase 4 before `eve-providers/oses/`
+exists) breaks provisioning. Run Phase 5 parity green before any merge.
