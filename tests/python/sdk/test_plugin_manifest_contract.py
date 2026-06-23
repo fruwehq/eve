@@ -142,6 +142,52 @@ class TestPackageConfigSchema:
 
 
 # ---------------------------------------------------------------------------
+# v4.4 §8: launcher exec/wait_for, vagrant port_forwards, capability tokens
+# ---------------------------------------------------------------------------
+class TestLauncherAndCapabilities:
+    def test_action_exec_and_wait_for_accepted(self, tmp_path: Path) -> None:
+        manifest = _package_manifest(
+            tmp_path,
+            actions=[
+                {"id": "open", "label": "Open", "target": "testpkg.open", "exec": "commands/remote-open"},
+                {"id": "wait", "label": "Wait", "target": "testpkg.wait", "wait_for": "testpkg.open"},
+            ],
+        )
+        PluginManifest.validate(manifest)
+
+    def test_vagrant_port_forwards_accepted(self, tmp_path: Path) -> None:
+        manifest = _package_manifest(
+            tmp_path,
+            vagrant={
+                "port_forwards": [
+                    {"guest": 47984, "host": 47984},
+                    {"guest": 47998, "host": 47998, "protocol": "udp"},
+                ]
+            },
+        )
+        PluginManifest.validate(manifest)
+
+    def test_port_forward_missing_guest_rejected(self, tmp_path: Path) -> None:
+        manifest = _package_manifest(tmp_path, vagrant={"port_forwards": [{"host": 47984}]})
+        with pytest.raises(ValueError):
+            PluginManifest.validate(manifest)
+
+    def test_capability_tokens_accepted(self, tmp_path: Path) -> None:
+        manifest = _package_manifest(
+            tmp_path,
+            provides=["session:wayland"],
+            requires_capabilities=["capture:unattended"],
+            conflicts_capabilities=["session:wayland"],
+        )
+        PluginManifest.validate(manifest)
+
+    def test_malformed_capability_token_rejected(self, tmp_path: Path) -> None:
+        manifest = _package_manifest(tmp_path, provides=["not-a-token"])
+        with pytest.raises(ValueError):
+            PluginManifest.validate(manifest)
+
+
+# ---------------------------------------------------------------------------
 # catalog on provider manifests
 # ---------------------------------------------------------------------------
 

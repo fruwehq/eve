@@ -89,6 +89,45 @@
       "items": { "type": "string" }
     },
 
+    "provides": {
+      "description": "Capability tokens this package offers to the resolved bundle (package plugins only). Tokens are abstract '<facet>:<value>' strings (e.g. 'session:wayland', 'capture:unattended') — never package ids — so any package can negotiate compatibility without naming another package. Core aggregates these across the bundle.",
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*:[a-z0-9-]+$" }
+    },
+
+    "requires_capabilities": {
+      "description": "Capability tokens ('<facet>:<value>') that must be provided by the rest of the resolved bundle for this package to function. Dispatch fails clearly if any is unmet (v4.4 §8).",
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*:[a-z0-9-]+$" }
+    },
+
+    "conflicts_capabilities": {
+      "description": "Capability tokens ('<facet>:<value>') that disable this package when present in the resolved bundle. Replaces core-side, package-named compatibility guards (v4.4 §8).",
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*:[a-z0-9-]+$" }
+    },
+
+    "vagrant": {
+      "description": "Vagrant-engine contributions from this package (package plugins only). A package names only its own ports — self-contained, not a package-name leak.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "port_forwards": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["guest", "host"],
+            "additionalProperties": false,
+            "properties": {
+              "guest":     { "type": "integer", "minimum": 1, "maximum": 65535 },
+              "host":      { "type": "integer", "minimum": 1, "maximum": 65535 },
+              "protocol":  { "type": "string", "enum": ["tcp", "udp"] }
+            }
+          }
+        }
+      }
+    },
+
     "config_schema": {
       "description": "Config and secret field declarations. Valid on both provider and package manifests. On packages, values are namespaced under the package id (e.g. mypkg.my_field).",
       "type": "object",
@@ -344,6 +383,14 @@
           "type": "string",
           "minLength": 1,
           "description": "Action target dispatched by package-action, provider dispatch, or a compatibility Make target."
+        },
+        "exec": {
+          "type": "string",
+          "description": "Launcher command path (relative to the plugin dir) that core execs generically for this action. When set, core resolves the plugin dir, exports the shared EVE_REMOTE_* context + profile env, and runs it — no target string is interpreted by core. Enables package-owned remote launchers (v4.4 §8)."
+        },
+        "wait_for": {
+          "type": "string",
+          "description": "Another action target to run (and succeed) before this action. Used by launchers that need a service ready first, replacing core-side wait hooks."
         },
         "destructive": {
           "type": "boolean",
