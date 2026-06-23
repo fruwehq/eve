@@ -70,6 +70,8 @@ def test_exec_action_exports_remote_context_and_runs(
     assert env["EVE_REMOTE_OS_FAMILY"] == "ubuntu"
     assert env["EVE_REMOTE_ENGINE"] == "terraform"
     assert env["EVE_REMOTE_ACTION"] == "pkg.open"
+    assert env["EVE_REMOTE_ROOT"] == str(tmp_path)
+    assert env["EVE_REMOTE_INSTANCE"] == "inst"
 
 
 def test_exec_action_wait_for_runs_target_first(pa: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

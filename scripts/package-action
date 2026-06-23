@@ -83,6 +83,11 @@ def export_remote_context(root: Path, instance_name: str, target: str) -> None:
             "EVE_REMOTE_OS_FAMILY": profile_env.get("OS_FAMILY", ""),
             "EVE_REMOTE_ENGINE": profile_env.get("ENGINE", ""),
             "EVE_REMOTE_ACTION": target,
+            # Lets package launchers reach core's generic services (instance-ssh
+            # for remote state, instance-password) and know which instance they
+            # act on — without core interpreting any target/package string.
+            "EVE_REMOTE_ROOT": str(root),
+            "EVE_REMOTE_INSTANCE": instance_name,
         }
     )
 
