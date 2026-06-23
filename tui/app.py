@@ -55,6 +55,7 @@ from tui.commands import (
     provider_status_table,
     upload_folders,
 )
+from tui.plugins import prune_orphans
 from tui.render import (
     command_label,
     display_state,
@@ -216,8 +217,16 @@ class EveTui(App[None]):
     }
 
     #busy-cancel-command {
+        /* Hidden until a command is running (see #root.busy below). Yielding it
+           display-on by default flashed a full-width Cancel button at startup
+           before update_action_state() ran. */
+        display: none;
         width: 100%;
         margin: 0 1;
+    }
+
+    #root.busy #busy-cancel-command {
+        display: block;
     }
 
     #root.busy #output {
@@ -522,6 +531,7 @@ class EveTui(App[None]):
         self.show_disabled = False
         self._provider_pane_data: list[dict[str, Any]] = []
         self._provider_reachability: dict[str, bool] = {}
+        self.refetch_label: str | None = None
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -665,9 +675,16 @@ class EveTui(App[None]):
             self.render_empty_state()
 
     async def load_initial_data(self) -> None:
-        await self.load_catalog_options()
-        await self.load_provider_pane_data()
-        await self.action_refresh()
+        self.set_refetch("catalog")
+        try:
+            await self.load_catalog_options()
+            await self.load_provider_pane_data()
+            # Load directly rather than via action_refresh(): the latter flips
+            # command_running, which is for cancellable subprocess commands and
+            # would briefly reshuffle the layout on startup for no benefit.
+            await self.refresh_instances(preserve_selection=True, quiet=True)
+        finally:
+            self.set_refetch(None)
         self.call_after_refresh(self.focus_instance_list_if_empty)
 
     async def load_provider_pane_data(self) -> None:
@@ -826,6 +843,10 @@ class EveTui(App[None]):
                 start_new_session=True,
             )
             self.current_process = proc
+            # Now that a cancellable subprocess exists, activate the busy
+            # layout (expanded output + Cancel button). update_busy_layout keys
+            # off current_process, so this is the moment it turns on.
+            self.update_action_state()
             assert proc.stdout is not None
             partial_line = ""
             while True:
@@ -1523,13 +1544,23 @@ class EveTui(App[None]):
         )
 
     async def reload_after_plugin_change(self) -> None:
-        self.log_line("[primary]Reloading plugins…[/]")
-        invalidate_caches()
-        await self.load_catalog_options()
-        await self.load_provider_pane_data()
-        await self.load_provider_health()
-        await self.refresh_instances(preserve_selection=True, quiet=True)
-        self.log_line("[success]Plugins reloaded.[/]")
+        self.set_refetch("plugins")
+        try:
+            self.log_line("[primary]Reloading plugins…[/]")
+            # Drop materialized plugins whose source was just removed so the
+            # provider list reflects the configured set immediately — without
+            # waiting for a network pull. Then drop the warm caches and reload.
+            pruned = prune_orphans()
+            for source_id in pruned:
+                self.log_line(f"[dim]pruned orphaned plugin source: {source_id}[/]")
+            invalidate_caches()
+            await self.load_catalog_options()
+            await self.load_provider_pane_data()
+            await self.load_provider_health()
+            await self.refresh_instances(preserve_selection=True, quiet=True)
+            self.log_line("[success]Plugins reloaded.[/]")
+        finally:
+            self.set_refetch(None)
 
     async def action_cancel_command(self) -> None:
         proc = self.current_process
@@ -2136,7 +2167,6 @@ class EveTui(App[None]):
         busy = self.command_running
         self.update_busy_layout()
         self.set_button("refresh", disabled=busy)
-        self.set_button("busy-cancel-command", disabled=not busy, hide_when_disabled=False)
         for index in range(PROVIDER_ACTION_BUTTONS):
             button = self.query_one(f"#provider-action-{index}", Button)
             if index < len(self.current_provider_actions):
@@ -2255,24 +2285,58 @@ class EveTui(App[None]):
 
     def update_busy_layout(self) -> None:
         root = self.query_one("#root", Container)
-        summary = self.query_one("#summary", Static)
         output_help = self.query_one("#output-help", Static)
-        cancel_button = self.query_one("#busy-cancel-command", Button)
-        cancel_button.display = self.command_running
-        if self.command_running:
+        # The full "busy" output layout — and the Cancel button (via #root.busy
+        # in CSS) — belong to a running subprocess, not the in-process refresh.
+        # The refresh has nothing to cancel and shouldn't hide the body, so it
+        # is gated on current_process, not the broader command_running flag.
+        subprocess_active = self.current_process is not None
+        if subprocess_active:
             root.add_class("busy")
-            label = self.current_command_label or "command"
-            summary.update(f"[warning]Running {label}[/]  [dim]press Ctrl-C or c to cancel; y copies output[/dim]")
             output_help.update(
                 "Output is expanded while the command runs.\n"
                 "Press Ctrl-C or c to cancel, y to copy selected/all log text."
             )
         else:
             root.remove_class("busy")
-            summary.update(format_aggregate(self._cached_aggregate))
             output_help.update(
                 "Output  |  arrows/PageUp/PageDown to scroll, y to copy selected/all log text"
             )
+        self._render_summary()
+
+    def set_refetch(self, label: str | None) -> None:
+        """Show/clear a visible 'refetching' indicator.
+
+        Eve invalidates its warm caches and re-reads the catalog/provider
+        manifests on startup and after plugin-source changes. Those reads can
+        take a moment, so surface them on the always-visible summary bar
+        instead of letting the UI appear frozen.
+        """
+        self.refetch_label = label
+        self._render_summary()
+
+    def _render_summary(self) -> None:
+        """Render the summary bar from the highest-priority UI state.
+
+        Precedence: refetching > subprocess running > idle aggregate. The
+        summary bar is always visible, so it is the single place that reflects
+        whatever the app is currently waiting on. The "Running" state tracks a
+        real subprocess (current_process) so an in-process refresh doesn't
+        pretend a cancellable command is in flight.
+        """
+        summary = self.query_one("#summary", Static)
+        if self.refetch_label is not None:
+            summary.update(
+                f"[accent]⟳[/] [b]Refetching {self.refetch_label}[/b]  "
+                "[dim]reloading catalog & providers…[/dim]"
+            )
+        elif self.current_process is not None:
+            label = self.current_command_label or "command"
+            summary.update(
+                f"[warning]Running {label}[/]  [dim]press Ctrl-C or c to cancel; y copies output[/dim]"
+            )
+        else:
+            summary.update(format_aggregate(self._cached_aggregate))
 
     def action_focus_log(self) -> None:
         output = self.query_one("#output", TextArea)
