@@ -180,7 +180,7 @@
     },
 
     "os": {
-      "description": "Resolved catalog OS entry.",
+      "description": "Resolved catalog OS entry. Core/engine image selectors are named; provider-specific image fields (aws_ami_*, gcp_image_*, vultr_os_id, …) flow through additionalProperties, contributed by each provider's catalog.",
       "type": "object",
       "required": ["id", "family", "version", "arch"],
       "additionalProperties": true,
@@ -192,13 +192,7 @@
         "vagrant_box": { "type": "string" },
         "metal_image": { "type": "string" },
         "cloud_image_url": { "type": "string" },
-        "cloud_image_sha256": { "type": "string" },
-        "aws_ami_name_pattern": { "type": "string" },
-        "aws_ami_id": { "type": "string" },
-        "aws_ssm_parameter": { "type": "string" },
-        "gcp_image_project": { "type": "string" },
-        "gcp_image_family": { "type": "string" },
-        "vultr_os_id": { "type": "integer" }
+        "cloud_image_sha256": { "type": "string" }
       }
     },
 
@@ -219,18 +213,12 @@
     },
 
     "location": {
-      "description": "Resolved catalog location entry. Contains per-provider region/zone mappings.",
+      "description": "Resolved catalog location entry. Per-provider region/zone data is contributed by each provider under its id key (validated as provider_location); core names no provider here.",
       "type": "object",
       "required": ["name"],
-      "additionalProperties": true,
+      "additionalProperties": { "$ref": "#/$defs/provider_location" },
       "properties": {
-        "name": { "type": "string" },
-        "aws": { "$ref": "#/$defs/provider_location" },
-        "gcp": { "$ref": "#/$defs/provider_location" },
-        "vultr": { "$ref": "#/$defs/provider_location" },
-        "local-qemu": { "$ref": "#/$defs/provider_location" },
-        "raspberry-pi": { "$ref": "#/$defs/provider_location" },
-        "truenas": { "$ref": "#/$defs/provider_location" }
+        "name": { "type": "string" }
       }
     },
 

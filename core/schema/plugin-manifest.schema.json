@@ -624,7 +624,7 @@
     },
 
     "catalog_os": {
-      "description": "A provider-specific OS image/compatibility contribution. Only the provider's own fields are declared here (e.g. aws_ami_name_pattern, vultr_os_id, cloud_image_url); shared identity (family/version/arch) is merged by the aggregator.",
+      "description": "A provider-specific OS image/compatibility contribution. Only the provider's own image fields are declared here (e.g. an AMI pattern, a cloud image URL, a metal image); core names none — every provider-specific selector flows through additionalProperties, while shared identity (family/version/arch) is merged by the aggregator.",
       "type": "object",
       "required": ["id"],
       "additionalProperties": true,
@@ -636,10 +636,6 @@
         "vagrant_box": { "type": "string" },
         "cloud_image_url": { "type": "string" },
         "cloud_image_sha256": { "type": "string" },
-        "aws_ami_name_pattern": { "type": "string" },
-        "gcp_image_project": { "type": "string" },
-        "gcp_image_family": { "type": "string" },
-        "vultr_os_id": { "type": ["string", "integer"] },
         "metal_image": { "type": "string" }
       }
     },
