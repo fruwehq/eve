@@ -119,7 +119,7 @@ def test_add_url_opens_prompt_modal() -> None:
     from textual.widgets import Button
 
     from tui.app import EveTui
-    from tui.widgets import PluginSourcesScreen, TextPromptScreen
+    from tui.widgets import AddSourceScreen, PluginSourcesScreen
 
     async def _run() -> None:
         app = EveTui()
@@ -130,7 +130,7 @@ def test_add_url_opens_prompt_modal() -> None:
             await pilot.pause()
             screen.query_one("#plugins-add-url", Button).press()
             await pilot.pause()
-            assert isinstance(app.screen, TextPromptScreen)
+            assert isinstance(app.screen, AddSourceScreen)
 
     asyncio.run(_run())
 

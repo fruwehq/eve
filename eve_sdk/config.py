@@ -19,9 +19,10 @@ class ConfigEnv:
     the shared display setting, ``vagrant`` the engine, and ``moonlight`` until
     its launcher is extracted with sunshine in §8). Every provider- and
     package-owned row is contributed by that plugin's ``config_schema``
-    field-spec ``env_var`` declaration, discovered at runtime via
-    ``PluginManifest.load_all("provider")`` ∪ ``load_all("package")``. This
-    keeps core free of provider/package id literals and their env-var names.
+    field-spec ``env_var`` declaration, discovered at runtime across both
+    provider and package plugins (``load_all("provider")`` and
+    ``load_all("package")``). This keeps core free of provider/package id
+    literals and their env-var names.
 
     Path expansion (~ / $HOME) is carried per-row: core rows flag their own
     path fields, and plugin rows flag every ``type: path`` field. So no
