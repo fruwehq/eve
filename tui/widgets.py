@@ -2195,6 +2195,108 @@ class ProviderConfigScreen(ModalScreen[None]):
         self.dismiss(None)
 
 
+class AddSourceScreen(ModalScreen[dict[str, str] | None]):
+    """Add a plugin source by URL, branch, and folder (subdir).
+
+    A source is ``(repo, branch, folder)`` with folder defaulting to ``/``
+    (repo root). Validation is delegated to ``registry.add_source`` (via
+    ``plugin_src.add_url``) — the TUI does not re-implement the subdir ``..``
+    check, so an unsafe folder is rejected with a clear message.
+    """
+
+    CSS = """
+    AddSourceScreen {
+        align: center middle;
+    }
+
+    #addsrc-dialog {
+        width: 90%;
+        max-width: 80;
+        height: auto;
+        border: round $primary;
+        background: $surface;
+        padding: 1 2;
+    }
+
+    #addsrc-label {
+        margin-bottom: 1;
+    }
+
+    #addsrc-detail {
+        margin-bottom: 1;
+        color: $text-muted;
+    }
+
+    .addsrc-field-label {
+        height: 1;
+        color: $text-muted;
+        margin-top: 1;
+    }
+
+    #addsrc-url, #addsrc-ref, #addsrc-folder {
+        width: 100%;
+        margin-bottom: 1;
+    }
+
+    #addsrc-actions {
+        height: 3;
+        align-horizontal: center;
+        background: transparent;
+    }
+
+    #addsrc-actions Button {
+        margin: 0 1;
+    }
+    """
+
+    BINDINGS = [
+        Binding("escape", "dismiss_cancel", "Cancel"),
+    ]
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="addsrc-dialog"):
+            yield Label("[b]Add plugin source[/b]", id="addsrc-label")
+            yield Static(
+                "A source is (repo, branch, folder). Folder defaults to / (repo "
+                "root); a .eve/ inside the folder is used automatically when present.",
+                id="addsrc-detail",
+            )
+            yield Label("URL", classes="addsrc-field-label")
+            yield Input(placeholder="https://github.com/you/plugins.git", id="addsrc-url")
+            yield Label("Branch / ref", classes="addsrc-field-label")
+            yield Input(placeholder="main (pinning a tag is recommended)", id="addsrc-ref")
+            yield Label("Folder", classes="addsrc-field-label")
+            yield Input(value="/", placeholder="/", id="addsrc-folder")
+            with Horizontal(id="addsrc-actions"):
+                yield Button("Cancel", id="addsrc-cancel")
+                yield Button("Add", id="addsrc-ok", variant="primary")
+
+    def on_mount(self) -> None:
+        self.query_one("#addsrc-url", Input).focus()
+
+    def _submit(self) -> None:
+        url = self.query_one("#addsrc-url", Input).value.strip()
+        ref = self.query_one("#addsrc-ref", Input).value.strip()
+        folder = self.query_one("#addsrc-folder", Input).value.strip()
+        if not url:
+            self.query_one("#addsrc-url", Input).focus()
+            return
+        self.dismiss({"url": url, "ref": ref, "subdir": folder})
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "addsrc-ok":
+            self._submit()
+        else:
+            self.dismiss(None)
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        event.stop()
+        self._submit()
+
+    def action_dismiss_cancel(self) -> None:
+        self.dismiss(None)
+
+
 class TextPromptScreen(ModalScreen[str | None]):
     """Minimal single-line text prompt. Dismisses with the entered text or None."""
 
@@ -2338,7 +2440,7 @@ class PluginSourcesScreen(ModalScreen[None]):
         with Vertical(id="plugins-dialog"):
             yield Label("[b]Plugin sources[/b]", id="plugins-title")
             table = ListTable(id="plugins-table")
-            table.add_columns("", "Source", "Ref", "Status", "Info")
+            table.add_columns("", "Source", "Ref", "Folder", "Status", "Info")
             table.cursor_type = "row"
             yield table
             with Horizontal(id="plugins-controls"):
@@ -2365,14 +2467,19 @@ class PluginSourcesScreen(ModalScreen[None]):
         for row in plugin_src.configured_rows():
             configured_ids.add(row["id"])
             status = "synced" if row["synced"] else "not synced"
-            table.add_row("✔", f"[b]{row['id']}[/b]", row["ref"], status, row["url"], key=f"cfg:{row['id']}")
+            folder = row.get("subdir") or "/"
+            table.add_row(
+                "✔", f"[b]{row['id']}[/b]", row["ref"], folder, status, row["url"], key=f"cfg:{row['id']}"
+            )
             self._rows.append(("cfg", row["id"]))
         for row in plugin_src.recommended_rows():
             if row["id"] in configured_ids:
                 continue
             tags = ", ".join(row["tags"])
             info = f"{row['description']}" + (f" [dim]({tags})[/]" if tags else "")
-            table.add_row("[dim]+[/]", row["id"], row["ref"], "[dim]recommended[/]", info, key=f"rec:{row['id']}")
+            table.add_row(
+                "[dim]+[/]", row["id"], row["ref"], "[dim]/[/]", "[dim]recommended[/]", info, key=f"rec:{row['id']}"
+            )
             self._rows.append(("rec", row["id"]))
         if not self._rows:
             self._set_status("No sources or recommendations yet — use Add URL… to add one.")
@@ -2446,23 +2553,17 @@ class PluginSourcesScreen(ModalScreen[None]):
             self._reload()
 
     def _open_add_url(self) -> None:
-        def on_result(value: str | None) -> None:
-            if not value:
+        def on_result(result: dict[str, str] | None) -> None:
+            if not result:
                 return
-            url, _, ref = value.partition("#")
-            ok, message = plugin_src.add_url(url, ref=ref)
+            ok, message = plugin_src.add_url(
+                result["url"], ref=result.get("ref", ""), subdir=result.get("subdir", "")
+            )
             self._set_status(message)
             if ok:
                 self._reload()
 
-        self.app.push_screen(
-            TextPromptScreen(
-                "Add plugin source",
-                placeholder="https://github.com/you/plugins.git#v1.0.0",
-                detail="Enter a git url. Pin a ref with url#ref (recommended).",
-            ),
-            on_result,
-        )
+        self.app.push_screen(AddSourceScreen(), on_result)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "close":

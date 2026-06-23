@@ -288,10 +288,20 @@ def _materialize_worktree(source: Source, worktree: Path, env: dict[str, str]) -
 
 
 def _expose_subdir(source: Source, worktree: Path, dest_root: Path) -> None:
-    """Point `plugins_dir/<id>` at the source's subdir within its worktree."""
+    """Point ``plugins_dir/<id>`` at the source's resolved plugin root.
+
+    The plugin root is the source's folder (``subdir``, defaulting to the repo
+    root) — unless that folder contains a ``.eve/`` subdirectory, in which case
+    the ``.eve/`` directory is exposed instead. This lets a repo tuck its eve
+    plugin files under ``.eve/`` away from the top level without the user
+    pointing the source at a deeper folder by hand. Precedence: an explicit
+    ``.eve/`` within the folder wins over the folder itself; the user still
+    specifies only the folder.
+    """
     target = (worktree / source.subdir) if source.subdir else worktree
     if not target.is_dir():
         raise RegistryError(f"source {source.id}: subdir {source.subdir!r} not found at ref {source.ref}")
+    plugin_root = target / ".eve" if (target / ".eve").is_dir() else target
     link = dest_root / source.id
     if link.is_symlink() or link.exists():
         if link.is_symlink() or link.is_file():
@@ -300,7 +310,7 @@ def _expose_subdir(source: Source, worktree: Path, dest_root: Path) -> None:
             import shutil
 
             shutil.rmtree(link)
-    link.symlink_to(target)
+    link.symlink_to(plugin_root)
 
 
 # --------------------------------------------------------------------------- #

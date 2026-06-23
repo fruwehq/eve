@@ -24,6 +24,7 @@ def configured_rows() -> list[dict[str, Any]]:
         rows.append({
             "id": source.id,
             "url": source.url,
+            "subdir": source.subdir,
             "ref": source.ref or "(unpinned)",
             "auth": source.auth,
             "synced": source.id in locked,
@@ -59,8 +60,12 @@ def add_recommended(source_id: str) -> tuple[bool, str]:
     return True, f"added '{rec.id}' — run Pull to materialize"
 
 
-def add_url(url: str, *, ref: str = "", source_id: str = "", auth: str = "none") -> tuple[bool, str]:
+def add_url(
+    url: str, *, ref: str = "", subdir: str = "", source_id: str = "", auth: str = "none"
+) -> tuple[bool, str]:
     entry: dict[str, Any] = {"id": source_id or _derive_id(url), "url": url, "ref": ref, "auth": auth}
+    if subdir:
+        entry["subdir"] = subdir
     try:
         source = registry.add_source(entry)
     except registry.RegistryError as error:

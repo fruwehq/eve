@@ -121,6 +121,34 @@ def test_sync_exposes_subdir_and_resolves_sha(tmp_path: Path) -> None:
     assert not (exposed / "readme.md").exists()
 
 
+def test_sync_exposes_dot_eve_when_present(tmp_path: Path) -> None:
+    # A source folder containing a .eve/ directory exposes .eve/ as the plugin
+    # root (the convention lets a repo tuck plugin files out of its top level).
+    upstream = _make_repo(
+        tmp_path / "up",
+        {".eve/pkg/eve-plugin.yaml": "id: pkg\n", "readme.md": "top-level"},
+    )
+    src = Source(id="s", url=str(upstream), subdir="", ref="main", auth="none")
+    sync([src], plugins_dir=tmp_path / "plugins", cache_dir=tmp_path / "cache")
+    exposed = tmp_path / "plugins" / "s"
+    assert (exposed / "pkg/eve-plugin.yaml").read_text() == "id: pkg\n"
+    # The top-level file is NOT exposed — .eve/ wins over the folder root.
+    assert not (exposed / "readme.md").exists()
+
+
+def test_sync_exposes_folder_root_when_no_dot_eve(tmp_path: Path) -> None:
+    # Without .eve/, the folder itself is the plugin root (existing behavior).
+    upstream = _make_repo(
+        tmp_path / "up",
+        {"pkg/eve-plugin.yaml": "id: pkg\n", "readme.md": "top-level"},
+    )
+    src = Source(id="s", url=str(upstream), subdir="", ref="main", auth="none")
+    sync([src], plugins_dir=tmp_path / "plugins", cache_dir=tmp_path / "cache")
+    exposed = tmp_path / "plugins" / "s"
+    assert (exposed / "pkg/eve-plugin.yaml").read_text() == "id: pkg\n"
+    assert (exposed / "readme.md").read_text() == "top-level"
+
+
 def test_sync_two_refs_of_same_repo_coexist(tmp_path: Path) -> None:
     upstream = _make_repo(tmp_path / "up", {"a/marker": "main-content"})
     _git("checkout", "-q", "-b", "feature", cwd=upstream)
