@@ -1,12 +1,23 @@
 # v4.4 §8 — implementation task spec (for the coop coding agent)
 
 Read `docs/v4.4-design/remote-launchers.md` first — that is the settled contract.
-This file is the execution plan: **one phase per commit**, each self-contained for
-a cold session. Work on branch **`v4.4`** only — no separate/stacked PRs (see
-`docs/v4.4-roadmap.md` and the single-PR rule). Spans three repos; **core and the
-package repos must merge together** (core-first drops launchers/env — verified
-parity landmine). Run pytest with `.venv/bin` on `PATH` or the subprocess command
-tests spuriously fail on Python 3.9.
+
+**Run this end-to-end, autonomously.** Execute all six phases in order without
+stopping for external review between them. The phases are commit boundaries (commit
+after each, so history stays bisectable), not approval gates — self-verify every
+phase against the Health gate below and keep going. Only stop when §8 is **complete
+and fully green**, or when you hit a genuine blocker you cannot resolve (then commit
+what's clean and report exactly what's blocked). Do not ask for review mid-way; a
+human reviews the finished result.
+
+Work on branch **`v4.4`** only — no separate/stacked PRs (see `docs/v4.4-roadmap.md`
+and the single-PR rule). Spans three repos; **core and the package repos must merge
+together** (core-first drops launchers/env — verified parity landmine). Run pytest
+with `.venv/bin` on `PATH` or the subprocess command tests spuriously fail on
+Python 3.9.
+
+When done, self-review the whole diff against the contract (no package id left in
+core, no fallback paths, full suite + parity green) before reporting complete.
 
 ## Goal
 
