@@ -270,14 +270,33 @@ def validate_package_support(package_id: str, plugin: dict[str, Any], resolved: 
     for field, value, label in checks:
         if not support_allowed(supports, field, value):
             raise DispatchError(f"package plugin {package_id} does not support {label} {value}")
-    if (
-        os_family == "ubuntu"
-        and package_id == "rustdesk"
-        and "gnome-desktop" in resolved.get("bundle_packages", [])
-    ):
+    _reject_capability_conflicts(package_id, plugin, resolved)
+
+
+def _reject_capability_conflicts(
+    package_id: str, plugin: dict[str, Any], resolved: dict[str, Any]
+) -> None:
+    """Reject a package when a bundle provides a capability it conflicts with.
+
+    Capability-based (v4.4 §8): a package declares ``conflicts_capabilities``
+    tokens and other packages declare ``provides`` tokens; core matches tokens
+    and learns nothing about specific packages. A conflict is a hard error.
+    """
+    conflicts = plugin.get("conflicts_capabilities") or []
+    if not conflicts:
+        return
+    bundle_ids = set(resolved.get("bundle_packages") or [])
+    from eve_sdk.plugin_manifest import PluginManifest
+
+    provided: set[str] = set()
+    for other in PluginManifest.load_all("package"):
+        if other.get("id") in bundle_ids:
+            provided.update(other.get("provides") or [])
+    hit = sorted(set(conflicts) & provided)
+    if hit:
         raise DispatchError(
-            "package plugin rustdesk is disabled for gnome-desktop because RustDesk cannot "
-            "unattended-capture GNOME/Wayland sessions"
+            f"package plugin {package_id} is disabled for this bundle: required capability "
+            f"absent / conflicting capability present ({', '.join(hit)})"
         )
 
 

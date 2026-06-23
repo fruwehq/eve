@@ -48,13 +48,6 @@ class ConfigEnv:
         (("global", "ssh_public_key_file"), "SSH_PUBLIC_KEY_FILE", True),
         (("global", "timezone"), "TIMEZONE", False),
         (("global", "vm_user_name"), "VM_USER_NAME", False),
-        # moonlight is sunshine's client; its launcher still lives in core
-        # (remote_launch.py), so its config rows stay core until §8 moves the
-        # launcher (and these rows) out with sunshine.
-        (("moonlight", "bitrate_kbps"), "EPHEMERAL_MOONLIGHT_BITRATE_KBPS", False),
-        (("moonlight", "display_mode"), "EPHEMERAL_MOONLIGHT_DISPLAY_MODE", False),
-        (("moonlight", "video_codec"), "EPHEMERAL_MOONLIGHT_VIDEO_CODEC", False),
-        (("moonlight", "video_decoder"), "EPHEMERAL_MOONLIGHT_VIDEO_DECODER", False),
         (("vagrant", "show_console"), "VAGRANT_SHOW_CONSOLE", False),
     ]
 

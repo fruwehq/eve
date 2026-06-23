@@ -203,6 +203,7 @@ def adopt_resolved_instance(resolved_json_input: str) -> dict[str, Any]:
     matching the legacy jq remap.
     """
     resolved = json.loads(resolved_json_input)
+    assert isinstance(resolved, dict)
     if resolved.get("profile") is None:
         instance = resolved.get("instance") or {}
         profile = dict(instance)
@@ -331,6 +332,35 @@ def emit_json(resolved: dict[str, Any]) -> str:
     return json.dumps(resolved, separators=(",", ":"), ensure_ascii=False)
 
 
+def _aggregate_port_forwards(bundle_packages: list[str]) -> str:
+    """Aggregate ``vagrant.port_forwards`` across the resolved bundle's packages.
+
+    Data-driven (v4.4 §8): each package declares only its own ports in its
+    manifest; core no longer branches on package ids. Returns the Vagrantfile
+    ``forwarded_port`` snippet (empty when no package contributes ports).
+    """
+    from eve_sdk.plugin_manifest import PluginManifest
+
+    plugins = {p.get("id"): p for p in PluginManifest.load_all("package")}
+    lines: list[str] = []
+    for pkg_id in bundle_packages:
+        forwards = ((plugins.get(pkg_id) or {}).get("vagrant") or {}).get("port_forwards") or []
+        if not forwards:
+            continue
+        lines.append(f"  # {pkg_id}")
+        for pf in forwards:
+            guest = pf.get("guest")
+            host = pf.get("host")
+            if guest is None or host is None:
+                continue
+            proto = pf.get("protocol")
+            proto_part = f', protocol: "{proto}"' if proto else ""
+            lines.append(
+                f'  config.vm.network "forwarded_port", guest: {guest}, host: {host}{proto_part}, auto_correct: true'
+            )
+    return ("\n".join(lines) + "\n") if lines else ""
+
+
 def emit_vagrant(resolved: dict[str, Any]) -> str:
     """Produce a Vagrantfile for the resolved profile.
 
@@ -363,38 +393,7 @@ def emit_vagrant(resolved: dict[str, Any]) -> str:
 
     flags = {"docker": "docker" in bundle_packages, "dev": "dev-toolchain" in bundle_packages}
 
-    port_forwards = ""
-    if "sunshine" in bundle_packages:
-        port_forwards += (
-            '  # Sunshine / Moonlight\n'
-            '  config.vm.network "forwarded_port", guest: 47984, host: 47984, auto_correct: true\n'
-            '  config.vm.network "forwarded_port", guest: 47989, host: 47989, auto_correct: true\n'
-            '  config.vm.network "forwarded_port", guest: 47990, host: 47990, auto_correct: true\n'
-            '  config.vm.network "forwarded_port", guest: 48010, host: 48010, auto_correct: true\n'
-            '  config.vm.network "forwarded_port", guest: 47998, host: 47998, protocol: "udp", auto_correct: true\n'
-            '  config.vm.network "forwarded_port", guest: 47999, host: 47999, protocol: "udp", auto_correct: true\n'
-            '  config.vm.network "forwarded_port", guest: 48000, host: 48000, protocol: "udp", auto_correct: true\n'
-        )
-    if "vnc" in bundle_packages:
-        port_forwards += (
-            '  # VNC\n'
-            '  config.vm.network "forwarded_port", guest: 5901, host: 5901, auto_correct: true\n'
-        )
-    if "xpra" in bundle_packages:
-        port_forwards += (
-            '  # Xpra\n'
-            '  config.vm.network "forwarded_port", guest: 14500, host: 14500, auto_correct: true\n'
-        )
-    if "rdp" in bundle_packages:
-        port_forwards += (
-            '  # RDP\n'
-            '  config.vm.network "forwarded_port", guest: 3389, host: 3389, auto_correct: true\n'
-        )
-    if "thinlinc" in bundle_packages:
-        port_forwards += (
-            '  # ThinLinc Web Access\n'
-            '  config.vm.network "forwarded_port", guest: 300, host: 300, auto_correct: true\n'
-        )
+    port_forwards = _aggregate_port_forwards(bundle_packages)
 
     docker_setup = ""
     if flags["docker"]:
