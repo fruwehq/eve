@@ -155,7 +155,8 @@ class ConfigEnv:
         hardcoded MAPPINGS table had, so ``--structured`` section ordering is
         byte-identical before and after.
         Python's stable sort preserves the env_var order within one field
-        (e.g. GCP project → GOOGLE_CLOUD_PROJECT before GOOGLE_PROJECT).
+        (e.g. a provider that maps one field to two env vars keeps their
+        declared order).
         """
         combined = [*cls.MAPPINGS, *cls._provider_mappings()]
         return sorted(combined, key=lambda row: row[0])

@@ -244,7 +244,7 @@ def emit_env(resolved: dict[str, Any]) -> str:
     # Resolve provision/human user from the provider manifest's access rules,
     # using the same env→value→location→fallback chain instance-resolve uses
     # (resolve_access_value). The old legacy emit only honored a rule's env-var
-    # name, so a provider's static user (e.g. local-qemu ubuntu's
+    # name, so a provider's static user (e.g. a provider that pins
     # `{env: VM_USER_NAME, value: ubuntu}`) was dropped whenever the rule also
     # named an env var — leaving SSH_USER / HUMAN_USER_NAME empty and breaking
     # the remote-* launchers (VNC/RDP) that consume this output.

@@ -1659,7 +1659,7 @@ class SettingsScreen(ModalScreen[None]):
         self._schema_defaults = {}
         # Provider descriptions/defaults come from each installed provider's
         # manifest config_schema, not a core hardcode — so this covers every
-        # pulled provider (aws, gcp, truenas, raspberry-pi, …) automatically.
+        # pulled provider automatically, whatever its id.
         try:
             provider_sections = {
                 str(plugin["id"])
