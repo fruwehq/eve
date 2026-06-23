@@ -90,6 +90,19 @@ def pull() -> tuple[bool, str]:
     return True, out or "pull complete"
 
 
+def prune_orphans() -> list[str]:
+    """Remove materialized plugins whose source is no longer configured.
+
+    Local-only (no network): lets the provider list reflect a removed source
+    immediately on close of the plugin-sources screen, instead of leaving stale
+    plugins discoverable until the next pull.
+    """
+    try:
+        return registry.prune_plugins(registry.load_sources())
+    except Exception:
+        return []
+
+
 def _derive_id(url: str) -> str:
     base = url.rstrip("/").rsplit("/", 1)[-1]
     return base[:-4] if base.endswith(".git") else base

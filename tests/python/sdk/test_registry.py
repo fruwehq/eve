@@ -15,6 +15,7 @@ from eve_sdk.registry import (
     load_recommended,
     load_sources,
     parse_sources,
+    prune_plugins,
     read_lock,
     remove_source,
     sync,
@@ -139,6 +140,41 @@ def test_sync_missing_subdir_fails(tmp_path: Path) -> None:
     src = Source(id="s", url=str(upstream), subdir="nope", ref="main", auth="none")
     with pytest.raises(RegistryError, match=r"subdir .* not found"):
         sync([src], plugins_dir=tmp_path / "plugins", cache_dir=tmp_path / "cache")
+
+
+def test_sync_prunes_orphan_exposures(tmp_path: Path) -> None:
+    upstream = _make_repo(tmp_path / "up", {"a/marker": "v1"})
+    plugins = tmp_path / "plugins"
+    src_a = Source(id="a", url=str(upstream), subdir="a", ref="main", auth="none")
+    src_b = Source(id="b", url=str(upstream), subdir="a", ref="main", auth="none")
+    sync([src_a, src_b], plugins_dir=plugins, cache_dir=tmp_path / "cache")
+    assert (plugins / "a").exists() and (plugins / "b").exists()
+
+    # Re-sync with b removed from the configured set: b's exposure is pruned.
+    locked = sync([src_a], plugins_dir=plugins, cache_dir=tmp_path / "cache")
+
+    assert [item.id for item in locked] == ["a"]
+    assert (plugins / "a").exists()
+    assert not (plugins / "b").exists()
+
+
+def test_prune_plugins_only_removes_symlinks(tmp_path: Path) -> None:
+    plugins = tmp_path / "plugins"
+    plugins.mkdir()
+    # A symlink sync would have exposed (orphaned: not in the configured set).
+    orphan = plugins / "orphan"
+    orphan.symlink_to(tmp_path)
+    # A real directory the user created — must be left alone even though its
+    # name is not a configured source id.
+    keep_dir = plugins / "my-stuff"
+    keep_dir.mkdir()
+    (keep_dir / "file").write_text("x", encoding="utf-8")
+
+    pruned = prune_plugins([], plugins_dir=plugins)
+
+    assert pruned == ["orphan"]
+    assert not orphan.exists()
+    assert keep_dir.exists()
 
 
 def test_lock_roundtrip(tmp_path: Path) -> None:

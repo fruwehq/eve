@@ -192,6 +192,11 @@ def sync(
 
     Working copies are keyed by `(url, ref)` under *cache_dir*; each source's
     `subdir` is sparse-checked-out and exposed at `plugins_dir/<source-id>`.
+
+    After materializing, orphan exposures (a source that was removed from the
+    configured set) are pruned so ``plugins_dir`` mirrors the configured set
+    exactly — otherwise removing a source and re-pulling would leave its old
+    plugins discoverable.
     """
     dest_root = plugins_dir or Workdir.plugins_dir()
     cache_root = cache_dir or (Workdir.eve_dir() / "cache" / "sources")
@@ -208,7 +213,37 @@ def sync(
         locked.append(
             LockedSource(id=source.id, url=source.url, subdir=source.subdir, ref=source.ref, sha=sha)
         )
+    prune_plugins(sources, plugins_dir=dest_root)
     return locked
+
+
+def prune_plugins(
+    sources: list[Source], *, plugins_dir: Path | None = None
+) -> list[str]:
+    """Remove materialized exposures whose source id is no longer configured.
+
+    Only symlinks (what ``_expose_subdir`` creates at ``plugins_dir/<id>``) are
+    removed, so a user's real files/dirs under the plugins root are never
+    touched. Returns the ids of the pruned entries. Safe to call on its own —
+    e.g. the TUI prunes locally after a source is removed so the provider list
+    updates without a network pull.
+    """
+    dest_root = plugins_dir or Workdir.plugins_dir()
+    if not dest_root.exists():
+        return []
+    keep = {source.id for source in sources}
+    pruned: list[str] = []
+    for entry in sorted(dest_root.iterdir(), key=lambda p: p.name):
+        if entry.name.startswith("."):
+            continue
+        if entry.name in keep:
+            continue
+        # Only remove the symlinks sync exposes; leave anything else alone.
+        if not entry.is_symlink():
+            continue
+        entry.unlink()
+        pruned.append(entry.name)
+    return pruned
 
 
 def resolve_url(url: str) -> str:
