@@ -24,6 +24,7 @@ from textual.widgets.selection_list import Selection
 
 from textual.message import Message
 
+from eve_sdk.engine import default_engine
 from tui import plugins as plugin_src
 from tui.commands import (
     catalog_options,
@@ -1656,7 +1657,14 @@ class SettingsScreen(ModalScreen[None]):
 
         self._schema_descriptions = {}
         self._schema_defaults = {}
-        provider_sections = {"aws", "gcp", "truenas"}
+        # Provider descriptions/defaults come from each installed provider's
+        # manifest config_schema, not a core hardcode — so this covers every
+        # pulled provider (aws, gcp, truenas, raspberry-pi, …) automatically.
+        provider_sections = {
+            str(plugin["id"])
+            for plugin in default_engine().plugin_list(kind="provider")
+            if plugin.get("id")
+        }
         for provider_id in provider_sections:
             self._load_schema_for_provider(provider_id)
 

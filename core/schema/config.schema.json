@@ -76,7 +76,7 @@
       }
     },
 
-    "raspberry_pi": {
+    "raspberry-pi": {
       "type": "object",
       "additionalProperties": false,
       "properties": {

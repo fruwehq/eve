@@ -141,7 +141,7 @@ CONFIG_SECTIONS: list[dict[str, str]] = [
     {"id": "aws", "label": "AWS"},
     {"id": "gcp", "label": "GCP"},
     {"id": "truenas", "label": "TrueNAS"},
-    {"id": "raspberry_pi", "label": "Raspberry Pi"},
+    {"id": "raspberry-pi", "label": "Raspberry Pi"},
     {"id": "vagrant", "label": "Vagrant"},
 ]
 
@@ -284,19 +284,19 @@ FIELD_META: dict[str, dict[str, str]] = {
         "description": "Port for ThinLinc Web Access.",
         "example": "300",
     },
-    "raspberry_pi.hdmi_connector": {
+    "raspberry-pi.hdmi_connector": {
         "description": "Which HDMI connector to force output on.",
         "example": "0 | 1",
     },
-    "raspberry_pi.hdmi_mode": {
+    "raspberry-pi.hdmi_mode": {
         "description": "Forced HDMI display mode.",
         "example": "1920x1080@60",
     },
-    "raspberry_pi.host": {
+    "raspberry-pi.host": {
         "description": "SSH hostname of the Raspberry Pi.",
         "example": "raspberrypi.local",
     },
-    "raspberry_pi.ip": {
+    "raspberry-pi.ip": {
         "description": "IP address of the Raspberry Pi.",
         "example": "192.168.1.50",
     },

@@ -40,7 +40,7 @@ rdp:
   gate_password:
   gate_user:
 
-raspberry_pi:
+raspberry-pi:
   hdmi_connector:
   hdmi_mode:
   host:

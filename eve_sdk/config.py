@@ -19,7 +19,11 @@ class ConfigEnv:
     are contributed by each provider manifest's ``config_schema`` field-spec
     ``env_var`` declarations, discovered at runtime via
     ``PluginManifest.load_all("provider")``. This keeps core free of provider
-    id literals.
+    id literals and provider env-var names.
+
+    Path expansion (~ / $HOME) is carried per-row: core rows flag their own
+    path fields, and provider rows flag every ``type: path`` field. So no
+    provider env-var name is hard-coded here either.
 
     When no provider manifests are discoverable (e.g. a fresh clone before
     ``eve pull``), ``load_all`` returns ``[]`` and only the static rows are
@@ -28,54 +32,39 @@ class ConfigEnv:
 
     DEFAULT_CONFIG: ClassVar[Path] = Workdir.repo_root() / "config/defaults.yaml"
 
-    # Static non-provider config→env mappings. Provider sections are NOT here —
-    # they are contributed by provider manifests' config_schema.
-    MAPPINGS: ClassVar[list[tuple[tuple[str, str], str]]] = [
-        (("display", "fps"), "EPHEMERAL_DISPLAY_FPS"),
-        (("display", "resolution"), "EPHEMERAL_DISPLAY_RESOLUTION"),
-        (("global", "my_ip"), "MY_IP"),
-        (("global", "provision_user"), "EVE_PROVISION_USER"),
-        (("global", "ssh_public_key_file"), "SSH_PUBLIC_KEY_FILE"),
-        (("global", "timezone"), "TIMEZONE"),
-        (("global", "vm_user_name"), "VM_USER_NAME"),
-        (("moonlight", "bitrate_kbps"), "EPHEMERAL_MOONLIGHT_BITRATE_KBPS"),
-        (("moonlight", "display_mode"), "EPHEMERAL_MOONLIGHT_DISPLAY_MODE"),
-        (("moonlight", "video_codec"), "EPHEMERAL_MOONLIGHT_VIDEO_CODEC"),
-        (("moonlight", "video_decoder"), "EPHEMERAL_MOONLIGHT_VIDEO_DECODER"),
-        (("nomachine", "version"), "NOMACHINE_VERSION"),
-        (("raspberry_pi", "hdmi_connector"), "RASPBERRY_PI_HDMI_CONNECTOR"),
-        (("raspberry_pi", "hdmi_mode"), "RASPBERRY_PI_HDMI_MODE"),
-        (("raspberry_pi", "host"), "RASPBERRY_PI_HOST"),
-        (("raspberry_pi", "ip"), "RASPBERRY_PI_IP"),
-        (("rdp", "gate_user"), "RDP_GATE_USER"),
-        (("rustdesk", "server"), "RUSTDESK_SERVER"),
-        (("splashtop", "email"), "SPLASHTOP_EMAIL"),
-        (("splashtop", "streamer_path"), "SPLASHTOP_STREAMER_PATH"),
-        (("splashtop", "streamer_url"), "SPLASHTOP_STREAMER_URL"),
-        (("sunshine", "max_bitrate_kbps"), "SUNSHINE_MAX_BITRATE_KBPS"),
-        (("sunshine", "password"), "EPHEMERAL_SUNSHINE_PASSWORD"),
-        (("sunshine", "version"), "SUNSHINE_VERSION"),
-        (("thinlinc", "accept_eula"), "THINLINC_ACCEPT_EULA"),
-        (("thinlinc", "agent_hostname"), "THINLINC_AGENT_HOSTNAME"),
-        (("thinlinc", "server_bundle_path"), "THINLINC_SERVER_BUNDLE_PATH"),
-        (("thinlinc", "server_bundle_url"), "THINLINC_SERVER_BUNDLE_URL"),
-        (("thinlinc", "webaccess_port"), "THINLINC_WEBACCESS_PORT"),
-        (("vagrant", "show_console"), "VAGRANT_SHOW_CONSOLE"),
+    # Static non-provider config→env mappings. Each row is
+    # ``((section, field), env_var, is_path)``. Provider sections are NOT here —
+    # they are contributed by provider manifests' config_schema. ``is_path``
+    # flags the LOCAL filesystem paths that get ~ / $HOME expansion (remote
+    # paths live on the provider host and must not be expanded).
+    MAPPINGS: ClassVar[list[tuple[tuple[str, str], str, bool]]] = [
+        (("display", "fps"), "EPHEMERAL_DISPLAY_FPS", False),
+        (("display", "resolution"), "EPHEMERAL_DISPLAY_RESOLUTION", False),
+        (("global", "my_ip"), "MY_IP", False),
+        (("global", "provision_user"), "EVE_PROVISION_USER", False),
+        (("global", "ssh_public_key_file"), "SSH_PUBLIC_KEY_FILE", True),
+        (("global", "timezone"), "TIMEZONE", False),
+        (("global", "vm_user_name"), "VM_USER_NAME", False),
+        (("moonlight", "bitrate_kbps"), "EPHEMERAL_MOONLIGHT_BITRATE_KBPS", False),
+        (("moonlight", "display_mode"), "EPHEMERAL_MOONLIGHT_DISPLAY_MODE", False),
+        (("moonlight", "video_codec"), "EPHEMERAL_MOONLIGHT_VIDEO_CODEC", False),
+        (("moonlight", "video_decoder"), "EPHEMERAL_MOONLIGHT_VIDEO_DECODER", False),
+        (("nomachine", "version"), "NOMACHINE_VERSION", False),
+        (("rdp", "gate_user"), "RDP_GATE_USER", False),
+        (("rustdesk", "server"), "RUSTDESK_SERVER", False),
+        (("splashtop", "email"), "SPLASHTOP_EMAIL", False),
+        (("splashtop", "streamer_path"), "SPLASHTOP_STREAMER_PATH", False),
+        (("splashtop", "streamer_url"), "SPLASHTOP_STREAMER_URL", False),
+        (("sunshine", "max_bitrate_kbps"), "SUNSHINE_MAX_BITRATE_KBPS", False),
+        (("sunshine", "password"), "EPHEMERAL_SUNSHINE_PASSWORD", False),
+        (("sunshine", "version"), "SUNSHINE_VERSION", False),
+        (("thinlinc", "accept_eula"), "THINLINC_ACCEPT_EULA", False),
+        (("thinlinc", "agent_hostname"), "THINLINC_AGENT_HOSTNAME", False),
+        (("thinlinc", "server_bundle_path"), "THINLINC_SERVER_BUNDLE_PATH", False),
+        (("thinlinc", "server_bundle_url"), "THINLINC_SERVER_BUNDLE_URL", False),
+        (("thinlinc", "webaccess_port"), "THINLINC_WEBACCESS_PORT", False),
+        (("vagrant", "show_console"), "VAGRANT_SHOW_CONSOLE", False),
     ]
-
-    # Env var names whose values get ~/$HOME expansion. These are the LOCAL
-    # filesystem paths (AWS config file, GCP credentials, SSH keys, etc.).
-    # Remote paths (e.g. TRUENAS_VM_BASE_DIR, which lives on the TrueNAS host)
-    # are intentionally NOT here — ~ would expand to the wrong machine.
-    # Uppercase env var names do not contain lowercase provider id substrings,
-    # so this set does not trip the core-boundary provider-id check.
-    PATH_ENV_NAMES: ClassVar[set[str]] = {
-        "AWS_CONFIG_FILE",
-        "AWS_SHARED_CREDENTIALS_FILE",
-        "GOOGLE_APPLICATION_CREDENTIALS",
-        "SSH_PUBLIC_KEY_FILE",
-        "TRUENAS_SSH_PRIVATE_KEY_FILE",
-    }
 
     @staticmethod
     def load_config(path: str | os.PathLike[str]) -> dict[str, Any]:
@@ -102,7 +91,7 @@ class ConfigEnv:
     # ---- provider-contributed config→env mappings ------------------------ #
 
     @classmethod
-    def _provider_mappings(cls) -> list[tuple[tuple[str, str], str]]:
+    def _provider_mappings(cls) -> list[tuple[tuple[str, str], str, bool]]:
         """Provider-owned config→env rows, declared in each provider manifest.
 
         Scans ``config_schema.config`` for every ``env_var`` declaration (config
@@ -113,13 +102,17 @@ class ConfigEnv:
         config-env output. String-typed secrets (API keys, passwords) are
         injected at dispatch time only and are intentionally excluded.
 
+        The third tuple element is ``is_path``: provider ``type: path`` fields
+        flag themselves so their value gets ~ / $HOME expansion without core
+        having to name the provider's env var.
+
         When no providers are discoverable, returns ``[]`` (clean degradation).
         """
         # Imported lazily so config-env can run on a cold path without pulling
         # the full plugin_manifest validation chain at import time.
         from eve_sdk.plugin_manifest import PluginManifest
 
-        rows: list[tuple[tuple[str, str], str]] = []
+        rows: list[tuple[tuple[str, str], str, bool]] = []
         for plugin in PluginManifest.load_all("provider"):
             schema = plugin.get("config_schema") or {}
             if not isinstance(schema, dict):
@@ -133,9 +126,10 @@ class ConfigEnv:
                     env_var = spec.get("env_var")
                     if not env_var:
                         continue
+                    is_path = spec.get("type") == "path"
                     env_vars = env_var if isinstance(env_var, list) else [env_var]
                     for name in env_vars:
-                        rows.append(((plugin["id"], field_name), str(name)))
+                        rows.append(((plugin["id"], field_name), str(name), is_path))
             # secrets block: only type=path fields (local file paths the user
             # configures, not injected secret values).
             secret_fields = schema.get("secrets")
@@ -150,11 +144,11 @@ class ConfigEnv:
                         continue
                     env_vars = env_var if isinstance(env_var, list) else [env_var]
                     for name in env_vars:
-                        rows.append(((plugin["id"], field_name), str(name)))
+                        rows.append(((plugin["id"], field_name), str(name), True))
         return rows
 
     @classmethod
-    def _all_mappings(cls) -> list[tuple[tuple[str, str], str]]:
+    def _all_mappings(cls) -> list[tuple[tuple[str, str], str, bool]]:
         """Static MAPPINGS + provider-contributed rows, sorted by (section, field).
 
         The sort reproduces the alphabetical-by-section order the original
@@ -170,9 +164,9 @@ class ConfigEnv:
     def environment(cls, default_path: Path | None = None, local_path: Path | None = None) -> dict[str, str]:
         config, _defaults, _local = cls.merged_config(default_path, local_path)
         env: dict[str, str] = {}
-        for path, name in cls._all_mappings():
+        for path, name, is_path in cls._all_mappings():
             value = cls.scalar_value(cls.fetch_path(config, path))
-            if value and name in cls.PATH_ENV_NAMES:
+            if value and is_path:
                 value = cls.normalize_pathish(value)
             if value:
                 env[name] = value
@@ -187,7 +181,7 @@ class ConfigEnv:
         env = cls.environment(default_path, local_path)
         _config, defaults, local = cls.merged_config(default_path, local_path)
         sections: dict[str, dict[str, dict[str, str | None]]] = {}
-        for path, name in cls._all_mappings():
+        for path, name, _is_path in cls._all_mappings():
             section, field = path
             if cls.scalar_value(cls.fetch_path(local, path)):
                 source = "config.yaml"
