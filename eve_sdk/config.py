@@ -12,31 +12,33 @@ from eve_sdk.workdir import Workdir
 
 
 class ConfigEnv:
-    """Build the non-secret config→env mapping from core statics + provider manifests.
+    """Build the non-secret config→env mapping from core statics + plugin manifests.
 
-    The static ``MAPPINGS`` table carries rows that are NOT provider-owned
-    (display, global, moonlight, package sections, etc.). Provider-owned rows
-    are contributed by each provider manifest's ``config_schema`` field-spec
-    ``env_var`` declarations, discovered at runtime via
-    ``PluginManifest.load_all("provider")``. This keeps core free of provider
-    id literals and provider env-var names.
+    The static ``MAPPINGS`` table carries only TRUE-core rows — sections core
+    owns because no provider/package plugin backs them (``global``, ``display``
+    the shared display setting, ``vagrant`` the engine, and ``moonlight`` until
+    its launcher is extracted with sunshine in §8). Every provider- and
+    package-owned row is contributed by that plugin's ``config_schema``
+    field-spec ``env_var`` declaration, discovered at runtime via
+    ``PluginManifest.load_all("provider")`` ∪ ``load_all("package")``. This
+    keeps core free of provider/package id literals and their env-var names.
 
     Path expansion (~ / $HOME) is carried per-row: core rows flag their own
-    path fields, and provider rows flag every ``type: path`` field. So no
-    provider env-var name is hard-coded here either.
+    path fields, and plugin rows flag every ``type: path`` field. So no
+    provider/package env-var name is hard-coded here.
 
-    When no provider manifests are discoverable (e.g. a fresh clone before
-    ``eve pull``), ``load_all`` returns ``[]`` and only the static rows are
-    emitted — correct: no provider installed ⇒ no provider env.
+    When no plugins are discoverable (e.g. a fresh clone before ``eve pull``),
+    ``load_all`` returns ``[]`` and only the static core rows are emitted —
+    correct: no plugin installed ⇒ no provider/package env.
     """
 
     DEFAULT_CONFIG: ClassVar[Path] = Workdir.repo_root() / "config/defaults.yaml"
 
-    # Static non-provider config→env mappings. Each row is
-    # ``((section, field), env_var, is_path)``. Provider sections are NOT here —
-    # they are contributed by provider manifests' config_schema. ``is_path``
-    # flags the LOCAL filesystem paths that get ~ / $HOME expansion (remote
-    # paths live on the provider host and must not be expanded).
+    # True-core config→env mappings (no provider/package owns these). Each row
+    # is ``((section, field), env_var, is_path)``. Provider and package sections
+    # are contributed by their manifests' config_schema. ``is_path`` flags the
+    # LOCAL filesystem paths that get ~ / $HOME expansion (remote paths live on
+    # the provider host and must not be expanded).
     MAPPINGS: ClassVar[list[tuple[tuple[str, str], str, bool]]] = [
         (("display", "fps"), "EPHEMERAL_DISPLAY_FPS", False),
         (("display", "resolution"), "EPHEMERAL_DISPLAY_RESOLUTION", False),
@@ -45,24 +47,13 @@ class ConfigEnv:
         (("global", "ssh_public_key_file"), "SSH_PUBLIC_KEY_FILE", True),
         (("global", "timezone"), "TIMEZONE", False),
         (("global", "vm_user_name"), "VM_USER_NAME", False),
+        # moonlight is sunshine's client; its launcher still lives in core
+        # (remote_launch.py), so its config rows stay core until §8 moves the
+        # launcher (and these rows) out with sunshine.
         (("moonlight", "bitrate_kbps"), "EPHEMERAL_MOONLIGHT_BITRATE_KBPS", False),
         (("moonlight", "display_mode"), "EPHEMERAL_MOONLIGHT_DISPLAY_MODE", False),
         (("moonlight", "video_codec"), "EPHEMERAL_MOONLIGHT_VIDEO_CODEC", False),
         (("moonlight", "video_decoder"), "EPHEMERAL_MOONLIGHT_VIDEO_DECODER", False),
-        (("nomachine", "version"), "NOMACHINE_VERSION", False),
-        (("rdp", "gate_user"), "RDP_GATE_USER", False),
-        (("rustdesk", "server"), "RUSTDESK_SERVER", False),
-        (("splashtop", "email"), "SPLASHTOP_EMAIL", False),
-        (("splashtop", "streamer_path"), "SPLASHTOP_STREAMER_PATH", False),
-        (("splashtop", "streamer_url"), "SPLASHTOP_STREAMER_URL", False),
-        (("sunshine", "max_bitrate_kbps"), "SUNSHINE_MAX_BITRATE_KBPS", False),
-        (("sunshine", "password"), "EPHEMERAL_SUNSHINE_PASSWORD", False),
-        (("sunshine", "version"), "SUNSHINE_VERSION", False),
-        (("thinlinc", "accept_eula"), "THINLINC_ACCEPT_EULA", False),
-        (("thinlinc", "agent_hostname"), "THINLINC_AGENT_HOSTNAME", False),
-        (("thinlinc", "server_bundle_path"), "THINLINC_SERVER_BUNDLE_PATH", False),
-        (("thinlinc", "server_bundle_url"), "THINLINC_SERVER_BUNDLE_URL", False),
-        (("thinlinc", "webaccess_port"), "THINLINC_WEBACCESS_PORT", False),
         (("vagrant", "show_console"), "VAGRANT_SHOW_CONSOLE", False),
     ]
 
@@ -88,11 +79,11 @@ class ConfigEnv:
         local = cls.load_config(local_path or Workdir.config_path())
         return cls.deep_merge(defaults, local), defaults, local
 
-    # ---- provider-contributed config→env mappings ------------------------ #
+    # ---- plugin-contributed config→env mappings -------------------------- #
 
     @classmethod
-    def _provider_mappings(cls) -> list[tuple[tuple[str, str], str, bool]]:
-        """Provider-owned config→env rows, declared in each provider manifest.
+    def _plugin_mappings(cls) -> list[tuple[tuple[str, str], str, bool]]:
+        """Plugin-owned config→env rows, declared in each provider/package manifest.
 
         Scans ``config_schema.config`` for every ``env_var`` declaration (config
         fields are non-secret and always eligible for config-env emission), and
@@ -102,63 +93,66 @@ class ConfigEnv:
         config-env output. String-typed secrets (API keys, passwords) are
         injected at dispatch time only and are intentionally excluded.
 
-        The third tuple element is ``is_path``: provider ``type: path`` fields
-        flag themselves so their value gets ~ / $HOME expansion without core
-        having to name the provider's env var.
+        Both provider and package plugins are scanned, so a package's config
+        fields are emitted from its manifest exactly like a provider's. The
+        section is the plugin id; the third tuple element is ``is_path``
+        (``type: path`` fields flag themselves) so values get ~ / $HOME
+        expansion without core naming the env var.
 
-        When no providers are discoverable, returns ``[]`` (clean degradation).
+        When no plugins are discoverable, returns ``[]`` (clean degradation).
         """
         # Imported lazily so config-env can run on a cold path without pulling
         # the full plugin_manifest validation chain at import time.
         from eve_sdk.plugin_manifest import PluginManifest
 
         rows: list[tuple[tuple[str, str], str, bool]] = []
-        for plugin in PluginManifest.load_all("provider"):
-            schema = plugin.get("config_schema") or {}
-            if not isinstance(schema, dict):
-                continue
-            # config block: every field with env_var is eligible.
-            config_fields = schema.get("config")
-            if isinstance(config_fields, dict):
-                for field_name, spec in config_fields.items():
-                    if not isinstance(spec, dict):
-                        continue
-                    env_var = spec.get("env_var")
-                    if not env_var:
-                        continue
-                    is_path = spec.get("type") == "path"
-                    env_vars = env_var if isinstance(env_var, list) else [env_var]
-                    for name in env_vars:
-                        rows.append(((plugin["id"], field_name), str(name), is_path))
-            # secrets block: only type=path fields (local file paths the user
-            # configures, not injected secret values).
-            secret_fields = schema.get("secrets")
-            if isinstance(secret_fields, dict):
-                for field_name, spec in secret_fields.items():
-                    if not isinstance(spec, dict):
-                        continue
-                    if spec.get("type") != "path":
-                        continue
-                    env_var = spec.get("env_var")
-                    if not env_var:
-                        continue
-                    env_vars = env_var if isinstance(env_var, list) else [env_var]
-                    for name in env_vars:
-                        rows.append(((plugin["id"], field_name), str(name), True))
+        for kind in ("provider", "package"):
+            for plugin in PluginManifest.load_all(kind):
+                schema = plugin.get("config_schema") or {}
+                if not isinstance(schema, dict):
+                    continue
+                # config block: every field with env_var is eligible.
+                config_fields = schema.get("config")
+                if isinstance(config_fields, dict):
+                    for field_name, spec in config_fields.items():
+                        if not isinstance(spec, dict):
+                            continue
+                        env_var = spec.get("env_var")
+                        if not env_var:
+                            continue
+                        is_path = spec.get("type") == "path"
+                        env_vars = env_var if isinstance(env_var, list) else [env_var]
+                        for name in env_vars:
+                            rows.append(((plugin["id"], field_name), str(name), is_path))
+                # secrets block: only type=path fields (local file paths the
+                # user configures, not injected secret values).
+                secret_fields = schema.get("secrets")
+                if isinstance(secret_fields, dict):
+                    for field_name, spec in secret_fields.items():
+                        if not isinstance(spec, dict):
+                            continue
+                        if spec.get("type") != "path":
+                            continue
+                        env_var = spec.get("env_var")
+                        if not env_var:
+                            continue
+                        env_vars = env_var if isinstance(env_var, list) else [env_var]
+                        for name in env_vars:
+                            rows.append(((plugin["id"], field_name), str(name), True))
         return rows
 
     @classmethod
     def _all_mappings(cls) -> list[tuple[tuple[str, str], str, bool]]:
-        """Static MAPPINGS + provider-contributed rows, sorted by (section, field).
+        """Static MAPPINGS + plugin-contributed rows, sorted by (section, field).
 
         The sort reproduces the alphabetical-by-section order the original
         hardcoded MAPPINGS table had, so ``--structured`` section ordering is
         byte-identical before and after.
         Python's stable sort preserves the env_var order within one field
-        (e.g. a provider that maps one field to two env vars keeps their
-        declared order).
+        (e.g. a plugin that maps one field to two env vars keeps their declared
+        order).
         """
-        combined = [*cls.MAPPINGS, *cls._provider_mappings()]
+        combined = [*cls.MAPPINGS, *cls._plugin_mappings()]
         return sorted(combined, key=lambda row: row[0])
 
     @classmethod
