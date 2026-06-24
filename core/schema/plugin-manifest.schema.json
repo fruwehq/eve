@@ -753,7 +753,7 @@
           "type": "boolean"
         },
         "env_var": {
-          "description": "Environment variable name(s) CoreEmit for this field. For config fields, ConfigEnv emits the value during config-env emission (make/shell/json). For secrets, provider dispatch also injects the value at runtime. A field may map to multiple env vars (e.g. GCP project → GOOGLE_CLOUD_PROJECT and GOOGLE_PROJECT) by giving a list.",
+          "description": "Environment variable name(s) CoreEmit for this field. For config fields, ConfigEnv emits the value during config-env emission (make/shell/json). For secrets, provider dispatch also injects the value at runtime. A field may map to multiple env vars by giving a list.",
           "oneOf": [
             {
               "type": "string"

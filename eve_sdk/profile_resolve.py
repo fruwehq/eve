@@ -248,7 +248,7 @@ def emit_env(resolved: dict[str, Any]) -> str:
     # name, so a provider's static user (e.g. a provider that pins
     # `{env: VM_USER_NAME, value: ubuntu}`) was dropped whenever the rule also
     # named an env var — leaving SSH_USER / HUMAN_USER_NAME empty and breaking
-    # the remote-* launchers (VNC/RDP) that consume this output.
+    # the package remote-client launchers that consume this output.
     from eve_sdk.plugin_manifest import PluginManifest
     from eve_sdk.resolve import resolve_access_value
 
@@ -307,23 +307,18 @@ def emit_env(resolved: dict[str, Any]) -> str:
         ("VM_INSTANCE_TYPE", _jq_coalesce(machine_defaults.get("instance_type"), "")),
         ("VM_ROOT_VOLUME_TYPE", _jq_coalesce(machine_defaults.get("root_volume_type"), "")),
         ("VM_USE_SPOT", use_spot_value),
-        ("GCP_IMAGE_FAMILY", provider_env.get("GCP_IMAGE_FAMILY", "")),
-        ("GCP_IMAGE_PROJECT", provider_env.get("GCP_IMAGE_PROJECT", "")),
-        ("VULTR_OS_ID", provider_env.get("VULTR_OS_ID", "0")),
         ("LOCATION_REGION", _jq_coalesce(locp.get("region"), "")),
         ("LOCATION_AVAILABILITY_ZONE", _jq_coalesce(locp.get("availability_zone"), "")),
         ("LOCATION_ZONE", _jq_coalesce(locp.get("zone"), "")),
         ("SSH_USER", provision_user_value),
-        ("CLOUD_IMAGE_URL", provider_env.get("CLOUD_IMAGE_URL", "")),
         ("HUMAN_USER_NAME", human_user_value),
         ("PROVISION_USER_NAME", provision_user_value),
-        ("RASPBERRY_PI_HOST", provider_env.get("RASPBERRY_PI_HOST", "")),
-        ("RASPBERRY_PI_IP", provider_env.get("RASPBERRY_PI_IP", "")),
-        ("TRUENAS_HOST", provider_env.get("TRUENAS_HOST", "")),
-        ("TRUENAS_SSH_PORT", provider_env.get("TRUENAS_SSH_PORT", "22")),
-        ("TRUENAS_SSH_USER", provider_env.get("TRUENAS_SSH_USER", "")),
         ("VM_USER_NAME", _env_or("VM_USER_NAME", "")),
     ]
+    # Provider-specific env (image selectors, host/port, …) is emitted generically
+    # from each provider manifest's env_emission (which already applies the
+    # per-provider defaults) — core names no provider here.
+    lines.extend(sorted(provider_env.items()))
     return "".join(f"{key}={value}\n" for key, value in lines)
 
 

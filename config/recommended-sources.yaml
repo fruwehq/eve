@@ -30,7 +30,7 @@ recommended:
     tags: [packages, windows]
 
   - id: eve-plugins-ai
-    description: AI agents and developer tooling (claude, codex-cli, opencode, goose, hermes, vscode, dev-toolchain).
+    description: AI agents and developer tooling.
     url: https://github.com/fruwehq/eve-plugins-ai.git
     ref: main
     auth: none

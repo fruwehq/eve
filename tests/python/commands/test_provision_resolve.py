@@ -76,22 +76,18 @@ _EXPECTED_ENV_LINES = [
     "VM_INSTANCE_TYPE=",
     "VM_ROOT_VOLUME_TYPE=",
     "VM_USE_SPOT=",
-    "GCP_IMAGE_FAMILY=",
-    "GCP_IMAGE_PROJECT=",
-    "VULTR_OS_ID=0",
     "LOCATION_REGION=",
     "LOCATION_AVAILABILITY_ZONE=",
     "LOCATION_ZONE=",
     "SSH_USER=vagrant",
-    "CLOUD_IMAGE_URL=",
     "HUMAN_USER_NAME=vagrant",
     "PROVISION_USER_NAME=vagrant",
-    "RASPBERRY_PI_HOST=",
-    "RASPBERRY_PI_IP=",
-    "TRUENAS_HOST=",
-    "TRUENAS_SSH_PORT=22",
-    "TRUENAS_SSH_USER=",
     "VM_USER_NAME=",
+    # Provider-specific env now emitted generically after the core keys, sorted
+    # by name (from each provider manifest's env_emission) — §15.5c. The mock
+    # provider declares only MOCK_IMAGE_URL, so only it appears (the old golden
+    # wrongly carried real-provider keys the hardcoded list always emitted).
+    "MOCK_IMAGE_URL=",
 ]
 
 
