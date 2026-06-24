@@ -35,6 +35,12 @@ WINDOWS_RUNNER = _os_runner("windows-server-2025", "runner.ps1")
 failures = 0
 skipped = 0
 
+# After v4.4 §14, real OS provision trees live in eve-providers/oses/ (os plugins),
+# not in core. When they're absent (hermetic test env), skip gracefully.
+if not UBUNTU_RUNNER.exists() and not WINDOWS_RUNNER.exists():
+    print("[SKIP] real OS provision trees moved to eve-providers/oses/ (v4.4 §14).")
+    raise SystemExit(0)
+
 
 def pass_check(message: str) -> None:
     print(f"  [OK] {message}")
