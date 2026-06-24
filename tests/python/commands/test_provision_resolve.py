@@ -319,3 +319,31 @@ def test_provision_bad_profile_exits_5(pr_env: dict[str, str]) -> None:
     """An unknown profile name propagates profile-resolve exit 5."""
     result = _run("provision", "definitely-not-a-profile", env=pr_env)
     assert result.returncode == 5
+
+
+def test_aggregate_vagrant_provision_is_package_declared(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Vagrant inline-provision is aggregated from package manifests, not hardcoded."""
+    from eve_sdk import plugin_manifest
+    from eve_sdk.profile_resolve import _aggregate_vagrant_provision
+
+    fake = [
+        {"id": "dev-toolchain", "vagrant": {"inline_provision": {"ubuntu": "sudo apt-get install -y build-essential"}}},
+        {"id": "container", "vagrant": {"inline_provision": {"ubuntu": "# Install\nsudo apt-get install -y docker-ce"}}},
+        {"id": "noop"},  # contributes nothing
+    ]
+    monkeypatch.setattr(
+        plugin_manifest.PluginManifest, "load_all",
+        classmethod(lambda cls, kind=None: fake if kind == "package" else []),
+    )
+    out = _aggregate_vagrant_provision(["dev-toolchain", "container", "noop"])
+    assert out == (
+        "    # dev-toolchain\n"
+        "    sudo apt-get install -y build-essential\n"
+        "    # container\n"
+        "    # Install\n"
+        "    sudo apt-get install -y docker-ce\n"
+    )
+    # bundle without contributors -> empty (no hardcoded docker/dev branch)
+    assert _aggregate_vagrant_provision(["noop"]) == ""

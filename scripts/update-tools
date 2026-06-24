@@ -38,41 +38,15 @@ def main(argv: list[str]) -> int:
         if result.returncode != 0:
             return result.returncode
 
-        # Core/dev-toolchain upgrade steps (these are not eve plugins).
-        # Each step mirrors `<ssh> '<script>' || <handler>`:
+        # Core OS update only. Everything package-specific (editors, AI CLIs,
+        # container engines, toolchains) is declared by its own plugin and
+        # aggregated below — core names no package.
         #   None failure  -> `|| true`            (continue silently)
         #   str failure   -> `|| log "<message>"` (emit [update] line, continue)
         steps: list[tuple[str, str, str | None]] = [
             ("Updating apt packages...",
              "sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq && "
              "sudo DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -qq",
-             None),
-            ("Updating VS Code...",
-             "sudo DEBIAN_FRONTEND=noninteractive apt-get install --only-upgrade -y code 2>/dev/null",
-             "vscode not installed"),
-            ("Updating Claude...",
-             'command -v claude >/dev/null 2>&1 && curl -fsSL https://claude.ai/install.sh | sh '
-             '|| echo "skip"',
-             None),
-            ("Updating OpenCode...",
-             'command -v opencode >/dev/null 2>&1 && curl -fsSL https://opencode.ai/install | bash '
-             '|| echo "skip"',
-             None),
-            ("Updating Codex CLI...",
-             'command -v codex >/dev/null 2>&1 && sudo npm update -g @openai/codex || echo "skip"',
-             None),
-            ("Updating Goose...",
-             'command -v goose >/dev/null 2>&1 && goose update 2>/dev/null || echo "skip"',
-             None),
-            ("Updating Hermes...",
-             'command -v hermes >/dev/null 2>&1 && hermes update || echo "skip"',
-             None),
-            ("Updating Docker...",
-             "command -v docker >/dev/null 2>&1 && sudo apt-get install --only-upgrade -y "
-             'docker-ce docker-ce-cli containerd.io 2>/dev/null || echo "skip"',
-             None),
-            ("Updating Rust...",
-             'command -v rustup >/dev/null 2>&1 && rustup update || echo "skip"',
              None),
         ]
         # Package-declared self-upgrade steps (v4.4 §15): each installed package

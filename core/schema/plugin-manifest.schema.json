@@ -170,6 +170,16 @@
               }
             }
           }
+        },
+        "inline_provision": {
+          "description": "Per-OS-family shell snippet this package contributes to the Vagrantfile inline bootstrap (run during `vagrant up`). Aggregated by core, so core names no package.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "ubuntu": {
+              "type": "string"
+            }
+          }
         }
       }
     },

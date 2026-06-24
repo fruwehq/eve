@@ -356,6 +356,28 @@ def _aggregate_port_forwards(bundle_packages: list[str]) -> str:
     return ("\n".join(lines) + "\n") if lines else ""
 
 
+def _aggregate_vagrant_provision(bundle_packages: list[str]) -> str:
+    """Aggregate ``vagrant.inline_provision.<os_family>`` across the bundle.
+
+    Each package declares its own pre-provision shell (run in the Vagrantfile
+    inline bootstrap during ``vagrant up``); core branches on no package id.
+    Lines are indented to sit inside the heredoc. Returns "" when none apply.
+    """
+    from eve_sdk.plugin_manifest import PluginManifest
+
+    plugins = {p.get("id"): p for p in PluginManifest.load_all("package")}
+    out: list[str] = []
+    for pkg_id in bundle_packages:
+        inline = ((plugins.get(pkg_id) or {}).get("vagrant") or {}).get("inline_provision") or {}
+        cmd = inline.get("ubuntu") if isinstance(inline, dict) else None
+        if not cmd:
+            continue
+        out.append(f"    # {pkg_id}\n")
+        for line in cmd.rstrip("\n").split("\n"):
+            out.append(f"    {line}\n" if line.strip() else "\n")
+    return "".join(out)
+
+
 def emit_vagrant(resolved: dict[str, Any]) -> str:
     """Produce a Vagrantfile for the resolved profile.
 
@@ -386,31 +408,11 @@ def emit_vagrant(resolved: dict[str, Any]) -> str:
     qemu_disk = _jq_tostring(_jq_coalesce(defaults.get("disk_gb"), 30)) + "G"
     pkg_list = " ".join(bundle_packages)
 
-    flags = {"docker": "docker" in bundle_packages, "dev": "dev-toolchain" in bundle_packages}
-
     port_forwards = _aggregate_port_forwards(bundle_packages)
-
-    docker_setup = ""
-    if flags["docker"]:
-        docker_setup = (
-            '    # Install Docker\n'
-            '    sudo install -m 0755 -d /etc/apt/keyrings\n'
-            '    curl -fsSL https://download.docker.com/linux/ubuntu/gpg'
-            ' | sudo gpg --batch --yes --dearmor -o /etc/apt/keyrings/docker.gpg\n'
-            '    echo "deb [arch=$(dpkg --print-architecture)'
-            ' signed-by=/etc/apt/keyrings/docker.gpg]'
-            ' https://download.docker.com/linux/ubuntu'
-            ' $(. /etc/os-release && echo $VERSION_CODENAME) stable"'
-            ' | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null\n'
-            '    sudo apt-get update -y\n'
-            '    sudo apt-get install -y docker-ce docker-ce-cli containerd.io'
-            ' docker-buildx-plugin\n'
-            '    sudo usermod -aG docker vagrant\n'
-        )
-
-    dev_setup = ""
-    if flags["dev"]:
-        dev_setup = '    sudo apt-get install -y build-essential pkg-config libssl-dev\n'
+    # Pre-provision shell each bundle package contributes for the Vagrantfile
+    # inline bootstrap — declared in the package manifest, aggregated generically
+    # so core branches on no package id (replaces the old docker/dev hardcode).
+    package_provision = _aggregate_vagrant_provision(bundle_packages)
 
     provider_block = (
         f'  config.vm.provider "qemu" do |qe|\n'
@@ -440,8 +442,7 @@ def emit_vagrant(resolved: dict[str, Any]) -> str:
         f'    echo "Packages: {pkg_list}"\n'
         f'    sudo apt-get update -y\n'
         f'    sudo apt-get install -y curl git jq\n'
-        f'{docker_setup}'
-        f'{dev_setup}'
+        f'{package_provision}'
         f'  SHELL\n'
         f'end\n'
     )
