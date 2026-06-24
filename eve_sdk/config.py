@@ -152,6 +152,40 @@ class ConfigEnv:
         return sorted(combined, key=lambda row: row[0])
 
     @classmethod
+    def plugin_provision_env_names(
+        cls, *, kinds: tuple[str, ...] = ("provider", "package")
+    ) -> list[str]:
+        """Every env-var name installed plugins declare — config **and** secrets.
+
+        Provision needs a plugin's full env surface, including the string secrets
+        (passwords/keys) that ``_plugin_mappings`` excludes, so each plugin's
+        provision steps read their own config + secrets by env var while core
+        names none of them. Returns a sorted, de-duped list. When no plugins are
+        discoverable, returns ``[]``.
+        """
+        from eve_sdk.plugin_manifest import PluginManifest
+
+        names: set[str] = set()
+        for kind in kinds:
+            for plugin in PluginManifest.load_all(kind):
+                schema = plugin.get("config_schema") or {}
+                if not isinstance(schema, dict):
+                    continue
+                for block in ("config", "secrets"):
+                    fields = schema.get(block)
+                    if not isinstance(fields, dict):
+                        continue
+                    for spec in fields.values():
+                        if not isinstance(spec, dict):
+                            continue
+                        env_var = spec.get("env_var")
+                        if not env_var:
+                            continue
+                        for name in env_var if isinstance(env_var, list) else [env_var]:
+                            names.add(str(name))
+        return sorted(names)
+
+    @classmethod
     def provision_env_payload(cls, windows_password: str = "") -> dict[str, str]:
         """Build the generic provision ``env.json`` payload (v4.4 §15).
 
