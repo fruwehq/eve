@@ -23,6 +23,9 @@ from shutil import copy2, copytree
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from eve_sdk.config import ConfigEnv  # noqa: E402
+from eve_sdk.plugin_manifest import PluginManifest  # noqa: E402
+
 
 def _run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
     """Run a subprocess in ROOT, forwarding stderr by default."""
@@ -373,8 +376,6 @@ def provision_windows(profile: str, env: dict[str, str], root: Path) -> int:
 
     tmp_dir = root / "tmp"
     tmp_dir.mkdir(parents=True, exist_ok=True)
-    from eve_sdk.config import ConfigEnv
-
     env_json = ConfigEnv.provision_env_payload(windows_password)
     (tmp_dir / "env.json").write_text(json.dumps(env_json, indent=2) + "\n", encoding="utf-8")
 
