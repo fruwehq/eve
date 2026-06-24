@@ -156,6 +156,16 @@
       "additionalProperties": false
     },
 
+    "update": {
+      "description": "Per-OS-family shell command (run on the instance over SSH) to upgrade this package to its latest version (package plugins only). Aggregated and run by scripts/update-tools, so core names no package.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ubuntu": { "type": "string" },
+        "windows": { "type": "string" }
+      }
+    },
+
     "install": {
       "description": "Install metadata per OS family, consumed by provisioning scripts (package plugins only).",
       "type": "object",
