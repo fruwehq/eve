@@ -66,8 +66,13 @@ def package_ids() -> list[str]:
     return sorted(plugin["id"] for plugin in PluginManifest.load_all("package"))
 
 
+def os_plugin_ids() -> list[str]:
+    """OS-plugin ids (kind: os) from loaded os-plugin manifests (§14)."""
+    return sorted(plugin["id"] for plugin in PluginManifest.load_all("os"))
+
+
 def all_ids() -> list[str]:
-    return [*provider_ids(), *package_ids(), *os_ids()]
+    return [*provider_ids(), *package_ids(), *os_plugin_ids(), *os_ids()]
 
 
 # --- scan scope ------------------------------------------------------------

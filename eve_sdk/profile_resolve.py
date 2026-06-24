@@ -399,7 +399,8 @@ def emit_vagrant(resolved: dict[str, Any]) -> str:
     bundle_packages = resolved.get("bundle_packages") or []
     name = resolved["profile"]["name"]
 
-    box = _jq_coalesce(os_doc.get("vagrant_box"), "cloud-image/ubuntu-26.04")
+    box_default = f"cloud-image/{os_doc.get('family', 'ubuntu')}-{os_doc.get('version', '')}".rstrip("-")
+    box = _jq_coalesce(os_doc.get("vagrant_box"), box_default)
     arch = _jq_coalesce(os_doc.get("arch"), "amd64")
     qemu_arch = "aarch64" if arch == "arm64" else "x86_64"
     cpus = _jq_tostring(_jq_coalesce(defaults.get("cpu_cores"), defaults.get("cpus"), 2))
