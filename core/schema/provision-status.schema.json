@@ -20,7 +20,11 @@
     },
     "os_family": {
       "description": "OS family of the guest (ubuntu or windows).",
-      "type": "string"
+      "type": "string",
+      "enum": [
+        "ubuntu",
+        "windows"
+      ]
     },
     "started_at": {
       "description": "ISO 8601 timestamp when the overall provisioning run started.",

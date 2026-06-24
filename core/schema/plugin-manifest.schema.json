@@ -9,7 +9,6 @@
     "kind",
     "id",
     "display_name",
-    "commands",
     "supports"
   ],
   "additionalProperties": false,
@@ -248,7 +247,7 @@
     "install": {
       "description": "Install metadata per OS family, consumed by provisioning scripts (package plugins only).",
       "type": "object",
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "ubuntu": {
           "$ref": "#/$defs/install_os_spec"
@@ -310,6 +309,18 @@
           }
         }
       }
+    },
+    "provision": {
+      "description": "OS provision tree pointer (os plugins only). 'dir' is relative to the plugin directory.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "dir": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Directory name of the provision tree, relative to the plugin dir (e.g. 'provision')."
+        }
+      }
     }
   },
   "allOf": [
@@ -324,7 +335,8 @@
       "then": {
         "required": [
           "access",
-          "env"
+          "env",
+          "commands"
         ],
         "properties": {
           "commands": {
@@ -364,7 +376,8 @@
       },
       "then": {
         "required": [
-          "env"
+          "env",
+          "commands"
         ],
         "properties": {
           "commands": {
@@ -388,6 +401,26 @@
             "items": {
               "$ref": "#/$defs/artifact_entry"
             }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "os"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "provision",
+          "supports"
+        ],
+        "properties": {
+          "commands": {
+            "description": "os plugins do not use commands."
           }
         }
       }

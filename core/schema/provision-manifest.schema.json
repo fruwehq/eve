@@ -18,7 +18,11 @@
     },
     "os_family": {
       "description": "OS family this manifest targets (ubuntu or windows).",
-      "type": "string"
+      "type": "string",
+      "enum": [
+        "ubuntu",
+        "windows"
+      ]
     },
     "created_at": {
       "description": "ISO 8601 timestamp when the host wrote this manifest.",
