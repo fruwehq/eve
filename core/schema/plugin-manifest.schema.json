@@ -30,7 +30,7 @@
     "id": {
       "description": "Plugin identifier. Must match [a-z][a-z0-9-]*.",
       "type": "string",
-      "pattern": "^[a-z][a-z0-9-]*$"
+      "pattern": "^[a-z][a-z0-9.-]*$"
     },
     "display_name": {
       "description": "Human-readable plugin name shown in the TUI and CLI listings.",

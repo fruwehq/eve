@@ -253,7 +253,7 @@ class PluginManifest:
         kind = plugin.get("kind")
         if kind not in {"provider", "package", "os"}:
             raise ValueError(f"{path}: kind must be provider, package, or os")
-        if not re.match(r"^[a-z][a-z0-9-]*$", str(plugin.get("id", ""))):
+        if not re.match(r"^[a-z][a-z0-9.-]*$", str(plugin.get("id", ""))):
             raise ValueError(f"{path}: id must match [a-z][a-z0-9-]*")
         # os plugins carry a provision tree pointer, not executable commands.
         if kind == "os":
