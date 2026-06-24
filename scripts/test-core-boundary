@@ -176,13 +176,17 @@ def find_provider_os_violations(
     violations: list[str] = []
     for rel_path, content in files:
         for identifier in ids:
+            # UPPERCASE env-var form of the id (raspberry-pi -> RASPBERRY_PI,
+            # thinlinc -> THINLINC). Hardcoding a plugin's env var by name is the
+            # same leak as naming the id; the lowercase substring scan misses it.
+            env_form = identifier.upper().replace("-", "_")
             if identifier in COMMON_TOKEN_IDS:
                 if _has_comparison(content, identifier) and rel_path not in allowed:
                     violations.append(
                         f"FAIL: {rel_path} (branches on {identifier}) not in allowlist"
                     )
                     break
-            elif identifier in content and rel_path not in allowed:
+            elif (identifier in content or env_form in content) and rel_path not in allowed:
                 violations.append(
                     f"FAIL: {rel_path} (references {identifier}) not in allowlist"
                 )
