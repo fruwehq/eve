@@ -24,7 +24,6 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from eve_sdk.config import ConfigEnv  # noqa: E402
-from eve_sdk.plugin_manifest import PluginManifest  # noqa: E402
 
 
 def _run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
@@ -109,7 +108,6 @@ def provision_ubuntu(profile: str, env: dict[str, str], root: Path) -> int:
     bundle_packages = env.get("BUNDLE_PACKAGES", "")
     profile_name = env.get("PROFILE_NAME", "")
     provider = env.get("PROVIDER", "")
-    engine = env.get("ENGINE", "")
     os_provision_dir = root / "oses" / os_id / "provision"
 
     if not os_provision_dir.is_dir():
@@ -129,9 +127,12 @@ def provision_ubuntu(profile: str, env: dict[str, str], root: Path) -> int:
         ).returncode == 0
 
     if not check_sudo():
-        rpi_password = os.environ.get("RASPBERRY_PI_USER_PASSWORD", "")
-        if engine == "metal" and rpi_password:
-            print("[provision] configuring passwordless sudo for Raspberry Pi provisioning")
+        # A provider may declare a bootstrap password (via its manifest, read
+        # generically by _bootstrap_sudo_password) used to install NOPASSWD
+        # sudo on first contact. Core names no provider here.
+        bootstrap_password = ConfigEnv.bootstrap_sudo_password(provider)
+        if bootstrap_password:
+            print("[provision] configuring passwordless sudo via the provider's bootstrap password")
             remote_cmd = (
                 'tmp=$(mktemp); printf "%s ALL=(ALL) NOPASSWD:ALL\\n" "$USER" > "$tmp"; '
                 'chmod 0440 "$tmp"; sudo -S -p "" install -o root -g root -m 0440 "$tmp" '
@@ -140,7 +141,7 @@ def provision_ubuntu(profile: str, env: dict[str, str], root: Path) -> int:
             )
             subprocess.run(
                 [instance_ssh, profile, "--", remote_cmd],
-                cwd=root, input=f"{rpi_password}\n", text=True, check=False,
+                cwd=root, input=f"{bootstrap_password}\n", text=True, check=False,
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             )
 
@@ -150,8 +151,8 @@ def provision_ubuntu(profile: str, env: dict[str, str], root: Path) -> int:
             " for the SSH user.", file=sys.stderr,
         )
         print(
-            f"[provision] Configure RASPBERRY_PI_USER_PASSWORD or sudo NOPASSWD"
-            f" for VM_USER_NAME on {profile}, then retry.", file=sys.stderr,
+            "[provision] Configure the provider's bootstrap password or passwordless"
+            f" sudo for the SSH user on {profile}, then retry.", file=sys.stderr,
         )
         return 1
 

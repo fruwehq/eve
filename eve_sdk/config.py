@@ -152,6 +152,25 @@ class ConfigEnv:
         return sorted(combined, key=lambda row: row[0])
 
     @classmethod
+    def bootstrap_sudo_password(cls, provider_id: str) -> str:
+        """Password for first-contact NOPASSWD-sudo setup, declared by the provider.
+
+        A provider manifest names which of its config/secret env vars holds the
+        bootstrap password via ``bootstrap.sudo_password_env``; core reads that
+        env var generically and never names a provider. Returns "" when the
+        provider declares none or the value is unset.
+        """
+        from eve_sdk.plugin_manifest import PluginManifest
+
+        for plugin in PluginManifest.load_all("provider"):
+            if plugin.get("id") != provider_id:
+                continue
+            bootstrap = plugin.get("bootstrap")
+            if isinstance(bootstrap, dict) and bootstrap.get("sudo_password_env"):
+                return os.environ.get(str(bootstrap["sudo_password_env"]), "")
+        return ""
+
+    @classmethod
     def plugin_provision_env_names(
         cls, *, kinds: tuple[str, ...] = ("provider", "package")
     ) -> list[str]:

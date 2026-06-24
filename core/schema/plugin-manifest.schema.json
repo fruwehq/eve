@@ -88,6 +88,16 @@
       "description": "Whether compatibility failures are hard errors during dispatch (package plugins only).",
       "type": "boolean"
     },
+    "bootstrap": {
+      "description": "Provider-owned first-contact bootstrap hints. sudo_password_env names which of this provider's config/secret env vars holds the password core uses to install NOPASSWD sudo (provider plugins only); core reads it generically and never names a provider.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sudo_password_env": {
+          "type": "string"
+        }
+      }
+    },
     "access": {
       "description": "Provider-owned VM access identity rules used to populate resolved access.bootstrap_user, provision_user, and human_user.",
       "type": "object",

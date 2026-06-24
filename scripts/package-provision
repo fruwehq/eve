@@ -144,7 +144,6 @@ def main(argv: list[str]) -> int:
     os_id = resolved.get("OS_ID", "")
     profile_name = resolved.get("PROFILE_NAME", "")
     provider = resolved.get("PROVIDER", "")
-    engine = resolved.get("ENGINE", "")
     bundle_packages = resolved.get("BUNDLE_PACKAGES", "")
     os_provision_dir = root / "oses" / os_id / "provision"
 
@@ -234,9 +233,11 @@ def main(argv: list[str]) -> int:
         ).returncode == 0
 
     if not sudo_ok():
-        pi_password = os.environ.get("RASPBERRY_PI_USER_PASSWORD", "")
-        if engine == "metal" and pi_password:
-            print("[package-provision] configuring passwordless sudo for Raspberry Pi provisioning")
+        # Provider-declared bootstrap password (manifest bootstrap.sudo_password_env),
+        # read generically — core names no provider.
+        bootstrap_password = ConfigEnv.bootstrap_sudo_password(provider)
+        if bootstrap_password:
+            print("[package-provision] configuring passwordless sudo via the provider's bootstrap password")
             sudo_setup = (
                 'tmp=$(mktemp); printf "%s ALL=(ALL) NOPASSWD:ALL\\n" "$USER" > "$tmp"; '
                 'chmod 0440 "$tmp"; sudo -S -p "" install -o root -g root -m 0440 '
@@ -244,7 +245,7 @@ def main(argv: list[str]) -> int:
                 "sudo -n visudo -cf /etc/sudoers.d/90-eve-provision"
             )
             subprocess.run([ssh, instance_name, "--", sudo_setup],
-                           input=pi_password + "\n", text=True)
+                           input=bootstrap_password + "\n", text=True)
 
     if not sudo_ok():
         print(
