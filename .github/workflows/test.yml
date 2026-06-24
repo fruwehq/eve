@@ -7,6 +7,7 @@ on:
   pull_request:
   schedule:
     - cron: "0 9 * * *"
+  workflow_dispatch:
 
 jobs:
   test:
@@ -195,3 +196,48 @@ jobs:
               echo "| no timed shell steps completed | 0 | 0 |"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # Cross-repo agnosticism guard. Deliberately NOT part of per-PR CI: the per-PR
+  # `test` job stays decoupled (one-way dependency, synthetic fixtures only).
+  # This job runs nightly + on demand, checking out the real sibling plugin repos
+  # read-only and running the core-boundary lint with them sourced — so a leak of
+  # a concrete provider/package/OS id that the synthetic-fixture lint can't see
+  # (it only bans the ids it discovers) fails here. See docs/v4.4-roadmap.md §11.
+  cross-repo-agnosticism:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout eve
+        uses: actions/checkout@v5
+        with:
+          path: eve
+
+      - name: Checkout sibling plugin repos (read-only)
+        run: |
+          set -euo pipefail
+          for repo in eve-providers eve-packages-linux eve-packages-windows eve-plugins-ai eve-plugins-openwrt; do
+            git clone --depth 1 "https://github.com/fruwehq/${repo}.git" "plugins/${repo}"
+          done
+
+      - name: Install Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+
+      - name: Install eve
+        working-directory: eve
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade poetry
+          poetry install --no-interaction --no-root
+
+      - name: core-boundary lint with real plugins sourced
+        working-directory: eve
+        run: |
+          set -euo pipefail
+          roots=""
+          for repo in eve-providers eve-packages-linux eve-packages-windows eve-plugins-ai eve-plugins-openwrt; do
+            roots="${roots:+$roots:}${GITHUB_WORKSPACE}/plugins/${repo}"
+          done
+          EVE_PLUGIN_ROOTS_EXCLUSIVE=1 EVE_PLUGIN_ROOTS="$roots" \
+            poetry run ./scripts/test-core-boundary
