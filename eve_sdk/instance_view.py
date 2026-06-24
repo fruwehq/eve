@@ -59,23 +59,20 @@ def provider_actions(
 # Package-list assembly (extracted from scripts/package-list)
 # --------------------------------------------------------------------------- #
 
-def compatibility_target(os_family: str, package_ids: list[str]) -> dict[str, str]:
+def compatibility_target(os_family: str, desktop_plugins: list[dict[str, Any]]) -> dict[str, str]:
     """Pick the desktop/session compatibility target for an OS family.
 
-    Faithful port of ``scripts/package-list.compatibility_target``.
+    Data-driven (v4.4 §15): the selected desktop package(s) contribute their
+    ``desktop`` manifest metadata (name/session/headless); core no longer
+    branches on package ids. When no desktop is selected on ubuntu, the default
+    is XFCE/X11 (a core default, not a package id).
     """
     if os_family == "windows":
         return {"platform": "windows", "desktop": "Windows", "session": "Native"}
-    if os_family == "ubuntu" and "gnome-desktop-headless" in package_ids:
-        return {"platform": "ubuntu", "desktop": "GNOME Headless", "session": "Wayland"}
-    if os_family == "ubuntu" and "gnome-desktop" in package_ids:
-        return {"platform": "ubuntu", "desktop": "GNOME", "session": "Wayland"}
-    if os_family == "ubuntu" and "kde-desktop-headless" in package_ids:
-        return {"platform": "ubuntu", "desktop": "KDE Plasma Headless", "session": "Wayland"}
-    if os_family == "ubuntu" and "kde-desktop" in package_ids:
-        return {"platform": "ubuntu", "desktop": "KDE Plasma", "session": "Wayland"}
-    if os_family == "ubuntu" and "xfce-desktop-headless" in package_ids:
-        return {"platform": "ubuntu", "desktop": "XFCE Headless", "session": "X11"}
+    if desktop_plugins:
+        chosen = sorted(desktop_plugins, key=lambda d: not bool(d.get("headless")))[0]
+        return {"platform": os_family, "desktop": str(chosen.get("name", "")),
+                "session": str(chosen.get("session", ""))}
     if os_family == "ubuntu":
         return {"platform": "ubuntu", "desktop": "XFCE", "session": "X11"}
     return {"platform": os_family, "desktop": "", "session": ""}
@@ -116,12 +113,17 @@ def build_package_rows(
     """
     plugin_by_id = {plugin["id"]: plugin for plugin in package_plugins}
     selected_ids = resolved["bundle_packages"]
+    desktop_plugins = [
+        plugin_by_id[pkg]["desktop"]
+        for pkg in selected_ids
+        if pkg in plugin_by_id and isinstance(plugin_by_id[pkg].get("desktop"), dict)
+    ]
     package_sources = resolved.get("package_sources", {})
     os_doc = resolved["os"]
     os_family = os_doc["family"]
     os_arch = os_doc.get("arch", "")
     os_version = os_doc.get("version", "")
-    target = compatibility_target(os_family, selected_ids)
+    target = compatibility_target(os_family, desktop_plugins)
 
     packages: list[dict[str, Any]] = []
     for plugin in sorted(package_plugins, key=lambda entry: entry["id"]):

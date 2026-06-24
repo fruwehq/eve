@@ -57,18 +57,6 @@ class ListTable(DataTable[Any]):
     ]
 
 
-DESKTOP_PACKAGE_IDS = frozenset(
-    {
-        "gnome-desktop",
-        "gnome-desktop-headless",
-        "kde-desktop",
-        "kde-desktop-headless",
-        "xfce-desktop",
-        "xfce-desktop-headless",
-    }
-)
-
-
 class ProviderPane(Static):
     DEFAULT_CSS = """
     ProviderPane {
@@ -852,8 +840,8 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
 
         True when the package enforces compatibility and every supported row for
         the selected OS family names a desktop — i.e. it cannot run without one.
-        Scoped to ubuntu, where the desktop packages (DESKTOP_PACKAGE_IDS) live;
-        on Windows, RDP uses the native session and needs no desktop package.
+        Scoped to ubuntu, where desktop packages live; on Windows, RDP uses the
+        native session and needs no desktop package.
         """
         platform_choice = self.selected_platform()
         if str(platform_choice.get("os_family") or "") != "ubuntu":
@@ -871,6 +859,17 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
             return False
         return all(str(entry.get("desktop") or "") for entry in family_supported)
 
+    def _has_desktop(self, package_ids: set[str]) -> bool:
+        """True if any of these packages declares desktop metadata (v4.4 §15).
+
+        Replaces the hardcoded DESKTOP_PACKAGE_IDS set — desktop detection is
+        data-driven from each package's manifest ``desktop`` field.
+        """
+        return any(
+            isinstance(self.package_map.get(pid, {}).get("desktop"), dict)
+            for pid in package_ids
+        )
+
     def package_select_reason(self, package_id: str) -> str | None:
         reason = self.support_reason(package_id)
         if reason:
@@ -881,7 +880,7 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
             return conflict_reason
         if not self.package_installable_on_platform(package_id):
             return "native action only on this OS"
-        if self.package_requires_desktop(package_id) and not (prospective & DESKTOP_PACKAGE_IDS):
+        if self.package_requires_desktop(package_id) and not self._has_desktop(prospective):
             return "requires a desktop package (e.g. xfce-desktop)"
         compatibility_reason = self.package_compatibility_reason(package_id, prospective)
         if compatibility_reason:
@@ -897,7 +896,7 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
             conflict_reason = self.package_conflict_reason(package_id, prospective_packages)
             if conflict_reason:
                 return f"{package_id}: {conflict_reason}"
-            if self.package_requires_desktop(package_id) and not (prospective_packages & DESKTOP_PACKAGE_IDS):
+            if self.package_requires_desktop(package_id) and not self._has_desktop(prospective_packages):
                 return f"{package_id}: requires a desktop package (e.g. xfce-desktop)"
             compatibility_reason = self.package_compatibility_reason(package_id, prospective_packages)
             if compatibility_reason:
@@ -929,16 +928,17 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
         os_family = str(platform_choice.get("os_family") or "")
         if os_family == "windows":
             return {"platform": "windows", "desktop": "Windows", "session": "Native"}
-        if os_family == "ubuntu" and "gnome-desktop-headless" in package_ids:
-            return {"platform": "ubuntu", "desktop": "GNOME Headless", "session": "Wayland"}
-        if os_family == "ubuntu" and "gnome-desktop" in package_ids:
-            return {"platform": "ubuntu", "desktop": "GNOME", "session": "Wayland"}
-        if os_family == "ubuntu" and "kde-desktop-headless" in package_ids:
-            return {"platform": "ubuntu", "desktop": "KDE Plasma Headless", "session": "Wayland"}
-        if os_family == "ubuntu" and "kde-desktop" in package_ids:
-            return {"platform": "ubuntu", "desktop": "KDE Plasma", "session": "Wayland"}
-        if os_family == "ubuntu" and "xfce-desktop-headless" in package_ids:
-            return {"platform": "ubuntu", "desktop": "XFCE Headless", "session": "X11"}
+        # Data-driven (v4.4 §15): desktop packages declare a `desktop` manifest
+        # field; read it instead of branching on package ids.
+        desktops = [
+            self.package_map[pid]["desktop"]
+            for pid in package_ids
+            if pid in self.package_map and isinstance(self.package_map[pid].get("desktop"), dict)
+        ]
+        if desktops:
+            chosen = sorted(desktops, key=lambda d: not bool(d.get("headless")))[0]
+            return {"platform": os_family, "desktop": str(chosen.get("name", "")),
+                    "session": str(chosen.get("session", ""))}
         if os_family == "ubuntu":
             return {"platform": "ubuntu", "desktop": "XFCE", "session": "X11"}
         return {"platform": os_family, "desktop": "", "session": ""}

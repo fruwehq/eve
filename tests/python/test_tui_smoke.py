@@ -344,7 +344,7 @@ def test_new_instance_desktop_required_package_blocks_and_auto_deselects() -> No
         "packages": [
             {"id": "rdp", "compatibility_enforced": True, "installable_os_families": ["ubuntu"],
              "compatibility": [{"platform": "ubuntu", "desktop": "XFCE", "session": "X11", "status": "supported"}]},
-            {"id": "xfce-desktop", "installable_os_families": ["ubuntu"],
+            {"id": "xfce-desktop", "installable_os_families": ["ubuntu"], "desktop": {"name": "XFCE", "session": "X11"},
              "compatibility": [{"platform": "ubuntu", "desktop": "XFCE", "session": "X11", "status": "supported"}]},
         ],
     }

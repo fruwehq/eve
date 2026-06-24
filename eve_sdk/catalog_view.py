@@ -115,12 +115,14 @@ def build_catalog_options(
         compatibility = plugin.get("compatibility") if isinstance(plugin.get("compatibility"), list) else []
         install = plugin.get("install") if isinstance(plugin.get("install"), dict) else None
         conflicts_with = plugin.get("conflicts_with") if isinstance(plugin.get("conflicts_with"), list) else []
+        desktop = plugin.get("desktop") if isinstance(plugin.get("desktop"), dict) else None
         packages.append(
             {
                 "id": package.get("id"),
                 "display_name": plugin.get("display_name") or package.get("id"),
                 "supports": supports,
                 "conflicts_with": conflicts_with,
+                "desktop": desktop,
                 "installable": install is not None,
                 "installable_os_families": list(install.keys()) if install else [],
                 "actions": actions,

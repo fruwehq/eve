@@ -166,6 +166,17 @@
       }
     },
 
+    "desktop": {
+      "description": "Desktop metadata a desktop package contributes (package plugins only). Drives desktop/session detection in core data-driven, without naming packages: core reads the selected desktop package's name/session instead of branching on ids.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "description": "Display name (e.g. 'GNOME Headless')." },
+        "session": { "type": "string", "description": "Session type (e.g. 'Wayland', 'X11')." },
+        "headless": { "type": "boolean", "description": "Whether this is a headless variant (preferred when multiple desktops are selected)." }
+      }
+    },
+
     "install": {
       "description": "Install metadata per OS family, consumed by provisioning scripts (package plugins only).",
       "type": "object",
