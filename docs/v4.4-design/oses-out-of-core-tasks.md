@@ -54,20 +54,24 @@ scripts/test-core-boundary
 
 ---
 
-## Phase 1 — schema: add the `os` plugin kind + open OS-id enums  *(eve core)*
+## Phase 1 — schema: add the `os` plugin kind  *(eve core — ✅ `os` kind DONE)*
 
-1. Add `os` to the `kind` enum in `plugin-manifest.schema.json`; add an
-   `if kind==os then …` branch declaring how an OS plugin points at its
-   provision tree (e.g. `provision: { dir: provision }` relative to the plugin)
-   and its `supports` (arch/family). Mirror the provider/package branches.
-2. Open the OS-id enums to freeform (drop `enum [ubuntu, windows]`; use
-   `additionalProperties`/string) in `provision-manifest.schema.json`,
-   `plugin-manifest.schema.json` (install specs + enum), and
-   `provision-status.schema.json`. Reclassify the `windows` section of
-   `config.schema.json` (move to the OS plugin, or keep only if genuinely a core
-   knob — justify in the commit).
+1. ✅ DONE: `os` is in the `kind` enum in `plugin-manifest.schema.json`.
+   Still TODO: add an `if kind==os then …` branch declaring how an OS plugin
+   points at its provision tree (e.g. `provision: { dir: provision }` relative to
+   the plugin) and its `supports` (arch/family). Mirror the provider/package
+   branches.
+2. **DECISION — do NOT open the `ubuntu`/`windows` OS-family enums.** An OS
+   *family* is part of the core extension **contract**, exactly like the
+   `engines` enum (kept as contract in §3/§5) — core legitimately dispatches the
+   provision flow per family. So keep `provision-manifest`/`provision-status`/
+   `plugin-manifest` family enums and the install-spec `ubuntu`/`windows` keys as
+   the contract. (The agnosticism target is the concrete OS *catalog ids* and the
+   shipped provision *trees*, not the family taxonomy.) If a prior pass already
+   opened some family enums, that's fine — just don't treat closing them as a
+   regression. Leave `config.schema.json`'s `windows` section as a core section.
 
-Commit: `feat(schema): add os plugin kind; open OS-family id enums (§14)`.
+Commit (only if the `kind==os` branch is added): `feat(schema): os-plugin provision-dir branch (§14)`.
 
 ## Phase 2 — discover OS provision trees from plugins  *(eve core, additive)*
 
@@ -95,7 +99,9 @@ Once every real OS family is an `eve-providers/oses/` plugin and parity-green:
    only `oses/mockos-*` and `oses/mockwin-*` as test fixtures.
 2. Remove the in-repo `oses/<id>` fallback added in Phase 2 — discovery is now
    purely plugin-driven.
-3. Remove any remaining `ubuntu`/`windows` literals from core code/comments.
+3. Remove stray concrete OS-id literals (`ubuntu-26.04*`, `windows-server-2025`)
+   from core. **Keep** the OS-*family* names (`ubuntu`/`windows`) — they are the
+   core contract (like engines), not a leak.
 
 Commit: `refactor(core): drop real OS families; discovery is plugin-only (§14)`.
 
@@ -110,13 +116,32 @@ Confirm provisioning still resolves + runs steps for a real OS family sourced
 from `eve-providers/oses/`, and the mock OSes still work as in-repo fixtures. No
 fallback paths — a missing OS plugin must fail loudly.
 
-## Phase 6 — extend the §11 lint to ban OS-family ids  *(eve core; LAST)*
+## Phase 6 — extend the §11 lint to ban concrete OS-plugin ids  *(eve core; LAST)*
 
-Add OS-family ids (`load_all("os")`) to `scripts/test-core-boundary`'s banned set
-(reuse `COMMON_TOKEN_IDS` for dual-meaning words). Run it green; fix any
+Add `load_all("os")` plugin ids (the concrete OS ids, e.g. `ubuntu-26.04-arm64` —
+**not** the family names) to `scripts/test-core-boundary`'s banned set; the
+uppercase-env matching is already in place. Run with all sibling plugins sourced
+and confirm GREEN (the meaningful run — see the verification note below); fix any
 straggler. Update `docs/v4.4-roadmap.md` §14 + §11 to **done**.
 
-Commit: `chore(lint): ban OS-family ids in core; v4.4 §14 done`.
+Commit: `chore(lint): ban OS-plugin ids in core; v4.4 §14 done`.
+
+## Verification note (applies to the whole milestone)
+
+`scripts/test-core-boundary` only bans ids it can **discover**, and eve CI sources
+only synthetic fixtures — so a default run can be green while real leaks remain.
+The meaningful run sources every sibling plugin repo:
+
+```
+EVE_PLUGIN_ROOTS_EXCLUSIVE=1 \
+EVE_PLUGIN_ROOTS="<eve-providers>:<eve-packages-linux>:<eve-packages-windows>:<eve-plugins-ai>:<eve-plugins-openwrt>" \
+  scripts/test-core-boundary
+```
+
+§8 / §15 / §15.5 / §15.5c already pass this. A standing **CI job that runs the lint
+with the real plugin repos checked out read-only** is still owed — without it,
+"green" only means "clean of the mock-fixture ids," which is exactly how the
+earlier leaks hid. Add it as part of finishing v4.4.
 
 ## Merge discipline
 
