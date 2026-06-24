@@ -82,3 +82,33 @@ def test_plugin_provision_env_names_aggregates_config_and_secrets(
     names = ConfigEnv.plugin_provision_env_names(kinds=("package",))
     # string secret IS included here (unlike _plugin_mappings/config-env).
     assert names == ["PKG_KEY_FILE", "PKG_PASSWORD", "PKG_VERSION"]
+
+
+def test_package_stage_env_names_only_package_type_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only package type:path config fields are staged; provider paths excluded."""
+    from eve_sdk import plugin_manifest
+
+    def fake_load_all(cls: object, kind: str | None = None) -> list[dict[str, object]]:
+        if kind == "package":
+            return [{
+                "id": "pkg",
+                "config_schema": {"config": {
+                    "bundle": {"type": "path", "env_var": "PKG_BUNDLE"},
+                    "name": {"type": "string", "env_var": "PKG_NAME"},
+                }},
+            }]
+        if kind == "provider":
+            return [{
+                "id": "prov",
+                "config_schema": {"config": {
+                    "creds": {"type": "path", "env_var": "PROV_CREDS"},
+                }},
+            }]
+        return []
+
+    monkeypatch.setattr(plugin_manifest.PluginManifest, "load_all", classmethod(fake_load_all))
+    # PKG_BUNDLE (package type:path) only — PKG_NAME (string) and PROV_CREDS
+    # (provider type:path, local-only credential) excluded.
+    assert ConfigEnv.package_stage_env_names() == ["PKG_BUNDLE"]

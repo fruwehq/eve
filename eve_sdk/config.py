@@ -152,6 +152,23 @@ class ConfigEnv:
         return sorted(combined, key=lambda row: row[0])
 
     @classmethod
+    def package_stage_env_names(cls) -> list[str]:
+        """Env vars of package ``type: path`` config fields — local files to stage.
+
+        A package ``type: path`` config value is a local file the package needs on
+        the remote (e.g. an installer bundle). Core stages each to the remote
+        during provision and rewrites the env var to the remote path — generically,
+        naming no package. Provider ``type: path`` fields (local credential files)
+        are excluded by scope. Returns a sorted, de-duped list.
+        """
+        names = {
+            env_var
+            for (_section, _field), env_var, is_path in cls._plugin_mappings(kinds=("package",))
+            if is_path
+        }
+        return sorted(names)
+
+    @classmethod
     def bootstrap_sudo_password(cls, provider_id: str) -> str:
         """Password for first-contact NOPASSWD-sudo setup, declared by the provider.
 

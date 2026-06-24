@@ -226,18 +226,22 @@ def provision_ubuntu(profile: str, env: dict[str, str], root: Path) -> int:
         (stage / "state" / "bundle_packages").write_text(pkg_lines + "\n", encoding="utf-8")
         (stage / "state" / "selected_packages").write_text(pkg_lines + "\n", encoding="utf-8")
 
-        server_bundle_remote = os.environ.get("THINLINC_SERVER_BUNDLE_PATH", "")
-        upload_server_bundle = False
-        if server_bundle_remote:
-            if not Path(server_bundle_remote).exists():
-                print(
-                    f"[provision] THINLINC_SERVER_BUNDLE_PATH does not exist:"
-                    f" {server_bundle_remote}", file=sys.stderr,
-                )
+        # Stage package type:path config files (local installers/bundles, e.g.
+        # ThinLinc/Splashtop) onto the remote and rewrite each env var to its
+        # remote path — generic, so core names no package. Captured as
+        # (local_path, remote_rel_dir) and uploaded after the provision dir is
+        # prepared, below.
+        stage_files: list[tuple[str, str]] = []
+        for stage_var in ConfigEnv.package_stage_env_names():
+            local_path = os.environ.get(stage_var, "")
+            if not local_path:
+                continue
+            if not Path(local_path).exists():
+                print(f"[provision] {stage_var} does not exist: {local_path}", file=sys.stderr)
                 return 2
-            bundle_basename = os.path.basename(server_bundle_remote)
-            server_bundle_remote = f"$HOME/provision/downloads/server-bundle/{bundle_basename}"
-            upload_server_bundle = True
+            remote_rel = f"provision/downloads/{stage_var.lower()}"
+            os.environ[stage_var] = f"$HOME/{remote_rel}/{os.path.basename(local_path)}"
+            stage_files.append((local_path, remote_rel))
 
         host_tz = os.environ.get("TIMEZONE", "")
         if not host_tz:
@@ -247,26 +251,6 @@ def provision_ubuntu(profile: str, env: dict[str, str], root: Path) -> int:
             )
             if tz_result.returncode == 0:
                 host_tz = tz_result.stdout.strip()
-
-        agent_hostname = os.environ.get("THINLINC_AGENT_HOSTNAME", "")
-        if not agent_hostname and os.environ.get("THINLINC_SERVER_BUNDLE_PATH"):
-            ip_result = subprocess.run(
-                [str(root / "scripts/instance-ip"), profile], cwd=root,
-                capture_output=True, text=True, check=False,
-            )
-            if ip_result.returncode == 0:
-                agent_hostname = ip_result.stdout.strip()
-
-        # §15.5b (remaining): the ThinLinc server-bundle upload rewrites its
-        # path to the remote location and defaults the agent hostname to the
-        # instance IP — value-transforming provision logic that still names the
-        # package. Folded into os.environ so the generic env loop below emits the
-        # computed values; tracked for generalization into a manifest
-        # provision-upload field so core names no package here either.
-        if server_bundle_remote:
-            os.environ["THINLINC_SERVER_BUNDLE_PATH"] = server_bundle_remote
-        if agent_hostname:
-            os.environ["THINLINC_AGENT_HOSTNAME"] = agent_hostname
 
         # Core (non-plugin) provision env. Plugin env is appended generically
         # below so core names no provider or package (v4.4 §15.5).
@@ -288,9 +272,9 @@ def provision_ubuntu(profile: str, env: dict[str, str], root: Path) -> int:
             f'export VIRTUAL_MONITOR_HEIGHT="{os.environ.get("VIRTUAL_MONITOR_HEIGHT", "1080")}"',
         ]
         # Plugin-declared env (config + secrets) from installed provider/package
-        # manifests — generic, so no plugin id is named in core. The ThinLinc
-        # bundle path / agent hostname above were folded into os.environ before
-        # this loop, so they emit with their computed (remote/resolved) values.
+        # manifests — generic, so no plugin id is named in core. Staged package
+        # files (above) were rewritten in os.environ to their remote paths, so
+        # they emit here with the remote value.
         for _name in ConfigEnv.plugin_provision_env_names():
             env_lines.append(f'export {_name}="{os.environ.get(_name, "")}"')
         (stage / "state" / "env").write_text("\n".join(env_lines) + "\n", encoding="utf-8")
@@ -300,13 +284,13 @@ def provision_ubuntu(profile: str, env: dict[str, str], root: Path) -> int:
                         "rm -rf ~/provision/state ~/provision/scripts ~/provision/logs && mkdir -p ~/provision/state")
         if rc:
             return rc
-        if upload_server_bundle:
-            rc = _ssh_retry(profile, "prepare ThinLinc bundle directory",
-                            "rm -rf ~/provision/downloads/server-bundle && mkdir -p ~/provision/downloads/server-bundle")
+        for local_path, remote_rel in stage_files:
+            rc = _ssh_retry(profile, f"prepare {remote_rel}",
+                            f"rm -rf ~/{remote_rel} && mkdir -p ~/{remote_rel}")
             if rc:
                 return rc
-            rc = _ssh_retry_scp(profile, "upload ThinLinc server bundle",
-                                os.environ["THINLINC_SERVER_BUNDLE_PATH"], "provision/downloads/server-bundle")
+            rc = _ssh_retry_scp(profile, f"upload {os.path.basename(local_path)}",
+                                local_path, remote_rel)
             if rc:
                 return rc
         rc = _ssh_retry_scp(profile, "upload linux scripts", str(stage / "scripts"), "provision/")
