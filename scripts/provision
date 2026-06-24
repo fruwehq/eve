@@ -24,6 +24,15 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from eve_sdk.config import ConfigEnv  # noqa: E402
+from eve_sdk.plugin_manifest import PluginManifest  # noqa: E402
+
+
+def _provision_dir_display(path: Path, root: Path) -> str:
+    """Display the provision dir relative to root, or full path if external."""
+    try:
+        return str(path.relative_to(root))
+    except ValueError:
+        return str(path)
 
 
 def _run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
@@ -108,10 +117,13 @@ def provision_ubuntu(profile: str, env: dict[str, str], root: Path) -> int:
     bundle_packages = env.get("BUNDLE_PACKAGES", "")
     profile_name = env.get("PROFILE_NAME", "")
     provider = env.get("PROVIDER", "")
-    os_provision_dir = root / "oses" / os_id / "provision"
+    os_provision_dir = PluginManifest.os_provision_dir(os_id)
+    if os_provision_dir is None:
+        os_provision_dir = root / "oses" / os_id / "provision"
 
     if not os_provision_dir.is_dir():
-        print(f"[provision] OS provisioning directory not found: {os_provision_dir.relative_to(root)}", file=sys.stderr)
+        display = _provision_dir_display(os_provision_dir, root)
+        print(f"[provision] OS provisioning directory not found: {display}", file=sys.stderr)
         return 2
 
     ssh_wait_rc = _run([str(root / "scripts/ssh-wait"), profile]).returncode
@@ -279,7 +291,7 @@ def provision_ubuntu(profile: str, env: dict[str, str], root: Path) -> int:
             env_lines.append(f'export {_name}="{os.environ.get(_name, "")}"')
         (stage / "state" / "env").write_text("\n".join(env_lines) + "\n", encoding="utf-8")
 
-        print(f"[provision] uploading {os_provision_dir.relative_to(root)}/ to remote")
+        print(f"[provision] uploading {_provision_dir_display(os_provision_dir, root)}/ to remote")
         rc = _ssh_retry(profile, "prepare linux provision directory",
                         "rm -rf ~/provision/state ~/provision/scripts ~/provision/logs && mkdir -p ~/provision/state")
         if rc:
@@ -339,7 +351,9 @@ def provision_windows(profile: str, env: dict[str, str], root: Path) -> int:
     os_family = env.get("OS_FAMILY", "")
     os_id = env.get("OS_ID", "")
     bundle_packages = env.get("BUNDLE_PACKAGES", "")
-    os_provision_dir = root / "oses" / os_id / "provision"
+    os_provision_dir = PluginManifest.os_provision_dir(os_id)
+    if os_provision_dir is None:
+        os_provision_dir = root / "oses" / os_id / "provision"
 
     windows_password = os.environ.get("EPHEMERAL_WINDOWS_PASSWORD", "")
     if not windows_password:
@@ -406,7 +420,7 @@ def provision_windows(profile: str, env: dict[str, str], root: Path) -> int:
         (stage / "provision" / "state").mkdir(parents=True, exist_ok=True)
         _write_manifest(stage / "provision" / "state", manifest_steps, os_family)
 
-        print(f"[provision] uploading {os_provision_dir.relative_to(root)}/ to remote")
+        print(f"[provision] uploading {_provision_dir_display(os_provision_dir, root)}/ to remote")
         rc = _ssh_retry(profile, "prepare windows provision directory",
                         'New-Item -ItemType Directory -Force C:\\Users\\Administrator\\provision | Out-Null; '
                         'if (Test-Path "C:\\Users\\Administrator\\provision\\scripts") { '

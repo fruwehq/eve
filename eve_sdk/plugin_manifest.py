@@ -135,6 +135,21 @@ class PluginManifest:
             return None
 
     @classmethod
+    def os_provision_dir(cls, os_id: str) -> Path | None:
+        """Resolve an OS family's provision tree from the installed os-plugin set.
+
+        Returns ``<plugin_dir>/<provision.dir>`` for the os plugin whose id
+        matches ``os_id``, or ``None`` when no os plugin is found (caller falls
+        back to the in-repo ``oses/<os_id>/provision`` tree). (v4.4 §14)
+        """
+        for plugin in cls.load_all("os"):
+            if plugin.get("id") == os_id:
+                provision = plugin.get("provision") or {}
+                dir_name = provision.get("dir") or "provision"
+                return Path(str(plugin["_path"])).parent / dir_name
+        return None
+
+    @classmethod
     def load(cls, path: str | os.PathLike[str]) -> dict[str, Any]:
         target = Path(path).resolve()
         loaded = yaml.safe_load(target.read_text(encoding="utf-8")) or {}
