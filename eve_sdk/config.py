@@ -169,6 +169,40 @@ class ConfigEnv:
         return sorted(names)
 
     @classmethod
+    def instance_package_env(
+        cls, package_config: dict[str, Any]
+    ) -> dict[str, str]:
+        """Map per-instance package config overrides to their env vars (§16).
+
+        ``package_config`` is ``{package_id: {field: value}}`` carried by an
+        instance — the package-scope analog of ``provider_config``. Each field is
+        mapped to the env var the package manifest declares for it
+        (``config_schema.config[field].env_var``), so an instance can override a
+        package option just like a provider one. Core names no package — the
+        mapping is read from each package's own manifest. Unknown packages/fields
+        are skipped. Returns ``{ENV_VAR: value}`` (instance scope, applied over the
+        user-scope config-env).
+        """
+        from eve_sdk.plugin_manifest import PluginManifest
+
+        if not isinstance(package_config, dict) or not package_config:
+            return {}
+        by_id = {p.get("id"): p for p in PluginManifest.load_all("package")}
+        out: dict[str, str] = {}
+        for pkg_id, overrides in package_config.items():
+            if not isinstance(overrides, dict):
+                continue
+            fields = ((by_id.get(pkg_id) or {}).get("config_schema") or {}).get("config") or {}
+            for field, value in overrides.items():
+                spec = fields.get(field)
+                env_var = spec.get("env_var") if isinstance(spec, dict) else None
+                if not env_var or value is None:
+                    continue
+                for name in (env_var if isinstance(env_var, list) else [env_var]):
+                    out[str(name)] = str(value)
+        return out
+
+    @classmethod
     def bootstrap_sudo_password(cls, provider_id: str) -> str:
         """Password for first-contact NOPASSWD-sudo setup, declared by the provider.
 

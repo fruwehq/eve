@@ -24,6 +24,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from eve_sdk.config import ConfigEnv  # noqa: E402
+from eve_sdk.resolve import instance_package_config  # noqa: E402
 from eve_sdk.package_dispatch import emit_json  # noqa: E402
 from eve_sdk.tf_dispatch import repo_root, resolve_env  # noqa: E402
 
@@ -321,6 +322,10 @@ def main(argv: list[str]) -> int:
             _env_line("VIRTUAL_MONITOR_WIDTH", os.environ.get("VIRTUAL_MONITOR_WIDTH", "1920")),
             _env_line("VIRTUAL_MONITOR_HEIGHT", os.environ.get("VIRTUAL_MONITOR_HEIGHT", "1080")),
         ]
+        # Per-instance package option overrides (§16): instance scope wins over
+        # the user-scope config-env in os.environ before the generic plugin loop
+        # reads it. Field→env_var mapping comes from each package manifest.
+        os.environ.update(ConfigEnv.instance_package_env(instance_package_config(instance_name)))
         env_lines += [
             _env_line(_name, os.environ.get(_name, ""))
             for _name in ConfigEnv.plugin_provision_env_names()

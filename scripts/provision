@@ -24,6 +24,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from eve_sdk.config import ConfigEnv  # noqa: E402
+from eve_sdk.resolve import instance_package_config  # noqa: E402
 from eve_sdk.plugin_manifest import PluginManifest  # noqa: E402
 
 
@@ -283,6 +284,11 @@ def provision_ubuntu(profile: str, env: dict[str, str], root: Path) -> int:
             f'export VIRTUAL_MONITOR_WIDTH="{os.environ.get("VIRTUAL_MONITOR_WIDTH", "1920")}"',
             f'export VIRTUAL_MONITOR_HEIGHT="{os.environ.get("VIRTUAL_MONITOR_HEIGHT", "1080")}"',
         ]
+        # Per-instance package option overrides (§16): instance scope wins over
+        # the user-scope config-env already in os.environ, before the generic
+        # plugin loop reads it. Core names no package — the field→env_var mapping
+        # comes from each package manifest.
+        os.environ.update(ConfigEnv.instance_package_env(instance_package_config(profile)))
         # Plugin-declared env (config + secrets) from installed provider/package
         # manifests — generic, so no plugin id is named in core. Staged package
         # files (above) were rewritten in os.environ to their remote paths, so

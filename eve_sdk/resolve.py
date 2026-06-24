@@ -77,6 +77,24 @@ def default_registry_path() -> Path:
     return Workdir.instance_registry_path()
 
 
+def instance_package_config(
+    instance_name: str, registry_path: str | os.PathLike[str] | None = None
+) -> dict[str, Any]:
+    """The instance's per-instance package option overrides (§16), or ``{}``.
+
+    Lightweight registry read (no full resolve) for the dispatch path: returns
+    ``{package_id: {field: value}}`` as carried by the instance entry, which
+    ``ConfigEnv.instance_package_env`` maps to env vars and overlays over the
+    user-scope config-env.
+    """
+    registry = load_any(registry_path or default_registry_path())
+    for entry in registry.get("instances", []):
+        if isinstance(entry, dict) and entry.get("name") == instance_name:
+            pkg_cfg = entry.get("package_config")
+            return pkg_cfg if isinstance(pkg_cfg, dict) else {}
+    return {}
+
+
 def load_catalog() -> dict[str, Any]:
     """Load the effective catalog via the aggregator.
 
@@ -454,7 +472,7 @@ def resolve_instance(
     # Warm path: a pre-aggregated catalog (the Engine's memo) avoids a fresh
     # disk parse per resolve. Cold path: aggregate from disk now.
     catalog_data = catalog if catalog is not None else load_catalog()
-    ignored_keys = {"name", "overrides", "provider_config", "created_at", "updated_at", "state"}
+    ignored_keys = {"name", "overrides", "provider_config", "package_config", "created_at", "updated_at", "state"}
     composition = {key: value for key, value in instance.items() if key not in ignored_keys}
     composition["name"] = instance["name"]
     machine = by_key(catalog_data, "machines", "name", composition.get("machine", ""))
@@ -491,6 +509,7 @@ def resolve_instance(
         "init": init,
         "location": location,
         "provider_config": provider_config,
+        "package_config": instance.get("package_config") or {},
         "bundle_packages": bundle_packages,
         "package_sources": package_sources,
         "provider_plugin": provider,

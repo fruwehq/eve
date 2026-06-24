@@ -112,3 +112,29 @@ def test_package_stage_env_names_only_package_type_path(
     # PKG_BUNDLE (package type:path) only — PKG_NAME (string) and PROV_CREDS
     # (provider type:path, local-only credential) excluded.
     assert ConfigEnv.package_stage_env_names() == ["PKG_BUNDLE"]
+
+
+def test_instance_package_env_maps_overrides_via_manifest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Per-instance package_config maps field->env_var via the package manifest (§16)."""
+    from eve_sdk import plugin_manifest
+
+    fake = [{
+        "id": "streamer",
+        "config_schema": {"config": {
+            "version": {"env_var": "STREAMER_VERSION"},
+            "bitrate": {"env_var": "STREAMER_BITRATE"},
+        }},
+    }]
+    monkeypatch.setattr(
+        plugin_manifest.PluginManifest, "load_all",
+        classmethod(lambda cls, kind=None: fake if kind == "package" else []),
+    )
+    out = ConfigEnv.instance_package_env({
+        "streamer": {"version": "9.9", "bitrate": 20000},
+        "unknown-pkg": {"x": "y"},          # unknown package -> skipped
+        "streamer-typo-field": {},          # ignored (not a real pkg)
+    })
+    assert out == {"STREAMER_VERSION": "9.9", "STREAMER_BITRATE": "20000"}
+    assert ConfigEnv.instance_package_env({}) == {}
