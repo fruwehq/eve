@@ -3,80 +3,105 @@
   "$id": "https://ephemeral.dev/schemas/provision-status.schema.json",
   "title": "Provision Status",
   "description": "Guest-emitted structured status JSON tracking provision step execution. Written by guest runners (runner.sh / runner.ps1) as each step starts, succeeds, fails, or completes. Consumed by scripts/wait-for-provision when present.",
-
   "type": "object",
-  "required": ["api_version", "os_family", "started_at", "status", "steps"],
+  "required": [
+    "api_version",
+    "os_family",
+    "started_at",
+    "status",
+    "steps"
+  ],
   "additionalProperties": false,
-
   "properties": {
     "api_version": {
       "description": "Status schema version. Unknown versions must be reported as malformed, not silently ignored.",
       "type": "integer",
       "const": 1
     },
-
     "os_family": {
       "description": "OS family of the guest (ubuntu or windows).",
-      "type": "string",
-      "enum": ["ubuntu", "windows"]
+      "type": "string"
     },
-
     "started_at": {
       "description": "ISO 8601 timestamp when the overall provisioning run started.",
-      "type": ["string", "null"]
+      "type": [
+        "string",
+        "null"
+      ]
     },
-
     "finished_at": {
       "description": "ISO 8601 timestamp when the overall provisioning run finished.",
-      "type": ["string", "null"]
+      "type": [
+        "string",
+        "null"
+      ]
     },
-
     "status": {
       "description": "Overall provisioning status.",
       "type": "string",
-      "enum": ["running", "done", "failed"]
+      "enum": [
+        "running",
+        "done",
+        "failed"
+      ]
     },
-
     "steps": {
       "description": "Ordered list of step status records, one per provision step.",
       "type": "array",
-      "items": { "$ref": "#/$defs/step_status" }
+      "items": {
+        "$ref": "#/$defs/step_status"
+      }
     }
   },
-
   "$defs": {
     "step_status": {
       "description": "Status record for a single provision step.",
       "type": "object",
-      "required": ["step", "phase", "started_at", "ended_at", "exit_code"],
+      "required": [
+        "step",
+        "phase",
+        "started_at",
+        "ended_at",
+        "exit_code"
+      ],
       "additionalProperties": false,
-
       "properties": {
         "step": {
           "description": "Step filename (e.g. base.sh, 01_preferences.ps1).",
           "type": "string",
           "minLength": 1
         },
-
         "phase": {
           "description": "Current execution phase of this step.",
           "type": "string",
-          "enum": ["pending", "running", "succeeded", "failed", "skipped"]
+          "enum": [
+            "pending",
+            "running",
+            "succeeded",
+            "failed",
+            "skipped"
+          ]
         },
-
         "started_at": {
           "description": "ISO 8601 timestamp when this step started executing.",
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
-
         "ended_at": {
           "description": "ISO 8601 timestamp when this step finished (success or failure).",
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
-
         "exit_code": {
           "description": "Exit code of the step. null if not yet executed or still running.",
-          "type": ["integer", "null"]
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       }
     }
