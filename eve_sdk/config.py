@@ -76,7 +76,9 @@ class ConfigEnv:
     # ---- plugin-contributed config→env mappings -------------------------- #
 
     @classmethod
-    def _plugin_mappings(cls) -> list[tuple[tuple[str, str], str, bool]]:
+    def _plugin_mappings(
+        cls, *, kinds: tuple[str, ...] = ("provider", "package")
+    ) -> list[tuple[tuple[str, str], str, bool]]:
         """Plugin-owned config→env rows, declared in each provider/package manifest.
 
         Scans ``config_schema.config`` for every ``env_var`` declaration (config
@@ -87,11 +89,11 @@ class ConfigEnv:
         config-env output. String-typed secrets (API keys, passwords) are
         injected at dispatch time only and are intentionally excluded.
 
-        Both provider and package plugins are scanned, so a package's config
-        fields are emitted from its manifest exactly like a provider's. The
-        section is the plugin id; the third tuple element is ``is_path``
-        (``type: path`` fields flag themselves) so values get ~ / $HOME
-        expansion without core naming the env var.
+        Both provider and package plugins are scanned by default (``kinds`` may
+        be narrowed), so a package's config fields are emitted from its manifest
+        exactly like a provider's. The section is the plugin id; the third tuple
+        element is ``is_path`` (``type: path`` fields flag themselves) so values
+        get ~ / $HOME expansion without core naming the env var.
 
         When no plugins are discoverable, returns ``[]`` (clean degradation).
         """
@@ -100,7 +102,7 @@ class ConfigEnv:
         from eve_sdk.plugin_manifest import PluginManifest
 
         rows: list[tuple[tuple[str, str], str, bool]] = []
-        for kind in ("provider", "package"):
+        for kind in kinds:
             for plugin in PluginManifest.load_all(kind):
                 schema = plugin.get("config_schema") or {}
                 if not isinstance(schema, dict):
@@ -148,6 +150,28 @@ class ConfigEnv:
         """
         combined = [*cls.MAPPINGS, *cls._plugin_mappings()]
         return sorted(combined, key=lambda row: row[0])
+
+    @classmethod
+    def provision_env_payload(cls, windows_password: str = "") -> dict[str, str]:
+        """Build the generic provision ``env.json`` payload (v4.4 §15).
+
+        Core keys (``windows_password``, ``display_resolution``) plus every
+        installed *package's* config env that is currently set, keyed by the env
+        var name lowercased with an ``EPHEMERAL_`` prefix stripped. Package
+        provision steps read their keys (``sunshine_version``, ``rustdesk_key``,
+        …) by construction — core names no package. Unset vars are omitted.
+        """
+        payload: dict[str, str] = {
+            "windows_password": windows_password,
+            "display_resolution": os.environ.get("EPHEMERAL_DISPLAY_RESOLUTION", ""),
+        }
+        for _path, env_var, _is_path in cls._plugin_mappings(kinds=("package",)):
+            value = os.environ.get(env_var, "")
+            if not value:
+                continue
+            key = env_var.lower().removeprefix("ephemeral_")
+            payload.setdefault(key, value)
+        return payload
 
     @classmethod
     def environment(cls, default_path: Path | None = None, local_path: Path | None = None) -> dict[str, str]:

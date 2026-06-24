@@ -208,19 +208,9 @@ def main(argv: list[str]) -> int:
                     capture_output=True, text=True, check=False,
                 )
                 windows_password = pw_result.stdout.strip() if pw_result.returncode == 0 else ""
-            env_payload = {
-                "windows_password": windows_password,
-                "sunshine_password": os.environ.get("EPHEMERAL_SUNSHINE_PASSWORD", ""),
-                "display_resolution": os.environ.get("EPHEMERAL_DISPLAY_RESOLUTION", ""),
-                "rustdesk_key": os.environ.get("RUSTDESK_KEY", ""),
-                "rustdesk_password": os.environ.get("RUSTDESK_PASSWORD", ""),
-                "rustdesk_server": os.environ.get("RUSTDESK_SERVER", ""),
-                "sunshine_version": os.environ.get("SUNSHINE_VERSION", ""),
-                "nomachine_version": os.environ.get("NOMACHINE_VERSION", ""),
-                "splashtop_email": os.environ.get("SPLASHTOP_EMAIL", ""),
-                "splashtop_password": os.environ.get("SPLASHTOP_PASSWORD", ""),
-                "splashtop_streamer_url": os.environ.get("SPLASHTOP_STREAMER_URL", ""),
-            }
+            from eve_sdk.config import ConfigEnv
+
+            env_payload = ConfigEnv.provision_env_payload(windows_password)
             (stage / "state").mkdir(parents=True, exist_ok=True)
             (stage / "state" / "env.json").write_text(
                 json.dumps(env_payload, indent=2, ensure_ascii=False) + "\n",
