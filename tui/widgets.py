@@ -836,7 +836,7 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
         return False
 
     def package_requires_desktop(self, package_id: str) -> bool:
-        """Whether a package needs a desktop package selected (e.g. rdp/vnc).
+        """Whether a package needs a desktop package selected (e.g. remote-desktop packages).
 
         True when the package enforces compatibility and every supported row for
         the selected OS family names a desktop — i.e. it cannot run without one.
@@ -881,7 +881,7 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
         if not self.package_installable_on_platform(package_id):
             return "native action only on this OS"
         if self.package_requires_desktop(package_id) and not self._has_desktop(prospective):
-            return "requires a desktop package (e.g. xfce-desktop)"
+            return "requires a desktop package"
         compatibility_reason = self.package_compatibility_reason(package_id, prospective)
         if compatibility_reason:
             return compatibility_reason
@@ -897,7 +897,7 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
             if conflict_reason:
                 return f"{package_id}: {conflict_reason}"
             if self.package_requires_desktop(package_id) and not self._has_desktop(prospective_packages):
-                return f"{package_id}: requires a desktop package (e.g. xfce-desktop)"
+                return f"{package_id}: requires a desktop package"
             compatibility_reason = self.package_compatibility_reason(package_id, prospective_packages)
             if compatibility_reason:
                 return f"{package_id}: {compatibility_reason}"
@@ -1173,7 +1173,7 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
     def prune_unsatisfied_selections(self) -> None:
         """Auto-deselect packages/bundles whose requirements are no longer met.
 
-        Mirrors the rule: rdp/vnc (and anything needing a desktop) are blocked
+        Mirrors the rule: remote-desktop packages (and anything needing a desktop) are blocked
         until their requirement is satisfied, and are dropped if it stops being
         satisfied — e.g. after the last desktop is deselected or the platform
         changes. Conflicts can't coexist (the toggle blocks adding them), so any

@@ -222,18 +222,18 @@ def provision_ubuntu(profile: str, env: dict[str, str], root: Path) -> int:
         (stage / "state" / "bundle_packages").write_text(pkg_lines + "\n", encoding="utf-8")
         (stage / "state" / "selected_packages").write_text(pkg_lines + "\n", encoding="utf-8")
 
-        thinlinc_remote_path = os.environ.get("THINLINC_SERVER_BUNDLE_PATH", "")
-        upload_thinlinc = False
-        if "thinlinc" in _selected_packages(bundle_packages) and thinlinc_remote_path:
-            if not Path(thinlinc_remote_path).exists():
+        server_bundle_remote = os.environ.get("THINLINC_SERVER_BUNDLE_PATH", "")
+        upload_server_bundle = False
+        if server_bundle_remote:
+            if not Path(server_bundle_remote).exists():
                 print(
                     f"[provision] THINLINC_SERVER_BUNDLE_PATH does not exist:"
-                    f" {thinlinc_remote_path}", file=sys.stderr,
+                    f" {server_bundle_remote}", file=sys.stderr,
                 )
                 return 2
-            thinlinc_basename = os.path.basename(thinlinc_remote_path)
-            thinlinc_remote_path = f"$HOME/provision/downloads/thinlinc/{thinlinc_basename}"
-            upload_thinlinc = True
+            bundle_basename = os.path.basename(server_bundle_remote)
+            server_bundle_remote = f"$HOME/provision/downloads/server-bundle/{bundle_basename}"
+            upload_server_bundle = True
 
         host_tz = os.environ.get("TIMEZONE", "")
         if not host_tz:
@@ -244,14 +244,14 @@ def provision_ubuntu(profile: str, env: dict[str, str], root: Path) -> int:
             if tz_result.returncode == 0:
                 host_tz = tz_result.stdout.strip()
 
-        thinlinc_agent_hostname = os.environ.get("THINLINC_AGENT_HOSTNAME", "")
-        if "thinlinc" in _selected_packages(bundle_packages) and not thinlinc_agent_hostname:
+        agent_hostname = os.environ.get("THINLINC_AGENT_HOSTNAME", "")
+        if not agent_hostname and os.environ.get("THINLINC_SERVER_BUNDLE_PATH"):
             ip_result = subprocess.run(
                 [str(root / "scripts/instance-ip"), profile], cwd=root,
                 capture_output=True, text=True, check=False,
             )
             if ip_result.returncode == 0:
-                thinlinc_agent_hostname = ip_result.stdout.strip()
+                agent_hostname = ip_result.stdout.strip()
 
         env_lines = [
             f'export ACCESS_BOOTSTRAP_USER="{env.get("ACCESS_BOOTSTRAP_USER", "")}"',
@@ -282,8 +282,8 @@ def provision_ubuntu(profile: str, env: dict[str, str], root: Path) -> int:
             f'export SUNSHINE_MAX_BITRATE_KBPS="{os.environ.get("SUNSHINE_MAX_BITRATE_KBPS", "")}"',
             f'export SUNSHINE_VERSION="{os.environ.get("SUNSHINE_VERSION", "")}"',
             f'export THINLINC_ACCEPT_EULA="{os.environ.get("THINLINC_ACCEPT_EULA", "")}"',
-            f'export THINLINC_AGENT_HOSTNAME="{thinlinc_agent_hostname}"',
-            f'export THINLINC_SERVER_BUNDLE_PATH="{thinlinc_remote_path}"',
+            f'export THINLINC_AGENT_HOSTNAME="{agent_hostname}"',
+            f'export THINLINC_SERVER_BUNDLE_PATH="{server_bundle_remote}"',
             f'export THINLINC_SERVER_BUNDLE_URL="{os.environ.get("THINLINC_SERVER_BUNDLE_URL", "")}"',
             f'export THINLINC_WEBACCESS_PORT="{os.environ.get("THINLINC_WEBACCESS_PORT", "")}"',
             f'export TIMEZONE="{host_tz}"',
@@ -297,13 +297,13 @@ def provision_ubuntu(profile: str, env: dict[str, str], root: Path) -> int:
                         "rm -rf ~/provision/state ~/provision/scripts ~/provision/logs && mkdir -p ~/provision/state")
         if rc:
             return rc
-        if upload_thinlinc:
+        if upload_server_bundle:
             rc = _ssh_retry(profile, "prepare ThinLinc bundle directory",
-                            "rm -rf ~/provision/downloads/thinlinc && mkdir -p ~/provision/downloads/thinlinc")
+                            "rm -rf ~/provision/downloads/server-bundle && mkdir -p ~/provision/downloads/server-bundle")
             if rc:
                 return rc
             rc = _ssh_retry_scp(profile, "upload ThinLinc server bundle",
-                                os.environ["THINLINC_SERVER_BUNDLE_PATH"], "provision/downloads/thinlinc")
+                                os.environ["THINLINC_SERVER_BUNDLE_PATH"], "provision/downloads/server-bundle")
             if rc:
                 return rc
         rc = _ssh_retry_scp(profile, "upload linux scripts", str(stage / "scripts"), "provision/")

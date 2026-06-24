@@ -17,7 +17,7 @@ class ConfigEnv:
     The static ``MAPPINGS`` table carries only TRUE-core rows — sections core
     owns because no provider/package plugin backs them (``global``, ``display``
     the shared display setting, ``vagrant`` the engine, and ``moonlight`` until
-    its launcher is extracted with sunshine in §8). Every provider- and
+    its launcher is extracted (v4.4 §8). Every provider- and
     package-owned row is contributed by that plugin's ``config_schema``
     field-spec ``env_var`` declaration, discovered at runtime across both
     provider and package plugins (``load_all("provider")`` and
@@ -158,7 +158,7 @@ class ConfigEnv:
         Core keys (``windows_password``, ``display_resolution``) plus every
         installed *package's* config env that is currently set, keyed by the env
         var name lowercased with an ``EPHEMERAL_`` prefix stripped. Package
-        provision steps read their keys (``sunshine_version``, ``rustdesk_key``,
+        provision steps read their keys (e.g. a streaming host's version, a remote
         …) by construction — core names no package. Unset vars are omitted.
         """
         payload: dict[str, str] = {

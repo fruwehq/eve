@@ -2,7 +2,7 @@
 #
 # Only TRUE-core sections live here — the ones no provider/package plugin owns
 # (global, the shared display setting, the vagrant engine, the human/windows
-# users, and moonlight until its launcher is extracted with sunshine in v4.4 §8).
+# users, and moonlight until its launcher is extracted (v4.4 §8).
 # Provider and package config fields, defaults, and validation come from each
 # plugin's manifest config_schema, not from core.
 #

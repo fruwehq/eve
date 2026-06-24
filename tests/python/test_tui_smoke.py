@@ -353,7 +353,7 @@ def test_new_instance_desktop_required_package_blocks_and_auto_deselects() -> No
     screen.notify = lambda *a, **k: None  # type: ignore[assignment, method-assign]
 
     assert screen.package_requires_desktop("rdp") is True
-    assert screen.package_select_reason("rdp") == "requires a desktop package (e.g. xfce-desktop)"
+    assert screen.package_select_reason("rdp") == "requires a desktop package"
 
     # a selected desktop satisfies the requirement
     screen.selected_package_ids = {"xfce-desktop", "rdp"}

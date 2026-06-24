@@ -285,20 +285,20 @@ def main(argv: list[str]) -> int:
             )
             host_tz = tz_result.stdout.strip() if tz_result.returncode == 0 else ""
 
-        thinlinc_hostname = os.environ.get("THINLINC_AGENT_HOSTNAME", "")
-        if package == "thinlinc" and not thinlinc_hostname:
+        agent_hostname = os.environ.get("THINLINC_AGENT_HOSTNAME", "")
+        if not agent_hostname and os.environ.get("THINLINC_SERVER_BUNDLE_PATH"):
             ip_result = subprocess.run(
                 [str(ROOT / "scripts/instance-ip"), instance_name],
                 capture_output=True, text=True, check=False,
             )
-            thinlinc_hostname = ip_result.stdout.strip() if ip_result.returncode == 0 else ""
+            agent_hostname = ip_result.stdout.strip() if ip_result.returncode == 0 else ""
 
-        thinlinc_bundle_env = (
+        bundle_env = (
             os.environ.get("THINLINC_REMOTE_SERVER_BUNDLE_PATH", "")
             or os.environ.get("THINLINC_SERVER_BUNDLE_PATH", "")
         )
-        thinlinc_bundle_upload: str | None = None
-        if package == "thinlinc" and os.environ.get("THINLINC_SERVER_BUNDLE_PATH"):
+        bundle_upload: str | None = None
+        if os.environ.get("THINLINC_SERVER_BUNDLE_PATH"):
             local_bundle = os.environ["THINLINC_SERVER_BUNDLE_PATH"]
             if not Path(local_bundle).exists():
                 print(
@@ -306,8 +306,8 @@ def main(argv: list[str]) -> int:
                     file=sys.stderr,
                 )
                 return 2
-            thinlinc_bundle_env = f"$HOME/provision/downloads/thinlinc/{Path(local_bundle).name}"
-            thinlinc_bundle_upload = local_bundle
+            bundle_env = f"$HOME/provision/downloads/server-bundle/{Path(local_bundle).name}"
+            bundle_upload = local_bundle
 
         env_lines = [
             _env_line("ACCESS_BOOTSTRAP_USER", resolved.get("ACCESS_BOOTSTRAP_USER", "")),
@@ -338,8 +338,8 @@ def main(argv: list[str]) -> int:
             _env_line("SUNSHINE_MAX_BITRATE_KBPS", os.environ.get("SUNSHINE_MAX_BITRATE_KBPS", "")),
             _env_line("SUNSHINE_VERSION", os.environ.get("SUNSHINE_VERSION", "")),
             _env_line("THINLINC_ACCEPT_EULA", os.environ.get("THINLINC_ACCEPT_EULA", "")),
-            _env_line("THINLINC_AGENT_HOSTNAME", thinlinc_hostname),
-            _env_line("THINLINC_SERVER_BUNDLE_PATH", thinlinc_bundle_env),
+            _env_line("THINLINC_AGENT_HOSTNAME", agent_hostname),
+            _env_line("THINLINC_SERVER_BUNDLE_PATH", bundle_env),
             _env_line("THINLINC_SERVER_BUNDLE_URL", os.environ.get("THINLINC_SERVER_BUNDLE_URL", "")),
             _env_line("THINLINC_WEBACCESS_PORT", os.environ.get("THINLINC_WEBACCESS_PORT", "")),
             _env_line("TIMEZONE", host_tz),
@@ -354,15 +354,15 @@ def main(argv: list[str]) -> int:
             [ssh, instance_name, "--",
              "rm -rf ~/provision/scripts && mkdir -p ~/provision/state ~/provision/logs ~/provision/downloads"],
         )]
-        if thinlinc_bundle_upload:
+        if bundle_upload:
             uploads.append((
                 "prepare ThinLinc bundle directory",
                 [ssh, instance_name, "--",
-                 "rm -rf ~/provision/downloads/thinlinc && mkdir -p ~/provision/downloads/thinlinc"],
+                 "rm -rf ~/provision/downloads/server-bundle && mkdir -p ~/provision/downloads/server-bundle"],
             ))
             uploads.append((
                 "upload ThinLinc server bundle",
-                [ssh, instance_name, "--scp", thinlinc_bundle_upload, "provision/downloads/thinlinc"],
+                [ssh, instance_name, "--scp", bundle_upload, "provision/downloads/server-bundle"],
             ))
         uploads.extend([
             ("upload linux package scripts",

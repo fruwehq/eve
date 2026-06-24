@@ -61,8 +61,13 @@ def os_ids() -> list[str]:
     )
 
 
+def package_ids() -> list[str]:
+    """Package ids from loaded package plugin manifests."""
+    return sorted(plugin["id"] for plugin in PluginManifest.load_all("package"))
+
+
 def all_ids() -> list[str]:
-    return [*provider_ids(), *os_ids()]
+    return [*provider_ids(), *package_ids(), *os_ids()]
 
 
 # --- scan scope ------------------------------------------------------------
@@ -142,7 +147,7 @@ import re  # noqa: E402
 # vs "docker" the provider ID). For these IDs, use context-aware matching:
 # only flag comparison/branching patterns (== "id", != "id"),
 # not bare mentions (CLI commands, package names, example strings).
-COMMON_TOKEN_IDS: set[str] = {"docker"}
+COMMON_TOKEN_IDS: set[str] = {"docker", "rdp"}
 
 
 def _has_comparison(content: str, identifier: str) -> bool:
@@ -263,11 +268,11 @@ def self_test() -> int:
     # A planted comparison should be caught; a bare mention should NOT.
     for identifier in COMMON_TOKEN_IDS:
         # PLANTED real coupling — must be caught.
-        planted = 'if provider == "docker":\n    return "docker-engine"'
+        planted = f'if provider == "{identifier}":\n    return "{identifier}-engine"'
         if not _has_comparison(planted, identifier):
             print(f"SELF-TEST FAIL: planted == \"{identifier}\" not detected")
             fail = 1
-        planted_ne = 'if engine != "docker":\n    raise'
+        planted_ne = f'if engine != "{identifier}":\n    raise'
         if not _has_comparison(planted_ne, identifier):
             print(f"SELF-TEST FAIL: planted != \"{identifier}\" not detected")
             fail = 1
