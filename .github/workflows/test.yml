@@ -212,11 +212,23 @@ jobs:
         with:
           path: eve
 
-      - name: Checkout sibling plugin repos (read-only)
+      - name: Checkout sibling plugin repos (read-only, best-effort)
+        env:
+          # Optional PAT with read access to private sibling repos. Public repos
+          # clone without it; private ones (e.g. eve-plugins-openwrt) are skipped
+          # with a warning when it's unset (the default GITHUB_TOKEN is scoped to
+          # eve only and cannot read other repos).
+          CROSS_REPO_TOKEN: ${{ secrets.EVE_CROSS_REPO_TOKEN }}
         run: |
-          set -euo pipefail
+          set -uo pipefail
+          auth=""
+          [ -n "${CROSS_REPO_TOKEN:-}" ] && auth="x-access-token:${CROSS_REPO_TOKEN}@"
           for repo in eve-providers eve-packages-linux eve-packages-windows eve-plugins-ai eve-plugins-openwrt; do
-            git clone --depth 1 "https://github.com/fruwehq/${repo}.git" "plugins/${repo}"
+            if git clone --depth 1 "https://${auth}github.com/fruwehq/${repo}.git" "plugins/${repo}" 2>/dev/null; then
+              echo "cloned ${repo}"
+            else
+              echo "::warning::skipping ${repo} — clone failed (private without EVE_CROSS_REPO_TOKEN?); not covered by this run"
+            fi
           done
 
       - name: Install Python
@@ -236,8 +248,14 @@ jobs:
         run: |
           set -euo pipefail
           roots=""
-          for repo in eve-providers eve-packages-linux eve-packages-windows eve-plugins-ai eve-plugins-openwrt; do
-            roots="${roots:+$roots:}${GITHUB_WORKSPACE}/plugins/${repo}"
+          for dir in "${GITHUB_WORKSPACE}"/plugins/*/; do
+            [ -d "$dir" ] || continue
+            roots="${roots:+$roots:}${dir%/}"
           done
+          if [ -z "$roots" ]; then
+            echo "::error::no sibling plugin repos were cloned — cannot run the guard"
+            exit 1
+          fi
+          echo "sourcing: $roots"
           EVE_PLUGIN_ROOTS_EXCLUSIVE=1 EVE_PLUGIN_ROOTS="$roots" \
             poetry run ./scripts/test-core-boundary
