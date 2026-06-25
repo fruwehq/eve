@@ -52,7 +52,7 @@ def main() -> int:
         for platform in doc["platforms"]:
             print(
                 f"  {platform['provider']} {platform['machine']} {platform['os']} "
-                f"{platform['location']} {platform['init']}"
+                f"{platform['init']}"
             )
     return 0
 
