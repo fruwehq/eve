@@ -24,8 +24,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from eve_sdk.config import ConfigEnv  # noqa: E402
-from eve_sdk.resolve import instance_package_config  # noqa: E402
 from eve_sdk.plugin_manifest import PluginManifest  # noqa: E402
+from eve_sdk.resolve import instance_package_config  # noqa: E402
 
 
 def _provision_dir_display(path: Path, root: Path) -> str:
