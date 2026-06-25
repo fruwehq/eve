@@ -24,6 +24,7 @@ def configured_rows() -> list[dict[str, Any]]:
         rows.append({
             "id": source.id,
             "url": source.url,
+            "subdir": source.subdir,
             "ref": source.ref or "(unpinned)",
             "auth": source.auth,
             "synced": source.id in locked,
@@ -59,8 +60,12 @@ def add_recommended(source_id: str) -> tuple[bool, str]:
     return True, f"added '{rec.id}' — run Pull to materialize"
 
 
-def add_url(url: str, *, ref: str = "", source_id: str = "", auth: str = "none") -> tuple[bool, str]:
+def add_url(
+    url: str, *, ref: str = "", subdir: str = "", source_id: str = "", auth: str = "none"
+) -> tuple[bool, str]:
     entry: dict[str, Any] = {"id": source_id or _derive_id(url), "url": url, "ref": ref, "auth": auth}
+    if subdir:
+        entry["subdir"] = subdir
     try:
         source = registry.add_source(entry)
     except registry.RegistryError as error:
@@ -88,6 +93,19 @@ def pull() -> tuple[bool, str]:
     if proc.returncode != 0:
         return False, out or f"plugins-pull exited {proc.returncode}"
     return True, out or "pull complete"
+
+
+def prune_orphans() -> list[str]:
+    """Remove materialized plugins whose source is no longer configured.
+
+    Local-only (no network): lets the provider list reflect a removed source
+    immediately on close of the plugin-sources screen, instead of leaving stale
+    plugins discoverable until the next pull.
+    """
+    try:
+        return registry.prune_plugins(registry.load_sources())
+    except Exception:
+        return []
 
 
 def _derive_id(url: str) -> str:

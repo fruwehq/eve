@@ -17,10 +17,29 @@ os.environ["EVE_PLUGIN_ROOTS_EXCLUSIVE"] = "1"
 os.environ.setdefault("EVE_HOME", tempfile.mkdtemp(prefix="eve-prov."))
 
 ROOT = Path(__file__).resolve().parents[1]
-UBUNTU_RUNNER = ROOT / "oses/ubuntu-26.04/provision/scripts/runner.sh"
-WINDOWS_RUNNER = ROOT / "oses/windows-server-2025/provision/scripts/runner.ps1"
+sys.path.insert(0, str(ROOT))
+
+from eve_sdk.plugin_manifest import PluginManifest  # noqa: E402
+
+
+def _os_runner(os_id: str, script: str) -> Path:
+    """Resolve an OS provision runner: os plugin first, in-repo fallback (§14)."""
+    provision_dir = PluginManifest.os_provision_dir(os_id)
+    if provision_dir is not None:
+        return provision_dir / "scripts" / script
+    return ROOT / "oses" / os_id / "provision" / "scripts" / script
+
+
+UBUNTU_RUNNER = _os_runner("ubuntu-26.04", "runner.sh")
+WINDOWS_RUNNER = _os_runner("windows-server-2025", "runner.ps1")
 failures = 0
 skipped = 0
+
+# After v4.4 §14, real OS provision trees live in eve-providers/oses/ (os plugins),
+# not in core. When they're absent (hermetic test env), skip gracefully.
+if not UBUNTU_RUNNER.exists() and not WINDOWS_RUNNER.exists():
+    print("[SKIP] real OS provision trees moved to eve-providers/oses/ (v4.4 §14).")
+    raise SystemExit(0)
 
 
 def pass_check(message: str) -> None:

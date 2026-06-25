@@ -84,17 +84,70 @@ class PluginManifest:
 
     @classmethod
     def plugin_paths(cls) -> list[Path]:
+        synced_root = Workdir.plugins_dir()
+        configured_ids = cls._configured_source_ids()
         paths: list[Path] = []
         for root in cls.plugin_roots():
             if not root.exists():
                 continue
+            # The synced root (.eve/plugins) is source-managed: only descend
+            # into exposures backed by a currently-configured source, so the
+            # installed set mirrors the configured set exactly and stale
+            # materializations stop appearing. Other roots (the legacy repo
+            # plugins dir, EVE_PLUGIN_ROOTS extras) are user/dev-owned and
+            # walked in full. Hermetic tests set EVE_PLUGIN_ROOTS_EXCLUSIVE=1,
+            # which excludes the synced root from plugin_roots() entirely.
+            if root == synced_root and configured_ids is not None:
+                for source_id in configured_ids:
+                    paths.extend(cls._manifests_under(root / source_id))
+                continue
             # os.walk(followlinks=True): synced sources are exposed as symlinks
             # under .eve/plugins/<id>; we must descend into them to find manifests.
             # (pathlib's ** symlink-following is 3.13+; this stays 3.12-compatible.)
-            for dirpath, _dirs, files in os.walk(root, followlinks=True):
-                if "eve-plugin.yaml" in files:
-                    paths.append(Path(dirpath) / "eve-plugin.yaml")
+            paths.extend(cls._manifests_under(root))
         return sorted(paths)
+
+    @classmethod
+    def _manifests_under(cls, root: Path) -> list[Path]:
+        found: list[Path] = []
+        if not root.is_dir():
+            return found
+        for dirpath, _dirs, files in os.walk(root, followlinks=True):
+            if "eve-plugin.yaml" in files:
+                found.append(Path(dirpath) / "eve-plugin.yaml")
+        return found
+
+    @staticmethod
+    def _configured_source_ids() -> set[str] | None:
+        """Ids of configured plugin sources, or ``None`` if resolution failed.
+
+        The synced plugins root is source-aware: only exposures whose id is in
+        the configured set are discovered. ``None`` is the safe fallback — a
+        malformed sources file should not make every plugin invisible, so the
+        caller walks the synced root in full instead. (An empty-but-valid
+        source list returns ``set()``, correctly yielding no plugins.)
+        """
+        try:
+            from eve_sdk.registry import load_sources
+
+            return {source.id for source in load_sources()}
+        except Exception:
+            return None
+
+    @classmethod
+    def os_provision_dir(cls, os_id: str) -> Path | None:
+        """Resolve an OS family's provision tree from the installed os-plugin set.
+
+        Returns ``<plugin_dir>/<provision.dir>`` for the os plugin whose id
+        matches ``os_id``, or ``None`` when no os plugin is found (caller falls
+        back to the in-repo ``oses/<os_id>/provision`` tree). (v4.4 §14)
+        """
+        for plugin in cls.load_all("os"):
+            if plugin.get("id") == os_id:
+                provision = plugin.get("provision") or {}
+                dir_name = provision.get("dir") or "provision"
+                return Path(str(plugin["_path"])).parent / dir_name
+        return None
 
     @classmethod
     def load(cls, path: str | os.PathLike[str]) -> dict[str, Any]:
@@ -198,10 +251,17 @@ class PluginManifest:
         if plugin.get("api_version") != cls.API_VERSION:
             raise ValueError(f"{path}: api_version must be {cls.API_VERSION}")
         kind = plugin.get("kind")
-        if kind not in {"provider", "package"}:
-            raise ValueError(f"{path}: kind must be provider or package")
-        if not re.match(r"^[a-z][a-z0-9-]*$", str(plugin.get("id", ""))):
+        if kind not in {"provider", "package", "os"}:
+            raise ValueError(f"{path}: kind must be provider, package, or os")
+        if not re.match(r"^[a-z][a-z0-9.-]*$", str(plugin.get("id", ""))):
             raise ValueError(f"{path}: id must match [a-z][a-z0-9-]*")
+        # os plugins carry a provision tree pointer, not executable commands.
+        if kind == "os":
+            provision = plugin.get("provision")
+            if not isinstance(provision, dict) or not provision.get("dir"):
+                raise ValueError(f"{path}: os plugin must declare provision.dir")
+            cls._validate_requires(plugin, path)
+            return
         commands = plugin.get("commands")
         if not isinstance(commands, dict):
             raise ValueError(f"{path}: commands must be a map")

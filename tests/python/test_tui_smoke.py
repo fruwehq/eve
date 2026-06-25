@@ -119,7 +119,7 @@ def test_add_url_opens_prompt_modal() -> None:
     from textual.widgets import Button
 
     from tui.app import EveTui
-    from tui.widgets import PluginSourcesScreen, TextPromptScreen
+    from tui.widgets import AddSourceScreen, PluginSourcesScreen
 
     async def _run() -> None:
         app = EveTui()
@@ -130,7 +130,7 @@ def test_add_url_opens_prompt_modal() -> None:
             await pilot.pause()
             screen.query_one("#plugins-add-url", Button).press()
             await pilot.pause()
-            assert isinstance(app.screen, TextPromptScreen)
+            assert isinstance(app.screen, AddSourceScreen)
 
     asyncio.run(_run())
 
@@ -344,7 +344,7 @@ def test_new_instance_desktop_required_package_blocks_and_auto_deselects() -> No
         "packages": [
             {"id": "rdp", "compatibility_enforced": True, "installable_os_families": ["ubuntu"],
              "compatibility": [{"platform": "ubuntu", "desktop": "XFCE", "session": "X11", "status": "supported"}]},
-            {"id": "xfce-desktop", "installable_os_families": ["ubuntu"],
+            {"id": "xfce-desktop", "installable_os_families": ["ubuntu"], "desktop": {"name": "XFCE", "session": "X11"},
              "compatibility": [{"platform": "ubuntu", "desktop": "XFCE", "session": "X11", "status": "supported"}]},
         ],
     }
@@ -353,7 +353,7 @@ def test_new_instance_desktop_required_package_blocks_and_auto_deselects() -> No
     screen.notify = lambda *a, **k: None  # type: ignore[assignment, method-assign]
 
     assert screen.package_requires_desktop("rdp") is True
-    assert screen.package_select_reason("rdp") == "requires a desktop package (e.g. xfce-desktop)"
+    assert screen.package_select_reason("rdp") == "requires a desktop package"
 
     # a selected desktop satisfies the requirement
     screen.selected_package_ids = {"xfce-desktop", "rdp"}

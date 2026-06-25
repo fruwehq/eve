@@ -23,7 +23,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from eve_sdk.config import ConfigEnv  # noqa: E402
 from eve_sdk.package_dispatch import emit_json  # noqa: E402
+from eve_sdk.resolve import instance_package_config  # noqa: E402
 from eve_sdk.tf_dispatch import repo_root, resolve_env  # noqa: E402
 
 _USAGE = (
@@ -143,7 +145,6 @@ def main(argv: list[str]) -> int:
     os_id = resolved.get("OS_ID", "")
     profile_name = resolved.get("PROFILE_NAME", "")
     provider = resolved.get("PROVIDER", "")
-    engine = resolved.get("ENGINE", "")
     bundle_packages = resolved.get("BUNDLE_PACKAGES", "")
     os_provision_dir = root / "oses" / os_id / "provision"
 
@@ -233,9 +234,11 @@ def main(argv: list[str]) -> int:
         ).returncode == 0
 
     if not sudo_ok():
-        pi_password = os.environ.get("RASPBERRY_PI_USER_PASSWORD", "")
-        if engine == "metal" and pi_password:
-            print("[package-provision] configuring passwordless sudo for Raspberry Pi provisioning")
+        # Provider-declared bootstrap password (manifest bootstrap.sudo_password_env),
+        # read generically — core names no provider.
+        bootstrap_password = ConfigEnv.bootstrap_sudo_password(provider)
+        if bootstrap_password:
+            print("[package-provision] configuring passwordless sudo via the provider's bootstrap password")
             sudo_setup = (
                 'tmp=$(mktemp); printf "%s ALL=(ALL) NOPASSWD:ALL\\n" "$USER" > "$tmp"; '
                 'chmod 0440 "$tmp"; sudo -S -p "" install -o root -g root -m 0440 '
@@ -243,7 +246,7 @@ def main(argv: list[str]) -> int:
                 "sudo -n visudo -cf /etc/sudoers.d/90-eve-provision"
             )
             subprocess.run([ssh, instance_name, "--", sudo_setup],
-                           input=pi_password + "\n", text=True)
+                           input=bootstrap_password + "\n", text=True)
 
     if not sudo_ok():
         print(
@@ -285,30 +288,23 @@ def main(argv: list[str]) -> int:
             )
             host_tz = tz_result.stdout.strip() if tz_result.returncode == 0 else ""
 
-        thinlinc_hostname = os.environ.get("THINLINC_AGENT_HOSTNAME", "")
-        if package == "thinlinc" and not thinlinc_hostname:
-            ip_result = subprocess.run(
-                [str(ROOT / "scripts/instance-ip"), instance_name],
-                capture_output=True, text=True, check=False,
-            )
-            thinlinc_hostname = ip_result.stdout.strip() if ip_result.returncode == 0 else ""
-
-        thinlinc_bundle_env = (
-            os.environ.get("THINLINC_REMOTE_SERVER_BUNDLE_PATH", "")
-            or os.environ.get("THINLINC_SERVER_BUNDLE_PATH", "")
-        )
-        thinlinc_bundle_upload: str | None = None
-        if package == "thinlinc" and os.environ.get("THINLINC_SERVER_BUNDLE_PATH"):
-            local_bundle = os.environ["THINLINC_SERVER_BUNDLE_PATH"]
-            if not Path(local_bundle).exists():
-                print(
-                    f"package-provision: THINLINC_SERVER_BUNDLE_PATH does not exist: {local_bundle}",
-                    file=sys.stderr,
-                )
+        # Stage package type:path config files (local installers/bundles) onto
+        # the remote and rewrite each env var to its remote path — generic, so
+        # core names no package. (local_path, remote_rel_dir); uploaded below.
+        stage_files: list[tuple[str, str]] = []
+        for stage_var in ConfigEnv.package_stage_env_names():
+            local_path = os.environ.get(stage_var, "")
+            if not local_path:
+                continue
+            if not Path(local_path).exists():
+                print(f"package-provision: {stage_var} does not exist: {local_path}", file=sys.stderr)
                 return 2
-            thinlinc_bundle_env = f"$HOME/provision/downloads/thinlinc/{Path(local_bundle).name}"
-            thinlinc_bundle_upload = local_bundle
+            remote_rel = f"provision/downloads/{stage_var.lower()}"
+            os.environ[stage_var] = f"$HOME/{remote_rel}/{Path(local_path).name}"
+            stage_files.append((local_path, remote_rel))
 
+        # Core (non-plugin) provision env; plugin env appended generically below
+        # so core names no provider or package (v4.4 §15.5).
         env_lines = [
             _env_line("ACCESS_BOOTSTRAP_USER", resolved.get("ACCESS_BOOTSTRAP_USER", "")),
             _env_line("ACCESS_HUMAN_USER", resolved.get("ACCESS_HUMAN_USER", "")),
@@ -322,29 +318,17 @@ def main(argv: list[str]) -> int:
             _env_line("EPHEMERAL_DISPLAY_RESOLUTION", os.environ.get("EPHEMERAL_DISPLAY_RESOLUTION", "")),
             _env_line("EPHEMERAL_DISPLAY_FPS", os.environ.get("EPHEMERAL_DISPLAY_FPS", "")),
             _env_line("PROVIDER", provider),
-            _env_line("EPHEMERAL_SUNSHINE_PASSWORD", os.environ.get("EPHEMERAL_SUNSHINE_PASSWORD", "")),
-            _env_line("RDP_GATE_PASSWORD", os.environ.get("RDP_GATE_PASSWORD", "")),
-            _env_line("RDP_GATE_USER", os.environ.get("RDP_GATE_USER", "")),
-            _env_line("NOMACHINE_VERSION", os.environ.get("NOMACHINE_VERSION", "")),
-            _env_line("RASPBERRY_PI_HDMI_CONNECTOR", os.environ.get("RASPBERRY_PI_HDMI_CONNECTOR", "")),
-            _env_line("RASPBERRY_PI_HDMI_MODE", os.environ.get("RASPBERRY_PI_HDMI_MODE", "")),
-            _env_line("RUSTDESK_KEY", os.environ.get("RUSTDESK_KEY", "")),
-            _env_line("RUSTDESK_PASSWORD", os.environ.get("RUSTDESK_PASSWORD", "")),
-            _env_line("RUSTDESK_SERVER", os.environ.get("RUSTDESK_SERVER", "")),
-            _env_line("SPLASHTOP_EMAIL", os.environ.get("SPLASHTOP_EMAIL", "")),
-            _env_line("SPLASHTOP_PASSWORD", os.environ.get("SPLASHTOP_PASSWORD", "")),
-            _env_line("SPLASHTOP_STREAMER_PATH", os.environ.get("SPLASHTOP_STREAMER_PATH", "")),
-            _env_line("SPLASHTOP_STREAMER_URL", os.environ.get("SPLASHTOP_STREAMER_URL", "")),
-            _env_line("SUNSHINE_MAX_BITRATE_KBPS", os.environ.get("SUNSHINE_MAX_BITRATE_KBPS", "")),
-            _env_line("SUNSHINE_VERSION", os.environ.get("SUNSHINE_VERSION", "")),
-            _env_line("THINLINC_ACCEPT_EULA", os.environ.get("THINLINC_ACCEPT_EULA", "")),
-            _env_line("THINLINC_AGENT_HOSTNAME", thinlinc_hostname),
-            _env_line("THINLINC_SERVER_BUNDLE_PATH", thinlinc_bundle_env),
-            _env_line("THINLINC_SERVER_BUNDLE_URL", os.environ.get("THINLINC_SERVER_BUNDLE_URL", "")),
-            _env_line("THINLINC_WEBACCESS_PORT", os.environ.get("THINLINC_WEBACCESS_PORT", "")),
             _env_line("TIMEZONE", host_tz),
             _env_line("VIRTUAL_MONITOR_WIDTH", os.environ.get("VIRTUAL_MONITOR_WIDTH", "1920")),
             _env_line("VIRTUAL_MONITOR_HEIGHT", os.environ.get("VIRTUAL_MONITOR_HEIGHT", "1080")),
+        ]
+        # Per-instance package option overrides (§16): instance scope wins over
+        # the user-scope config-env in os.environ before the generic plugin loop
+        # reads it. Field→env_var mapping comes from each package manifest.
+        os.environ.update(ConfigEnv.instance_package_env(instance_package_config(instance_name)))
+        env_lines += [
+            _env_line(_name, os.environ.get(_name, ""))
+            for _name in ConfigEnv.plugin_provision_env_names()
         ]
         (stage / "state" / "env").write_text("\n".join(env_lines) + "\n")
 
@@ -354,15 +338,15 @@ def main(argv: list[str]) -> int:
             [ssh, instance_name, "--",
              "rm -rf ~/provision/scripts && mkdir -p ~/provision/state ~/provision/logs ~/provision/downloads"],
         )]
-        if thinlinc_bundle_upload:
+        for local_path, remote_rel in stage_files:
             uploads.append((
-                "prepare ThinLinc bundle directory",
+                f"prepare {remote_rel}",
                 [ssh, instance_name, "--",
-                 "rm -rf ~/provision/downloads/thinlinc && mkdir -p ~/provision/downloads/thinlinc"],
+                 f"rm -rf ~/{remote_rel} && mkdir -p ~/{remote_rel}"],
             ))
             uploads.append((
-                "upload ThinLinc server bundle",
-                [ssh, instance_name, "--scp", thinlinc_bundle_upload, "provision/downloads/thinlinc"],
+                f"upload {Path(local_path).name}",
+                [ssh, instance_name, "--scp", local_path, remote_rel],
             ))
         uploads.extend([
             ("upload linux package scripts",

@@ -3,15 +3,16 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from eve_sdk.dispatch import DispatchError, exec_cmd, open_url, prepare_overlay, run_json  # noqa: E402
+from eve_sdk.dispatch import DispatchError, exec_cmd, prepare_overlay, run_json  # noqa: E402
 from eve_sdk.instance_dispatch import load_runtime_env  # noqa: E402
+from eve_sdk.remote_launch import instance_ip, resolve_env, resolve_private_key  # noqa: E402
 from eve_sdk.workdir import Workdir  # noqa: E402
 
 
@@ -50,78 +51,88 @@ def parse_args(argv: list[str]) -> tuple[str, str, str, bool]:
     return instance_name, package_id, action_id, dry_run
 
 
-def wait_for_sunshine(instance_name: str) -> None:
-    status = subprocess.run(
-        [str(Workdir.repo_root() / "scripts/remote-sunshine-wait"), instance_name],
-        cwd=Workdir.repo_root(),
-        check=False,
-    ).returncode
-    if status != 0:
-        raise SystemExit(status)
+# ---- generic launcher path (v4.4 §8) ------------------------------------- #
+def export_remote_context(root: Path, instance_name: str, target: str) -> None:
+    """Resolve and export the shared launcher context for a package exec.
+
+    The documented stable contract is the ``EVE_REMOTE_*`` set below; the full
+    ``profile-resolve`` env (incl. ``BUNDLE_PACKAGES``, ``OS_FAMILY``,
+    ``ENGINE``, ``VM_USER_NAME``) is exported as passthrough so package launchers
+    keep working. No package id appears here — this spine is identical for every
+    client.
+    """
+    profile_env = resolve_env(root, instance_name)
+    ip = instance_ip(root, instance_name)
+    os.environ.update(profile_env)
+    os.environ.update(
+        {
+            "EVE_REMOTE_IP": ip,
+            "EVE_REMOTE_USER": profile_env.get("VM_USER_NAME") or profile_env.get("SSH_USER", ""),
+            "EVE_REMOTE_KEY": resolve_private_key(),
+            "EVE_REMOTE_OS_FAMILY": profile_env.get("OS_FAMILY", ""),
+            "EVE_REMOTE_ENGINE": profile_env.get("ENGINE", ""),
+            "EVE_REMOTE_ACTION": target,
+            # Lets package launchers reach core's generic services (instance-ssh
+            # for remote state, instance-password) and know which instance they
+            # act on — without core interpreting any target/package string.
+            "EVE_REMOTE_ROOT": str(root),
+            "EVE_REMOTE_INSTANCE": instance_name,
+        }
+    )
 
 
-def run_action_target(target: str, instance_name: str) -> None:
-    root = Workdir.repo_root()
-    mapping = {
-        "console.open": ["scripts/remote-console", instance_name],
-        "nomachine.connect": ["scripts/remote-nomachine", instance_name, "connect"],
-        "nomachine.info": ["scripts/remote-nomachine", instance_name],
-        "rdp.open": ["scripts/remote-rdp", instance_name],
-        "rustdesk.connect": ["scripts/remote-rustdesk", instance_name, "connect"],
-        "rustdesk.info": ["scripts/remote-rustdesk", instance_name],
-        "splashtop.info": ["scripts/remote-splashtop", instance_name],
-        "sunshine.wait": ["scripts/remote-sunshine-wait", instance_name],
-        "thinlinc.web": ["scripts/remote-thinlinc", instance_name],
-        "thinlinc.client": ["scripts/remote-thinlinc-client", instance_name],
-        "vnc.open": ["scripts/remote-vnc", instance_name],
-        "xpra.apps": ["scripts/remote-xpra", instance_name, "apps"],
-        "xpra.attach": ["scripts/remote-xpra", instance_name, "attach"],
-        "xpra.desktop": ["scripts/remote-xpra", instance_name, "desktop"],
-        "xpra.start": ["scripts/remote-xpra", instance_name, "start"],
-        "xpra.status": ["scripts/remote-xpra", instance_name, "status"],
-        "xpra.stop": ["scripts/remote-xpra", instance_name, "stop"],
-    }
-    if target in {"moonlight.open", "moonlight.pair"}:
-        wait_for_sunshine(instance_name)
-        script = "scripts/remote-moonlight" if target == "moonlight.open" else "scripts/remote-moonlight-pair"
-        exec_cmd([str(root / script), instance_name])
-    if target == "sunshine.open":
-        result = subprocess.run(
-            [str(root / "scripts/instance-ip"), instance_name],
-            cwd=root,
-            text=True,
-            capture_output=True,
-            check=False,
+def exec_launcher(exec_rel: str, package: dict[str, Any], target: str) -> None:
+    """Resolve an action ``exec`` (relative to the plugin dir) and run it.
+
+    Inherits os.environ, so the ``EVE_REMOTE_*`` context exported by
+    :func:`export_remote_context` is visible to the launcher.
+    """
+    plugin_dir = Path(str(package.get("path", ""))).resolve().parent
+    exec_path = Path(exec_rel)
+    if not exec_path.is_absolute():
+        exec_path = (plugin_dir / exec_rel).resolve()
+    if not exec_path.is_file():
+        raise DispatchError(f"launcher exec not found for action {target}: {exec_rel}")
+    exec_cmd([str(exec_path)])
+
+
+def run_action_target(
+    action: dict[str, Any],
+    package: dict[str, Any],
+    instance_name: str,
+    target_map: dict[str, dict[str, Any]],
+    root: Path,
+) -> None:
+    """Dispatch a package action to its declared launcher command.
+
+    Pure generic dispatch (v4.4 §8): the action's ``exec`` is resolved relative
+    to the plugin dir and run with the shared ``EVE_REMOTE_*`` context exported.
+    ``wait_for`` runs another action target first. No target string is
+    interpreted by core and no package id appears here — a missing ``exec`` is a
+    hard error (no fallback).
+    """
+    target = action["target"]
+    wait_for = action.get("wait_for")
+    if wait_for:
+        wf = target_map.get(wait_for)
+        if wf is None:
+            raise DispatchError(f"wait_for target not found: {wait_for}")
+        run_action_target(wf["action"], wf["package"], instance_name, target_map, root)
+
+    exec_rel = action.get("exec")
+    if not exec_rel:
+        raise DispatchError(
+            f"action {target} has no 'exec' launcher; the owning package must declare one"
         )
-        if result.returncode != 0:
-            details = f"{result.stdout.strip()}{result.stderr.strip()}"
-            raise DispatchError(f"could not resolve IP for {instance_name}: {details}")
-        ip = result.stdout.strip()
-        if not ip:
-            raise DispatchError(f"could not resolve IP for {instance_name}")
-        open_url(f"https://{ip}:47990")
-    if target == "waypipe.open":
-        app = os.environ.get("APP")
-        cmd = [str(root / "scripts/remote-waypipe"), instance_name]
-        if app:
-            cmd.append(app)
-        exec_cmd(cmd)
-    if target == "xpra.run":
-        app = os.environ.get("APP")
-        if not app:
-            raise DispatchError("APP is required for xpra.run")
-        exec_cmd([str(root / "scripts/remote-xpra"), instance_name, "run", app])
-    if target in mapping:
-        rel = mapping[target]
-        exec_cmd([str(root / rel[0]), *rel[1:]])
-    raise DispatchError(f"unsupported package action target: {target}")
+    export_remote_context(root, instance_name, target)
+    exec_launcher(exec_rel, package, target)
 
 
 def main(argv: list[str]) -> int:
     instance_name, package_id, action_id, dry_run = parse_args(argv)
-    # The remote-* launchers this dispatches to read config-derived env (e.g.
-    # VM_USER_NAME for Ubuntu RDP/VNC). The old `make` layer injected config-env
-    # before every recipe; without it, load it here like instance-run does.
+    # Package launchers read config-derived env (e.g. VM_USER_NAME). The old
+    # `make` layer injected config-env before every recipe; load it here like
+    # instance-run does.
     load_runtime_env(Workdir.repo_root())
     try:
         doc = run_json(str(Workdir.repo_root() / "scripts/package-list"), "--instance", instance_name, "--json")
@@ -141,6 +152,8 @@ def main(argv: list[str]) -> int:
                         "action": action_id,
                         "label": action["label"],
                         "target": action["target"],
+                        "exec": action.get("exec"),
+                        "wait_for": action.get("wait_for"),
                         "dry_run": True,
                     },
                     indent=2,
@@ -150,7 +163,12 @@ def main(argv: list[str]) -> int:
         overlay = prepare_overlay(instance_name, os.environ.get("EVE_INSTANCE_REGISTRY"))
         os.environ["EVE_CATALOG_LOCAL"] = overlay
         os.environ["EVE_INSTANCE_NAME"] = instance_name
-        run_action_target(action["target"], instance_name)
+        # target -> {package, action} for wait_for resolution.
+        target_map: dict[str, dict[str, Any]] = {}
+        for pkg in doc["packages"]:
+            for act in pkg.get("actions", []):
+                target_map[act["target"]] = {"package": pkg, "action": act}
+        run_action_target(action, package, instance_name, target_map, Workdir.repo_root())
         return 0
     except SystemExit as error:
         raise error

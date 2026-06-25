@@ -90,6 +90,25 @@ def test_planted_os_literal_is_detected() -> None:
     assert len(violations) == 1
 
 
+def test_planted_uppercase_env_form_is_detected() -> None:
+    """The UPPERCASE env-var form of an id is a violation (§15.5 — the blind spot).
+
+    Hardcoding `MOCK_CLOUD_*` / `MOCK-CLOUD`->`MOCK_CLOUD` is the same leak as
+    naming the lowercase id; the scan must catch it (this is what hid the
+    provision/profile_resolve/update-tools leaks before §15.5).
+    """
+    module = _load_module()
+    ids = module.all_ids()
+    assert "mock-cloud" in ids
+    env_form = "mock-cloud".upper().replace("-", "_")  # MOCK_CLOUD
+    violations = module.find_provider_os_violations(
+        [("scripts/some-unallowed-file", f'export {env_form}_REGION="x"')],
+        ids,
+        allowed=set(),
+    )
+    assert len(violations) == 1, "uppercase env form must be flagged"
+
+
 def test_allowlisted_literal_is_not_a_violation() -> None:
     """A literal in an allowlisted rel_path is not flagged."""
     module = _load_module()

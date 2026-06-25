@@ -24,6 +24,7 @@ from textual.widgets.selection_list import Selection
 
 from textual.message import Message
 
+from eve_sdk.engine import default_engine
 from tui import plugins as plugin_src
 from tui.commands import (
     catalog_options,
@@ -54,18 +55,6 @@ class ListTable(DataTable[Any]):
     BINDINGS = [
         Binding("space", "select_cursor", "Select", show=False),
     ]
-
-
-DESKTOP_PACKAGE_IDS = frozenset(
-    {
-        "gnome-desktop",
-        "gnome-desktop-headless",
-        "kde-desktop",
-        "kde-desktop-headless",
-        "xfce-desktop",
-        "xfce-desktop-headless",
-    }
-)
 
 
 class ProviderPane(Static):
@@ -847,12 +836,12 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
         return False
 
     def package_requires_desktop(self, package_id: str) -> bool:
-        """Whether a package needs a desktop package selected (e.g. rdp/vnc).
+        """Whether a package needs a desktop package selected (e.g. remote-desktop packages).
 
         True when the package enforces compatibility and every supported row for
         the selected OS family names a desktop — i.e. it cannot run without one.
-        Scoped to ubuntu, where the desktop packages (DESKTOP_PACKAGE_IDS) live;
-        on Windows, RDP uses the native session and needs no desktop package.
+        Scoped to ubuntu, where desktop packages live; on Windows, RDP uses the
+        native session and needs no desktop package.
         """
         platform_choice = self.selected_platform()
         if str(platform_choice.get("os_family") or "") != "ubuntu":
@@ -870,6 +859,17 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
             return False
         return all(str(entry.get("desktop") or "") for entry in family_supported)
 
+    def _has_desktop(self, package_ids: set[str]) -> bool:
+        """True if any of these packages declares desktop metadata (v4.4 §15).
+
+        Replaces the hardcoded DESKTOP_PACKAGE_IDS set — desktop detection is
+        data-driven from each package's manifest ``desktop`` field.
+        """
+        return any(
+            isinstance(self.package_map.get(pid, {}).get("desktop"), dict)
+            for pid in package_ids
+        )
+
     def package_select_reason(self, package_id: str) -> str | None:
         reason = self.support_reason(package_id)
         if reason:
@@ -880,8 +880,8 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
             return conflict_reason
         if not self.package_installable_on_platform(package_id):
             return "native action only on this OS"
-        if self.package_requires_desktop(package_id) and not (prospective & DESKTOP_PACKAGE_IDS):
-            return "requires a desktop package (e.g. xfce-desktop)"
+        if self.package_requires_desktop(package_id) and not self._has_desktop(prospective):
+            return "requires a desktop package"
         compatibility_reason = self.package_compatibility_reason(package_id, prospective)
         if compatibility_reason:
             return compatibility_reason
@@ -896,8 +896,8 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
             conflict_reason = self.package_conflict_reason(package_id, prospective_packages)
             if conflict_reason:
                 return f"{package_id}: {conflict_reason}"
-            if self.package_requires_desktop(package_id) and not (prospective_packages & DESKTOP_PACKAGE_IDS):
-                return f"{package_id}: requires a desktop package (e.g. xfce-desktop)"
+            if self.package_requires_desktop(package_id) and not self._has_desktop(prospective_packages):
+                return f"{package_id}: requires a desktop package"
             compatibility_reason = self.package_compatibility_reason(package_id, prospective_packages)
             if compatibility_reason:
                 return f"{package_id}: {compatibility_reason}"
@@ -928,16 +928,17 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
         os_family = str(platform_choice.get("os_family") or "")
         if os_family == "windows":
             return {"platform": "windows", "desktop": "Windows", "session": "Native"}
-        if os_family == "ubuntu" and "gnome-desktop-headless" in package_ids:
-            return {"platform": "ubuntu", "desktop": "GNOME Headless", "session": "Wayland"}
-        if os_family == "ubuntu" and "gnome-desktop" in package_ids:
-            return {"platform": "ubuntu", "desktop": "GNOME", "session": "Wayland"}
-        if os_family == "ubuntu" and "kde-desktop-headless" in package_ids:
-            return {"platform": "ubuntu", "desktop": "KDE Plasma Headless", "session": "Wayland"}
-        if os_family == "ubuntu" and "kde-desktop" in package_ids:
-            return {"platform": "ubuntu", "desktop": "KDE Plasma", "session": "Wayland"}
-        if os_family == "ubuntu" and "xfce-desktop-headless" in package_ids:
-            return {"platform": "ubuntu", "desktop": "XFCE Headless", "session": "X11"}
+        # Data-driven (v4.4 §15): desktop packages declare a `desktop` manifest
+        # field; read it instead of branching on package ids.
+        desktops = [
+            self.package_map[pid]["desktop"]
+            for pid in package_ids
+            if pid in self.package_map and isinstance(self.package_map[pid].get("desktop"), dict)
+        ]
+        if desktops:
+            chosen = sorted(desktops, key=lambda d: not bool(d.get("headless")))[0]
+            return {"platform": os_family, "desktop": str(chosen.get("name", "")),
+                    "session": str(chosen.get("session", ""))}
         if os_family == "ubuntu":
             return {"platform": "ubuntu", "desktop": "XFCE", "session": "X11"}
         return {"platform": os_family, "desktop": "", "session": ""}
@@ -1172,7 +1173,7 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
     def prune_unsatisfied_selections(self) -> None:
         """Auto-deselect packages/bundles whose requirements are no longer met.
 
-        Mirrors the rule: rdp/vnc (and anything needing a desktop) are blocked
+        Mirrors the rule: remote-desktop packages (and anything needing a desktop) are blocked
         until their requirement is satisfied, and are dropped if it stops being
         satisfied — e.g. after the last desktop is deselected or the platform
         changes. Conflicts can't coexist (the toggle blocks adding them), so any
@@ -1656,9 +1657,18 @@ class SettingsScreen(ModalScreen[None]):
 
         self._schema_descriptions = {}
         self._schema_defaults = {}
-        provider_sections = {"aws", "gcp", "truenas"}
-        for provider_id in provider_sections:
-            self._load_schema_for_provider(provider_id)
+        # Descriptions/defaults come from each installed plugin's manifest
+        # config_schema (provider OR package), not a core hardcode. Collect
+        # display_name → section label for every plugin so core names none.
+        plugin_labels: dict[str, str] = {}
+        try:
+            for plugin in default_engine().plugin_list():
+                pid = str(plugin.get("id") or "")
+                if pid:
+                    plugin_labels[pid] = str(plugin.get("display_name") or pid)
+                    self._load_schema_for_provider(pid)
+        except Exception:
+            pass
 
         table = self.query_one("#settings-table", DataTable)
         table.clear()
@@ -1684,7 +1694,17 @@ class SettingsScreen(ModalScreen[None]):
         except Exception:
             pass
 
-        for section_info in CONFIG_SECTIONS:
+        # Core sections first (defined order), then provider/package sections
+        # contributed by installed plugins (alphabetical), labeled by display_name.
+        core_ids = {section["id"] for section in CONFIG_SECTIONS}
+        ordered_sections: list[dict[str, str]] = list(CONFIG_SECTIONS)
+        for section_id in sorted(self._structured):
+            if section_id in core_ids:
+                continue
+            label = plugin_labels.get(section_id, section_id.replace("-", " ").title())
+            ordered_sections.append({"id": section_id, "label": label})
+
+        for section_info in ordered_sections:
             section_id = section_info["id"]
             section_label = section_info["label"]
             fields = self._structured.get(section_id, {})
@@ -2175,6 +2195,108 @@ class ProviderConfigScreen(ModalScreen[None]):
         self.dismiss(None)
 
 
+class AddSourceScreen(ModalScreen[dict[str, str] | None]):
+    """Add a plugin source by URL, branch, and folder (subdir).
+
+    A source is ``(repo, branch, folder)`` with folder defaulting to ``/``
+    (repo root). Validation is delegated to ``registry.add_source`` (via
+    ``plugin_src.add_url``) — the TUI does not re-implement the subdir ``..``
+    check, so an unsafe folder is rejected with a clear message.
+    """
+
+    CSS = """
+    AddSourceScreen {
+        align: center middle;
+    }
+
+    #addsrc-dialog {
+        width: 90%;
+        max-width: 80;
+        height: auto;
+        border: round $primary;
+        background: $surface;
+        padding: 1 2;
+    }
+
+    #addsrc-label {
+        margin-bottom: 1;
+    }
+
+    #addsrc-detail {
+        margin-bottom: 1;
+        color: $text-muted;
+    }
+
+    .addsrc-field-label {
+        height: 1;
+        color: $text-muted;
+        margin-top: 1;
+    }
+
+    #addsrc-url, #addsrc-ref, #addsrc-folder {
+        width: 100%;
+        margin-bottom: 1;
+    }
+
+    #addsrc-actions {
+        height: 3;
+        align-horizontal: center;
+        background: transparent;
+    }
+
+    #addsrc-actions Button {
+        margin: 0 1;
+    }
+    """
+
+    BINDINGS = [
+        Binding("escape", "dismiss_cancel", "Cancel"),
+    ]
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="addsrc-dialog"):
+            yield Label("[b]Add plugin source[/b]", id="addsrc-label")
+            yield Static(
+                "A source is (repo, branch, folder). Folder defaults to / (repo "
+                "root); a .eve/ inside the folder is used automatically when present.",
+                id="addsrc-detail",
+            )
+            yield Label("URL", classes="addsrc-field-label")
+            yield Input(placeholder="https://github.com/you/plugins.git", id="addsrc-url")
+            yield Label("Branch / ref", classes="addsrc-field-label")
+            yield Input(placeholder="main (pinning a tag is recommended)", id="addsrc-ref")
+            yield Label("Folder", classes="addsrc-field-label")
+            yield Input(value="/", placeholder="/", id="addsrc-folder")
+            with Horizontal(id="addsrc-actions"):
+                yield Button("Cancel", id="addsrc-cancel")
+                yield Button("Add", id="addsrc-ok", variant="primary")
+
+    def on_mount(self) -> None:
+        self.query_one("#addsrc-url", Input).focus()
+
+    def _submit(self) -> None:
+        url = self.query_one("#addsrc-url", Input).value.strip()
+        ref = self.query_one("#addsrc-ref", Input).value.strip()
+        folder = self.query_one("#addsrc-folder", Input).value.strip()
+        if not url:
+            self.query_one("#addsrc-url", Input).focus()
+            return
+        self.dismiss({"url": url, "ref": ref, "subdir": folder})
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "addsrc-ok":
+            self._submit()
+        else:
+            self.dismiss(None)
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        event.stop()
+        self._submit()
+
+    def action_dismiss_cancel(self) -> None:
+        self.dismiss(None)
+
+
 class TextPromptScreen(ModalScreen[str | None]):
     """Minimal single-line text prompt. Dismisses with the entered text or None."""
 
@@ -2318,7 +2440,7 @@ class PluginSourcesScreen(ModalScreen[None]):
         with Vertical(id="plugins-dialog"):
             yield Label("[b]Plugin sources[/b]", id="plugins-title")
             table = ListTable(id="plugins-table")
-            table.add_columns("", "Source", "Ref", "Status", "Info")
+            table.add_columns("", "Source", "Ref", "Folder", "Status", "Info")
             table.cursor_type = "row"
             yield table
             with Horizontal(id="plugins-controls"):
@@ -2345,14 +2467,19 @@ class PluginSourcesScreen(ModalScreen[None]):
         for row in plugin_src.configured_rows():
             configured_ids.add(row["id"])
             status = "synced" if row["synced"] else "not synced"
-            table.add_row("✔", f"[b]{row['id']}[/b]", row["ref"], status, row["url"], key=f"cfg:{row['id']}")
+            folder = row.get("subdir") or "/"
+            table.add_row(
+                "✔", f"[b]{row['id']}[/b]", row["ref"], folder, status, row["url"], key=f"cfg:{row['id']}"
+            )
             self._rows.append(("cfg", row["id"]))
         for row in plugin_src.recommended_rows():
             if row["id"] in configured_ids:
                 continue
             tags = ", ".join(row["tags"])
             info = f"{row['description']}" + (f" [dim]({tags})[/]" if tags else "")
-            table.add_row("[dim]+[/]", row["id"], row["ref"], "[dim]recommended[/]", info, key=f"rec:{row['id']}")
+            table.add_row(
+                "[dim]+[/]", row["id"], row["ref"], "[dim]/[/]", "[dim]recommended[/]", info, key=f"rec:{row['id']}"
+            )
             self._rows.append(("rec", row["id"]))
         if not self._rows:
             self._set_status("No sources or recommendations yet — use Add URL… to add one.")
@@ -2426,23 +2553,17 @@ class PluginSourcesScreen(ModalScreen[None]):
             self._reload()
 
     def _open_add_url(self) -> None:
-        def on_result(value: str | None) -> None:
-            if not value:
+        def on_result(result: dict[str, str] | None) -> None:
+            if not result:
                 return
-            url, _, ref = value.partition("#")
-            ok, message = plugin_src.add_url(url, ref=ref)
+            ok, message = plugin_src.add_url(
+                result["url"], ref=result.get("ref", ""), subdir=result.get("subdir", "")
+            )
             self._set_status(message)
             if ok:
                 self._reload()
 
-        self.app.push_screen(
-            TextPromptScreen(
-                "Add plugin source",
-                placeholder="https://github.com/you/plugins.git#v1.0.0",
-                detail="Enter a git url. Pin a ref with url#ref (recommended).",
-            ),
-            on_result,
-        )
+        self.app.push_screen(AddSourceScreen(), on_result)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "close":

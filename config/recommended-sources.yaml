@@ -9,7 +9,7 @@
 # once available. All are public, so auth is `none`.
 recommended:
   - id: eve-providers
-    description: First-party providers (aws, gcp, vultr, truenas, raspberry-pi, local-qemu, docker).
+    description: First-party provider plugins repo (each provider in its own subfolder).
     url: https://github.com/fruwehq/eve-providers.git
     ref: main
     auth: none
@@ -30,7 +30,7 @@ recommended:
     tags: [packages, windows]
 
   - id: eve-plugins-ai
-    description: AI agents and developer tooling (claude, codex-cli, opencode, goose, hermes, vscode, dev-toolchain).
+    description: AI agents and developer tooling.
     url: https://github.com/fruwehq/eve-plugins-ai.git
     ref: main
     auth: none

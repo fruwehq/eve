@@ -42,8 +42,6 @@ config/
   catalog.yaml                # Single source of truth: machines / oses / inits / bundles / locations
   catalog.local.example.yaml  # Template for personal overrides
   catalog.local.yaml          # Personal overrides (git-ignored, merged over base)
-stacks/
-  config.tm.hcl               # Legacy shared Terramate globals only
 plugins/providers/
   aws/                         # AWS plugin, Terramate stacks, EC2 modules
   gcp/                         # GCP plugin, Terramate stacks, Compute modules
@@ -101,7 +99,7 @@ Init entries are bootstrap/access methods, not user-facing workload choices. The
 - Provider blocks and `required_providers` live in `providers.tm.hcl` files, not in stack or resource config files.
 - Each provider's variables (host, key paths, ports) are declared alongside the provider block in the same generated file.
 - Instance-driven values (region, instance type, plan, OS id, AZ) are threaded through as `TF_VAR_*` from provider plugin `tf-env` commands; do **not** hardcode them in stack globals.
-- Terraform/Terramate provider implementations live with their provider plugins under `plugins/providers/<id>/stacks/` and `plugins/providers/<id>/modules/`. The remaining top-level `stacks/config.tm.hcl` is legacy shared global context only; do not add new provider implementation files there.
+- Terraform/Terramate provider implementations live with their provider plugins under `plugins/providers/<id>/stacks/` and `plugins/providers/<id>/modules/`; the core repo ships no provider stacks. Terraform validation of those stacks runs in each provider's own CI (e.g. `eve-providers`), not here.
 - TrueNAS is a special case inside that layout: the parent `providers.tm.hcl` generates only `required_version`; the child `20-services/providers.tm.hcl` generates the full provider + variables (which the module then relies on — see the note at `null_resource.cloudinit_iso` about `var.truenas_host`).
 
 ## Windows SSH shell
@@ -159,7 +157,6 @@ Adding a new Linux step:
 - **lifecycle** (`test-lifecycle`) — exercises fake-provider up/status/ip/stop/down/start state transitions through `provider-dispatch`, asserting provider state and observed-state cache transitions. No live VM, no cloud credentials.
 - **plugins** (`test-plugins`) — validates plugin manifests and dry-run dispatch contracts.
 - **provision-runner** (`test-provision-runner`) — directly executes Ubuntu (bash) and optional Windows (PowerShell) provision runners in tempdirs, asserting step status, resume behaviour, manifest validation, and structured status output. Skips host-incompatible checks with `[SKIP]`.
-- **terraform** (`test-terraform`) — `terramate generate` + `terraform init -backend=false` + `terraform validate` across `aws-services`, `gcp-services`, `vultr-services`, and `truenas-services`. Uses a fake `MY_IP` and a tempfile SSH key. No cloud credentials required.
 - **shellcheck** (`test-shellcheck`) — runs `shellcheck -x --source-path=SCRIPTDIR` over every shell script with a bash/sh shebang in `scripts/` and `oses/<catalog-os-id>/provision/`.
 - **python** (`test-python`) — runs ruff and strict mypy for Python TUI code.
 - **schemas** (`test-schemas`) — validates JSON Schemas (draft 2020-12) for resolved instance, observed state, plugin manifests, and command I/O. Checks all shipped manifests, fixture instances, and negative-test fixtures.

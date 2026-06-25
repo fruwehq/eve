@@ -203,6 +203,7 @@ def adopt_resolved_instance(resolved_json_input: str) -> dict[str, Any]:
     matching the legacy jq remap.
     """
     resolved = json.loads(resolved_json_input)
+    assert isinstance(resolved, dict)
     if resolved.get("profile") is None:
         instance = resolved.get("instance") or {}
         profile = dict(instance)
@@ -244,10 +245,10 @@ def emit_env(resolved: dict[str, Any]) -> str:
     # Resolve provision/human user from the provider manifest's access rules,
     # using the same env→value→location→fallback chain instance-resolve uses
     # (resolve_access_value). The old legacy emit only honored a rule's env-var
-    # name, so a provider's static user (e.g. local-qemu ubuntu's
+    # name, so a provider's static user (e.g. a provider that pins
     # `{env: VM_USER_NAME, value: ubuntu}`) was dropped whenever the rule also
     # named an env var — leaving SSH_USER / HUMAN_USER_NAME empty and breaking
-    # the remote-* launchers (VNC/RDP) that consume this output.
+    # the package remote-client launchers that consume this output.
     from eve_sdk.plugin_manifest import PluginManifest
     from eve_sdk.resolve import resolve_access_value
 
@@ -306,29 +307,75 @@ def emit_env(resolved: dict[str, Any]) -> str:
         ("VM_INSTANCE_TYPE", _jq_coalesce(machine_defaults.get("instance_type"), "")),
         ("VM_ROOT_VOLUME_TYPE", _jq_coalesce(machine_defaults.get("root_volume_type"), "")),
         ("VM_USE_SPOT", use_spot_value),
-        ("GCP_IMAGE_FAMILY", provider_env.get("GCP_IMAGE_FAMILY", "")),
-        ("GCP_IMAGE_PROJECT", provider_env.get("GCP_IMAGE_PROJECT", "")),
-        ("VULTR_OS_ID", provider_env.get("VULTR_OS_ID", "0")),
         ("LOCATION_REGION", _jq_coalesce(locp.get("region"), "")),
         ("LOCATION_AVAILABILITY_ZONE", _jq_coalesce(locp.get("availability_zone"), "")),
         ("LOCATION_ZONE", _jq_coalesce(locp.get("zone"), "")),
         ("SSH_USER", provision_user_value),
-        ("CLOUD_IMAGE_URL", provider_env.get("CLOUD_IMAGE_URL", "")),
         ("HUMAN_USER_NAME", human_user_value),
         ("PROVISION_USER_NAME", provision_user_value),
-        ("RASPBERRY_PI_HOST", provider_env.get("RASPBERRY_PI_HOST", "")),
-        ("RASPBERRY_PI_IP", provider_env.get("RASPBERRY_PI_IP", "")),
-        ("TRUENAS_HOST", provider_env.get("TRUENAS_HOST", "")),
-        ("TRUENAS_SSH_PORT", provider_env.get("TRUENAS_SSH_PORT", "22")),
-        ("TRUENAS_SSH_USER", provider_env.get("TRUENAS_SSH_USER", "")),
         ("VM_USER_NAME", _env_or("VM_USER_NAME", "")),
     ]
+    # Provider-specific env (image selectors, host/port, …) is emitted generically
+    # from each provider manifest's env_emission (which already applies the
+    # per-provider defaults) — core names no provider here.
+    lines.extend(sorted(provider_env.items()))
     return "".join(f"{key}={value}\n" for key, value in lines)
 
 
 def emit_json(resolved: dict[str, Any]) -> str:
     """Produce compact JSON (matching ``jq -c``) of the resolved object."""
     return json.dumps(resolved, separators=(",", ":"), ensure_ascii=False)
+
+
+def _aggregate_port_forwards(bundle_packages: list[str]) -> str:
+    """Aggregate ``vagrant.port_forwards`` across the resolved bundle's packages.
+
+    Data-driven (v4.4 §8): each package declares only its own ports in its
+    manifest; core no longer branches on package ids. Returns the Vagrantfile
+    ``forwarded_port`` snippet (empty when no package contributes ports).
+    """
+    from eve_sdk.plugin_manifest import PluginManifest
+
+    plugins = {p.get("id"): p for p in PluginManifest.load_all("package")}
+    lines: list[str] = []
+    for pkg_id in bundle_packages:
+        forwards = ((plugins.get(pkg_id) or {}).get("vagrant") or {}).get("port_forwards") or []
+        if not forwards:
+            continue
+        lines.append(f"  # {pkg_id}")
+        for pf in forwards:
+            guest = pf.get("guest")
+            host = pf.get("host")
+            if guest is None or host is None:
+                continue
+            proto = pf.get("protocol")
+            proto_part = f', protocol: "{proto}"' if proto else ""
+            lines.append(
+                f'  config.vm.network "forwarded_port", guest: {guest}, host: {host}{proto_part}, auto_correct: true'
+            )
+    return ("\n".join(lines) + "\n") if lines else ""
+
+
+def _aggregate_vagrant_provision(bundle_packages: list[str]) -> str:
+    """Aggregate ``vagrant.inline_provision.<os_family>`` across the bundle.
+
+    Each package declares its own pre-provision shell (run in the Vagrantfile
+    inline bootstrap during ``vagrant up``); core branches on no package id.
+    Lines are indented to sit inside the heredoc. Returns "" when none apply.
+    """
+    from eve_sdk.plugin_manifest import PluginManifest
+
+    plugins = {p.get("id"): p for p in PluginManifest.load_all("package")}
+    out: list[str] = []
+    for pkg_id in bundle_packages:
+        inline = ((plugins.get(pkg_id) or {}).get("vagrant") or {}).get("inline_provision") or {}
+        cmd = inline.get("ubuntu") if isinstance(inline, dict) else None
+        if not cmd:
+            continue
+        out.append(f"    # {pkg_id}\n")
+        for line in cmd.rstrip("\n").split("\n"):
+            out.append(f"    {line}\n" if line.strip() else "\n")
+    return "".join(out)
 
 
 def emit_vagrant(resolved: dict[str, Any]) -> str:
@@ -352,7 +399,8 @@ def emit_vagrant(resolved: dict[str, Any]) -> str:
     bundle_packages = resolved.get("bundle_packages") or []
     name = resolved["profile"]["name"]
 
-    box = _jq_coalesce(os_doc.get("vagrant_box"), "cloud-image/ubuntu-26.04")
+    box_default = f"cloud-image/{os_doc.get('family', 'ubuntu')}-{os_doc.get('version', '')}".rstrip("-")
+    box = _jq_coalesce(os_doc.get("vagrant_box"), box_default)
     arch = _jq_coalesce(os_doc.get("arch"), "amd64")
     qemu_arch = "aarch64" if arch == "arm64" else "x86_64"
     cpus = _jq_tostring(_jq_coalesce(defaults.get("cpu_cores"), defaults.get("cpus"), 2))
@@ -361,62 +409,11 @@ def emit_vagrant(resolved: dict[str, Any]) -> str:
     qemu_disk = _jq_tostring(_jq_coalesce(defaults.get("disk_gb"), 30)) + "G"
     pkg_list = " ".join(bundle_packages)
 
-    flags = {"docker": "docker" in bundle_packages, "dev": "dev-toolchain" in bundle_packages}
-
-    port_forwards = ""
-    if "sunshine" in bundle_packages:
-        port_forwards += (
-            '  # Sunshine / Moonlight\n'
-            '  config.vm.network "forwarded_port", guest: 47984, host: 47984, auto_correct: true\n'
-            '  config.vm.network "forwarded_port", guest: 47989, host: 47989, auto_correct: true\n'
-            '  config.vm.network "forwarded_port", guest: 47990, host: 47990, auto_correct: true\n'
-            '  config.vm.network "forwarded_port", guest: 48010, host: 48010, auto_correct: true\n'
-            '  config.vm.network "forwarded_port", guest: 47998, host: 47998, protocol: "udp", auto_correct: true\n'
-            '  config.vm.network "forwarded_port", guest: 47999, host: 47999, protocol: "udp", auto_correct: true\n'
-            '  config.vm.network "forwarded_port", guest: 48000, host: 48000, protocol: "udp", auto_correct: true\n'
-        )
-    if "vnc" in bundle_packages:
-        port_forwards += (
-            '  # VNC\n'
-            '  config.vm.network "forwarded_port", guest: 5901, host: 5901, auto_correct: true\n'
-        )
-    if "xpra" in bundle_packages:
-        port_forwards += (
-            '  # Xpra\n'
-            '  config.vm.network "forwarded_port", guest: 14500, host: 14500, auto_correct: true\n'
-        )
-    if "rdp" in bundle_packages:
-        port_forwards += (
-            '  # RDP\n'
-            '  config.vm.network "forwarded_port", guest: 3389, host: 3389, auto_correct: true\n'
-        )
-    if "thinlinc" in bundle_packages:
-        port_forwards += (
-            '  # ThinLinc Web Access\n'
-            '  config.vm.network "forwarded_port", guest: 300, host: 300, auto_correct: true\n'
-        )
-
-    docker_setup = ""
-    if flags["docker"]:
-        docker_setup = (
-            '    # Install Docker\n'
-            '    sudo install -m 0755 -d /etc/apt/keyrings\n'
-            '    curl -fsSL https://download.docker.com/linux/ubuntu/gpg'
-            ' | sudo gpg --batch --yes --dearmor -o /etc/apt/keyrings/docker.gpg\n'
-            '    echo "deb [arch=$(dpkg --print-architecture)'
-            ' signed-by=/etc/apt/keyrings/docker.gpg]'
-            ' https://download.docker.com/linux/ubuntu'
-            ' $(. /etc/os-release && echo $VERSION_CODENAME) stable"'
-            ' | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null\n'
-            '    sudo apt-get update -y\n'
-            '    sudo apt-get install -y docker-ce docker-ce-cli containerd.io'
-            ' docker-buildx-plugin\n'
-            '    sudo usermod -aG docker vagrant\n'
-        )
-
-    dev_setup = ""
-    if flags["dev"]:
-        dev_setup = '    sudo apt-get install -y build-essential pkg-config libssl-dev\n'
+    port_forwards = _aggregate_port_forwards(bundle_packages)
+    # Pre-provision shell each bundle package contributes for the Vagrantfile
+    # inline bootstrap — declared in the package manifest, aggregated generically
+    # so core branches on no package id (replaces the old docker/dev hardcode).
+    package_provision = _aggregate_vagrant_provision(bundle_packages)
 
     provider_block = (
         f'  config.vm.provider "qemu" do |qe|\n'
@@ -446,8 +443,7 @@ def emit_vagrant(resolved: dict[str, Any]) -> str:
         f'    echo "Packages: {pkg_list}"\n'
         f'    sudo apt-get update -y\n'
         f'    sudo apt-get install -y curl git jq\n'
-        f'{docker_setup}'
-        f'{dev_setup}'
+        f'{package_provision}'
         f'  SHELL\n'
         f'end\n'
     )

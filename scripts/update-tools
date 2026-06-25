@@ -27,7 +27,8 @@ def main(argv: list[str]) -> int:
         sys.stderr.write(USAGE)
         return 2
     root = repo_root()
-    os_family = resolve_env(root, profile).get("OS_FAMILY", "")
+    resolved = resolve_env(root, profile)
+    os_family = resolved.get("OS_FAMILY", "")
     ssh = [str(ROOT / "scripts/instance-ssh"), profile, "--"]
 
     if os_family == "ubuntu":
@@ -37,7 +38,9 @@ def main(argv: list[str]) -> int:
         if result.returncode != 0:
             return result.returncode
 
-        # Each step mirrors `<ssh> '<script>' || <handler>`:
+        # Core OS update only. Everything package-specific (editors, AI CLIs,
+        # container engines, toolchains) is declared by its own plugin and
+        # aggregated below — core names no package.
         #   None failure  -> `|| true`            (continue silently)
         #   str failure   -> `|| log "<message>"` (emit [update] line, continue)
         steps: list[tuple[str, str, str | None]] = [
@@ -45,42 +48,21 @@ def main(argv: list[str]) -> int:
              "sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq && "
              "sudo DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -qq",
              None),
-            ("Updating VS Code...",
-             "sudo DEBIAN_FRONTEND=noninteractive apt-get install --only-upgrade -y code 2>/dev/null",
-             "vscode not installed"),
-            ("Updating Claude...",
-             'command -v claude >/dev/null 2>&1 && curl -fsSL https://claude.ai/install.sh | sh '
-             '|| echo "skip"',
-             None),
-            ("Updating OpenCode...",
-             'command -v opencode >/dev/null 2>&1 && curl -fsSL https://opencode.ai/install | bash '
-             '|| echo "skip"',
-             None),
-            ("Updating Codex CLI...",
-             'command -v codex >/dev/null 2>&1 && sudo npm update -g @openai/codex || echo "skip"',
-             None),
-            ("Updating Goose...",
-             'command -v goose >/dev/null 2>&1 && goose update 2>/dev/null || echo "skip"',
-             None),
-            ("Updating Hermes...",
-             'command -v hermes >/dev/null 2>&1 && hermes update || echo "skip"',
-             None),
-            ("Updating RustDesk...",
-             "command -v rustdesk >/dev/null 2>&1 && sudo DEBIAN_FRONTEND=noninteractive "
-             'apt-get install --only-upgrade -y rustdesk 2>/dev/null || echo "skip"',
-             None),
-            ("Updating Sunshine...",
-             "dpkg -l sunshine >/dev/null 2>&1 && sudo DEBIAN_FRONTEND=noninteractive "
-             'apt-get install --only-upgrade -y sunshine 2>/dev/null || echo "skip"',
-             None),
-            ("Updating Docker...",
-             "command -v docker >/dev/null 2>&1 && sudo apt-get install --only-upgrade -y "
-             'docker-ce docker-ce-cli containerd.io 2>/dev/null || echo "skip"',
-             None),
-            ("Updating Rust...",
-             'command -v rustup >/dev/null 2>&1 && rustup update || echo "skip"',
-             None),
         ]
+        # Package-declared self-upgrade steps (v4.4 §15): each installed package
+        # may declare an `update.<os_family>` command in its manifest; aggregate
+        # and run them generically — core names no package.
+        bundle = [p for p in resolved.get("BUNDLE_PACKAGES", "").split(",") if p]
+        from eve_sdk.plugin_manifest import PluginManifest
+
+        for plugin in PluginManifest.load_all("package"):
+            if plugin.get("id") not in bundle:
+                continue
+            cmd = (plugin.get("update") or {}).get(os_family)
+            if cmd:
+                label = plugin.get("display_name") or plugin.get("id") or "package"
+                steps.append((f"Updating {label}...", cmd, None))
+
         for msg, script, fail_msg in steps:
             print(f"[update] {msg}")
             step = subprocess.run([*ssh, script], check=False)

@@ -143,6 +143,7 @@
         ]
       },
       "conflicts_with": [],
+      "desktop": null,
       "installable": true,
       "installable_os_families": [
         "ubuntu"
@@ -166,6 +167,7 @@
         ]
       },
       "conflicts_with": [],
+      "desktop": null,
       "installable": true,
       "installable_os_families": [
         "ubuntu"
@@ -183,6 +185,7 @@
         ]
       },
       "conflicts_with": [],
+      "desktop": null,
       "installable": true,
       "installable_os_families": [
         "windows"
@@ -200,6 +203,7 @@
         ]
       },
       "conflicts_with": [],
+      "desktop": null,
       "installable": true,
       "installable_os_families": [
         "windows"

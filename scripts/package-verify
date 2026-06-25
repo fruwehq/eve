@@ -3,15 +3,16 @@
 
 Usage: scripts/package-verify --instance <name> [--package <id>]
 
-Verifies selected package plugins with lightweight live probes against the
-running instance via SSH/WinRM.
+Generic dispatcher (v4.4 §15): for each selected installed package that declares
+a ``verify`` action, run it via scripts/package-action (the package's verify
+command does the live probes and prints ok/fail lines, exiting non-zero on
+failure). Packages without a verify action get a generic installed-status check.
+Core names no package.
 """
-
 from __future__ import annotations
 
 import json
 import os
-import re
 import subprocess
 import sys
 from pathlib import Path
@@ -19,18 +20,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from eve_sdk.package_dispatch import optional_profile_env  # noqa: E402
-from eve_sdk.tf_dispatch import repo_root  # noqa: E402
-
 _USAGE = (
     "Usage: scripts/package-verify --instance <name> [--package <id>]\n\n"
     "Verifies selected package plugins with lightweight live probes."
 )
-
-
-def _shell_quote(value: str) -> str:
-    """POSIX single-quote escaping: wrap in ''' and escape internal quotes."""
-    return "'" + value.replace("'", "'\\''") + "'"
 
 
 def main(argv: list[str]) -> int:
@@ -55,19 +48,15 @@ def main(argv: list[str]) -> int:
         print(_USAGE, file=sys.stderr)
         return 2
 
-    root = repo_root()
-
-    paths_result = subprocess.run(
+    overlay_path_result = subprocess.run(
         [str(ROOT / "scripts/instance-paths"), "--instance", instance, "--emit", "json"],
         capture_output=True, text=True, check=True,
     )
-    paths_json = json.loads(paths_result.stdout)
-    overlay_path = paths_json.get("INSTANCE_OVERLAY_PATH", "")
+    overlay_path = json.loads(overlay_path_result.stdout).get("INSTANCE_OVERLAY_PATH", "")
     if overlay_path:
         Path(overlay_path).parent.mkdir(parents=True, exist_ok=True)
         overlay_result = subprocess.run(
-            [str(ROOT / "scripts/instance-profile-overlay"),
-             "--instance", instance, "--output", overlay_path],
+            [str(ROOT / "scripts/instance-profile-overlay"), "--instance", instance, "--output", overlay_path],
             stdout=subprocess.DEVNULL,
         )
         if overlay_result.returncode != 0:
@@ -75,56 +64,34 @@ def main(argv: list[str]) -> int:
         os.environ["EVE_CATALOG_LOCAL"] = overlay_path
     os.environ["EVE_INSTANCE_NAME"] = instance
 
-    resolved_json_result = subprocess.run(
+    resolved_result = subprocess.run(
         [str(ROOT / "scripts/instance-resolve"), "--instance", instance, "--emit", "json"],
         capture_output=True, text=True, check=True,
     )
-    resolved_json = json.loads(resolved_json_result.stdout)
-    os_family = resolved_json.get("os", {}).get("family", "")
-
-    resolved_env = optional_profile_env(root, instance)
-    resolved_vm_user = resolved_env.get("VM_USER_NAME", "") if resolved_env else ""
-    resolved_ssh_user = resolved_env.get("SSH_USER", "") if resolved_env else ""
-    human_user = resolved_vm_user or os.environ.get("VM_USER_NAME", "") or resolved_ssh_user
+    os_family = json.loads(resolved_result.stdout).get("os", {}).get("family", "")
 
     list_result = subprocess.run(
         [str(ROOT / "scripts/package-list"), "--instance", instance, "--json"],
         capture_output=True, text=True, check=True,
     )
-    package_list = json.loads(list_result.stdout)
-    all_packages = package_list.get("packages", [])
+    all_packages = json.loads(list_result.stdout).get("packages", [])
 
     if package_filter:
-        selected_ids = [p["id"] for p in all_packages if p.get("id") == package_filter]
-        if not selected_ids:
+        packages = [p for p in all_packages if p.get("id") == package_filter]
+        if not packages:
             print(f"package.verify: unknown package for {instance}: {package_filter}", file=sys.stderr)
             return 2
-        packages = selected_ids
     else:
-        packages = [p["id"] for p in all_packages if p.get("selected") and p.get("supported")]
+        packages = [p for p in all_packages if p.get("selected") and p.get("supported")]
 
     if not packages:
         print(f"No selected supported packages to verify for {instance}.")
         return 0
 
-    ssh_base = [str(ROOT / "scripts/instance-ssh"), instance, "--"]
-    failures = 0
-    package_status_details = ""
-
-    def remote_check(command: str) -> bool:
-        return subprocess.run(
-            [*ssh_base, command], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        ).returncode == 0
-
-    def package_selected(pkg: str) -> bool:
-        return any(p.get("id") == pkg and p.get("selected") and p.get("supported") for p in all_packages)
-
-    def status_for_package(pkg: str) -> str:
-        nonlocal package_status_details
-        package_status_details = ""
+    def status_for_package(pkg_id: str) -> str:
         result = subprocess.run(
             [str(ROOT / "scripts/package-dispatch"), "--instance", instance,
-             "--package", pkg, "--command", "status"],
+             "--package", pkg_id, "--command", "status"],
             capture_output=True, text=True, check=False,
         )
         output = result.stdout + result.stderr
@@ -140,253 +107,36 @@ def main(argv: list[str]) -> int:
             elif capturing:
                 json_text += "\n" + line
         try:
-            data = json.loads(json_text)
-            status = str(data.get("status", "unknown"))
-            package_status_details = str(data.get("details", ""))
+            return str(json.loads(json_text).get("status", "unknown")) or "unknown"
         except (json.JSONDecodeError, ValueError):
-            status = "unknown"
-            package_status_details = ""
-        return status or "unknown"
-
-    def verify_installed(pkg: str) -> bool:
-        status = status_for_package(pkg)
-        if status == "installed":
-            print(f"ok   {pkg:<14} {status}")
-            return True
-        print(f"fail {pkg:<14} status is {status}")
-        if package_status_details:
-            print(f"     {'':<14} {package_status_details}")
-        return False
-
-    def verify_rdp() -> None:
-        nonlocal failures
-        if not verify_installed("rdp"):
-            return
-        if os_family == "windows":
-            print(f"ok   {'rdp':<14} Windows RDP helper can use Administrator password")
-        elif os_family == "ubuntu":
-            rdp_password = os.environ.get("RDP_GATE_PASSWORD", "") or os.environ.get("VM_USER_PASSWORD", "")
-            if not rdp_password:
-                print(f"fail {'rdp':<14} VM_USER_PASSWORD or RDP_GATE_PASSWORD is not set; Ubuntu RDP login will prompt and fail")
-                failures += 1
-            else:
-                print(f"ok   {'rdp':<14} Ubuntu RDP password is set")
-            if not human_user:
-                print(f"fail {'rdp':<14} VM_USER_NAME is not known, cannot verify Linux password state")
-                failures += 1
-            else:
-                huq = _shell_quote(human_user)
-                if remote_check(
-                    f"human_user={huq}; "
-                    r'sudo getent shadow "$human_user" | '
-                    r"awk -F: 'length($2) > 0 && $2 !~ /^(!|\*)/ { ok=1 } END { exit !ok }'"
-                ):
-                    print(f"ok   {'rdp':<14} Linux password hash is present for {human_user}")
-                else:
-                    print(f"fail {'rdp':<14} Linux password is locked or missing for {human_user}; rerun provisioning after setting VM_USER_PASSWORD")
-                    failures += 1
-            if package_selected("gnome-desktop"):
-                if remote_check('systemctl is-active --quiet gnome-remote-desktop && ss -tln | grep -q ":3389 "'):
-                    print(f"ok   {'rdp':<14} GNOME Remote Desktop active on tcp/3389")
-                else:
-                    print(f"fail {'rdp':<14} GNOME Remote Desktop is not active/listening on tcp/3389")
-                    failures += 1
-            elif remote_check('systemctl is-active --quiet xrdp && ss -tln | grep -q ":3389 "'):
-                print(f"ok   {'rdp':<14} xrdp active on tcp/3389")
-            else:
-                print(f"fail {'rdp':<14} xrdp is not active/listening on tcp/3389")
-                failures += 1
-        else:
-            print(f"fail {'rdp':<14} unsupported OS family: {os_family}")
-            failures += 1
-
-    def verify_rustdesk() -> None:
-        nonlocal failures
-        if not verify_installed("rustdesk"):
-            return
-        output_result = subprocess.run(
-            [str(ROOT / "scripts/remote-rustdesk"), instance],
-            capture_output=True, text=True, check=False,
-        )
-        output = output_result.stdout + output_result.stderr
-        if output_result.returncode == 0 and re.search(
-            r"^RustDesk ID:\s*[0-9]", output, re.MULTILINE,
-        ):
-            print(f"ok   {'rustdesk':<14} RustDesk ID available")
-        else:
-            print(output, file=sys.stderr)
-            print(f"fail {'rustdesk':<14} RustDesk ID is not available")
-            failures += 1
-        if os_family == "ubuntu":
-            huq = _shell_quote(human_user or "chris")
-            if remote_check(
-                f'human_user={huq}; '
-                r"""pgrep -u "$human_user" -f 'gdm-wayland-session|gnome-shell --mode=.*' >/dev/null 2>&1 """
-                r"""&& pgrep -u "$human_user" -f '[X]wayland' >/dev/null 2>&1"""
-            ):
-                print(f"fail {'rustdesk':<14} active GNOME session is Wayland/Xwayland; RustDesk requires peer-side screen sharing and is not unattended-capturable")
-                failures += 1
-            elif remote_check(
-                f'human_user={huq}; '
-                r'''ps -u "$human_user" -o comm= | grep -Eq '^(gnome-shell|xfce4-session|xfwm4|xfdesktop)$' '''
-            ):
-                print(f"ok   {'rustdesk':<14} capturable X11 desktop/session is present")
-            else:
-                print(f"fail {'rustdesk':<14} no capturable X11 desktop/session found")
-                failures += 1
-        elif os_family == "windows":
-            if remote_check(
-                r"""powershell.exe -NoProfile -Command '$svc = Get-Service -ErrorAction SilentlyContinue | Where-Object { $_.Name -match "rustdesk" -or $_.DisplayName -match "rustdesk" } | Select-Object -First 1; if (-not $svc -or $svc.Status -ne "Running") { exit 1 }'"""
-            ):
-                print(f"ok   {'rustdesk':<14} Windows service is running")
-            else:
-                print(f"fail {'rustdesk':<14} Windows service is not running")
-                failures += 1
-            if remote_check(
-                r"""powershell.exe -NoProfile -Command '$p = Get-Process rustdesk -ErrorAction SilentlyContinue | Where-Object { $_.SessionId -gt 0 } | Select-Object -First 1; if (-not $p) { exit 1 }'"""
-            ):
-                print(f"ok   {'rustdesk':<14} interactive Windows RustDesk process is running")
-            else:
-                print(f"fail {'rustdesk':<14} no interactive Windows RustDesk process is running")
-                failures += 1
-            if remote_check(
-                r"""powershell.exe -NoProfile -Command '$logs = @("C:\Windows\ServiceProfiles\LocalService\AppData\Roaming\RustDesk\log\server\RustDesk_rCURRENT.log", "C:\Windows\ServiceProfiles\LocalService\AppData\Roaming\RustDesk\log\service\RustDesk_rCURRENT.log", "C:\Users\Administrator\AppData\Roaming\RustDesk\log\server\rustdesk_rCURRENT.log", "C:\Users\Administrator\AppData\Roaming\RustDesk\log\rustdesk_rCURRENT.log") | Where-Object { Test-Path -LiteralPath $_ }; if (-not $logs) { exit 1 }; $fresh = $false; foreach ($log in $logs) { $item = Get-Item -LiteralPath $log; if ($item.LastWriteTime -lt (Get-Date).AddMinutes(-15)) { continue }; $recent = Get-Content -LiteralPath $log -Tail 160 | Select-String -Pattern "start rendezvous mediator|Latency of .*:21116|Got nat response"; if ($recent) { $fresh = $true } }; if (-not $fresh) { exit 1 }'"""
-            ):
-                print(f"ok   {'rustdesk':<14} recent rendezvous activity is present")
-            else:
-                print(f"fail {'rustdesk':<14} no recent RustDesk rendezvous activity; host may appear offline")
-                failures += 1
-
-    def verify_sunshine() -> None:
-        nonlocal failures
-        if not verify_installed("sunshine"):
-            return
-        if subprocess.run(
-            [str(ROOT / "scripts/remote-sunshine-wait"), instance],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        ).returncode == 0:
-            print(f"ok   {'sunshine':<14} Sunshine API reachable")
-        else:
-            print(f"fail {'sunshine':<14} Sunshine API is not reachable")
-            failures += 1
-        if os_family == "ubuntu":
-            if not human_user:
-                print(f"fail {'sunshine':<14} VM_USER_NAME is not known, cannot verify X display")
-                failures += 1
-                return
-            huq = _shell_quote(human_user)
-            if remote_check(
-                f'human_user={huq}; '
-                r'uid=$(id -u "$human_user"); '
-                r'home=$(getent passwd "$human_user" | cut -d: -f6); '
-                r'sudo -H -u "$human_user" env '
-                r'HOME="$home" USER="$human_user" LOGNAME="$human_user" '
-                r'XDG_RUNTIME_DIR="/run/user/$uid" '
-                r'DISPLAY="${SUNSHINE_DISPLAY:-:0}" '
-                r'XAUTHORITY="${XAUTHORITY:-$home/.Xauthority}" '
-                r'xrandr --query >/dev/null 2>&1'
-            ):
-                print(f"ok   {'sunshine':<14} X display is available for capture")
-            else:
-                print(f"fail {'sunshine':<14} no usable X display for capture")
-                failures += 1
-            user_sq = _shell_quote(human_user)
-            if remote_check(
-                f"sudo test -r /home/{user_sq}/.config/sunshine/sunshine.log && "
-                f"! sudo tail -250 /home/{user_sq}/.config/sunshine/sunshine.log | "
-                r"grep -Eq 'CLIENT CONNECTED|New streaming session started'"
-            ):
-                print(f"ok   {'sunshine':<14} no recent streaming session to classify")
-            else:
-                if remote_check(
-                    f"sudo tail -250 /home/{user_sq}/.config/sunshine/sunshine.log | "
-                    r"grep -Eq 'frame I:[0-9]+[[:space:]]+Avg QP:.*size:[[:space:]]+[0-9]{1,3}($|[^0-9])|coded y,uvDC,uvAC intra:[[:space:]]+0\.0%[[:space:]]+0\.0%[[:space:]]+0\.0%|skip:100\.0%'"
-                ):
-                    print(f"fail {'sunshine':<14} recent stream encoded blank/static frames; visual Moonlight check will be black")
-                    failures += 1
-                else:
-                    print(f"ok   {'sunshine':<14} recent stream log does not show the known blank-frame signature")
-        elif os_family == "windows":
-            if remote_check(
-                r"""powershell.exe -NoProfile -Command '$marker = "C:\Users\Administrator\provision\state\display-config-done.flag"; if (-not (Test-Path -LiteralPath $marker)) { exit 1 }; $content = (Get-Content -LiteralPath $marker -Raw).Trim(); if ($content -notmatch "^OK\b") { exit 1 }'"""
-            ):
-                print(f"ok   {'sunshine':<14} Windows VDD display setup completed")
-            else:
-                print(f"fail {'sunshine':<14} Windows VDD display setup failed; Moonlight may pair but stream black")
-                failures += 1
-            if remote_check(
-                r"""powershell.exe -NoProfile -Command '$log = "C:\Users\Administrator\provision\state\display-config.log"; if (-not (Test-Path -LiteralPath $log)) { exit 1 }; $activeVdd = Get-Content -LiteralPath $log | Select-String -Pattern "active=True.*vdd=True"; if (-not $activeVdd) { exit 1 }'"""
-            ):
-                print(f"ok   {'sunshine':<14} active VDD display is present")
-            else:
-                print(f"fail {'sunshine':<14} no active VDD display is present")
-                failures += 1
-
-    def verify_vnc() -> None:
-        nonlocal failures
-        if not verify_installed("vnc"):
-            return
-        if remote_check('systemctl is-active --quiet vncserver.service && ss -tln | grep -q ":5901 "'):
-            print(f"ok   {'vnc':<14} TigerVNC active on tcp/5901")
-        else:
-            print(f"fail {'vnc':<14} TigerVNC is not active/listening on tcp/5901")
-            failures += 1
-        if not human_user:
-            print(f"fail {'vnc':<14} VM_USER_NAME is not known, cannot verify XFCE session")
-            failures += 1
-            return
-        huq = _shell_quote(human_user)
-        if remote_check(
-            f'human_user={huq}; '
-            r"""pgrep -u "$human_user" -f 'xfce4-session|xfwm4|xfdesktop' >/dev/null 2>&1"""
-        ):
-            print(f"ok   {'vnc':<14} XFCE session process is running")
-        else:
-            print(f"fail {'vnc':<14} no XFCE session process found; VNC may show a black screen")
-            failures += 1
-
-    def verify_thinlinc() -> None:
-        nonlocal failures
-        if not verify_installed("thinlinc"):
-            return
-        if remote_check(
-            'systemctl is-active --quiet vsmserver.service && '
-            'systemctl is-active --quiet vsmagent.service && '
-            'systemctl is-active --quiet tlwebaccess.service'
-        ):
-            print(f"ok   {'thinlinc':<14} ThinLinc services are active")
-        else:
-            print(f"fail {'thinlinc':<14} one or more ThinLinc services are not active")
-            failures += 1
-        port = os.environ.get("THINLINC_WEBACCESS_PORT", "300")
-        if remote_check(f'''ss -tln | grep -Eq ":(300|{port}) "'''):
-            print(f"ok   {'thinlinc':<14} Web Access is listening")
-        else:
-            print(f"fail {'thinlinc':<14} ThinLinc Web Access is not listening")
-            failures += 1
-
-    def verify_generic(pkg: str) -> None:
-        verify_installed(pkg)
+            return "unknown"
 
     print(f"Verifying packages for {instance} ({os_family})")
+    failures = 0
     for pkg in packages:
-        if pkg == "rdp":
-            verify_rdp()
-        elif pkg == "rustdesk":
-            verify_rustdesk()
-        elif pkg == "sunshine":
-            verify_sunshine()
-        elif pkg == "thinlinc":
-            verify_thinlinc()
-        elif pkg == "vnc":
-            verify_vnc()
+        pkg_id = str(pkg.get("id", ""))
+        actions = pkg.get("actions") or []
+        has_verify = any(a.get("id") == "verify" for a in actions)
+        if has_verify:
+            result = subprocess.run(
+                [str(ROOT / "scripts/package-action"), "--instance", instance,
+                 "--package", pkg_id, "--action", "verify"],
+                check=False,
+            )
+            if result.returncode != 0:
+                failures += 1
+            continue
+        # Generic fallback: installed-status check only.
+        status = status_for_package(pkg_id)
+        if status == "installed":
+            print(f"ok   {pkg_id:<14} {status}")
         else:
-            verify_generic(pkg)
+            print(f"fail {pkg_id:<14} status is {status}")
+            failures += 1
 
     if failures > 0:
         print(f"package.verify failed with {failures} failure(s).")
         return 1
-
     print("package.verify passed.")
     return 0
 

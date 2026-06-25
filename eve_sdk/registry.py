@@ -192,6 +192,11 @@ def sync(
 
     Working copies are keyed by `(url, ref)` under *cache_dir*; each source's
     `subdir` is sparse-checked-out and exposed at `plugins_dir/<source-id>`.
+
+    After materializing, orphan exposures (a source that was removed from the
+    configured set) are pruned so ``plugins_dir`` mirrors the configured set
+    exactly — otherwise removing a source and re-pulling would leave its old
+    plugins discoverable.
     """
     dest_root = plugins_dir or Workdir.plugins_dir()
     cache_root = cache_dir or (Workdir.eve_dir() / "cache" / "sources")
@@ -208,7 +213,50 @@ def sync(
         locked.append(
             LockedSource(id=source.id, url=source.url, subdir=source.subdir, ref=source.ref, sha=sha)
         )
+    prune_plugins(sources, plugins_dir=dest_root)
     return locked
+
+
+def prune_plugins(
+    sources: list[Source], *, plugins_dir: Path | None = None
+) -> list[str]:
+    """Remove materialized exposures whose source id is no longer configured.
+
+    The synced plugins root (``.eve/plugins/``) is fully eve-owned — it is
+    materialized entirely by :func:`sync` — so reconciliation removes **any**
+    entry not backed by a currently-configured source, whether a symlink or a
+    real directory. A stale real-dir materialization (e.g. left behind by a
+    previously-disabled source, or by an older eve that materialized dirs) is
+    removed too, so the next pull re-downloads it fresh and it stops showing in
+    the Providers list. Returns the ids of the pruned entries.
+
+    The safety boundary is **scope, not file type**: pass only the eve-managed
+    synced root (the default, :meth:`Workdir.plugins_dir`). User-owned plugin
+    roots (``EVE_PLUGIN_ROOTS``) live in a separate root that is never passed
+    here and must never be pruned. Safe to call on its own — e.g. the TUI prunes
+    locally after a source is removed so the provider list updates without a
+    network pull.
+    """
+    import shutil
+
+    dest_root = plugins_dir or Workdir.plugins_dir()
+    if not dest_root.exists():
+        return []
+    keep = {source.id for source in sources}
+    pruned: list[str] = []
+    for entry in sorted(dest_root.iterdir(), key=lambda p: p.name):
+        if entry.name.startswith("."):
+            continue
+        if entry.name in keep:
+            continue
+        # The synced root is eve-owned: remove anything not in the configured
+        # source set, regardless of file type.
+        if entry.is_dir() and not entry.is_symlink():
+            shutil.rmtree(entry)
+        else:
+            entry.unlink()  # symlink or regular file
+        pruned.append(entry.name)
+    return pruned
 
 
 def resolve_url(url: str) -> str:
@@ -240,10 +288,20 @@ def _materialize_worktree(source: Source, worktree: Path, env: dict[str, str]) -
 
 
 def _expose_subdir(source: Source, worktree: Path, dest_root: Path) -> None:
-    """Point `plugins_dir/<id>` at the source's subdir within its worktree."""
+    """Point ``plugins_dir/<id>`` at the source's resolved plugin root.
+
+    The plugin root is the source's folder (``subdir``, defaulting to the repo
+    root) — unless that folder contains a ``.eve/`` subdirectory, in which case
+    the ``.eve/`` directory is exposed instead. This lets a repo tuck its eve
+    plugin files under ``.eve/`` away from the top level without the user
+    pointing the source at a deeper folder by hand. Precedence: an explicit
+    ``.eve/`` within the folder wins over the folder itself; the user still
+    specifies only the folder.
+    """
     target = (worktree / source.subdir) if source.subdir else worktree
     if not target.is_dir():
         raise RegistryError(f"source {source.id}: subdir {source.subdir!r} not found at ref {source.ref}")
+    plugin_root = target / ".eve" if (target / ".eve").is_dir() else target
     link = dest_root / source.id
     if link.is_symlink() or link.exists():
         if link.is_symlink() or link.is_file():
@@ -252,7 +310,7 @@ def _expose_subdir(source: Source, worktree: Path, dest_root: Path) -> None:
             import shutil
 
             shutil.rmtree(link)
-    link.symlink_to(target)
+    link.symlink_to(plugin_root)
 
 
 # --------------------------------------------------------------------------- #

@@ -61,14 +61,30 @@ def os_ids() -> list[str]:
     )
 
 
+def package_ids() -> list[str]:
+    """Package ids from loaded package plugin manifests."""
+    return sorted(plugin["id"] for plugin in PluginManifest.load_all("package"))
+
+
+def os_plugin_ids() -> list[str]:
+    """OS-plugin ids (kind: os) from loaded os-plugin manifests (§14)."""
+    return sorted(plugin["id"] for plugin in PluginManifest.load_all("os"))
+
+
 def all_ids() -> list[str]:
-    return [*provider_ids(), *os_ids()]
+    return [*provider_ids(), *package_ids(), *os_plugin_ids(), *os_ids()]
 
 
 # --- scan scope ------------------------------------------------------------
 
 def scan_paths() -> list[Path]:
-    """Core files scanned for provider/OS id references (Check 1)."""
+    """Core files scanned for provider/OS id references (Check 1).
+
+    Covers every core surface that must stay plugin-agnostic: ``scripts/``,
+    ``eve_sdk/``, the TUI (``tui/``), the config layer (``config/``), and the
+    core JSON schemas (``core/schema/``). Test fixtures and plugin manifests
+    are out of scope (they legitimately name provider/package ids).
+    """
     files: list[Path] = []
     for entry in sorted((REPO / "scripts").iterdir()):
         if entry.is_dir():
@@ -77,6 +93,9 @@ def scan_paths() -> list[Path]:
             continue
         files.append(entry)
     files.extend(sorted(REPO.glob("eve_sdk/**/*.py")))
+    files.extend(sorted(REPO.glob("tui/**/*.py")))
+    files.extend(sorted(p for p in (REPO / "config").iterdir() if p.is_file()))
+    files.extend(sorted(p for p in (REPO / "core" / "schema").iterdir() if p.is_file()))
     for sub in ("plugins/providers/_common", "plugins/providers/_terraform-common"):
         base = REPO / sub
         if base.is_dir():
@@ -133,7 +152,7 @@ import re  # noqa: E402
 # vs "docker" the provider ID). For these IDs, use context-aware matching:
 # only flag comparison/branching patterns (== "id", != "id"),
 # not bare mentions (CLI commands, package names, example strings).
-COMMON_TOKEN_IDS: set[str] = {"docker"}
+COMMON_TOKEN_IDS: set[str] = {"docker", "rdp"}
 
 
 def _has_comparison(content: str, identifier: str) -> bool:
@@ -162,13 +181,17 @@ def find_provider_os_violations(
     violations: list[str] = []
     for rel_path, content in files:
         for identifier in ids:
+            # UPPERCASE env-var form of the id (raspberry-pi -> RASPBERRY_PI,
+            # thinlinc -> THINLINC). Hardcoding a plugin's env var by name is the
+            # same leak as naming the id; the lowercase substring scan misses it.
+            env_form = identifier.upper().replace("-", "_")
             if identifier in COMMON_TOKEN_IDS:
                 if _has_comparison(content, identifier) and rel_path not in allowed:
                     violations.append(
                         f"FAIL: {rel_path} (branches on {identifier}) not in allowlist"
                     )
                     break
-            elif identifier in content and rel_path not in allowed:
+            elif (identifier in content or env_form in content) and rel_path not in allowed:
                 violations.append(
                     f"FAIL: {rel_path} (references {identifier}) not in allowlist"
                 )
@@ -254,11 +277,11 @@ def self_test() -> int:
     # A planted comparison should be caught; a bare mention should NOT.
     for identifier in COMMON_TOKEN_IDS:
         # PLANTED real coupling — must be caught.
-        planted = 'if provider == "docker":\n    return "docker-engine"'
+        planted = f'if provider == "{identifier}":\n    return "{identifier}-engine"'
         if not _has_comparison(planted, identifier):
             print(f"SELF-TEST FAIL: planted == \"{identifier}\" not detected")
             fail = 1
-        planted_ne = 'if engine != "docker":\n    raise'
+        planted_ne = f'if engine != "{identifier}":\n    raise'
         if not _has_comparison(planted_ne, identifier):
             print(f"SELF-TEST FAIL: planted != \"{identifier}\" not detected")
             fail = 1

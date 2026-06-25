@@ -60,6 +60,21 @@ def test_add_url_and_remove_roundtrip() -> None:
     assert "no such source" in msg
 
 
+def test_add_url_with_folder_roundtrips_into_override() -> None:
+    ok, _ = plugins.add_url("https://example.com/x.git", ref="v1.0.0", subdir="providers")
+    assert ok
+    (row,) = plugins.configured_rows()
+    assert row["id"] == "x"
+    assert row["subdir"] == "providers"
+
+
+def test_add_url_rejects_unsafe_folder_via_registry_validation() -> None:
+    # The TUI does not re-implement the .. check — registry.parse_sources does.
+    ok, msg = plugins.add_url("https://example.com/x.git", ref="v1.0.0", subdir="../escape")
+    assert not ok
+    assert "relative path inside" in msg
+
+
 def test_derive_id_strips_git_suffix() -> None:
     assert plugins._derive_id("https://github.com/you/your-plugins.git") == "your-plugins"
     assert plugins._derive_id("../eve-providers") == "eve-providers"

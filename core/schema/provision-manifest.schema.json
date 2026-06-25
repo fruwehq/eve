@@ -3,57 +3,61 @@
   "$id": "https://ephemeral.dev/schemas/provision-manifest.schema.json",
   "title": "Provision Manifest",
   "description": "Host-written manifest of provision steps and their expected hashes. Written by scripts/provision before upload and consumed by guest runners to detect host-uploaded-vs-guest-executing drift.",
-
   "type": "object",
-  "required": ["api_version", "os_family", "steps"],
+  "required": [
+    "api_version",
+    "os_family",
+    "steps"
+  ],
   "additionalProperties": false,
-
   "properties": {
     "api_version": {
       "description": "Manifest schema version. Unknown versions must be refused.",
       "type": "integer",
       "const": 1
     },
-
     "os_family": {
       "description": "OS family this manifest targets (ubuntu or windows).",
       "type": "string",
-      "enum": ["ubuntu", "windows"]
+      "enum": [
+        "ubuntu",
+        "windows"
+      ]
     },
-
     "created_at": {
       "description": "ISO 8601 timestamp when the host wrote this manifest.",
       "type": "string"
     },
-
     "steps": {
       "description": "Ordered list of provision steps the host expects the guest to execute.",
       "type": "array",
-      "items": { "$ref": "#/$defs/step_entry" },
+      "items": {
+        "$ref": "#/$defs/step_entry"
+      },
       "minItems": 1
     }
   },
-
   "$defs": {
     "step_entry": {
       "description": "A single provision step in the manifest.",
       "type": "object",
-      "required": ["order", "name", "sha256"],
+      "required": [
+        "order",
+        "name",
+        "sha256"
+      ],
       "additionalProperties": false,
-
       "properties": {
         "order": {
           "description": "Zero-based execution order index.",
           "type": "integer",
           "minimum": 0
         },
-
         "name": {
           "description": "Step filename (e.g. base.sh, 01_preferences.ps1).",
           "type": "string",
           "minLength": 1
         },
-
         "sha256": {
           "description": "SHA-256 hex digest of the step file contents at upload time.",
           "type": "string",

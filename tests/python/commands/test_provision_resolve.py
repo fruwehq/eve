@@ -76,22 +76,18 @@ _EXPECTED_ENV_LINES = [
     "VM_INSTANCE_TYPE=",
     "VM_ROOT_VOLUME_TYPE=",
     "VM_USE_SPOT=",
-    "GCP_IMAGE_FAMILY=",
-    "GCP_IMAGE_PROJECT=",
-    "VULTR_OS_ID=0",
     "LOCATION_REGION=",
     "LOCATION_AVAILABILITY_ZONE=",
     "LOCATION_ZONE=",
     "SSH_USER=vagrant",
-    "CLOUD_IMAGE_URL=",
     "HUMAN_USER_NAME=vagrant",
     "PROVISION_USER_NAME=vagrant",
-    "RASPBERRY_PI_HOST=",
-    "RASPBERRY_PI_IP=",
-    "TRUENAS_HOST=",
-    "TRUENAS_SSH_PORT=22",
-    "TRUENAS_SSH_USER=",
     "VM_USER_NAME=",
+    # Provider-specific env now emitted generically after the core keys, sorted
+    # by name (from each provider manifest's env_emission) — §15.5c. The mock
+    # provider declares only MOCK_IMAGE_URL, so only it appears (the old golden
+    # wrongly carried real-provider keys the hardcoded list always emitted).
+    "MOCK_IMAGE_URL=",
 ]
 
 
@@ -323,3 +319,31 @@ def test_provision_bad_profile_exits_5(pr_env: dict[str, str]) -> None:
     """An unknown profile name propagates profile-resolve exit 5."""
     result = _run("provision", "definitely-not-a-profile", env=pr_env)
     assert result.returncode == 5
+
+
+def test_aggregate_vagrant_provision_is_package_declared(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Vagrant inline-provision is aggregated from package manifests, not hardcoded."""
+    from eve_sdk import plugin_manifest
+    from eve_sdk.profile_resolve import _aggregate_vagrant_provision
+
+    fake = [
+        {"id": "dev-toolchain", "vagrant": {"inline_provision": {"ubuntu": "sudo apt-get install -y build-essential"}}},
+        {"id": "container", "vagrant": {"inline_provision": {"ubuntu": "# Install\nsudo apt-get install -y docker-ce"}}},
+        {"id": "noop"},  # contributes nothing
+    ]
+    monkeypatch.setattr(
+        plugin_manifest.PluginManifest, "load_all",
+        classmethod(lambda cls, kind=None: fake if kind == "package" else []),
+    )
+    out = _aggregate_vagrant_provision(["dev-toolchain", "container", "noop"])
+    assert out == (
+        "    # dev-toolchain\n"
+        "    sudo apt-get install -y build-essential\n"
+        "    # container\n"
+        "    # Install\n"
+        "    sudo apt-get install -y docker-ce\n"
+    )
+    # bundle without contributors -> empty (no hardcoded docker/dev branch)
+    assert _aggregate_vagrant_provision(["noop"]) == ""

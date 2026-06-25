@@ -1,21 +1,17 @@
 # Non-secret structured defaults. Empty values are ignored.
 #
+# Only TRUE-core sections live here — the ones no provider/package plugin owns
+# (global, the shared display setting, the vagrant engine, the human/windows
+# users, and moonlight until its launcher is extracted (v4.4 §8).
+# Provider and package config fields, defaults, and validation come from each
+# plugin's manifest config_schema, not from core.
+#
 # Personal overrides go in .eve/config.yaml (git-ignored).
 # Secrets (API keys, passwords) go in .eve/secrets/<provider>.yaml.
-
-aws:
-  config_file:
-  profile:
-  region:
-  shared_credentials_file:
 
 display:
   fps:
   resolution:
-
-gcp:
-  application_credentials:
-  project:
 
 global:
   my_ip:
@@ -32,52 +28,6 @@ moonlight:
   display_mode:
   video_codec:
   video_decoder:
-
-nomachine:
-  version:
-
-rdp:
-  gate_password:
-  gate_user:
-
-raspberry_pi:
-  hdmi_connector:
-  hdmi_mode:
-  host:
-  ip:
-
-rustdesk:
-  password:
-  server:
-
-splashtop:
-  email:
-  password:
-  streamer_path:
-  streamer_url:
-
-sunshine:
-  max_bitrate_kbps:
-  password:
-  version:
-
-thinlinc:
-  accept_eula:
-  agent_hostname:
-  server_bundle_path:
-  server_bundle_url:
-  webaccess_port:
-
-truenas:
-  api_user:
-  host:
-  ssh_host_key_fingerprint:
-  ssh_port:
-  ssh_private_key_file:
-  ssh_user:
-  vm_base_dir:
-  vm_pool:
-  vm_zvol_prefix:
 
 vagrant:
   show_console:

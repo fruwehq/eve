@@ -6,13 +6,15 @@
 #   machines.name, oses.id, inits.id, packages.id, bundles.id, locations.name
 # - Matching entries are replaced/updated.
 # - New entries are appended.
+# - Replace <provider> below with a provider id contributed by an installed
+#   provider plugin (e.g. one pulled via `eve pull`). Core ships no providers.
 
 locations:
   - name: tokyo
-    aws:
+    <provider>:
       availability_zone: ap-northeast-1c
 
 machines:
-  - name: aws-cheap-x86
+  - name: <provider>-cheap-x86
     defaults:
       disk_gb: 60

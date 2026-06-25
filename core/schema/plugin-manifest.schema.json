@@ -3,92 +3,185 @@
   "$id": "https://ephemeral.dev/schemas/plugin-manifest.schema.json",
   "title": "Plugin Manifest",
   "description": "Schema for eve-plugin.yaml manifests covering both provider and package plugin kinds.",
-
   "type": "object",
-  "required": ["api_version", "kind", "id", "display_name", "commands", "supports"],
+  "required": [
+    "api_version",
+    "kind",
+    "id",
+    "display_name",
+    "supports"
+  ],
   "additionalProperties": false,
-
   "properties": {
     "api_version": {
       "description": "API version. Only eve.plugin/v1 is accepted; unknown versions must be refused.",
       "type": "string",
       "const": "eve.plugin/v1"
     },
-
     "kind": {
       "description": "Plugin kind determines the required commands and allowed fields.",
       "type": "string",
-      "enum": ["provider", "package"]
+      "enum": [
+        "provider",
+        "package",
+        "os"
+      ]
     },
-
     "id": {
       "description": "Plugin identifier. Must match [a-z][a-z0-9-]*.",
       "type": "string",
-      "pattern": "^[a-z][a-z0-9-]*$"
+      "pattern": "^[a-z][a-z0-9.-]*$"
     },
-
     "display_name": {
       "description": "Human-readable plugin name shown in the TUI and CLI listings.",
       "type": "string",
       "minLength": 1
     },
-
     "commands": {
       "description": "Map of command name to execution spec. Required commands differ by kind.",
       "type": "object",
-      "additionalProperties": { "$ref": "#/$defs/command_spec" }
+      "additionalProperties": {
+        "$ref": "#/$defs/command_spec"
+      }
     },
-
     "supports": {
       "description": "Compatibility constraints. Shape differs by kind.",
       "type": "object",
       "additionalProperties": true
     },
-
     "env": {
       "description": "List of environment variable names this plugin reads.",
       "type": "array",
-      "items": { "type": "string" }
+      "items": {
+        "type": "string"
+      }
     },
-
     "actions": {
       "description": "UI actions exposed by provider and package plugins.",
       "type": "array",
-      "items": { "$ref": "#/$defs/action" }
+      "items": {
+        "$ref": "#/$defs/action"
+      }
     },
-
     "capabilities": {
       "description": "Behavioral flags the UI/core can consult. Distinct from supports (compatibility) and actions (user-clickable).",
       "type": "array",
       "items": {
         "type": "string",
-        "enum": ["host-ssh", "login", "needs-provider-ip", "password"]
+        "enum": [
+          "host-ssh",
+          "login",
+          "needs-provider-ip",
+          "password"
+        ]
       }
     },
-
     "compatibility": {
       "description": "Compatibility matrix listing supported platform/desktop/session combinations (package plugins only).",
       "type": "array",
-      "items": { "$ref": "#/$defs/compatibility_entry" }
+      "items": {
+        "$ref": "#/$defs/compatibility_entry"
+      }
     },
-
     "compatibility_enforced": {
       "description": "Whether compatibility failures are hard errors during dispatch (package plugins only).",
       "type": "boolean"
     },
-
+    "bootstrap": {
+      "description": "Provider-owned first-contact bootstrap hints. sudo_password_env names which of this provider's config/secret env vars holds the password core uses to install NOPASSWD sudo (provider plugins only); core reads it generically and never names a provider.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sudo_password_env": {
+          "type": "string"
+        }
+      }
+    },
     "access": {
       "description": "Provider-owned VM access identity rules used to populate resolved access.bootstrap_user, provision_user, and human_user.",
       "type": "object",
-      "additionalProperties": { "$ref": "#/$defs/access_rules" }
+      "additionalProperties": {
+        "$ref": "#/$defs/access_rules"
+      }
     },
-
     "conflicts_with": {
       "description": "Package ids that cannot coexist with this package (package plugins only).",
       "type": "array",
-      "items": { "type": "string" }
+      "items": {
+        "type": "string"
+      }
     },
-
+    "provides": {
+      "description": "Capability tokens this package offers to the resolved bundle (package plugins only). Tokens are abstract '<facet>:<value>' strings (e.g. 'session:wayland', 'capture:unattended') — never package ids — so any package can negotiate compatibility without naming another package. Core aggregates these across the bundle.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9-]*:[a-z0-9-]+$"
+      }
+    },
+    "requires_capabilities": {
+      "description": "Capability tokens ('<facet>:<value>') that must be provided by the rest of the resolved bundle for this package to function. Dispatch fails clearly if any is unmet (v4.4 §8).",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9-]*:[a-z0-9-]+$"
+      }
+    },
+    "conflicts_capabilities": {
+      "description": "Capability tokens ('<facet>:<value>') that disable this package when present in the resolved bundle. Replaces core-side, package-named compatibility guards (v4.4 §8).",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9-]*:[a-z0-9-]+$"
+      }
+    },
+    "vagrant": {
+      "description": "Vagrant-engine contributions from this package (package plugins only). A package names only its own ports — self-contained, not a package-name leak.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "port_forwards": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "guest",
+              "host"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "guest": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535
+              },
+              "host": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535
+              },
+              "protocol": {
+                "type": "string",
+                "enum": [
+                  "tcp",
+                  "udp"
+                ]
+              }
+            }
+          }
+        },
+        "inline_provision": {
+          "description": "Per-OS-family shell snippet this package contributes to the Vagrantfile inline bootstrap (run during `vagrant up`). Aggregated by core, so core names no package.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "ubuntu": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
     "config_schema": {
       "description": "Config and secret field declarations. Valid on both provider and package manifests. On packages, values are namespaced under the package id (e.g. mypkg.my_field).",
       "type": "object",
@@ -96,15 +189,18 @@
       "properties": {
         "config": {
           "type": "object",
-          "additionalProperties": { "$ref": "#/$defs/field_spec" }
+          "additionalProperties": {
+            "$ref": "#/$defs/field_spec"
+          }
         },
         "secrets": {
           "type": "object",
-          "additionalProperties": { "$ref": "#/$defs/field_spec" }
+          "additionalProperties": {
+            "$ref": "#/$defs/field_spec"
+          }
         }
       }
     },
-
     "down": {
       "description": "Package down behavior metadata (package plugins only).",
       "type": "object",
@@ -116,52 +212,86 @@
       },
       "additionalProperties": false
     },
-
+    "update": {
+      "description": "Per-OS-family shell command (run on the instance over SSH) to upgrade this package to its latest version (package plugins only). Aggregated and run by scripts/update-tools, so core names no package.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ubuntu": {
+          "type": "string"
+        },
+        "windows": {
+          "type": "string"
+        }
+      }
+    },
+    "desktop": {
+      "description": "Desktop metadata a desktop package contributes (package plugins only). Drives desktop/session detection in core data-driven, without naming packages: core reads the selected desktop package's name/session instead of branching on ids.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Display name (e.g. 'GNOME Headless')."
+        },
+        "session": {
+          "type": "string",
+          "description": "Session type (e.g. 'Wayland', 'X11')."
+        },
+        "headless": {
+          "type": "boolean",
+          "description": "Whether this is a headless variant (preferred when multiple desktops are selected)."
+        }
+      }
+    },
     "install": {
       "description": "Install metadata per OS family, consumed by provisioning scripts (package plugins only).",
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "ubuntu": { "$ref": "#/$defs/install_os_spec" },
-        "windows": { "$ref": "#/$defs/windows_install_spec" }
+        "ubuntu": {
+          "$ref": "#/$defs/install_os_spec"
+        },
+        "windows": {
+          "$ref": "#/$defs/windows_install_spec"
+        }
       }
     },
-
     "depends_on": {
       "description": "Package IDs this plugin requires. Used by the resolver to validate that dependencies are selected and to order install steps so dependencies run first.",
       "type": "array",
-      "items": { "type": "string" },
+      "items": {
+        "type": "string"
+      },
       "uniqueItems": true
     },
-
     "catalog": {
       "description": "Provider-contributed catalog rows (machines, provider-specific OS image fields, inits). Only meaningful on provider manifests. The aggregator merges these onto shared OS identity rows to produce the effective catalog.",
       "type": "object",
       "additionalProperties": true
     },
-
     "env_emission": {
       "description": "Provider-declared env-var emission rules. Core evaluates the union of all provider entries against each resolved instance to produce the provider-specific portion of the resolved env, keeping core free of provider id literals.",
       "type": "array",
-      "items": { "$ref": "#/$defs/env_emission_entry" }
+      "items": {
+        "$ref": "#/$defs/env_emission_entry"
+      }
     },
-
     "host_tools": {
       "description": "Host-side CLI tools this provider requires. ``doctor`` reads these generically to check tool availability.",
       "type": "array",
-      "items": { "$ref": "#/$defs/host_tool_entry" }
+      "items": {
+        "$ref": "#/$defs/host_tool_entry"
+      }
     },
-
     "bundles": {
       "description": "Bundle definitions contributed by this package manifest. Each bundle composes a set of included package ids. Only meaningful on package manifests.",
       "type": "array"
     },
-
     "artifacts": {
       "description": "Declared build outputs for this package. Phase 0: declaration only — no execution wiring.",
       "type": "array"
     },
-
     "requires": {
       "description": "Compatibility requirements. The eve range is enforced at load as a core gate (reject if the running core version is outside the range). The plugins map is validated for shape only; full graph resolution is deferred to Phase 1.",
       "type": "object",
@@ -174,54 +304,135 @@
         "plugins": {
           "type": "object",
           "description": "Map of plugin id to required semver range string.",
-          "additionalProperties": { "type": "string" }
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "provision": {
+      "description": "OS provision tree pointer (os plugins only). 'dir' is relative to the plugin directory.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "dir": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Directory name of the provision tree, relative to the plugin dir (e.g. 'provision')."
         }
       }
     }
   },
-
   "allOf": [
     {
-      "if": { "properties": { "kind": { "const": "provider" } } },
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "provider"
+          }
+        }
+      },
       "then": {
-        "required": ["access", "env"],
+        "required": [
+          "access",
+          "env",
+          "commands"
+        ],
         "properties": {
           "commands": {
-            "required": ["resolve", "init", "plan", "up", "down", "start", "stop", "status", "ip", "ssh", "validate"]
+            "required": [
+              "resolve",
+              "init",
+              "plan",
+              "up",
+              "down",
+              "start",
+              "stop",
+              "status",
+              "ip",
+              "ssh",
+              "validate"
+            ]
           },
-          "supports": { "$ref": "#/$defs/provider_supports" },
-          "catalog": { "$ref": "#/$defs/catalog_contribution" },
-          "env_emission": { "$ref": "#/$defs/env_emission_array" }
+          "supports": {
+            "$ref": "#/$defs/provider_supports"
+          },
+          "catalog": {
+            "$ref": "#/$defs/catalog_contribution"
+          },
+          "env_emission": {
+            "$ref": "#/$defs/env_emission_array"
+          }
         }
       }
     },
     {
-      "if": { "properties": { "kind": { "const": "package" } } },
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "package"
+          }
+        }
+      },
       "then": {
-        "required": ["env"],
+        "required": [
+          "env",
+          "commands"
+        ],
         "properties": {
           "commands": {
-            "required": ["install", "status", "down"]
+            "required": [
+              "install",
+              "status",
+              "down"
+            ]
           },
-          "supports": { "$ref": "#/$defs/package_supports" },
+          "supports": {
+            "$ref": "#/$defs/package_supports"
+          },
           "bundles": {
             "type": "array",
-            "items": { "$ref": "#/$defs/bundle_entry" }
+            "items": {
+              "$ref": "#/$defs/bundle_entry"
+            }
           },
           "artifacts": {
             "type": "array",
-            "items": { "$ref": "#/$defs/artifact_entry" }
+            "items": {
+              "$ref": "#/$defs/artifact_entry"
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "os"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "provision",
+          "supports"
+        ],
+        "properties": {
+          "commands": {
+            "description": "os plugins do not use commands."
           }
         }
       }
     }
   ],
-
   "$defs": {
     "command_spec": {
       "description": "Execution spec for a single plugin command.",
       "type": "object",
-      "required": ["exec"],
+      "required": [
+        "exec"
+      ],
       "additionalProperties": false,
       "properties": {
         "exec": {
@@ -230,40 +441,59 @@
         },
         "args": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "description": "Arguments passed to the executable."
         }
       }
     },
-
     "access_rules": {
       "description": "Access identity rules for one OS family.",
       "type": "object",
-      "required": ["bootstrap_user", "provision_user", "human_user"],
+      "required": [
+        "bootstrap_user",
+        "provision_user",
+        "human_user"
+      ],
       "additionalProperties": false,
       "properties": {
-        "bootstrap_user": { "$ref": "#/$defs/access_user_rule" },
-        "provision_user": { "$ref": "#/$defs/access_user_rule" },
-        "human_user": { "$ref": "#/$defs/access_user_rule" }
+        "bootstrap_user": {
+          "$ref": "#/$defs/access_user_rule"
+        },
+        "provision_user": {
+          "$ref": "#/$defs/access_user_rule"
+        },
+        "human_user": {
+          "$ref": "#/$defs/access_user_rule"
+        }
       }
     },
-
     "access_user_rule": {
       "description": "Rule for resolving one user identity. env reads an environment variable, value is a constant, location reads a provider location field, and fallback references another access field.",
       "type": "object",
       "minProperties": 1,
       "additionalProperties": false,
       "properties": {
-        "env": { "type": "string" },
+        "env": {
+          "type": "string"
+        },
         "fallback": {
           "type": "string",
-          "enum": ["bootstrap_user", "provision_user", "human_user"]
+          "enum": [
+            "bootstrap_user",
+            "provision_user",
+            "human_user"
+          ]
         },
-        "location": { "type": "string" },
-        "value": { "type": "string" }
+        "location": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
       }
     },
-
     "provider_supports": {
       "description": "Provider plugin compatibility constraints.",
       "type": "object",
@@ -272,20 +502,28 @@
           "type": "array",
           "items": {
             "type": "string",
-            "enum": ["terraform", "vagrant", "qemu", "metal", "docker"]
+            "enum": [
+              "terraform",
+              "vagrant",
+              "qemu",
+              "metal",
+              "docker"
+            ]
           }
         },
         "kinds": {
           "type": "array",
           "items": {
             "type": "string",
-            "enum": ["vm", "metal"]
+            "enum": [
+              "vm",
+              "metal"
+            ]
           }
         }
       },
       "additionalProperties": false
     },
-
     "package_supports": {
       "description": "Package plugin compatibility constraints. Contract rule: the same package id may exist in multiple sources iff their supports are disjoint (e.g. one for ubuntu, one for windows). Overlapping supports for one id is a conflict and requires explicit EVE_PLUGIN_ALLOW_OVERRIDE. Enforcement is deferred to the Phase 1/3 resolver; today load_all already rejects duplicate kind:id pairs without that override.",
       "type": "object",
@@ -294,40 +532,57 @@
           "type": "array",
           "items": {
             "type": "string",
-            "enum": ["ubuntu", "windows"]
+            "enum": [
+              "ubuntu",
+              "windows"
+            ]
           }
         },
         "arches": {
           "type": "array",
           "items": {
             "type": "string",
-            "enum": ["amd64", "arm64"]
+            "enum": [
+              "amd64",
+              "arm64"
+            ]
           }
         },
         "os_ids": {
           "type": "array",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         },
         "os_versions": {
           "type": "array",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         },
         "ubuntu_versions": {
           "type": "array",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         },
         "windows_versions": {
           "type": "array",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         }
       },
       "additionalProperties": false
     },
-
     "action": {
       "description": "A UI action exposed by the plugin.",
       "type": "object",
-      "required": ["id", "label", "target"],
+      "required": [
+        "id",
+        "label",
+        "target"
+      ],
       "additionalProperties": false,
       "properties": {
         "id": {
@@ -344,6 +599,14 @@
           "type": "string",
           "minLength": 1,
           "description": "Action target dispatched by package-action, provider dispatch, or a compatibility Make target."
+        },
+        "exec": {
+          "type": "string",
+          "description": "Launcher command path (relative to the plugin dir) that core execs generically for this action. When set, core resolves the plugin dir, exports the shared EVE_REMOTE_* context + profile env, and runs it — no target string is interpreted by core. Enables package-owned remote launchers (v4.4 §8)."
+        },
+        "wait_for": {
+          "type": "string",
+          "description": "Another action target to run (and succeed) before this action. Used by launchers that need a service ready first, replacing core-side wait hooks."
         },
         "destructive": {
           "type": "boolean",
@@ -365,7 +628,9 @@
           "type": "boolean",
           "description": "Whether this action uses a native protocol handler."
         },
-        "prompt": { "$ref": "#/$defs/action_prompt" },
+        "prompt": {
+          "$ref": "#/$defs/action_prompt"
+        },
         "requires": {
           "type": "object",
           "description": "Optional state predicates that control when this action is available.",
@@ -373,11 +638,15 @@
         }
       }
     },
-
     "action_prompt": {
       "description": "A user-choice prompt rendered before the action fires.",
       "type": "object",
-      "required": ["title", "message", "env", "choices"],
+      "required": [
+        "title",
+        "message",
+        "env",
+        "choices"
+      ],
       "additionalProperties": false,
       "properties": {
         "title": {
@@ -396,15 +665,19 @@
         "choices": {
           "type": "array",
           "minItems": 1,
-          "items": { "$ref": "#/$defs/prompt_choice" }
+          "items": {
+            "$ref": "#/$defs/prompt_choice"
+          }
         }
       }
     },
-
     "prompt_choice": {
       "description": "A single choice in an action prompt.",
       "type": "object",
-      "required": ["value", "label"],
+      "required": [
+        "value",
+        "label"
+      ],
       "additionalProperties": false,
       "properties": {
         "value": {
@@ -417,15 +690,26 @@
         },
         "variant": {
           "type": "string",
-          "enum": ["default", "primary", "success", "warning", "error"]
+          "enum": [
+            "default",
+            "primary",
+            "success",
+            "warning",
+            "error"
+          ]
         }
       }
     },
-
     "compatibility_entry": {
       "description": "One row in the package compatibility matrix.",
       "type": "object",
-      "required": ["platform", "desktop", "session", "status", "notes"],
+      "required": [
+        "platform",
+        "desktop",
+        "session",
+        "status",
+        "notes"
+      ],
       "additionalProperties": false,
       "properties": {
         "platform": {
@@ -442,7 +726,12 @@
         },
         "status": {
           "type": "string",
-          "enum": ["supported", "wip", "unsupported", "legacy"]
+          "enum": [
+            "supported",
+            "wip",
+            "unsupported",
+            "legacy"
+          ]
         },
         "notes": {
           "type": "string",
@@ -450,74 +739,117 @@
         }
       }
     },
-
     "install_os_spec": {
       "description": "Ubuntu install step specification.",
       "type": "object",
-      "required": ["steps"],
+      "required": [
+        "steps"
+      ],
       "additionalProperties": false,
       "properties": {
         "steps": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "minItems": 1
         },
         "package_markers": {
           "type": "array",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         }
       }
     },
-
     "field_spec": {
       "description": "A single config or secret field declared by a provider manifest.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["type"],
+      "required": [
+        "type"
+      ],
       "properties": {
         "type": {
-          "enum": ["string", "integer", "boolean", "path", "url", "host", "enum"]
+          "enum": [
+            "string",
+            "integer",
+            "boolean",
+            "path",
+            "url",
+            "host",
+            "enum"
+          ]
         },
         "enum": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "minItems": 1
         },
         "default": {},
-        "description": { "type": "string" },
-        "required": { "type": "boolean" },
+        "description": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        },
         "env_var": {
-          "description": "Environment variable name(s) CoreEmit for this field. For config fields, ConfigEnv emits the value during config-env emission (make/shell/json). For secrets, provider dispatch also injects the value at runtime. A field may map to multiple env vars (e.g. GCP project → GOOGLE_CLOUD_PROJECT and GOOGLE_PROJECT) by giving a list.",
+          "description": "Environment variable name(s) CoreEmit for this field. For config fields, ConfigEnv emits the value during config-env emission (make/shell/json). For secrets, provider dispatch also injects the value at runtime. A field may map to multiple env vars by giving a list.",
           "oneOf": [
-            { "type": "string" },
-            { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1
+            }
           ]
         }
       },
       "allOf": [
         {
-          "if":   { "properties": { "type": { "const": "enum" } } },
-          "then": { "required": ["enum"] }
+          "if": {
+            "properties": {
+              "type": {
+                "const": "enum"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "enum"
+            ]
+          }
         }
       ]
     },
-
     "windows_install_spec": {
       "description": "Windows install step specification.",
       "type": "object",
-      "required": ["steps"],
+      "required": [
+        "steps"
+      ],
       "additionalProperties": false,
       "properties": {
         "steps": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "minItems": 1
         },
         "state_files": {
           "type": "array",
           "items": {
             "type": "string",
-            "enum": ["env.json"]
+            "enum": [
+              "env.json"
+            ]
           }
         },
         "fallback": {
@@ -525,7 +857,6 @@
         }
       }
     },
-
     "catalog_contribution": {
       "description": "Provider catalog contribution block: machines, provider-specific OS image/compatibility rows, inits, and locations.",
       "type": "object",
@@ -533,55 +864,84 @@
       "properties": {
         "machines": {
           "type": "array",
-          "items": { "$ref": "#/$defs/catalog_machine" }
+          "items": {
+            "$ref": "#/$defs/catalog_machine"
+          }
         },
         "oses": {
           "type": "array",
-          "items": { "$ref": "#/$defs/catalog_os" }
+          "items": {
+            "$ref": "#/$defs/catalog_os"
+          }
         },
         "inits": {
           "type": "array",
-          "items": { "$ref": "#/$defs/catalog_init" }
+          "items": {
+            "$ref": "#/$defs/catalog_init"
+          }
         },
         "locations": {
           "type": "array",
-          "items": { "$ref": "#/$defs/catalog_location" }
+          "items": {
+            "$ref": "#/$defs/catalog_location"
+          }
         }
       }
     },
-
     "catalog_location": {
       "description": "A location row contributed by a provider manifest. Field-merged by name across providers so each provider contributes its own per-location data (region, host, etc.).",
       "type": "object",
-      "required": ["name"],
+      "required": [
+        "name"
+      ],
       "additionalProperties": true,
       "properties": {
-        "name": { "type": "string", "minLength": 1 }
+        "name": {
+          "type": "string",
+          "minLength": 1
+        }
       }
     },
-
     "env_emission_array": {
       "type": "array",
-      "items": { "$ref": "#/$defs/env_emission_entry" }
+      "items": {
+        "$ref": "#/$defs/env_emission_entry"
+      }
     },
-
     "host_tool_entry": {
       "description": "One host-side CLI tool a provider requires (checked by ``doctor``).",
       "type": "object",
-      "required": ["name", "check"],
+      "required": [
+        "name",
+        "check"
+      ],
       "additionalProperties": false,
       "properties": {
-        "name": { "type": "string", "description": "Display name for the tool." },
-        "check": { "type": "string", "description": "Shell command to verify the tool is installed." },
-        "brew": { "type": "string", "description": "macOS install hint." },
-        "apt": { "type": "string", "description": "Debian/Ubuntu install hint." }
+        "name": {
+          "type": "string",
+          "description": "Display name for the tool."
+        },
+        "check": {
+          "type": "string",
+          "description": "Shell command to verify the tool is installed."
+        },
+        "brew": {
+          "type": "string",
+          "description": "macOS install hint."
+        },
+        "apt": {
+          "type": "string",
+          "description": "Debian/Ubuntu install hint."
+        }
       }
     },
-
     "env_emission_entry": {
       "description": "One provider-declared env-var emission rule.",
       "type": "object",
-      "required": ["name", "from"],
+      "required": [
+        "name",
+        "from"
+      ],
       "additionalProperties": false,
       "properties": {
         "name": {
@@ -591,8 +951,16 @@
         "from": {
           "description": "Source ref(s) into the resolved context, tried in order (coalesce — first non-empty wins). Refs: os.<field>, location.<field>, provider_config.<field>, machine.defaults.<field>, env:<ENV_VAR>.",
           "oneOf": [
-            { "type": "string" },
-            { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1
+            }
           ]
         },
         "default": {
@@ -608,78 +976,141 @@
         }
       }
     },
-
     "catalog_machine": {
       "description": "A machine row contributed by a provider manifest, mirroring config/catalog.yaml machine shapes.",
       "type": "object",
-      "required": ["name", "kind"],
+      "required": [
+        "name",
+        "kind"
+      ],
       "additionalProperties": true,
       "properties": {
-        "name": { "type": "string", "minLength": 1 },
-        "provider": { "type": "string" },
-        "kind": { "type": "string", "enum": ["vm", "metal"] },
-        "supports": { "type": "object", "additionalProperties": true },
-        "defaults": { "type": "object", "additionalProperties": true }
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "provider": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "vm",
+            "metal"
+          ]
+        },
+        "supports": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "defaults": {
+          "type": "object",
+          "additionalProperties": true
+        }
       }
     },
-
     "catalog_os": {
-      "description": "A provider-specific OS image/compatibility contribution. Only the provider's own fields are declared here (e.g. aws_ami_name_pattern, vultr_os_id, cloud_image_url); shared identity (family/version/arch) is merged by the aggregator.",
+      "description": "A provider-specific OS image/compatibility contribution. Only the provider's own image fields are declared here (e.g. an AMI pattern, a cloud image URL, a metal image); core names none — every provider-specific selector flows through additionalProperties, while shared identity (family/version/arch) is merged by the aggregator.",
       "type": "object",
-      "required": ["id"],
+      "required": [
+        "id"
+      ],
       "additionalProperties": true,
       "properties": {
-        "id": { "type": "string", "minLength": 1, "description": "OS identifier matching a shared OS identity row." },
-        "family": { "type": "string" },
-        "version": { "type": "string" },
-        "arch": { "type": "string", "enum": ["amd64", "arm64"] },
-        "vagrant_box": { "type": "string" },
-        "cloud_image_url": { "type": "string" },
-        "cloud_image_sha256": { "type": "string" },
-        "aws_ami_name_pattern": { "type": "string" },
-        "gcp_image_project": { "type": "string" },
-        "gcp_image_family": { "type": "string" },
-        "vultr_os_id": { "type": ["string", "integer"] },
-        "metal_image": { "type": "string" }
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "OS identifier matching a shared OS identity row."
+        },
+        "family": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "arch": {
+          "type": "string",
+          "enum": [
+            "amd64",
+            "arm64"
+          ]
+        },
+        "vagrant_box": {
+          "type": "string"
+        },
+        "cloud_image_url": {
+          "type": "string"
+        },
+        "cloud_image_sha256": {
+          "type": "string"
+        },
+        "metal_image": {
+          "type": "string"
+        }
       }
     },
-
     "catalog_init": {
       "description": "An init row contributed by a provider manifest, mirroring config/catalog.yaml init shapes.",
       "type": "object",
-      "required": ["id"],
+      "required": [
+        "id"
+      ],
       "additionalProperties": true,
       "properties": {
-        "id": { "type": "string", "minLength": 1 },
-        "os_family": { "type": "string" },
-        "providers": { "type": "array", "items": { "type": "string" } }
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "os_family": {
+          "type": "string"
+        },
+        "providers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
       }
     },
-
     "bundle_entry": {
       "description": "A bundle composes a set of included package ids.",
       "type": "object",
-      "required": ["id", "includes"],
+      "required": [
+        "id",
+        "includes"
+      ],
       "additionalProperties": false,
       "properties": {
-        "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
         "includes": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "minItems": 1,
           "uniqueItems": true
         }
       }
     },
-
     "artifact_entry": {
       "description": "A declared build output for a package. Phase 0: declaration only — no execution wiring.",
       "type": "object",
-      "required": ["id"],
+      "required": [
+        "id"
+      ],
       "additionalProperties": false,
       "properties": {
-        "id": { "type": "string", "minLength": 1 },
-        "path": { "type": "string", "minLength": 1 },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
         "download": {
           "type": "string",
           "minLength": 1,
