@@ -24,6 +24,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from eve_sdk.config import ConfigEnv  # noqa: E402
+from eve_sdk.instance_dispatch import load_runtime_env  # noqa: E402
 from eve_sdk.plugin_manifest import PluginManifest  # noqa: E402
 from eve_sdk.resolve import instance_package_config  # noqa: E402
 
@@ -92,7 +93,12 @@ def _plugin_windows_steps(plugin_doc: dict, bundle_packages: str) -> list[tuple[
         if not plugin:
             continue
         for step in (plugin.get("install") or {}).get("windows", {}).get("steps") or []:
-            result.append((plugin["path"], step))
+            # For dual-OS packages, the merged plugin's path points to the
+            # Linux half. The Windows provision files live in the Windows half
+            # (os_paths.windows). Use that path when available.
+            os_paths = plugin.get("os_paths") or {}
+            path = os_paths.get("windows") or plugin["path"]
+            result.append((path, step))
     return result
 
 
@@ -239,8 +245,8 @@ def provision_ubuntu(profile: str, env: dict[str, str], root: Path) -> int:
         (stage / "state" / "bundle_packages").write_text(pkg_lines + "\n", encoding="utf-8")
         (stage / "state" / "selected_packages").write_text(pkg_lines + "\n", encoding="utf-8")
 
-        # Stage package type:path config files (local installers/bundles, e.g.
-        # ThinLinc/Splashtop) onto the remote and rewrite each env var to its
+        # Stage package type:path config files (local installer files a package
+        # needs on the remote) onto the remote and rewrite each env var to its
         # remote path — generic, so core names no package. Captured as
         # (local_path, remote_rel_dir) and uploaded after the provision dir is
         # prepared, below.
@@ -382,6 +388,7 @@ def provision_windows(profile: str, env: dict[str, str], root: Path) -> int:
     tmp_dir = root / "tmp"
     tmp_dir.mkdir(parents=True, exist_ok=True)
     env_json = ConfigEnv.provision_env_payload(windows_password)
+
     (tmp_dir / "env.json").write_text(json.dumps(env_json, indent=2) + "\n", encoding="utf-8")
 
     stage = Path(tempfile.mkdtemp())
@@ -464,6 +471,7 @@ def provision_windows(profile: str, env: dict[str, str], root: Path) -> int:
 
 
 def main(argv: list[str]) -> int:
+    load_runtime_env(ROOT)
     profile = argv[0] if argv else ""
     if not profile:
         print("Usage: scripts/provision <instance>", file=sys.stderr)

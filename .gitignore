@@ -69,3 +69,4 @@ __pycache__/
 # local catalog overrides (developer-specific, not committed)
 config/catalog.local.yaml
 .profile-selection
+plugins/providers/

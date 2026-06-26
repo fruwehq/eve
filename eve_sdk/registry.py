@@ -17,6 +17,7 @@ behind explicit functions so it is drivable from pytest with local repos.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import os
 import re
@@ -284,7 +285,12 @@ def _materialize_worktree(source: Source, worktree: Path, env: dict[str, str]) -
         _git("sparse-checkout", "set", "--no-cone", source.subdir, cwd=worktree, env=env)
     else:
         _git("sparse-checkout", "disable", cwd=worktree, env=env)
+    # After fetch, the local branch may be behind origin. Reset to origin/<ref>
+    # so the worktree always reflects the latest fetched commit (not a stale
+    # local tracking branch). Falls through harmlessly for tags/SHAs.
     _git("checkout", source.ref, cwd=worktree, env=env)
+    with contextlib.suppress(RegistryError):
+        _git("reset", "--hard", f"origin/{source.ref}", cwd=worktree, env=env)
 
 
 def _expose_subdir(source: Source, worktree: Path, dest_root: Path) -> None:

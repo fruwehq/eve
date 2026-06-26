@@ -92,3 +92,46 @@ def apply_tf_env(root: Path, profile: str) -> None:
         if len(value) >= 2 and value[0] == "'" and value[-1] == "'":
             value = value[1:-1].replace("'\\''", "'")
         os.environ[key] = value
+
+
+def prepare_provider_stacks(root: Path, provider_id: str) -> None:
+    """Stage a provider's terramate stacks where terramate can discover them.
+
+    After v4.0 externalized providers, the stacks live under
+    ``.eve/plugins/<source>/<provider>/stacks/`` (a symlinked path terramate
+    can't scan). The stack files reference root-relative paths like
+    ``/plugins/providers/<provider>/stacks/...``, and manifests reference
+    siblings like ``../_terraform-common/``, so we physically copy the entire
+    source tree to ``plugins/providers/`` — terramate finds the stacks AND
+    the sibling paths resolve. Safe to call repeatedly (idempotent).
+    """
+    import shutil
+
+    from eve_sdk.plugin_manifest import PluginManifest
+
+    # Find the materialized provider plugin path, then go up to the source root.
+    plugin_path = None
+    for plugin in PluginManifest.load_all("provider"):
+        if plugin.get("id") == provider_id:
+            plugin_path = Path(str(plugin["_path"])).parent
+            break
+    if plugin_path is None or not plugin_path.is_dir():
+        return
+
+    source_root = plugin_path.parent  # e.g. .eve/plugins/eve-providers/
+    dest_root = root / "plugins" / "providers"
+
+    # Copy the provider dir + all sibling dirs starting with _ (shared: _common, _terraform-common, etc.).
+    # This ensures ../_terraform-common/ etc. resolve from the staged provider.
+    needed = [provider_id] + [d.name for d in source_root.iterdir() if d.is_dir() and d.name.startswith("_")]
+    for name in needed:
+        src = source_root / name
+        dst = dest_root / name
+        if not src.is_dir():
+            continue
+        if dst.exists() or dst.is_symlink():
+            if dst.is_symlink() or dst.is_file():
+                dst.unlink()
+            else:
+                shutil.rmtree(dst)
+        shutil.copytree(src, dst, ignore=shutil.ignore_patterns("eve-plugin.yaml"))

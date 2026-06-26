@@ -13,7 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from eve_sdk.tf_dispatch import apply_tf_env, repo_root, resolve_env  # noqa: E402
+from eve_sdk.tf_dispatch import apply_tf_env, prepare_provider_stacks, repo_root, resolve_env  # noqa: E402
 
 
 def main(argv: list[str]) -> int:
@@ -32,6 +32,7 @@ def main(argv: list[str]) -> int:
     tags = resolved.get("STACK_TAGS", "")
     print(f"[tf-plan] profile={profile} tags={tags}")
 
+    prepare_provider_stacks(root, resolved.get("PROVIDER", ""))
     rc = subprocess.run(["terramate", "generate"], cwd=root).returncode
     if rc != 0:
         return rc
