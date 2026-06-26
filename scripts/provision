@@ -245,8 +245,8 @@ def provision_ubuntu(profile: str, env: dict[str, str], root: Path) -> int:
         (stage / "state" / "bundle_packages").write_text(pkg_lines + "\n", encoding="utf-8")
         (stage / "state" / "selected_packages").write_text(pkg_lines + "\n", encoding="utf-8")
 
-        # Stage package type:path config files (local installers/bundles, e.g.
-        # ThinLinc/Splashtop) onto the remote and rewrite each env var to its
+        # Stage package type:path config files (local installer files a package
+        # needs on the remote) onto the remote and rewrite each env var to its
         # remote path — generic, so core names no package. Captured as
         # (local_path, remote_rel_dir) and uploaded after the provision dir is
         # prepared, below.
