@@ -241,6 +241,13 @@ def dispatch_instance_command(
     if registry_path:
         env["EVE_INSTANCE_REGISTRY"] = registry_path
 
+    # Merge the overlay/secrets/resolved-env into os.environ so all subsequent
+    # exec_cmd calls (tf-init, tf-apply, tf-destroy — which build via
+    # command_env() from os.environ) inherit them. Without this, the tf-*
+    # scripts don't get EVE_CATALOG_LOCAL and profile-resolve can't find the
+    # instance's overlay catalog.
+    os.environ.update(env)
+
     if interactive_provider_command(plugin, command):
         # Interactive commands (ssh etc.) replace the process; never returns.
         exec_cmd(cmd, env)
