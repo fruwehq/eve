@@ -165,7 +165,7 @@ def aggregate(
     ``central_docs`` are applied in order (base first, overlays later). Plugin
     contributions are applied after all central docs: provider manifests
     contribute ``catalog.machines``, ``catalog.oses``, and ``catalog.inits``;
-    package manifests contribute ``bundles``.
+    bundle plugins contribute ``bundles`` (built from ``requires``).
     """
     result: dict[str, list[dict[str, Any]]] = {section: [] for section in CATALOG_SECTIONS}
 
@@ -180,10 +180,14 @@ def aggregate(
             if isinstance(contribution, dict):
                 for section in ("machines", "oses", "inits", "locations"):
                     _merge_section(result[section], contribution.get(section), section)
-        elif kind == "package":
-            bundles = plugin.get("bundles")
-            if isinstance(bundles, list):
-                _merge_section(result["bundles"], bundles, "bundles")
+        elif kind == "bundle":
+            members = plugin.get("members")
+            if isinstance(members, list) and members:
+                _merge_section(
+                    result["bundles"],
+                    [{"id": plugin["id"], "includes": list(members)}],
+                    "bundles",
+                )
 
     return result
 

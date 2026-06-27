@@ -8,8 +8,7 @@
     "api_version",
     "kind",
     "id",
-    "display_name",
-    "supports"
+    "display_name"
   ],
   "additionalProperties": false,
   "properties": {
@@ -24,7 +23,8 @@
       "enum": [
         "provider",
         "package",
-        "os"
+        "os",
+        "bundle"
       ]
     },
     "id": {
@@ -284,10 +284,6 @@
         "$ref": "#/$defs/host_tool_entry"
       }
     },
-    "bundles": {
-      "description": "Bundle definitions contributed by this package manifest. Each bundle composes a set of included package ids. Only meaningful on package manifests.",
-      "type": "array"
-    },
     "artifacts": {
       "description": "Declared build outputs for this package. Phase 0: declaration only — no execution wiring.",
       "type": "array"
@@ -321,6 +317,14 @@
           "description": "Directory name of the provision tree, relative to the plugin dir (e.g. 'provision')."
         }
       }
+    },
+    "members": {
+      "description": "Member package ids for a kind:bundle plugin.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9.-]*$"
+      }
     }
   },
   "allOf": [
@@ -336,7 +340,8 @@
         "required": [
           "access",
           "env",
-          "commands"
+          "commands",
+          "supports"
         ],
         "properties": {
           "commands": {
@@ -377,7 +382,8 @@
       "then": {
         "required": [
           "env",
-          "commands"
+          "commands",
+          "supports"
         ],
         "properties": {
           "commands": {
@@ -389,12 +395,6 @@
           },
           "supports": {
             "$ref": "#/$defs/package_supports"
-          },
-          "bundles": {
-            "type": "array",
-            "items": {
-              "$ref": "#/$defs/bundle_entry"
-            }
           },
           "artifacts": {
             "type": "array",
@@ -421,6 +421,28 @@
         "properties": {
           "commands": {
             "description": "os plugins do not use commands."
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "bundle"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "members"
+        ],
+        "properties": {
+          "commands": {
+            "description": "bundle plugins do not use commands."
+          },
+          "supports": {
+            "description": "bundle plugins do not use supports."
           }
         }
       }

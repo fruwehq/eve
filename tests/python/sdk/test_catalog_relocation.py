@@ -103,20 +103,16 @@ class TestBundlesRelocated:
         }
         assert bundle_ids == expected
 
-    def test_bundles_sourced_from_package_manifests(self) -> None:
+    def test_bundles_sourced_from_bundle_plugins(self) -> None:
         catalog = load_catalog()
         central_bundle_ids = {
             entry["id"] for entry in catalog["bundles"]
         }
-        package_bundle_ids: set[str] = set()
-        for plugin in PluginManifest.load_all("package"):
-            bundles = plugin.get("bundles")
-            if not isinstance(bundles, list):
-                continue
-            for bundle in bundles:
-                if isinstance(bundle, dict) and bundle.get("id"):
-                    package_bundle_ids.add(bundle["id"])
-        assert central_bundle_ids == package_bundle_ids
+        plugin_bundle_ids: set[str] = set()
+        for plugin in PluginManifest.load_all("bundle"):
+            if plugin.get("id"):
+                plugin_bundle_ids.add(plugin["id"])
+        assert central_bundle_ids == plugin_bundle_ids
 
 
 # ---------------------------------------------------------------------------

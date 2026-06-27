@@ -168,6 +168,8 @@ def _check_ssh_readiness(manifest: dict[str, Any]) -> list[CheckResult]:
         return _check_provider_boundary(manifest)
     if kind == "package":
         return _check_package_boundary(manifest)
+    if kind in ("os", "bundle"):
+        return [CheckResult("ssh-readiness-boundary", True, f"kind {kind!r} has no SSH boundary")]
     return [CheckResult(
         "ssh-readiness-boundary",
         False,

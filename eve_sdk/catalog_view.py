@@ -101,10 +101,21 @@ def build_catalog_options(
                     }
                 )
 
-    bundles: list[dict[str, Any]] = [
-        {"id": bundle.get("id"), "includes": bundle.get("includes") if isinstance(bundle.get("includes"), list) else []}
-        for bundle in catalog["bundles"]
-    ]
+    bundles: list[dict[str, Any]] = []
+    for bundle in catalog["bundles"]:
+        includes = bundle.get("includes") if isinstance(bundle.get("includes"), list) else []
+        # Compute bundle OS-compat from member packages' installable_os_families.
+        member_os_families: set[str] = set()
+        for member_id in includes:
+            member_plugin = package_plugin_by_id.get(member_id, {})
+            member_install = member_plugin.get("install")
+            if isinstance(member_install, dict):
+                member_os_families.update(member_install.keys())
+        bundles.append({
+            "id": bundle.get("id"),
+            "includes": includes,
+            "installable_os_families": sorted(member_os_families) if member_os_families else [],
+        })
 
     packages: list[dict[str, Any]] = []
     for package in catalog["packages"]:
