@@ -1027,7 +1027,12 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
             if not bundle_id:
                 continue
             bundle_ids.append(bundle_id)
-            bundle_list.add_row("✓" if bundle_id in selected else "", bundle_id, key=bundle_id)
+            reason = reasons.get(bundle_id)
+            if reason:
+                label = f"[dim]{bundle_id}[/]"
+            else:
+                label = bundle_id
+            bundle_list.add_row("✓" if bundle_id in selected else "", label, key=bundle_id)
         if bundle_ids:
             if self.highlighted_bundle_id not in bundle_ids:
                 self.highlighted_bundle_id = bundle_ids[0]
@@ -1065,7 +1070,12 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
             if package_id in bundled:
                 continue
             package_values.append(package_id)
-            package_list.add_row("✓" if package_id in selected else "", package_id, key=package_id)
+            reason = reasons.get(package_id)
+            if reason:
+                label = f"[dim]{package_id}[/]"
+            else:
+                label = package_id
+            package_list.add_row("✓" if package_id in selected else "", label, key=package_id)
         if package_values:
             if self.highlighted_package_id not in package_values:
                 self.highlighted_package_id = package_values[0]
@@ -2359,7 +2369,7 @@ class EditSourceScreen(ModalScreen[dict[str, str] | None]):
             yield Input(value=str(self._source.get("id", "")), id="editsrc-id")
             yield Label("URL / folder", classes="editsrc-field-label")
             yield Input(value=str(self._source.get("url", "")), id="editsrc-url")
-            yield Label("Branch / ref", classes="editsrc-field-label")
+            yield Label("Branch / ref (snapshot — re-pull to refresh)", classes="editsrc-field-label")
             ref = str(self._source.get("ref", ""))
             yield Input(value="" if ref == "(unpinned)" else ref, id="editsrc-ref")
             yield Label("Folder", classes="editsrc-field-label")
@@ -2545,8 +2555,8 @@ class PluginSourcesScreen(ModalScreen[None]):
             table.cursor_type = "row"
             yield table
             with Horizontal(id="plugins-controls"):
-                yield Button("Add selected", id="plugins-toggle", variant="primary")
-                yield Button("Edit", id="plugins-edit")
+                yield Button("Edit", id="plugins-edit", variant="primary")
+                yield Button("Remove", id="plugins-toggle", variant="warning")
                 yield Button("Add URL…", id="plugins-add-url")
                 yield Button("Pull", id="plugins-pull")
                 yield Button("Close", id="close")
@@ -2626,15 +2636,10 @@ class PluginSourcesScreen(ModalScreen[None]):
             self._reload()
 
     def _update_toggle(self) -> None:
-        """Toggle the main button between Add/Remove based on the highlighted row."""
-        current = self._current()
+        """The toggle button is always 'Remove' (warning) — Edit is the primary default."""
         button = self.query_one("#plugins-toggle", Button)
-        if current is not None and current[0] == "cfg":
-            button.label = "Remove"
-            button.variant = "warning"
-        else:
-            button.label = "Add selected"
-            button.variant = "primary"
+        button.label = "Remove"
+        button.variant = "warning"
 
     def _activate_current(self) -> None:
         """Default action on the highlighted row.
