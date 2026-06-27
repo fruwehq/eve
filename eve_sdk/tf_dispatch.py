@@ -94,7 +94,7 @@ def apply_tf_env(root: Path, profile: str) -> None:
         os.environ[key] = value
 
 
-def prepare_provider_stacks(root: Path, provider_id: str) -> None:
+def prepare_provider_stacks(root: Path, provider_id: str) -> bool:
     """Stage a provider's terramate stacks where terramate can discover them.
 
     After v4.0 externalized providers, the stacks live under
@@ -103,7 +103,17 @@ def prepare_provider_stacks(root: Path, provider_id: str) -> None:
     ``/plugins/providers/<provider>/stacks/...``, and manifests reference
     siblings like ``../_terraform-common/``, so we physically copy the entire
     source tree to ``plugins/providers/`` — terramate finds the stacks AND
-    the sibling paths resolve. Safe to call repeatedly (idempotent).
+    the sibling paths resolve.
+
+    Idempotent and cheap when already staged: each needed dir is copied only
+    when the destination doesn't already match the source (a read-only content
+    compare, ignoring terramate-generated artifacts that only exist in the
+    destination). Returns ``True`` when anything was (re)staged, ``False`` when
+    every dir was already up to date — the caller uses this to decide whether a
+    ``terramate generate`` is needed. The copy still wipes+replaces an
+    out-of-date dir (so upstream deletions propagate); the up-to-date
+    short-circuit is what keeps frequent callers (status polls) from churning
+    the filesystem and clobbering generated ``z_backend.tf`` files every time.
     """
     import shutil
 
@@ -116,7 +126,7 @@ def prepare_provider_stacks(root: Path, provider_id: str) -> None:
             plugin_path = Path(str(plugin["_path"])).parent
             break
     if plugin_path is None or not plugin_path.is_dir():
-        return
+        return False
 
     source_root = plugin_path.parent  # e.g. .eve/plugins/eve-providers/
     dest_root = root / "plugins" / "providers"
@@ -124,14 +134,75 @@ def prepare_provider_stacks(root: Path, provider_id: str) -> None:
     # Copy the provider dir + all sibling dirs starting with _ (shared: _common, _terraform-common, etc.).
     # This ensures ../_terraform-common/ etc. resolve from the staged provider.
     needed = [provider_id] + [d.name for d in source_root.iterdir() if d.is_dir() and d.name.startswith("_")]
+    changed = False
     for name in needed:
         src = source_root / name
         dst = dest_root / name
         if not src.is_dir():
             continue
+        if _staged_dir_current(src, dst):
+            continue
+        changed = True
         if dst.exists() or dst.is_symlink():
             if dst.is_symlink() or dst.is_file():
                 dst.unlink()
             else:
                 shutil.rmtree(dst)
         shutil.copytree(src, dst, ignore=shutil.ignore_patterns("eve-plugin.yaml"))
+    return changed
+
+
+# Files that only ever exist in the staged copy (terramate code generation +
+# terraform working dirs), never in the source — so they don't count against a
+# destination being "current" with its source.
+_STAGE_IGNORE_NAMES = frozenset({"eve-plugin.yaml"})
+
+
+def _staged_dir_current(src: Path, dst: Path) -> bool:
+    """True when every source file is present and identical under ``dst``.
+
+    Destination-only files (generated ``z_backend.tf``, ``.terraform/``) are
+    ignored — we only care that the source is faithfully represented, so a
+    freshly generated stack still reads as current and isn't needlessly wiped.
+    """
+    import filecmp
+
+    if not dst.is_dir():
+        return False
+    for src_file in src.rglob("*"):
+        if not src_file.is_file() or src_file.name in _STAGE_IGNORE_NAMES:
+            continue
+        dst_file = dst / src_file.relative_to(src)
+        if not dst_file.is_file() or not filecmp.cmp(src_file, dst_file, shallow=False):
+            return False
+    return True
+
+
+def stage_provider_stacks(root: Path, provider_id: str) -> None:
+    """Vendor a provider's stacks and (re)generate terramate code if needed.
+
+    The read/power commands (``status``, ``ip``, ``start`` …) need the
+    externalized stacks staged for terramate to discover them, but unlike the
+    write path they never run ``tf-init`` (which does this). This is the shared
+    helper they call (via ``scripts/tf-stage``) so the read path matches the
+    write path. Idempotent and cheap once staged: the copy is skipped when
+    already current, and ``terramate generate`` runs only when staging changed
+    something or no generated backend file exists yet.
+    """
+    if not provider_id:
+        return
+    changed = prepare_provider_stacks(root, provider_id)
+    if not changed and _generated_backend_present(root, provider_id):
+        return
+    result = subprocess.run(
+        ["terramate", "generate"], cwd=root, text=True, capture_output=True, check=False
+    )
+    if result.returncode != 0:
+        sys.stderr.write(result.stdout + result.stderr)
+        raise SystemExit(result.returncode)
+
+
+def _generated_backend_present(root: Path, provider_id: str) -> bool:
+    """True when terramate has already generated backend code for the provider."""
+    stacks = root / "plugins" / "providers" / provider_id / "stacks"
+    return stacks.is_dir() and any(stacks.rglob("z_backend.tf"))
