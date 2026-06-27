@@ -175,7 +175,7 @@ def test_plugin_toggle_add_then_flips_to_remove() -> None:
             await pilot.pause()
             assert any(r["id"] == sid for r in p.configured_rows())
             # the added source is now configured at row 0 -> button flips
-            assert str(toggle.label) == "Remove selected"
+            assert str(toggle.label) == "Remove"
 
     asyncio.run(_run())
 

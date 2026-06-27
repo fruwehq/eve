@@ -7,6 +7,7 @@ Wraps eve_sdk.registry (source mutation + recommended catalog) and the
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,11 @@ from typing import Any
 from eve_sdk import registry
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def is_local_folder(url: str) -> bool:
+    """True when the source URL is a filesystem path (not a git remote)."""
+    return not ("://" in url or re.match(r"^[^/]+@[^/]+:", url))
 
 
 def configured_rows() -> list[dict[str, Any]]:
@@ -28,8 +34,17 @@ def configured_rows() -> list[dict[str, Any]]:
             "ref": source.ref or "(unpinned)",
             "auth": source.auth,
             "synced": source.id in locked,
+            "local": is_local_folder(source.url),
         })
     return rows
+
+
+def configured_row(source_id: str) -> dict[str, Any] | None:
+    """A single configured source by id, or None."""
+    for row in configured_rows():
+        if row["id"] == source_id:
+            return row
+    return None
 
 
 def recommended_rows() -> list[dict[str, Any]]:
@@ -77,6 +92,20 @@ def remove(source_id: str) -> tuple[bool, str]:
     if registry.remove_source(source_id):
         return True, f"removed '{source_id}' — run Pull to update"
     return False, f"no such source in override: {source_id}"
+
+
+def update_source(
+    source_id: str, *, url: str, ref: str = "", subdir: str = "", auth: str = "none"
+) -> tuple[bool, str]:
+    """Replace an existing source by id (add_source replaces by id)."""
+    entry: dict[str, Any] = {"id": source_id, "url": url, "ref": ref, "auth": auth}
+    if subdir:
+        entry["subdir"] = subdir
+    try:
+        source = registry.add_source(entry)
+    except registry.RegistryError as error:
+        return False, str(error)
+    return True, f"updated '{source.id}' — run Pull to materialize"
 
 
 def pull() -> tuple[bool, str]:
