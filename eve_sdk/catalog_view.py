@@ -103,7 +103,8 @@ def build_catalog_options(
 
     bundles: list[dict[str, Any]] = []
     for bundle in catalog["bundles"]:
-        includes = bundle.get("includes") if isinstance(bundle.get("includes"), list) else []
+        includes_raw = bundle.get("includes")
+        includes = includes_raw if isinstance(includes_raw, list) else []
         # Compute bundle OS-compat from member packages' installable_os_families.
         member_os_families: set[str] = set()
         for member_id in includes:
