@@ -14,6 +14,7 @@ JSON object: {"configured","reachable","notes"}.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -22,8 +23,10 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from eve_sdk.config import ConfigEnv  # noqa: E402
 from eve_sdk.dispatch import command_vector  # noqa: E402
 from eve_sdk.plugin_manifest import PluginManifest  # noqa: E402
+from eve_sdk.provider_command import _inject_secrets  # noqa: E402
 
 HEADER = "Provider           Configured  Reachable  Notes"
 SEPARATOR = "-----------------  ----------  ---------  -------------------------------------------"
@@ -45,7 +48,17 @@ def _run_connectivity(plugin: dict[str, Any]) -> tuple[str, str, str]:
     """Run a provider's connectivity command, parse JSON → (configured, reachable, notes)."""
     spec = plugin["commands"]["connectivity"]
     cmd = command_vector(plugin, spec)
-    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    # Resolve the SAME env the real dispatch path gives a provider command:
+    # global config-env plus the provider's injected secrets. Without this the
+    # probe ran with a bare environment, so a provider whose "configured" gate is
+    # a secret (e.g. Vultr's VULTR_API_KEY, which lives only in the secrets file)
+    # was reported unconfigured even though dispatch could create instances with
+    # it. Status and dispatch must resolve config/secrets identically. (v4.5: this
+    # injection should become the one shared helper the FSM platform provides.)
+    env = dict(os.environ)
+    env.update(ConfigEnv.environment())
+    env = _inject_secrets(str(plugin["id"]), plugin, env)
+    result = subprocess.run(cmd, env=env, capture_output=True, text=True, check=False)
     if result.returncode != 0:
         return "no", "no", f"connectivity check failed (exit {result.returncode})"
     try:

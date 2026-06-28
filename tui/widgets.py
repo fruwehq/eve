@@ -1027,7 +1027,12 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
             if not bundle_id:
                 continue
             bundle_ids.append(bundle_id)
-            bundle_list.add_row("✓" if bundle_id in selected else "", bundle_id, key=bundle_id)
+            reason = reasons.get(bundle_id)
+            if reason:
+                label = f"[dim]{bundle_id}[/]"
+            else:
+                label = bundle_id
+            bundle_list.add_row("✓" if bundle_id in selected else "", label, key=bundle_id)
         if bundle_ids:
             if self.highlighted_bundle_id not in bundle_ids:
                 self.highlighted_bundle_id = bundle_ids[0]
@@ -1065,7 +1070,12 @@ class NewInstanceScreen(ModalScreen[dict[str, str] | None]):
             if package_id in bundled:
                 continue
             package_values.append(package_id)
-            package_list.add_row("✓" if package_id in selected else "", package_id, key=package_id)
+            reason = reasons.get(package_id)
+            if reason:
+                label = f"[dim]{package_id}[/]"
+            else:
+                label = package_id
+            package_list.add_row("✓" if package_id in selected else "", label, key=package_id)
         if package_values:
             if self.highlighted_package_id not in package_values:
                 self.highlighted_package_id = package_values[0]
@@ -2262,7 +2272,7 @@ class AddSourceScreen(ModalScreen[dict[str, str] | None]):
                 id="addsrc-detail",
             )
             yield Label("URL", classes="addsrc-field-label")
-            yield Input(placeholder="https://github.com/you/plugins.git", id="addsrc-url")
+            yield Input(placeholder="https://github.com/you/plugins.git or ../eve-providers", id="addsrc-url")
             yield Label("Branch / ref", classes="addsrc-field-label")
             yield Input(placeholder="main (pinning a tag is recommended)", id="addsrc-ref")
             yield Label("Folder", classes="addsrc-field-label")
@@ -2285,6 +2295,106 @@ class AddSourceScreen(ModalScreen[dict[str, str] | None]):
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "addsrc-ok":
+            self._submit()
+        else:
+            self.dismiss(None)
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        event.stop()
+        self._submit()
+
+    def action_dismiss_cancel(self) -> None:
+        self.dismiss(None)
+
+
+class EditSourceScreen(ModalScreen[dict[str, str] | None]):
+    """Edit an existing plugin source entry.
+
+    Pre-fills id, url/folder, ref, subdir, auth from the current source.
+    Saving calls ``update_source`` (replace-by-id via ``registry.add_source``).
+    """
+
+    CSS = """
+    EditSourceScreen {
+        align: center middle;
+    }
+
+    #editsrc-dialog {
+        width: 90%;
+        max-width: 80;
+        height: auto;
+        border: round $primary;
+        background: $surface;
+        padding: 1 2;
+    }
+
+    #editsrc-label {
+        margin-bottom: 1;
+    }
+
+    .editsrc-field-label {
+        height: 1;
+        color: $text-muted;
+        margin-top: 1;
+    }
+
+    #editsrc-id, #editsrc-url, #editsrc-ref, #editsrc-folder, #editsrc-auth {
+        width: 100%;
+        margin-bottom: 1;
+    }
+
+    #editsrc-actions {
+        height: 3;
+        align-horizontal: center;
+        background: transparent;
+    }
+
+    #editsrc-actions Button {
+        margin: 0 1;
+    }
+    """
+
+    BINDINGS = [
+        Binding("escape", "dismiss_cancel", "Cancel"),
+    ]
+
+    def __init__(self, source: dict[str, Any]) -> None:
+        super().__init__()
+        self._source = source
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="editsrc-dialog"):
+            yield Label("[b]Edit plugin source[/b]", id="editsrc-label")
+            yield Label("ID", classes="editsrc-field-label")
+            yield Input(value=str(self._source.get("id", "")), id="editsrc-id")
+            yield Label("URL / folder", classes="editsrc-field-label")
+            yield Input(value=str(self._source.get("url", "")), id="editsrc-url")
+            yield Label("Branch / ref (snapshot — re-pull to refresh)", classes="editsrc-field-label")
+            ref = str(self._source.get("ref", ""))
+            yield Input(value="" if ref == "(unpinned)" else ref, id="editsrc-ref")
+            yield Label("Folder", classes="editsrc-field-label")
+            subdir = str(self._source.get("subdir", "")) or "/"
+            yield Input(value=subdir, id="editsrc-folder")
+            yield Label("Auth", classes="editsrc-field-label")
+            yield Input(value=str(self._source.get("auth", "none")), id="editsrc-auth")
+            with Horizontal(id="editsrc-actions"):
+                yield Button("Cancel", id="editsrc-cancel")
+                yield Button("Save", id="editsrc-ok", variant="primary")
+
+    def on_mount(self) -> None:
+        self.query_one("#editsrc-url", Input).focus()
+
+    def _submit(self) -> None:
+        self.dismiss({
+            "id": self.query_one("#editsrc-id", Input).value.strip(),
+            "url": self.query_one("#editsrc-url", Input).value.strip(),
+            "ref": self.query_one("#editsrc-ref", Input).value.strip(),
+            "subdir": self.query_one("#editsrc-folder", Input).value.strip(),
+            "auth": self.query_one("#editsrc-auth", Input).value.strip() or "none",
+        })
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "editsrc-ok":
             self._submit()
         else:
             self.dismiss(None)
@@ -2426,6 +2536,7 @@ class PluginSourcesScreen(ModalScreen[None]):
 
     BINDINGS = [
         Binding("a", "add_row", "Add"),
+        Binding("e", "edit_row", "Edit"),
         Binding("x", "remove_row", "Remove"),
         Binding("p", "pull", "Pull"),
         Binding("escape", "dismiss_cancel", "Close"),
@@ -2440,16 +2551,18 @@ class PluginSourcesScreen(ModalScreen[None]):
         with Vertical(id="plugins-dialog"):
             yield Label("[b]Plugin sources[/b]", id="plugins-title")
             table = ListTable(id="plugins-table")
-            table.add_columns("", "Source", "Ref", "Folder", "Status", "Info")
+            table.add_columns("", "Source", "Type", "Ref", "Folder", "Status", "Info")
             table.cursor_type = "row"
             yield table
             with Horizontal(id="plugins-controls"):
-                yield Button("Add selected", id="plugins-toggle", variant="primary")
+                yield Button("Edit", id="plugins-edit", variant="primary")
+                yield Button("Remove", id="plugins-toggle", variant="warning")
                 yield Button("Add URL…", id="plugins-add-url")
                 yield Button("Pull", id="plugins-pull")
                 yield Button("Close", id="close")
             yield Label(
-                "↑/↓ select · space/enter or the button adds/removes the highlighted source · Add URL… for a custom repo",
+                "↑/↓ select · enter=edit (configured) / add (recommended) · "
+                "Add URL… for a custom source · Pull to materialize",
                 id="plugins-status",
             )
 
@@ -2468,8 +2581,11 @@ class PluginSourcesScreen(ModalScreen[None]):
             configured_ids.add(row["id"])
             status = "synced" if row["synced"] else "not synced"
             folder = row.get("subdir") or "/"
+            src_type = "folder" if row.get("local") else "remote"
+            url_display = row["url"]
             table.add_row(
-                "✔", f"[b]{row['id']}[/b]", row["ref"], folder, status, row["url"], key=f"cfg:{row['id']}"
+                "✔", f"[b]{row['id']}[/b]", src_type, row["ref"], folder, status, url_display,
+                key=f"cfg:{row['id']}",
             )
             self._rows.append(("cfg", row["id"]))
         for row in plugin_src.recommended_rows():
@@ -2478,7 +2594,8 @@ class PluginSourcesScreen(ModalScreen[None]):
             tags = ", ".join(row["tags"])
             info = f"{row['description']}" + (f" [dim]({tags})[/]" if tags else "")
             table.add_row(
-                "[dim]+[/]", row["id"], row["ref"], "[dim]/[/]", "[dim]recommended[/]", info, key=f"rec:{row['id']}"
+                "[dim]+[/]", row["id"], "[dim]remote[/]", row["ref"], "[dim]/[/]", "[dim]recommended[/]", info,
+                key=f"rec:{row['id']}",
             )
             self._rows.append(("rec", row["id"]))
         if not self._rows:
@@ -2519,25 +2636,57 @@ class PluginSourcesScreen(ModalScreen[None]):
             self._reload()
 
     def _update_toggle(self) -> None:
-        """Toggle the main button between Add/Remove based on the highlighted row."""
-        current = self._current()
+        """The toggle button is always 'Remove' (warning) — Edit is the primary default."""
         button = self.query_one("#plugins-toggle", Button)
-        if current is not None and current[0] == "cfg":
-            button.label = "Remove selected"
-            button.variant = "warning"
-        else:
-            button.label = "Add selected"
-            button.variant = "primary"
+        button.label = "Remove"
+        button.variant = "warning"
 
     def _activate_current(self) -> None:
-        """Default action on the highlighted row: remove if configured, else add."""
+        """Default action on the highlighted row.
+
+        Configured (custom) entries open the Edit screen.
+        Recommended entries add the source.
+        """
         current = self._current()
         if current is None:
             return
         if current[0] == "cfg":
-            self.action_remove_row()
+            self._open_edit(current[1])
         else:
             self.action_add_row()
+
+    def _open_edit(self, source_id: str) -> None:
+        """Open the Edit screen for a configured source."""
+        row = plugin_src.configured_row(source_id)
+        if row is None:
+            self._set_status(f"source '{source_id}' not found")
+            return
+
+        def on_result(result: dict[str, str] | None) -> None:
+            if not result:
+                return
+            ok, message = plugin_src.update_source(
+                result.get("id") or source_id,
+                url=result.get("url", ""),
+                ref=result.get("ref", ""),
+                subdir=result.get("subdir", ""),
+                auth=result.get("auth", "none"),
+            )
+            self._set_status(message)
+            if ok:
+                self._reload()
+
+        self.app.push_screen(EditSourceScreen(row), on_result)
+
+    def action_edit_row(self) -> None:
+        current = self._current()
+        if current is None:
+            self._set_status("Highlight a configured source, then Edit.")
+            return
+        if current[0] != "cfg":
+            self._set_status("Only configured sources can be edited.")
+            return
+        self._open_edit(current[1])
 
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
         self._update_toggle()
@@ -2569,7 +2718,13 @@ class PluginSourcesScreen(ModalScreen[None]):
         if event.button.id == "close":
             self.dismiss(None)
         elif event.button.id == "plugins-toggle":
-            self._activate_current()
+            current = self._current()
+            if current and current[0] == "cfg":
+                self.action_remove_row()
+            else:
+                self.action_add_row()
+        elif event.button.id == "plugins-edit":
+            self.action_edit_row()
         elif event.button.id == "plugins-add-url":
             self._open_add_url()
         elif event.button.id == "plugins-pull":

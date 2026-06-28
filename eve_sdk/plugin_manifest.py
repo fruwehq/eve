@@ -251,8 +251,8 @@ class PluginManifest:
         if plugin.get("api_version") != cls.API_VERSION:
             raise ValueError(f"{path}: api_version must be {cls.API_VERSION}")
         kind = plugin.get("kind")
-        if kind not in {"provider", "package", "os"}:
-            raise ValueError(f"{path}: kind must be provider, package, or os")
+        if kind not in {"provider", "package", "os", "bundle"}:
+            raise ValueError(f"{path}: kind must be provider, package, os, or bundle")
         if not re.match(r"^[a-z][a-z0-9.-]*$", str(plugin.get("id", ""))):
             raise ValueError(f"{path}: id must match [a-z][a-z0-9-]*")
         # os plugins carry a provision tree pointer, not executable commands.
@@ -260,6 +260,13 @@ class PluginManifest:
             provision = plugin.get("provision")
             if not isinstance(provision, dict) or not provision.get("dir"):
                 raise ValueError(f"{path}: os plugin must declare provision.dir")
+            cls._validate_requires(plugin, path)
+            return
+        # bundle plugins group packages via members; no commands needed.
+        if kind == "bundle":
+            members = plugin.get("members")
+            if not isinstance(members, list) or not members:
+                raise ValueError(f"{path}: bundle plugin must declare members (member package ids)")
             cls._validate_requires(plugin, path)
             return
         commands = plugin.get("commands")
