@@ -1,0 +1,35 @@
+# Synthetic provider machine (harel format) for the FSM-platform test — not a real
+# plugin. `configured` = a secret is present; `reachable` is a substate of configured
+# reached by a live probe. eve seeds api_key/region as external esvs from its shared
+# resolver, so status and dispatch read identical config.
+id: provider
+events:
+  resolve: {}
+  probe_ok: {}
+  probe_fail: {}
+top:
+  esvs:
+    api_key: { type: string, external: true }   # secret, eve-resolved
+    region:  { type: string, external: true }   # setting, eve-resolved
+  on_events:
+    env:
+      action: [ { refresh: {} } ]               # adopt changed external values
+  initial: { transition_to: unconfigured }
+  states:
+    unconfigured:
+      on_events:
+        resolve:
+          - { guard: "api_key != null && api_key != ''", transition_to: configured }
+    configured:
+      type: composite
+      initial: { transition_to: unreachable }
+      on_events:
+        resolve:
+          - { guard: "api_key == null || api_key == ''", transition_to: unconfigured }
+      states:
+        unreachable:
+          on_events:
+            probe_ok: { transition_to: reachable }
+        reachable:
+          on_events:
+            probe_fail: { transition_to: unreachable }
