@@ -106,6 +106,97 @@ def _strip_markup(text: str) -> str:
     return _MARKUP_RE.sub("", text)
 
 
+_COLOR_TAG_RE = re.compile(r"\[(/?)([^\]]*)\]")
+# Skin tones used on Eve's face; eye pixels are repainted to a nearby one when
+# she blinks. Kept as a set so _skin_near can recognise face cells.
+_EVE_SKIN = frozenset(
+    {
+        "#d09a7a", "#ecb896", "#f5cba8", "#fbdcc2", "#f8d3b5", "#f3caac",
+        "#f5ceb0", "#e7b593", "#f0c19f", "#f9d7bb",
+    }
+)
+# Soft lid tone drawn across each closed eye so a blink reads as eyes shutting
+# rather than the eyes simply vanishing into the forehead.
+_EVE_LID = "#b07a6a"
+
+
+def _art_cells(line: str) -> list[tuple[str, str | None]]:
+    """Explode one markup line into (char, color) cells, one per terminal column,
+    so the pixel art can be edited by coordinate and re-serialised."""
+    cells: list[tuple[str, str | None]] = []
+    color: str | None = None
+    pos = 0
+    for match in _COLOR_TAG_RE.finditer(line):
+        for ch in line[pos : match.start()]:
+            cells.append((ch, color))
+        color = None if match.group(1) else match.group(2)
+        pos = match.end()
+    for ch in line[pos:]:
+        cells.append((ch, color))
+    return cells
+
+
+def _art_serialize(cells: list[tuple[str, str | None]]) -> str:
+    """Re-collapse a cell row back into [color]run[/] markup."""
+    out: list[str] = []
+    index = 0
+    count = len(cells)
+    while index < count:
+        char, color = cells[index]
+        if color is None:
+            out.append(char)
+            index += 1
+            continue
+        run = [char]
+        index += 1
+        while index < count and cells[index][1] == color:
+            run.append(cells[index][0])
+            index += 1
+        out.append(f"[{color}]{''.join(run)}[/]")
+    return "".join(out)
+
+
+def _skin_near(grid: list[list[tuple[str, str | None]]], row: int, col: int) -> str:
+    """Sample the nearest face-skin colour on `row`, used to fill in eye pixels."""
+    line = grid[row]
+    for offset in range(1, 14):
+        for candidate in (col + offset, col - offset):
+            if 0 <= candidate < len(line) and line[candidate][1] in _EVE_SKIN:
+                return line[candidate][1]  # type: ignore[return-value]
+    return "#f5cba8"
+
+
+def _close_eyes(
+    art: list[str],
+    eyes: list[tuple[tuple[int, int, int, int], frozenset[str]]],
+) -> list[str]:
+    """Derive a closed-eyes (blinking) copy of `art`.
+
+    Each entry is a ``(box, colors)`` pair: `box` is ``(r0, r1, c0, c1)`` bounding
+    one eye and `colors` are the eye-pixel colours inside it. Those pixels are
+    repainted to nearby skin and a soft lid line is drawn across the eye's middle
+    row, so the eye shuts instead of disappearing. Only the eye rows differ from
+    the open-eyed art, so we derive the frame rather than duplicating the figure.
+    """
+    grid = [_art_cells(line) for line in art]
+    for (r0, r1, c0, c1), colors in eyes:
+        pixels = [
+            (r, c)
+            for r in range(r0, r1 + 1)
+            for c in range(c0, c1 + 1)
+            if c < len(grid[r]) and grid[r][c][0] == "█" and grid[r][c][1] in colors
+        ]
+        if not pixels:
+            raise ValueError(f"no eye pixels found in box {(r0, r1, c0, c1)}")
+        for r, c in pixels:
+            grid[r][c] = ("█", _skin_near(grid, r, c))
+        mid_row = round(sum(r for r, _ in pixels) / len(pixels))
+        cols = [c for _, c in pixels]
+        for c in range(min(cols), max(cols) + 1):
+            grid[mid_row][c] = ("█", _EVE_LID)
+    return [_art_serialize(row) for row in grid]
+
+
 # Eve's empty-state portrait: a colored pixel figure (pink hair, skin face,
 # blue->purple dress, dark shoes), one terminal cell per pixel as [color]█[/]
 # runs on the dark background ('.' background cells are blank spaces). Two
@@ -191,6 +282,26 @@ EVE_ART_SMALL = [
 ]
 EVE_FULL_WIDTH = max((len(_strip_markup(l)) for l in EVE_ART_FULL), default=0)
 EVE_SMALL_WIDTH = max((len(_strip_markup(l)) for l in EVE_ART_SMALL), default=0)
+
+
+# Blink frames: Eve's eyes shut for a beat. Her eyes are dark almond clusters on
+# the face; closing them repaints those pixels as skin and drops a soft lid line
+# across each one. The full figure's eyes are dark (#3a2a3a) clusters spanning a
+# few rows; the small figure's are single-row muted-brown pixels.
+EVE_ART_FULL_BLINK = _close_eyes(
+    EVE_ART_FULL,
+    [
+        ((13, 17, 22, 27), frozenset({"#3a2a3a"})),
+        ((13, 18, 41, 45), frozenset({"#3a2a3a"})),
+    ],
+)
+EVE_ART_SMALL_BLINK = _close_eyes(
+    EVE_ART_SMALL,
+    [
+        ((7, 7, 12, 13), frozenset({"#9a837e", "#997e77"})),
+        ((7, 7, 20, 22), frozenset({"#8f726c", "#9a837e"})),
+    ],
+)
 
 
 class EveTui(App[None]):
@@ -1247,9 +1358,9 @@ class EveTui(App[None]):
         chosen art is clipped to `rows` so the bottom scrolls off rather than
         overflowing the pane."""
         if rows >= 30 and cols >= EVE_FULL_WIDTH:
-            art = EVE_ART_FULL
+            art = EVE_ART_FULL_BLINK if self._eye_blinking else EVE_ART_FULL
         else:
-            art = EVE_ART_SMALL
+            art = EVE_ART_SMALL_BLINK if self._eye_blinking else EVE_ART_SMALL
         if rows > 0:
             art = art[:rows]
         return "\n".join(art)
