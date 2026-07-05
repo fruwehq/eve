@@ -1,0 +1,38 @@
+# The package lifecycle, shared by every package (v4.5 N/O) — the declarative
+# replacement for state.py's PACKAGE_STATES. Transitions are driven by eve operations
+# (install / remove) and by observation (found / absent maps a live probe back to a
+# state, keeping the machine honest about drift).
+id: package
+events:
+  found: {}          # observe: the package is present on the instance
+  absent: {}         # observe: not present
+  install: {}
+  install_ok: {}
+  install_fail: {}
+  remove: {}
+top:
+  initial: { transition_to: unknown }
+  states:
+    unknown:
+      on_events:
+        found:  { transition_to: installed }
+        absent: { transition_to: missing }
+        install: { transition_to: installing }
+    missing:
+      on_events:
+        install: { transition_to: installing }
+        found:   { transition_to: installed }   # drift: appeared out of band
+    installing:
+      on_events:
+        install_ok:   { transition_to: installed }
+        install_fail: { transition_to: failed }
+    installed:
+      on_events:
+        remove: { transition_to: removed }
+        absent: { transition_to: missing }       # drift: disappeared
+    failed:
+      on_events:
+        install: { transition_to: installing }   # retry
+    removed:
+      on_events:
+        install: { transition_to: installing }

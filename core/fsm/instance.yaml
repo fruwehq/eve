@@ -1,0 +1,85 @@
+# The instance lifecycle (v4.5 N/O) — the declarative replacement for state.py's
+# PROVIDER_STATES + PROVISION_STATES. Two concurrent regions: the provider (terraform)
+# lifecycle and the provisioning lifecycle, which advance independently. `desired` is the
+# goal (running | stopped | absent), supplied by eve as context. Transitions are driven
+# by eve operations (create/start/stop/destroy, provision) whose outcomes come back as
+# events, and by observation (observe_* maps live provider status back into a state,
+# keeping the machine honest about drift).
+id: instance
+events:
+  create: {}
+  start: {}
+  stop: {}
+  destroy: {}
+  created_ok: {}
+  started_ok: {}
+  stopped_ok: {}
+  destroyed_ok: {}
+  op_fail: {}
+  observe_running: {}
+  observe_stopped: {}
+  observe_absent: {}
+  provision: {}
+  provision_ok: {}
+  provision_fail: {}
+top:
+  esvs:
+    desired: { type: string, external: true }   # running | stopped | absent | unknown
+  regions:
+
+    # Provider (terraform) lifecycle. Each in-flight operation has its own transient
+    # state so its outcome is unambiguous; op_fail from any of them lands in error.
+    - initial: { transition_to: absent }
+      states:
+        absent:
+          on_events:
+            create: { transition_to: creating }
+        creating:
+          on_events:
+            created_ok: { transition_to: running }
+            op_fail:    { transition_to: error }
+        running:
+          on_events:
+            stop:            { transition_to: stopping }
+            destroy:         { transition_to: destroying }
+            observe_stopped: { transition_to: stopped }
+            observe_absent:  { transition_to: absent }
+        stopping:
+          on_events:
+            stopped_ok: { transition_to: stopped }
+            op_fail:    { transition_to: error }
+        stopped:
+          on_events:
+            start:           { transition_to: starting }
+            destroy:         { transition_to: destroying }
+            observe_running: { transition_to: running }
+            observe_absent:  { transition_to: absent }
+        starting:
+          on_events:
+            started_ok: { transition_to: running }
+            op_fail:    { transition_to: error }
+        destroying:
+          on_events:
+            destroyed_ok: { transition_to: absent }
+            op_fail:      { transition_to: error }
+        error:
+          on_events:
+            create:  { transition_to: creating }
+            destroy: { transition_to: destroying }
+
+    # Provisioning lifecycle (independent of the provider region).
+    - initial: { transition_to: unprovisioned }
+      states:
+        unprovisioned:
+          on_events:
+            provision: { transition_to: provisioning }
+        provisioning:
+          on_events:
+            provision_ok:   { transition_to: provisioned }
+            provision_fail: { transition_to: provision_error }
+        provisioned:
+          on_events:
+            provision: { transition_to: provisioning }   # re-converge
+        provision_error:
+          on_events:
+            provision: { transition_to: provisioning }   # retry
