@@ -13,10 +13,17 @@ command (probe, terraform, provision) and delivers the outcome back as an event
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable, Mapping
 from typing import Any
 
-import harel
+# The statechart engine is being renamed harel -> determa-state. Import it behind one
+# name so the eventual package rename is a no-op for eve; this module is the only place
+# eve touches the engine.
+try:  # pragma: no cover - the branch taken depends only on which package is installed
+    import determa_state as engine
+except ModuleNotFoundError:  # pre-rename package name
+    import harel as engine
 
 # Resolve a machine's declared ``external`` esvs from eve settings/secrets:
 #   (scope, key, external_names) -> {name: value}
@@ -30,15 +37,15 @@ class EveFsm:
 
     def __init__(self, resolve_context: ContextResolver) -> None:
         self._resolve = resolve_context
-        self._host = harel.Host()
+        self._host = engine.Host()
         self._raw: dict[str, dict[str, Any]] = {}
         self._machine: dict[str, Any] = {}
 
     def load(self, scope: str, machine_yaml: str) -> None:
         """Register the harel machine a plugin ships for ``scope`` (its first document)."""
-        defs = harel.load_definitions(machine_yaml)
+        defs = engine.load_definitions(machine_yaml)
         for definition in defs:
-            harel.validate(definition.raw)
+            engine.validate(definition.raw)
         self._host.register_all(defs)
         root = defs[0]
         self._raw[scope] = root.raw
@@ -101,3 +108,29 @@ class EveFsm:
             "context": dict(inst.resolved_esvs()),
             "status": inst.status.name.lower(),
         }
+
+
+def provider_context_resolver() -> ContextResolver:
+    """The real :data:`ContextResolver` for provider machines.
+
+    Each declared external esv is named as its eve env var (e.g. ``VULTR_API_KEY``) and
+    resolved from the *one* path dispatch uses — ``os.environ`` +
+    ``ConfigEnv.environment()`` + injected secrets — so a provider's FSM context and what
+    dispatch runs with are identical (v4.5 bug M: status ≡ dispatch). ``key`` is the
+    provider id.
+
+    (Systemic follow-up: drop ambient ``os.environ`` from *both* this resolver and
+    dispatch so no config reaches a plugin behind eve's back; kept here for now to
+    preserve exact parity.)
+    """
+    from eve_sdk.config import ConfigEnv
+    from eve_sdk.provider_command import _inject_secrets, _load_public_plugin
+
+    def resolve(scope: str, key: str, names: list[str]) -> dict[str, Any]:
+        env = dict(os.environ)
+        env.update(ConfigEnv.environment())
+        plugin = _load_public_plugin("provider", key)
+        env = _inject_secrets(key, plugin, env)
+        return {name: env.get(name, "") for name in names}
+
+    return resolve

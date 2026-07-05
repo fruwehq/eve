@@ -8,16 +8,19 @@ injected (as the real platform will inject the shared ConfigEnv+secrets resolver
 
 from __future__ import annotations
 
+import importlib.util
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-# The harel engine is a new dependency; until it is pinned in pyproject (gated on a
-# harel-python release tag), skip cleanly where it isn't installed so CI stays green.
-pytest.importorskip("harel")
+# The statechart engine (being renamed harel -> determa-state) is a new dependency;
+# until it is pinned in pyproject, skip cleanly where neither package is installed so
+# CI stays green.
+if not any(importlib.util.find_spec(name) for name in ("determa_state", "harel")):
+    pytest.skip("determa-state/harel engine not installed", allow_module_level=True)
 
-from eve_sdk.fsm import EveFsm  # noqa: E402  (must follow importorskip)
+from eve_sdk.fsm import EveFsm
 
 FIXTURE = Path(__file__).parent / "fsm_fixtures" / "provider.yaml"
 
@@ -68,3 +71,26 @@ def test_settings_change_reevaluates() -> None:
     assert changed == {"api_key": ""}
     fsm.fire("provider", "vultr", "resolve")
     assert _leaves(fsm) == ["unconfigured"]
+
+
+def test_provider_context_resolver_uses_shared_config_secret_path(monkeypatch: Any) -> None:
+    """The real resolver reads settings + secrets from the same path dispatch uses."""
+    from eve_sdk.fsm import provider_context_resolver
+
+    monkeypatch.setattr(
+        "eve_sdk.config.ConfigEnv.environment",
+        classmethod(lambda cls, *a, **k: {"VULTR_REGION": "ewr"}),
+    )
+    monkeypatch.setattr(
+        "eve_sdk.provider_command._load_public_plugin",
+        lambda kind, plugin_id: {
+            "id": plugin_id,
+            "kind": "provider",
+            "config_schema": {"secrets": {"api_key": {"env_var": "VULTR_API_KEY"}}},
+        },
+    )
+    monkeypatch.setattr("eve_sdk.provider_command.Secrets.read", staticmethod(lambda name: {"api_key": "SECRET"}))
+
+    resolve = provider_context_resolver()
+    got = resolve("provider", "vultr", ["VULTR_API_KEY", "VULTR_REGION"])
+    assert got == {"VULTR_API_KEY": "SECRET", "VULTR_REGION": "ewr"}
