@@ -94,3 +94,39 @@ def test_provider_context_resolver_uses_shared_config_secret_path(monkeypatch: A
     resolve = provider_context_resolver()
     got = resolve("provider", "vultr", ["VULTR_API_KEY", "VULTR_REGION"])
     assert got == {"VULTR_API_KEY": "SECRET", "VULTR_REGION": "ewr"}
+
+
+def test_core_provider_machine_configured_from_required_secret(monkeypatch: Any) -> None:
+    """The core provider machine: configured = a required secret is eve-resolved; a
+    connectivity probe promotes it to reachable. Exercises core/fsm/provider.yaml."""
+    from eve_sdk.fsm import EveFsm, provider_configured_resolver
+
+    monkeypatch.setattr("eve_sdk.config.ConfigEnv.environment", classmethod(lambda cls, *a, **k: {}))
+    monkeypatch.setattr(
+        "eve_sdk.provider_command._load_public_plugin",
+        lambda kind, plugin_id: {
+            "id": plugin_id,
+            "kind": "provider",
+            "config_schema": {"secrets": {"api_key": {"required": True, "env_var": "VULTR_API_KEY"}}},
+        },
+    )
+    box = {"secrets": {}}
+    monkeypatch.setattr("eve_sdk.provider_command.Secrets.read", staticmethod(lambda name: dict(box["secrets"])))
+
+    fsm = EveFsm(provider_configured_resolver())
+    core = (Path(__file__).resolve().parents[1] / "core" / "fsm" / "provider.yaml").read_text()
+    fsm.load("provider", core)
+
+    # no secret yet -> unconfigured
+    fsm.fire("provider", "vultr", "resolve")
+    assert _leaves(fsm) == ["unconfigured"]
+
+    # the required secret appears at the source -> refresh (env) + re-resolve -> configured
+    box["secrets"] = {"api_key": "KEY"}
+    fsm.refresh("provider", "vultr")
+    fsm.fire("provider", "vultr", "resolve")
+    assert _leaves(fsm) == ["unreachable"]  # configured, probe pending
+
+    # the connectivity probe succeeds -> reachable
+    fsm.fire("provider", "vultr", "probe_ok")
+    assert _leaves(fsm) == ["reachable"]

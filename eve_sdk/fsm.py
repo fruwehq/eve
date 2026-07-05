@@ -134,3 +134,41 @@ def provider_context_resolver() -> ContextResolver:
         return {name: env.get(name, "") for name in names}
 
     return resolve
+
+
+def provider_configured_resolver() -> ContextResolver:
+    """The :data:`ContextResolver` for the core provider machine (``core/fsm/provider.yaml``).
+
+    Derives ``is_configured`` = True iff every ``required`` config_schema secret/setting
+    of the provider resolves to a non-empty value via the one shared path (``os.environ``
+    + ``ConfigEnv.environment()`` + injected secrets). So "configured" is eve-resolved,
+    never a plugin's ambient self-report (the AWS-off-``~/.aws`` bug is structurally
+    impossible). ``key`` is the provider id; ``names`` is typically ``["is_configured"]``.
+    """
+    from eve_sdk.config import ConfigEnv
+    from eve_sdk.provider_command import _inject_secrets, _load_public_plugin
+
+    def resolve(scope: str, key: str, names: list[str]) -> dict[str, Any]:
+        plugin = _load_public_plugin("provider", key)
+        env = dict(os.environ)
+        env.update(ConfigEnv.environment())
+        env = _inject_secrets(key, plugin, env)
+        schema = plugin.get("config_schema") or {}
+        required = [
+            (field, spec)
+            for section in ("secrets", "settings")
+            for field, spec in (schema.get(section) or {}).items()
+            if isinstance(spec, Mapping) and spec.get("required")
+        ]
+
+        def present(field: str, spec: Mapping[str, Any]) -> bool:
+            candidates = [field]
+            env_var = spec.get("env_var")
+            if env_var:
+                candidates.append(str(env_var))
+            return any(env.get(candidate) for candidate in candidates)
+
+        values: dict[str, Any] = {"is_configured": all(present(f, s) for f, s in required)}
+        return {name: values.get(name, "") for name in names}
+
+    return resolve
