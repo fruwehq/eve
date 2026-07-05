@@ -1,12 +1,12 @@
-"""eve FSM platform — the single seam between eve and the harel statechart engine.
+"""eve FSM platform — the single seam between eve and the Determa State statechart engine.
 
-Machines are declared in **harel YAML** by the plugin that owns them (a provider, a
+Machines are declared in **Determa State YAML** by the plugin that owns them (a provider, a
 package, ...). eve resolves each machine's ``external`` esvs (settings + secrets)
 through **one shared resolver** and seeds them as the machine's context, so status,
-dispatch, and connectivity can never see different config (v4.5 bugs N/O). The harel
-engine is the swappable unit; this module is the only place eve touches it.
+dispatch, and connectivity can never see different config (v4.5 bugs N/O). The engine
+is the swappable unit; this module is the only place eve touches it.
 
-Side effects are host-driven: harel actions are sandboxed, so eve runs the real
+Side effects are host-driven: engine actions are sandboxed, so eve runs the real
 command (probe, terraform, provision) and delivers the outcome back as an event
 (e.g. ``probe_ok`` / ``probe_fail``). The machine only ever holds state + context.
 """
@@ -17,11 +17,10 @@ import os
 from collections.abc import Callable, Mapping
 from typing import Any
 
-# The statechart engine is being renamed harel -> determa-state. Import it behind one
-# name so the eventual package rename is a no-op for eve; this module is the only place
-# eve touches the engine.
+# The statechart engine (Determa State; formerly harel). Import it behind one name so
+# eve's only coupling to it is this module.
 try:  # pragma: no cover - the branch taken depends only on which package is installed
-    import determa_state as engine
+    import determa.state as engine
 except ModuleNotFoundError:  # pre-rename package name
     import harel as engine
 
@@ -33,7 +32,7 @@ ContextResolver = Callable[[str, str, list[str]], dict[str, Any]]
 
 
 class EveFsm:
-    """Loads plugin-declared harel machines and tracks their live instances."""
+    """Loads plugin-declared Determa State machines and tracks their live instances."""
 
     def __init__(self, resolve_context: ContextResolver) -> None:
         self._resolve = resolve_context
@@ -42,7 +41,7 @@ class EveFsm:
         self._machine: dict[str, Any] = {}
 
     def load(self, scope: str, machine_yaml: str) -> None:
-        """Register the harel machine a plugin ships for ``scope`` (its first document)."""
+        """Register the machine a plugin ships for ``scope`` (its first document)."""
         defs = engine.load_definitions(machine_yaml)
         for definition in defs:
             engine.validate(definition.raw)

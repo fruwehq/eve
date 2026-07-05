@@ -1,4 +1,4 @@
-"""FSM platform (eve_sdk.fsm.EveFsm) over the harel engine.
+"""FSM platform (eve_sdk.fsm.EveFsm) over the Determa State engine.
 
 Proves the v4.5 N/O invariant on a synthetic provider machine: `configured` and
 `reachable` are FSM-computed from context that comes from *one* resolver, and a
@@ -8,17 +8,8 @@ injected (as the real platform will inject the shared ConfigEnv+secrets resolver
 
 from __future__ import annotations
 
-import importlib.util
 from pathlib import Path
 from typing import Any
-
-import pytest
-
-# The statechart engine (being renamed harel -> determa-state) is a new dependency;
-# until it is pinned in pyproject, skip cleanly where neither package is installed so
-# CI stays green.
-if not any(importlib.util.find_spec(name) for name in ("determa_state", "harel")):
-    pytest.skip("determa-state/harel engine not installed", allow_module_level=True)
 
 from eve_sdk.fsm import EveFsm
 
