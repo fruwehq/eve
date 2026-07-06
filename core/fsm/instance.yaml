@@ -30,54 +30,44 @@ top:
     # Provider (terraform) lifecycle. Each in-flight operation has its own transient
     # state so its outcome is unambiguous; op_fail from any of them lands in error.
     # `unknown` is the unobserved start; observe_* reconcile from live provider status.
+    #
+    # Every concrete (non-transient) state accepts every operator command and routes
+    # to that command's transient state: the operator's intent is authoritative and the
+    # provider command's success/failure — not the machine — decides feasibility (a
+    # `start` that can't apply fails and lands in `error` via op_fail, it never silently
+    # no-ops). So a command's terminal outcome (up/start->running, stop->stopped,
+    # down->absent) holds from any state, exactly as before, now with honest transients.
     - initial: { transition_to: unknown }
       states:
         unknown:
-          on_events:
+          on_events: &commands
             create:          { transition_to: creating }
+            start:           { transition_to: starting }
+            stop:            { transition_to: stopping }
+            destroy:         { transition_to: destroying }
             observe_running: { transition_to: running }
             observe_stopped: { transition_to: stopped }
             observe_absent:  { transition_to: absent }
-        absent:
-          on_events:
-            create:          { transition_to: creating }
-            observe_running: { transition_to: running }   # drift: created out of band
-            observe_stopped: { transition_to: stopped }
+        absent:  { on_events: *commands }
+        running: { on_events: *commands }
+        stopped: { on_events: *commands }
+        error:   { on_events: *commands }
         creating:
           on_events:
             created_ok: { transition_to: running }
             op_fail:    { transition_to: error }
-        running:
-          on_events:
-            stop:            { transition_to: stopping }
-            destroy:         { transition_to: destroying }
-            observe_stopped: { transition_to: stopped }
-            observe_absent:  { transition_to: absent }
-        stopping:
-          on_events:
-            stopped_ok: { transition_to: stopped }
-            op_fail:    { transition_to: error }
-        stopped:
-          on_events:
-            start:           { transition_to: starting }
-            destroy:         { transition_to: destroying }
-            observe_running: { transition_to: running }
-            observe_absent:  { transition_to: absent }
         starting:
           on_events:
             started_ok: { transition_to: running }
+            op_fail:    { transition_to: error }
+        stopping:
+          on_events:
+            stopped_ok: { transition_to: stopped }
             op_fail:    { transition_to: error }
         destroying:
           on_events:
             destroyed_ok: { transition_to: absent }
             op_fail:      { transition_to: error }
-        error:
-          on_events:
-            create:          { transition_to: creating }
-            destroy:         { transition_to: destroying }
-            observe_running: { transition_to: running }
-            observe_stopped: { transition_to: stopped }
-            observe_absent:  { transition_to: absent }
 
     # Provisioning lifecycle (independent of the provider region).
     - initial: { transition_to: unprovisioned }

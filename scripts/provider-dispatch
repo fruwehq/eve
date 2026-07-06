@@ -16,7 +16,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from eve_sdk.dispatch import desired_state_for, provider_state_for, record_provider_state  # noqa: E402
+from eve_sdk.dispatch import desired_state_for, record_provider_state  # noqa: E402
+from eve_sdk.instance_fsm import dispatch_event  # noqa: E402
 from eve_sdk.provider_command import (  # noqa: E402
     dispatch_instance_command,
     dispatch_provider_command,
@@ -101,7 +102,7 @@ def main(argv: list[str]) -> int:
                     "failed",
                     error=str(error),
                     desired_state=desired_state_for(command),
-                    provider_state=provider_state_for(command, "failed"),
+                    provider_event=dispatch_event(command, "failed"),
                 )
             except Exception as state_error:
                 print(f"provider-dispatch: failed to record failure state: {state_error}", file=sys.stderr)

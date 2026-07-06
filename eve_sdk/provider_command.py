@@ -14,12 +14,12 @@ from eve_sdk.dispatch import (
     exec_cmd,
     interactive_provider_command,
     prepare_overlay,
-    provider_state_for,
     read_resolved_from_env_or_stdin,
     record_provider_state,
     stream_command,
     validate_provider_output,
 )
+from eve_sdk.instance_fsm import dispatch_event
 from eve_sdk.plugin_manifest import PluginManifest
 from eve_sdk.resolve import resolve_instance
 from eve_sdk.schema import validate_input, validate_output
@@ -252,7 +252,7 @@ def dispatch_instance_command(
         command,
         "running",
         desired_state=desired_state,
-        provider_state=provider_state_for(command, "running"),
+        provider_event=dispatch_event(command, "running"),
     )
 
     exit_status, output = stream_command(
@@ -268,7 +268,7 @@ def dispatch_instance_command(
                 "failed",
                 error=f"invalid provider output: {error}",
                 desired_state=desired_state,
-                provider_state=provider_state_for(command, "failed"),
+                provider_event=dispatch_event(command, "failed"),
             )
             print(f"provider-dispatch: {error}", file=sys.stderr)
             return 1
@@ -277,7 +277,7 @@ def dispatch_instance_command(
             command,
             "succeeded",
             desired_state=desired_state,
-            provider_state=provider_state_for(command, "succeeded"),
+            provider_event=dispatch_event(command, "succeeded"),
         )
     else:
         try:
@@ -287,7 +287,7 @@ def dispatch_instance_command(
                 "failed",
                 error=f"exit {exit_status}",
                 desired_state=desired_state,
-                provider_state=provider_state_for(command, "failed"),
+                provider_event=dispatch_event(command, "failed"),
             )
         except Exception as error:
             print(f"provider-dispatch: failed to record failure state: {error}", file=sys.stderr)

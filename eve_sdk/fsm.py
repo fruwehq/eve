@@ -20,9 +20,13 @@ from typing import Any
 # The statechart engine (Determa State; formerly harel). Import it behind one name so
 # eve's only coupling to it is this module.
 try:  # pragma: no cover - the branch taken depends only on which package is installed
-    import determa.state as engine
+    import determa.state as _engine_mod
 except ModuleNotFoundError:  # pre-rename package name
-    import harel as engine
+    import harel as _engine_mod  # type: ignore[import-untyped,no-redef]
+
+# Re-bound as a defined name so it is an explicit export (other eve modules read it
+# as ``eve_sdk.fsm.engine``).
+engine = _engine_mod
 
 # Resolve a machine's declared ``external`` esvs from eve settings/secrets:
 #   (scope, key, external_names) -> {name: value}

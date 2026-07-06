@@ -144,7 +144,7 @@ def record_provider_state(
     status: str,
     error: str | None = None,
     desired_state: str | None = None,
-    provider_state: str | None = None,
+    provider_event: str | None = None,
 ) -> None:
     if os.environ.get("EVE_DISABLE_STATE") == "1":
         return
@@ -154,7 +154,7 @@ def record_provider_state(
         status,
         error=error,
         desired_state=desired_state,
-        provider_state=provider_state,
+        provider_event=provider_event,
     )
 
 
@@ -182,23 +182,11 @@ def desired_state_for(command: str | None) -> str | None:
     return {"up": "running", "start": "running", "stop": "stopped", "down": "absent"}.get(command or "")
 
 
-def provider_state_for(command: str | None, status: str) -> str | None:
-    command = command or ""
-    if status == "running":
-        # operation in flight -> the instance machine's transient state (core/fsm/instance.yaml)
-        return {"up": "creating", "start": "starting", "stop": "stopping", "down": "destroying"}.get(command)
-    if status == "failed":
-        return None if command in {"resolve", "status", "ip", "ssh"} else "error"
-    if status != "succeeded":
-        return None
-    return {
-        "init": "creating",   # terraform sub-stages of an up -> still creating
-        "plan": "creating",
-        "up": "running",
-        "start": "running",
-        "stop": "stopped",
-        "down": "absent",
-    }.get(command)
+# The provider-state transition is no longer a hand-maintained table: dispatch
+# fires an event into the core instance machine (core/fsm/instance.yaml) seeded
+# from the persisted state, and the resulting leaf is the new provider_state.
+# ``instance_fsm.dispatch_event`` maps a dispatched (command, op_status) to that
+# event; the firing happens atomically inside State.record_operation.
 
 
 def interactive_provider_command(plugin: dict[str, Any], command: str) -> bool:

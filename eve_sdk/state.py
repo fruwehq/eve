@@ -130,6 +130,7 @@ class State:
         error: str | None = None,
         desired_state: str | None = None,
         provider_state: str | None = None,
+        provider_event: str | None = None,
         provision_state: str | None = None,
         package: str | None = None,
         package_state: str | None = None,
@@ -168,6 +169,17 @@ class State:
                 state["desired_state"] = desired_state
             if provider_state:
                 state["provider_state"] = provider_state
+            elif provider_event:
+                # Fire the event into the core instance machine, seeded from the
+                # current persisted provider_state; the resulting leaf is the new
+                # provider_state (None -> read-only command, leave it unchanged).
+                from eve_sdk import instance_fsm
+
+                new_provider = instance_fsm.provider_state_after(
+                    str(state.get("provider_state", "unknown")), provider_event
+                )
+                if new_provider is not None:
+                    state["provider_state"] = new_provider
             if provision_state:
                 state["provision_state"] = provision_state
             if package and package_state:
