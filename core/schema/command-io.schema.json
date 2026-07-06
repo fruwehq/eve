@@ -54,7 +54,7 @@
 
     "provider_state_mapping": {
       "title": "Provider State Mapping",
-      "description": "Maps (command, dispatch_status) to the provider_state recorded by the dispatcher. On success: init -> initialized, plan -> planned, up/start -> running, stop -> stopped, down -> absent. On running: -> changing. On failure: -> error (except resolve/status/ip/ssh which set null).",
+      "description": "Maps (command, dispatch_status) to the provider_state recorded by the dispatcher (the core/fsm/instance.yaml vocabulary). On success: init/plan -> creating, up/start -> running, stop -> stopped, down -> absent. On running (in flight): up -> creating, start -> starting, stop -> stopping, down -> destroying. On failure: -> error (except resolve/status/ip/ssh which set null).",
       "type": "object"
     }
   }

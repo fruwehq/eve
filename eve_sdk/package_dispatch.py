@@ -319,7 +319,7 @@ def dispatch_package(
     package_state = {
         "install": "installed",
         "down": "removed",
-        "reinstall": "reinstalled",
+        "reinstall": "installed",   # cleaner vocabulary: a reinstall lands in installed
     }.get(command)
     if package_state is None:
         package_state = package_status_from_output(output) or "unknown"

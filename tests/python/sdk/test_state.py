@@ -31,7 +31,7 @@ def test_state_read_defaults(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) ->
 def test_state_record_operation_and_recover(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("EVE_STATE_DIR", str(tmp_path))
 
-    State.record_operation("demo", "provider.up", "running", desired_state="running", provider_state="changing")
+    State.record_operation("demo", "provider.up", "running", desired_state="running", provider_state="creating")
     recovered = State.recover_running("demo")
 
     assert recovered["provider_state"] == "error"

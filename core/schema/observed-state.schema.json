@@ -31,7 +31,7 @@
     "provider_state": {
       "description": "Last known provider resource state.",
       "type": "string",
-      "enum": ["unknown", "initializing", "initialized", "planned", "changing", "running", "stopped", "absent", "error"]
+      "enum": ["unknown", "creating", "starting", "stopping", "destroying", "running", "stopped", "absent", "error"]
     },
 
     "provision_state": {
@@ -131,7 +131,7 @@
       "properties": {
         "status": {
           "type": "string",
-          "enum": ["unknown", "installed", "missing", "failed", "removed", "reinstalled"]
+          "enum": ["unknown", "installing", "installed", "missing", "failed", "removed"]
         },
         "updated_at": {
           "type": "string",

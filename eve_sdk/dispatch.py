@@ -184,15 +184,16 @@ def desired_state_for(command: str | None) -> str | None:
 
 def provider_state_for(command: str | None, status: str) -> str | None:
     command = command or ""
-    if status == "running" and command in {"up", "down", "start", "stop"}:
-        return "changing"
+    if status == "running":
+        # operation in flight -> the instance machine's transient state (core/fsm/instance.yaml)
+        return {"up": "creating", "start": "starting", "stop": "stopping", "down": "destroying"}.get(command)
     if status == "failed":
         return None if command in {"resolve", "status", "ip", "ssh"} else "error"
     if status != "succeeded":
         return None
     return {
-        "init": "initialized",
-        "plan": "planned",
+        "init": "creating",   # terraform sub-stages of an up -> still creating
+        "plan": "creating",
         "up": "running",
         "start": "running",
         "stop": "stopped",

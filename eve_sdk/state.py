@@ -22,19 +22,22 @@ class StateError(Exception):
 class State:
     OPERATION_STATUSES: ClassVar[set[str]] = {"running", "succeeded", "failed", "skipped"}
     DESIRED_STATES: ClassVar[set[str]] = {"unknown", "running", "stopped", "absent"}
+    # Provider + package state sets follow the core machines (core/fsm/instance.yaml,
+    # core/fsm/package.yaml): the terraform micro-stages collapse into the transient
+    # operation states, and package `reinstalled` folds into `installed`.
     PROVIDER_STATES: ClassVar[set[str]] = {
         "unknown",
-        "initializing",
-        "initialized",
-        "planned",
-        "changing",
+        "creating",
+        "starting",
+        "stopping",
+        "destroying",
         "running",
         "stopped",
         "absent",
         "error",
     }
     PROVISION_STATES: ClassVar[set[str]] = {"unknown", "provisioning", "provisioned", "error"}
-    PACKAGE_STATES: ClassVar[set[str]] = {"unknown", "installed", "missing", "failed", "removed", "reinstalled"}
+    PACKAGE_STATES: ClassVar[set[str]] = {"unknown", "installing", "installed", "missing", "failed", "removed"}
     DEFAULT_HISTORY_LIMIT = 50
 
     @classmethod
