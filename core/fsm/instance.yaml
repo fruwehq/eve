@@ -29,11 +29,20 @@ top:
 
     # Provider (terraform) lifecycle. Each in-flight operation has its own transient
     # state so its outcome is unambiguous; op_fail from any of them lands in error.
-    - initial: { transition_to: absent }
+    # `unknown` is the unobserved start; observe_* reconcile from live provider status.
+    - initial: { transition_to: unknown }
       states:
+        unknown:
+          on_events:
+            create:          { transition_to: creating }
+            observe_running: { transition_to: running }
+            observe_stopped: { transition_to: stopped }
+            observe_absent:  { transition_to: absent }
         absent:
           on_events:
-            create: { transition_to: creating }
+            create:          { transition_to: creating }
+            observe_running: { transition_to: running }   # drift: created out of band
+            observe_stopped: { transition_to: stopped }
         creating:
           on_events:
             created_ok: { transition_to: running }
@@ -64,8 +73,11 @@ top:
             op_fail:      { transition_to: error }
         error:
           on_events:
-            create:  { transition_to: creating }
-            destroy: { transition_to: destroying }
+            create:          { transition_to: creating }
+            destroy:         { transition_to: destroying }
+            observe_running: { transition_to: running }
+            observe_stopped: { transition_to: stopped }
+            observe_absent:  { transition_to: absent }
 
     # Provisioning lifecycle (independent of the provider region).
     - initial: { transition_to: unprovisioned }

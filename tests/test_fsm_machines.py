@@ -48,7 +48,7 @@ def test_package_lifecycle() -> None:
 
 def test_instance_regions_advance_independently() -> None:
     fsm = _fsm("instance", {"desired": "running"})
-    assert _leaves(fsm, "instance") == ["absent", "unprovisioned"]
+    assert _leaves(fsm, "instance") == ["unknown", "unprovisioned"]
 
     fsm.fire("instance", "x", "create")
     fsm.fire("instance", "x", "created_ok")
@@ -72,6 +72,7 @@ def test_instance_regions_advance_independently() -> None:
 
 def test_instance_op_failure_goes_to_error() -> None:
     fsm = _fsm("instance")
+    assert _leaves(fsm, "instance") == ["unknown", "unprovisioned"]
     fsm.fire("instance", "x", "create")
     fsm.fire("instance", "x", "op_fail")
     assert _leaves(fsm, "instance") == ["error", "unprovisioned"]
