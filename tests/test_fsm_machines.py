@@ -1,8 +1,8 @@
 """The core instance and package machines (core/fsm/*.yaml) over the Determa State engine.
 
-Loading each machine runs it through the engine's static validation (reachable states,
-no dead branches); the tests then exercise the key lifecycle transitions that replace
-state.py's PROVIDER_STATES / PROVISION_STATES / PACKAGE_STATES.
+Loading each bundle runs it through the engine's load-time validation; the tests then
+exercise the key lifecycle transitions that replace state.py's PROVIDER_STATES /
+PROVISION_STATES / PACKAGE_STATES.
 """
 
 from __future__ import annotations
@@ -14,68 +14,80 @@ from eve_sdk.fsm import EveFsm
 CORE = Path(__file__).resolve().parents[1] / "core" / "fsm"
 
 
-def _fsm(scope: str, external: dict[str, str] | None = None) -> EveFsm:
+def _fsm(scope: str, machine_id: str | None = None, external: dict[str, str] | None = None) -> EveFsm:
     ext = dict(external or {})
     fsm = EveFsm(lambda s, k, names: {n: ext.get(n, "") for n in names})
-    fsm.load(scope, (CORE / f"{scope}.yaml").read_text())
+    fsm.load(scope, (CORE / f"{scope}.yaml").read_text(), machine_id=machine_id)
     return fsm
-
-
-def _leaves(fsm: EveFsm, scope: str, key: str = "x") -> list[str]:
-    return sorted(fsm.instance(scope, key).active_leaf_names())
 
 
 def test_package_lifecycle() -> None:
     fsm = _fsm("package")
-    assert _leaves(fsm, "package") == ["unknown"]
+    assert fsm.leaves("package", "x") == ["unknown"]
 
     fsm.fire("package", "x", "absent")
-    assert _leaves(fsm, "package") == ["missing"]
+    assert fsm.leaves("package", "x") == ["missing"]
 
     fsm.fire("package", "x", "install")
-    assert _leaves(fsm, "package") == ["installing"]
+    assert fsm.leaves("package", "x") == ["installing"]
 
     fsm.fire("package", "x", "install_fail")
-    assert _leaves(fsm, "package") == ["failed"]
+    assert fsm.leaves("package", "x") == ["failed"]
 
     fsm.fire("package", "x", "install")           # retry
     fsm.fire("package", "x", "install_ok")
-    assert _leaves(fsm, "package") == ["installed"]
+    assert fsm.leaves("package", "x") == ["installed"]
 
     fsm.fire("package", "x", "absent")            # drift: disappeared out of band
-    assert _leaves(fsm, "package") == ["missing"]
+    assert fsm.leaves("package", "x") == ["missing"]
 
 
-def test_instance_regions_advance_independently() -> None:
-    fsm = _fsm("instance", {"desired": "running"})
-    assert _leaves(fsm, "instance") == ["unknown", "unprovisioned"]
+def test_instance_provider_lifecycle() -> None:
+    fsm = _fsm("instance", machine_id="instance_provider", external={"desired": "running"})
+    assert fsm.leaves("instance", "x") == ["unknown"]
 
     fsm.fire("instance", "x", "create")
     fsm.fire("instance", "x", "created_ok")
-    assert _leaves(fsm, "instance") == ["running", "unprovisioned"]
-
-    # the provisioning region advances without touching the provider region
-    fsm.fire("instance", "x", "provision")
-    fsm.fire("instance", "x", "provision_ok")
-    assert _leaves(fsm, "instance") == ["provisioned", "running"]
+    assert fsm.leaves("instance", "x") == ["running"]
 
     # stop lands in stopped; destroy lands in absent (distinct outcomes)
     fsm.fire("instance", "x", "stop")
     fsm.fire("instance", "x", "stopped_ok")
-    assert _leaves(fsm, "instance") == ["provisioned", "stopped"]
+    assert fsm.leaves("instance", "x") == ["stopped"]
 
     fsm.fire("instance", "x", "destroy")
     fsm.fire("instance", "x", "destroyed_ok")
-    assert _leaves(fsm, "instance") == ["absent", "provisioned"]
+    assert fsm.leaves("instance", "x") == ["absent"]
     assert fsm.context("instance", "x")["desired"] == "running"
+
+    # operator intent is authoritative: start recovers even from absent
+    fsm.fire("instance", "x", "start")
+    fsm.fire("instance", "x", "started_ok")
+    assert fsm.leaves("instance", "x") == ["running"]
+
+
+def test_instance_provision_lifecycle() -> None:
+    fsm = _fsm("instance", machine_id="instance_provision")
+    assert fsm.leaves("instance", "x") == ["unprovisioned"]
+
+    fsm.fire("instance", "x", "provision")
+    fsm.fire("instance", "x", "provision_ok")
+    assert fsm.leaves("instance", "x") == ["provisioned"]
+
+    fsm.fire("instance", "x", "provision")        # re-converge
+    fsm.fire("instance", "x", "provision_fail")
+    assert fsm.leaves("instance", "x") == ["provision_error"]
+
+    fsm.fire("instance", "x", "provision")        # retry
+    fsm.fire("instance", "x", "provision_ok")
+    assert fsm.leaves("instance", "x") == ["provisioned"]
 
 
 def test_instance_op_failure_goes_to_error() -> None:
-    fsm = _fsm("instance")
-    assert _leaves(fsm, "instance") == ["unknown", "unprovisioned"]
+    fsm = _fsm("instance", machine_id="instance_provider")
     fsm.fire("instance", "x", "create")
     fsm.fire("instance", "x", "op_fail")
-    assert _leaves(fsm, "instance") == ["error", "unprovisioned"]
+    assert fsm.leaves("instance", "x") == ["error"]
     fsm.fire("instance", "x", "create")           # recover
     fsm.fire("instance", "x", "created_ok")
-    assert _leaves(fsm, "instance") == ["running", "unprovisioned"]
+    assert fsm.leaves("instance", "x") == ["running"]

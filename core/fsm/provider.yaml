@@ -1,39 +1,45 @@
-# The provider lifecycle, shared by every provider (v4.5 N/O).
+# The provider lifecycle, shared by every provider (v4.5 N/O) — a Determa State
+# format-1 bundle.
 #
 # `is_configured` is derived by eve — true iff every `required` config_schema
 # secret/setting resolves to a non-empty value via the ONE shared path (os.environ +
-# ConfigEnv + injected secrets) — and seeded as external context. `reachable` is a
-# substate of `configured`, reached by the provider's `connectivity` probe (host-run,
-# delivered back as probe_ok / probe_fail). One machine: per-provider differences live
-# only in the config eve resolves, never in the states — so `configured` can never be a
-# plugin's ambient self-report (the AWS-off-~/.aws bug is structurally impossible).
-id: provider
+# ConfigEnv + injected secrets) — and seeded as an external creation binding.
+# `reachable` is a substate of `configured`, reached by the provider's `connectivity`
+# probe (host-run, delivered back as probe_ok / probe_fail). One machine: per-provider
+# differences live only in the config eve resolves, never in the states — so
+# `configured` can never be a plugin's ambient self-report (the AWS-off-~/.aws bug is
+# structurally impossible).
+format: 1
+namespace: eve.core
 events:
-  resolve: {}
-  probe_ok: {}
-  probe_fail: {}
-top:
-  esvs:
-    is_configured: { type: bool, external: true }
-  on_events:
-    env:
-      action: [ { refresh: {} } ]      # adopt a changed configured-ness
-  initial: { transition_to: unconfigured }
-  states:
-    unconfigured:
-      on_events:
-        resolve:
-          - { guard: "is_configured == true", transition_to: configured }
-    configured:
+  resolve: { direction: input }
+  probe_ok: { direction: input }
+  probe_fail: { direction: input }
+machines:
+  - machine_id: provider
+    root:
       type: composite
-      initial: { transition_to: unreachable }
+      variables:
+        is_configured: { type: bool, external: true }
       on_events:
-        resolve:
-          - { guard: "is_configured != true", transition_to: unconfigured }
+        env:
+          action: [ { refresh: {} } ]      # adopt a changed configured-ness
+      initial: { transition_to: unconfigured }
       states:
-        unreachable:
+        unconfigured:
           on_events:
-            probe_ok: { transition_to: reachable }
-        reachable:
+            resolve:
+              - { guard: "is_configured == true", transition_to: configured }
+        configured:
+          type: composite
+          initial: { transition_to: unreachable }
           on_events:
-            probe_fail: { transition_to: unreachable }
+            resolve:
+              - { guard: "is_configured != true", transition_to: unconfigured }
+          states:
+            unreachable:
+              on_events:
+                probe_ok: { transition_to: configured.reachable }
+            reachable:
+              on_events:
+                probe_fail: { transition_to: configured.unreachable }

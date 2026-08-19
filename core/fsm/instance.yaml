@@ -1,46 +1,53 @@
-# The instance lifecycle (v4.5 N/O) — the declarative replacement for state.py's
-# PROVIDER_STATES + PROVISION_STATES. Two concurrent regions: the provider (terraform)
-# lifecycle and the provisioning lifecycle, which advance independently. `desired` is the
-# goal (running | stopped | absent), supplied by eve as context. Transitions are driven
-# by eve operations (create/start/stop/destroy, provision) whose outcomes come back as
-# events, and by observation (observe_* maps live provider status back into a state,
-# keeping the machine honest about drift).
-id: instance
+# The instance lifecycle (v4.5 N/O) — a Determa State format-1 bundle; the declarative
+# replacement for state.py's PROVIDER_STATES + PROVISION_STATES. Two machines: the
+# provider (terraform) lifecycle and the provisioning lifecycle, which advance
+# independently (format 1 has no orthogonal regions, and eve persists + drives the two
+# as separate fields anyway). `desired` is the goal (running | stopped | absent),
+# supplied by eve as an external binding. Transitions are driven by eve operations
+# (create/start/stop/destroy, provision) whose outcomes come back as events, and by
+# observation (observe_* maps live provider status back into a state, keeping the
+# machine honest about drift).
+format: 1
+namespace: eve.core
 events:
-  create: {}
-  start: {}
-  stop: {}
-  destroy: {}
-  created_ok: {}
-  started_ok: {}
-  stopped_ok: {}
-  destroyed_ok: {}
-  op_fail: {}
-  observe_running: {}
-  observe_stopped: {}
-  observe_absent: {}
-  provision: {}
-  provision_ok: {}
-  provision_fail: {}
-top:
-  esvs:
-    desired: { type: string, external: true }   # running | stopped | absent | unknown
-  regions:
+  create: { direction: input }
+  start: { direction: input }
+  stop: { direction: input }
+  destroy: { direction: input }
+  created_ok: { direction: input }
+  started_ok: { direction: input }
+  stopped_ok: { direction: input }
+  destroyed_ok: { direction: input }
+  op_fail: { direction: input }
+  observe_running: { direction: input }
+  observe_stopped: { direction: input }
+  observe_absent: { direction: input }
+  provision: { direction: input }
+  provision_ok: { direction: input }
+  provision_fail: { direction: input }
+machines:
 
-    # Provider (terraform) lifecycle. Each in-flight operation has its own transient
-    # state so its outcome is unambiguous; op_fail from any of them lands in error.
-    # `unknown` is the unobserved start; observe_* reconcile from live provider status.
-    #
-    # Every concrete (non-transient) state accepts every operator command and routes
-    # to that command's transient state: the operator's intent is authoritative and the
-    # provider command's success/failure — not the machine — decides feasibility (a
-    # `start` that can't apply fails and lands in `error` via op_fail, it never silently
-    # no-ops). So a command's terminal outcome (up/start->running, stop->stopped,
-    # down->absent) holds from any state, exactly as before, now with honest transients.
-    - initial: { transition_to: unknown }
+  # Provider (terraform) lifecycle. Each in-flight operation has its own transient
+  # state so its outcome is unambiguous; op_fail from any of them lands in error.
+  # `unknown` is the unobserved start; observe_* reconcile from live provider status.
+  #
+  # Every concrete (non-transient) state accepts every operator command and routes
+  # to that command's transient state: the operator's intent is authoritative and the
+  # provider command's success/failure — not the machine — decides feasibility (a
+  # `start` that can't apply fails and lands in `error` via op_fail, it never silently
+  # no-ops). So a command's terminal outcome (up/start->running, stop->stopped,
+  # down->absent) holds from any state, exactly as before, now with honest transients.
+  - machine_id: instance_provider
+    root:
+      type: composite
+      variables:
+        desired: { type: string, external: true, init: "unknown" }   # running | stopped | absent | unknown
+      initial: { transition_to: unknown }
+      # (format 1 forbids YAML anchors, so the shared command block is spelled out
+      # in each concrete state.)
       states:
         unknown:
-          on_events: &commands
+          on_events:
             create:          { transition_to: creating }
             start:           { transition_to: starting }
             stop:            { transition_to: stopping }
@@ -48,10 +55,42 @@ top:
             observe_running: { transition_to: running }
             observe_stopped: { transition_to: stopped }
             observe_absent:  { transition_to: absent }
-        absent:  { on_events: *commands }
-        running: { on_events: *commands }
-        stopped: { on_events: *commands }
-        error:   { on_events: *commands }
+        absent:
+          on_events:
+            create:          { transition_to: creating }
+            start:           { transition_to: starting }
+            stop:            { transition_to: stopping }
+            destroy:         { transition_to: destroying }
+            observe_running: { transition_to: running }
+            observe_stopped: { transition_to: stopped }
+            observe_absent:  { transition_to: absent }
+        running:
+          on_events:
+            create:          { transition_to: creating }
+            start:           { transition_to: starting }
+            stop:            { transition_to: stopping }
+            destroy:         { transition_to: destroying }
+            observe_running: { transition_to: running }
+            observe_stopped: { transition_to: stopped }
+            observe_absent:  { transition_to: absent }
+        stopped:
+          on_events:
+            create:          { transition_to: creating }
+            start:           { transition_to: starting }
+            stop:            { transition_to: stopping }
+            destroy:         { transition_to: destroying }
+            observe_running: { transition_to: running }
+            observe_stopped: { transition_to: stopped }
+            observe_absent:  { transition_to: absent }
+        error:
+          on_events:
+            create:          { transition_to: creating }
+            start:           { transition_to: starting }
+            stop:            { transition_to: stopping }
+            destroy:         { transition_to: destroying }
+            observe_running: { transition_to: running }
+            observe_stopped: { transition_to: stopped }
+            observe_absent:  { transition_to: absent }
         creating:
           on_events:
             created_ok: { transition_to: running }
@@ -69,8 +108,11 @@ top:
             destroyed_ok: { transition_to: absent }
             op_fail:      { transition_to: error }
 
-    # Provisioning lifecycle (independent of the provider region).
-    - initial: { transition_to: unprovisioned }
+  # Provisioning lifecycle (independent of the provider machine).
+  - machine_id: instance_provision
+    root:
+      type: composite
+      initial: { transition_to: unprovisioned }
       states:
         unprovisioned:
           on_events:

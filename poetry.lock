@@ -49,20 +49,21 @@ files = [
 
 [[package]]
 name = "determa-state"
-version = "0.0.5"
+version = "0.1.0"
 description = "Determa State — Python reference implementation of the Determa statechart engine"
 optional = false
 python-versions = ">=3.11"
 groups = ["main"]
 files = [
-    {file = "determa_state-0.0.5-py3-none-any.whl", hash = "sha256:cb9d357c5fcd7c74e8d351802ca1e3057ba02a1e35ec8bfb63f5686c1f19800a"},
-    {file = "determa_state-0.0.5.tar.gz", hash = "sha256:2dac244ce11a028b38146ddbc5c006f36c1d1c9c67cba11b7a16e8e92171ee36"},
+    {file = "determa_state-0.1.0-py3-none-any.whl", hash = "sha256:c1ddde17d4dadb9797d727fce75186cb3609d479c902098f12ddb49625bc7709"},
+    {file = "determa_state-0.1.0.tar.gz", hash = "sha256:7adeda9877e1698262918ca36bf38ea420aa6ae7820abd442f5034cad9fbd5ab"},
 ]
 
 [package.dependencies]
 cel-python = ">=0.1"
 jsonschema = ">=4"
 pyyaml = ">=6"
+rfc8785 = ">=0.1.4"
 
 [package.extras]
 dev = ["mypy", "pytest (>=8)", "ruff", "types-jsonschema", "types-pyyaml"]
@@ -767,6 +768,24 @@ rpds-py = ">=0.7.0"
 typing-extensions = {version = ">=4.4.0", markers = "python_version < \"3.13\""}
 
 [[package]]
+name = "rfc8785"
+version = "0.1.4"
+description = "A pure-Python implementation of RFC 8785 (JSON Canonicalization Scheme)"
+optional = false
+python-versions = ">=3.8"
+groups = ["main"]
+files = [
+    {file = "rfc8785-0.1.4-py3-none-any.whl", hash = "sha256:520d690b448ecf0703691c76e1a34a24ddcd4fc5bc41d589cb7c58ec651bcd48"},
+    {file = "rfc8785-0.1.4.tar.gz", hash = "sha256:e545841329fe0eee4f6a3b44e7034343100c12b4ec566dc06ca9735681deb4da"},
+]
+
+[package.extras]
+dev = ["build", "rfc8785[doc,lint,test]"]
+doc = ["pdoc"]
+lint = ["interrogate", "mypy (>=1.0)", "ruff (>=0.3,<1.0)"]
+test = ["coverage", "pytest", "pytest-cov"]
+
+[[package]]
 name = "rich"
 version = "15.0.0"
 description = "Render rich text, tables, progress bars, syntax highlighting, markdown and more to the terminal"
@@ -1015,4 +1034,4 @@ test = ["coverage", "pytest", "pytest-cov"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<4.0"
-content-hash = "c5eebfc9584b4768d75016dc17389c9b7d961cfbd298c71ec1cc7a0532a13f1d"
+content-hash = "07004ccc761288f7f2999f1b91ae759c9b6eb9ea211cafb5cf3845c75e4a8b8f"

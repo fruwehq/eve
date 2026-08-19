@@ -91,11 +91,11 @@ def _provider_status(plugin: dict[str, Any]) -> tuple[str, str, str]:
     fsm = EveFsm(provider_configured_resolver())
     fsm.load("provider", CORE_PROVIDER_MACHINE.read_text())
     fsm.fire("provider", provider_id, "resolve")
-    if fsm.instance("provider", provider_id).active_leaf_names() == ["unconfigured"]:
+    if fsm.state("provider", provider_id) == "unconfigured":
         return "no", "no", "not configured"
     _configured, reachable, notes = _run_connectivity(plugin)
     fsm.fire("provider", provider_id, "probe_ok" if reachable == "yes" else "probe_fail")
-    reachable = "yes" if fsm.instance("provider", provider_id).active_leaf_names() == ["reachable"] else "no"
+    reachable = "yes" if fsm.state("provider", provider_id) == "reachable" else "no"
     return "yes", reachable, notes
 
 

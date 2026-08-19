@@ -28,7 +28,7 @@ def _make(settings: dict[str, str]) -> tuple[EveFsm, dict[str, dict[str, str]]]:
 
 
 def _leaves(fsm: EveFsm) -> list[str]:
-    return list(fsm.instance("provider", "vultr").active_leaf_names())
+    return fsm.leaves("provider", "vultr")
 
 
 def test_unconfigured_without_secret() -> None:
@@ -45,7 +45,7 @@ def test_configured_then_reachable_via_probe() -> None:
 
     fsm.fire("provider", "vultr", "probe_ok")
     assert _leaves(fsm) == ["reachable"]
-    assert fsm.view("provider", "vultr")["status"] == "active"
+    assert fsm.view("provider", "vultr")["status"] == "running"
 
 
 def test_settings_change_reevaluates() -> None:
