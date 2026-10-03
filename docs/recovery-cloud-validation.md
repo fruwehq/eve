@@ -113,6 +113,11 @@ those workflows filtered PR bases to `main`. Companion workflows now include
 and companion workflows explicitly handle `ready_for_review`. Provider CI now
 runs status-error and OS-runner tests, and Linux CI runs its launcher suite.
 
+Enabling core CI exposed a pre-existing environment mismatch: Poetry created a
+cached environment while the test runners require `.venv/bin/python`. The
+workflow now explicitly creates its environment inside the project, as used in
+fresh Cloud validation, and the pipeline contract check enforces this setting.
+
 No open issues or unresolved review threads were found on the affected PRs.
 The only additional open PR found was Eve #46, a TUI portrait-blink change
 outside this migration. Its `tui/app.py` overlap should be reviewed separately;
