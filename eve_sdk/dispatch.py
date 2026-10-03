@@ -273,26 +273,20 @@ def interactive_provider_command(plugin: dict[str, Any], command: str) -> bool:
 
 
 def last_json_object(output: str, keys: set[str]) -> dict[str, Any] | None:
-    for index in range(len(output) - 1, -1, -1):
-        if output[index] != "{":
-            continue
+    """Find the last matching top-level object, skipping its nested values."""
+    decoder = json.JSONDecoder()
+    result = None
+    offset = 0
+    while (index := output.find("{", offset)) != -1:
         try:
-            parsed = json.loads(output[index:].strip())
+            parsed, end = decoder.raw_decode(output, index)
         except json.JSONDecodeError:
+            offset = index + 1
             continue
+        offset = end
         if isinstance(parsed, dict) and keys.intersection(parsed):
-            return parsed
-    for line in reversed(output.splitlines()):
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            parsed = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(parsed, dict) and keys.intersection(parsed):
-            return parsed
-    return None
+            result = parsed
+    return result
 
 
 def validate_provider_output(output: str) -> None:

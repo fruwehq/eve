@@ -168,7 +168,7 @@ class EveFsm:
 def provider_context_resolver() -> ContextResolver:
     """The real :data:`ContextResolver` for provider machines.
 
-    Each declared external variable is named as its eve env var (e.g. ``VULTR_API_KEY``)
+    Each declared external variable is named as its eve env var (e.g. ``PROVIDER_API_KEY``)
     and resolved from the one environment builder dispatch uses, so a provider's
     FSM context and what dispatch runs with are identical (v4.5 bug M: status ≡
     dispatch). ``key`` is the provider id.

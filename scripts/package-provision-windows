@@ -30,6 +30,7 @@ from eve_sdk.package_dispatch import (  # noqa: E402
     resolved_package_set_environment,
 )
 from eve_sdk.resolve import instance_package_config  # noqa: E402
+from eve_sdk.secrets import windows_secret_cleanup, write_private_text  # noqa: E402
 from eve_sdk.tf_dispatch import repo_root, resolve_env  # noqa: E402
 
 _USAGE = (
@@ -225,9 +226,9 @@ def main(argv: list[str]) -> int:
                 windows_password, package_env, env_names
             )
             (stage / "state").mkdir(parents=True, exist_ok=True)
-            (stage / "state" / "env.json").write_text(
+            write_private_text(
+                stage / "state" / "env.json",
                 json.dumps(env_payload, indent=2, ensure_ascii=False) + "\n",
-                encoding="utf-8",
             )
 
         print(f"[package-provision-windows] uploading windows step files for package={package}")
@@ -241,6 +242,11 @@ def main(argv: list[str]) -> int:
         )
         if needs_env:
             reset_cmd += f" ; New-Item -ItemType Directory -Force '{_REMOTE_STATE_DIR}' | Out-Null"
+            reset_cmd += (
+                f" ; icacls '{_REMOTE_STATE_DIR}' /inheritance:r "
+                '/grant:r "Administrator:(OI)(CI)F" "SYSTEM:(OI)(CI)F" | Out-Null; '
+                'if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }'
+            )
 
         uploads: list[tuple[str, list[str]]] = [
             ("prepare windows package provision directory", [ssh, instance_name, "--", reset_cmd]),
@@ -265,19 +271,25 @@ def main(argv: list[str]) -> int:
         for label, cmd in uploads:
             status = _ssh_retry(label, cmd)
             if status != 0:
+                if label == "upload windows package env.json":
+                    _instance_ssh(
+                        instance_name, "--",
+                        windows_secret_cleanup(_REMOTE_STATE_DIR + r"\env.json"),
+                    )
                 return status
         if needs_env:
             status = _instance_ssh(
                 instance_name,
                 "--",
                 f"icacls '{_REMOTE_STATE_DIR}\\env.json' /inheritance:r "
-                '/grant:r "Administrator:F" "SYSTEM:F" | Out-Null',
+                '/grant:r "Administrator:F" "SYSTEM:F" | Out-Null; '
+                'if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }',
             )
             if status != 0:
                 _instance_ssh(
                     instance_name,
                     "--",
-                    f"Remove-Item -Force -ErrorAction SilentlyContinue '{_REMOTE_STATE_DIR}\\env.json'",
+                    windows_secret_cleanup(_REMOTE_STATE_DIR + r"\env.json"),
                 )
                 return status
 
@@ -296,7 +308,7 @@ def main(argv: list[str]) -> int:
             cleanup_status = _instance_ssh(
                 instance_name,
                 "--",
-                f"Remove-Item -Force -ErrorAction SilentlyContinue '{_REMOTE_STATE_DIR}\\env.json'",
+                windows_secret_cleanup(_REMOTE_STATE_DIR + r"\env.json"),
             )
         if step_status != 0:
             return step_status

@@ -31,6 +31,7 @@ from eve_sdk.package_dispatch import (  # noqa: E402
     resolved_package_set_environment,
 )
 from eve_sdk.resolve import instance_package_config  # noqa: E402
+from eve_sdk.secrets import write_private_text  # noqa: E402
 from eve_sdk.tf_dispatch import repo_root, resolve_env  # noqa: E402
 
 _USAGE = (
@@ -90,13 +91,14 @@ def _ssh_retry(label: str, cmd: list[str]) -> int:
     return subprocess.run([str(ROOT / "scripts/ssh-retry"), label, *cmd]).returncode
 
 
-def _env_line(key: str, value: str) -> str:
+def _env_line(key: str, value: str, *, remote_home: bool = False) -> str:
+    if remote_home:
+        return f'export {key}="$HOME"/{shlex.quote(value.removeprefix("$HOME/"))}'
     return f"export {key}={shlex.quote(value)}"
 
 
 def _write_private_text(path: Path, value: str) -> None:
-    path.write_text(value, encoding="utf-8")
-    path.chmod(0o600)
+    write_private_text(path, value)
 
 
 def main(argv: list[str]) -> int:
@@ -350,7 +352,10 @@ def main(argv: list[str]) -> int:
             _env_line("TIMEZONE", host_tz),
         ]
         env_lines += [
-            _env_line(name, package_env.get(name, ""))
+            _env_line(
+                name, package_env.get(name, ""),
+                remote_home=name in stage_env_names and bool(package_env.get(name)),
+            )
             for name in applicable_env_names
         ]
         env_path = stage / "state" / "env"
@@ -360,7 +365,8 @@ def main(argv: list[str]) -> int:
         uploads: list[tuple[str, list[str]]] = [(
             "prepare linux package provision directory",
             [ssh, instance_name, "--",
-             "rm -rf ~/provision/scripts && mkdir -p ~/provision/state ~/provision/logs ~/provision/downloads"],
+             "rm -rf ~/provision/scripts && mkdir -p ~/provision/state ~/provision/logs ~/provision/downloads"
+             " && chmod 0700 ~/provision/state"],
         )]
         for local_path, remote_rel in stage_files:
             uploads.append((
@@ -385,6 +391,11 @@ def main(argv: list[str]) -> int:
         for label, cmd in uploads:
             status = _ssh_retry(label, cmd)
             if status != 0:
+                if label == "upload linux package environment":
+                    _ssh_retry(
+                        "remove linux package environment after upload failure",
+                        [ssh, instance_name, "--", "rm -f ~/provision/state/env"],
+                    )
                 return status
 
         status = _ssh_retry(
@@ -409,7 +420,14 @@ def main(argv: list[str]) -> int:
             'echo "[package-provision] running $(basename "$step")"; '
             '/usr/bin/env bash "$step"; done'
         )
-        return subprocess.run([ssh, instance_name, "--", remote_cmd]).returncode
+        try:
+            status = subprocess.run([ssh, instance_name, "--", remote_cmd]).returncode
+        finally:
+            cleanup_status = _ssh_retry(
+                "remove linux package environment",
+                [ssh, instance_name, "--", "rm -f ~/provision/state/env"],
+            )
+        return status if status else cleanup_status
     finally:
         shutil.rmtree(stage, ignore_errors=True)
 

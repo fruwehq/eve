@@ -32,6 +32,7 @@ from eve_sdk.package_dispatch import (  # noqa: E402
 )
 from eve_sdk.plugin_manifest import PluginManifest  # noqa: E402
 from eve_sdk.resolve import instance_package_config  # noqa: E402
+from eve_sdk.secrets import windows_secret_cleanup, write_private_text  # noqa: E402
 
 
 def _provision_dir_display(path: Path, root: Path) -> str:
@@ -71,13 +72,14 @@ def _parse_env(output: str) -> dict[str, str]:
     return env
 
 
-def _env_line(key: str, value: str) -> str:
+def _env_line(key: str, value: str, *, remote_home: bool = False) -> str:
+    if remote_home:
+        return f'export {key}="$HOME"/{shlex.quote(value.removeprefix("$HOME/"))}'
     return f"export {key}={shlex.quote(value)}"
 
 
 def _write_private_text(path: Path, value: str) -> None:
-    path.write_text(value, encoding="utf-8")
-    path.chmod(0o600)
+    write_private_text(path, value)
 
 
 def _selected_packages(bundle_packages: str) -> list[str]:
@@ -288,9 +290,8 @@ def provision_ubuntu(profile: str, env: dict[str, str], root: Path) -> int:
         # (local_path, remote_rel_dir) and uploaded after the provision dir is
         # prepared, below.
         stage_files: list[tuple[str, str]] = []
-        for stage_var in package_environment_names(
-            selected_plugins, path_config_only=True
-        ):
+        stage_env_names = package_environment_names(selected_plugins, path_config_only=True)
+        for stage_var in stage_env_names:
             local_path = package_env.get(stage_var, "")
             if not local_path:
                 continue
@@ -328,13 +329,17 @@ def provision_ubuntu(profile: str, env: dict[str, str], root: Path) -> int:
             _env_line("TIMEZONE", host_tz),
         ]
         for name in package_environment_names(selected_plugins):
-            env_lines.append(_env_line(name, package_env.get(name, "")))
+            env_lines.append(_env_line(
+                name, package_env.get(name, ""),
+                remote_home=name in stage_env_names and bool(package_env.get(name)),
+            ))
         env_path = stage / "state" / "env"
         _write_private_text(env_path, "\n".join(env_lines) + "\n")
 
         print(f"[provision] uploading {_provision_dir_display(os_provision_dir, root)}/ to remote")
         rc = _ssh_retry(profile, "prepare linux provision directory",
-                        "rm -rf ~/provision/state ~/provision/scripts ~/provision/logs && mkdir -p ~/provision/state")
+                        "rm -rf ~/provision/state ~/provision/scripts ~/provision/logs && mkdir -p ~/provision/state"
+                        " && chmod 0700 ~/provision/state")
         if rc:
             return rc
         for local_path, remote_rel in stage_files:
@@ -362,6 +367,8 @@ def provision_ubuntu(profile: str, env: dict[str, str], root: Path) -> int:
         rc = _ssh_retry_scp(profile, "upload linux environment",
                             str(stage / "state" / "env"), "provision/state/")
         if rc:
+            _ssh_retry(profile, "remove linux provision environment after upload failure",
+                       "rm -f ~/provision/state/env")
             return rc
         rc = _ssh_retry(profile, "protect linux provision environment",
                         "chmod 0600 ~/provision/state/env")
@@ -444,8 +451,8 @@ def provision_windows(profile: str, env: dict[str, str], root: Path) -> int:
         )
         state_dir = stage / "provision" / "state"
         state_dir.mkdir(parents=True, exist_ok=True)
-        (state_dir / "env.json").write_text(
-            json.dumps(env_json, indent=2) + "\n", encoding="utf-8"
+        _write_private_text(
+            state_dir / "env.json", json.dumps(env_json, indent=2) + "\n"
         )
 
         for plugin_path, step in _plugin_windows_steps(plugin_doc, bundle_packages):
@@ -491,25 +498,32 @@ def provision_windows(profile: str, env: dict[str, str], root: Path) -> int:
                         'Remove-Item -Recurse -Force "C:\\Users\\Administrator\\provision\\state" }; '
                         'if (Test-Path "C:\\Users\\Administrator\\provision\\logs") { '
                         'Remove-Item -Recurse -Force "C:\\Users\\Administrator\\provision\\logs" }; '
-                        'New-Item -ItemType Directory -Force C:\\Users\\Administrator\\provision\\state | Out-Null')
+                        'New-Item -ItemType Directory -Force C:\\Users\\Administrator\\provision\\state | Out-Null; '
+                        'icacls "C:\\Users\\Administrator\\provision\\state" /inheritance:r '
+                        '/grant:r "Administrator:(OI)(CI)F" "SYSTEM:(OI)(CI)F" | Out-Null; '
+                        'if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }')
         if rc:
             return rc
         rc = _ssh_retry_scp(profile, "upload windows provision tree",
                             str(stage / "provision"), "/C:/Users/Administrator/")
         if rc:
+            _ssh_retry(
+                profile, "remove windows provision environment after upload failure",
+                windows_secret_cleanup(r"C:\Users\Administrator\provision\state\env.json"),
+            )
             return rc
         rc = _ssh_retry(
             profile,
             "protect windows provision environment",
             'icacls "C:\\Users\\Administrator\\provision\\state\\env.json" '
-            '/inheritance:r /grant:r "Administrator:F" "SYSTEM:F" | Out-Null',
+            '/inheritance:r /grant:r "Administrator:F" "SYSTEM:F" | Out-Null; '
+            'if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }',
         )
         if rc:
             _ssh_retry(
                 profile,
                 "remove unprotected windows provision environment",
-                'Remove-Item -Force -ErrorAction SilentlyContinue '
-                '"C:\\Users\\Administrator\\provision\\state\\env.json"',
+                windows_secret_cleanup(r"C:\Users\Administrator\provision\state\env.json"),
             )
             return rc
         print("[provision] running bootstrap.ps1")
@@ -522,8 +536,7 @@ def provision_windows(profile: str, env: dict[str, str], root: Path) -> int:
             _ssh_retry(
                 profile,
                 "remove windows provision environment after bootstrap failure",
-                'Remove-Item -Force -ErrorAction SilentlyContinue '
-                '"C:\\Users\\Administrator\\provision\\state\\env.json"',
+                windows_secret_cleanup(r"C:\Users\Administrator\provision\state\env.json"),
             )
             return result.returncode
         poll_interval = os.environ.get("EVE_PROVISION_WAIT_POLL_INTERVAL", "5")
@@ -532,8 +545,7 @@ def provision_windows(profile: str, env: dict[str, str], root: Path) -> int:
         cleanup_rc = _ssh_retry(
             profile,
             "remove windows provision environment",
-            'Remove-Item -Force -ErrorAction SilentlyContinue '
-            '"C:\\Users\\Administrator\\provision\\state\\env.json"',
+            windows_secret_cleanup(r"C:\Users\Administrator\provision\state\env.json"),
         )
         return rc if rc else cleanup_rc
     finally:
