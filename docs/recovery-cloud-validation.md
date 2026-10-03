@@ -1,6 +1,6 @@
 # v4.5 recovery validation in Cloud
 
-Validated on 2026-10-04 from fresh GitHub recovery checkouts. No backup files or
+Validated on 2026-10-03 UTC from fresh GitHub recovery checkouts. No backup files or
 ignored personal configuration were used. All five initial heads matched the
 recovery request:
 
