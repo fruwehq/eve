@@ -77,7 +77,10 @@ def test_provider_context_resolver_uses_shared_config_secret_path(monkeypatch: A
         lambda kind, plugin_id: {
             "id": plugin_id,
             "kind": "provider",
-            "config_schema": {"secrets": {"api_key": {"env_var": "VULTR_API_KEY"}}},
+            "config_schema": {
+                "config": {"region": {"env_var": "VULTR_REGION"}},
+                "secrets": {"api_key": {"env_var": "VULTR_API_KEY"}},
+            },
         },
     )
     monkeypatch.setattr("eve_sdk.provider_command.Secrets.read", staticmethod(lambda name: {"api_key": "SECRET"}))
@@ -121,3 +124,97 @@ def test_core_provider_machine_configured_from_required_secret(monkeypatch: Any)
     # the connectivity probe succeeds -> reachable
     fsm.fire("provider", "vultr", "probe_ok")
     assert _leaves(fsm) == ["reachable"]
+
+
+def test_core_provider_machine_honors_required_config(monkeypatch: Any) -> None:
+    from eve_sdk.fsm import EveFsm, provider_configured_resolver
+
+    monkeypatch.delenv("AWS_PROFILE", raising=False)
+    box = {"env": {}}
+    monkeypatch.setattr(
+        "eve_sdk.config.ConfigEnv.environment",
+        classmethod(lambda cls, *a, **k: dict(box["env"])),
+    )
+    monkeypatch.setattr(
+        "eve_sdk.provider_command._load_public_plugin",
+        lambda kind, plugin_id: {
+            "id": plugin_id,
+            "kind": "provider",
+            "config_schema": {
+                "config": {"profile": {"required": True, "env_var": "AWS_PROFILE"}}
+            },
+        },
+    )
+    monkeypatch.setattr(
+        "eve_sdk.provider_command.Secrets.read", staticmethod(lambda name: {})
+    )
+
+    fsm = EveFsm(provider_configured_resolver())
+    core = (Path(__file__).resolve().parents[1] / "core" / "fsm" / "provider.yaml").read_text()
+    fsm.load("provider", core)
+    fsm.fire("provider", "aws", "resolve")
+    assert fsm.state("provider", "aws") == "unconfigured"
+
+    box["env"] = {"AWS_PROFILE": "eve"}
+    fsm.refresh("provider", "aws")
+    fsm.fire("provider", "aws", "resolve")
+    assert fsm.state("provider", "aws") == "unreachable"
+
+
+def test_core_provider_machine_honors_required_any(monkeypatch: Any) -> None:
+    from eve_sdk.fsm import EveFsm, provider_configured_resolver
+
+    box = {"env": {}}
+    monkeypatch.setattr(
+        "eve_sdk.config.ConfigEnv.environment",
+        classmethod(lambda cls, *a, **k: dict(box["env"])),
+    )
+    plugin = {
+        "id": "aws",
+        "kind": "provider",
+        "config_schema": {
+            "config": {"profile": {"env_var": "AWS_PROFILE"}},
+            "required_any": [
+                ["config.profile"],
+                ["secrets.access_key", "secrets.secret_key"],
+            ],
+            "secrets": {
+                "access_key": {"env_var": "AWS_ACCESS_KEY_ID"},
+                "secret_key": {"env_var": "AWS_SECRET_ACCESS_KEY"},
+            },
+        },
+    }
+    monkeypatch.setattr(
+        "eve_sdk.provider_command._load_public_plugin",
+        lambda kind, plugin_id: plugin,
+    )
+    box_secrets: dict[str, str] = {}
+    monkeypatch.setattr(
+        "eve_sdk.provider_command.Secrets.read",
+        staticmethod(lambda name: dict(box_secrets)),
+    )
+
+    fsm = EveFsm(provider_configured_resolver())
+    core = (
+        Path(__file__).resolve().parents[1] / "core" / "fsm" / "provider.yaml"
+    ).read_text()
+    fsm.load("provider", core)
+
+    fsm.fire("provider", "aws", "resolve")
+    assert fsm.state("provider", "aws") == "unconfigured"
+
+    box_secrets["access_key"] = "ACCESS"
+    fsm.refresh("provider", "aws")
+    fsm.fire("provider", "aws", "resolve")
+    assert fsm.state("provider", "aws") == "unconfigured"
+
+    box_secrets["secret_key"] = "SECRET"
+    fsm.refresh("provider", "aws")
+    fsm.fire("provider", "aws", "resolve")
+    assert fsm.state("provider", "aws") == "unreachable"
+
+    box_secrets.clear()
+    box["env"] = {"AWS_PROFILE": "eve"}
+    fsm.refresh("provider", "aws")
+    fsm.fire("provider", "aws", "resolve")
+    assert fsm.state("provider", "aws") == "unreachable"

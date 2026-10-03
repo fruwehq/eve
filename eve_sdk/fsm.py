@@ -168,26 +168,20 @@ class EveFsm:
 def provider_context_resolver() -> ContextResolver:
     """The real :data:`ContextResolver` for provider machines.
 
-    Each declared external variable is named as its eve env var (e.g. ``VULTR_API_KEY``)
-    and resolved from the *one* path dispatch uses — ``os.environ`` +
-    ``ConfigEnv.environment()`` + injected secrets — so a provider's FSM context and what
-    dispatch runs with are identical (v4.5 bug M: status ≡ dispatch). ``key`` is the
-    provider id.
+    Each declared external variable is named as its eve env var (e.g. ``PROVIDER_API_KEY``)
+    and resolved from the one environment builder dispatch uses, so a provider's
+    FSM context and what dispatch runs with are identical (v4.5 bug M: status ≡
+    dispatch). ``key`` is the provider id.
 
     (Systemic follow-up: drop ambient ``os.environ`` from *both* this resolver and
     dispatch so no config reaches a plugin behind eve's back; kept here for now to
     preserve exact parity.)
     """
-    import os
-
-    from eve_sdk.config import ConfigEnv
-    from eve_sdk.provider_command import _inject_secrets, _load_public_plugin
+    from eve_sdk.provider_command import _load_public_plugin, resolved_provider_environment
 
     def resolve(scope: str, key: str, names: list[str]) -> dict[str, Any]:
-        env = dict(os.environ)
-        env.update(ConfigEnv.environment())
         plugin = _load_public_plugin("provider", key)
-        env = _inject_secrets(key, plugin, env)
+        env = resolved_provider_environment(key, plugin)
         return {name: env.get(name, "") for name in names}
 
     return resolve
@@ -196,26 +190,21 @@ def provider_context_resolver() -> ContextResolver:
 def provider_configured_resolver() -> ContextResolver:
     """The :data:`ContextResolver` for the core provider machine (``core/fsm/provider.yaml``).
 
-    Derives ``is_configured`` = True iff every ``required`` config_schema secret/setting
-    of the provider resolves to a non-empty value via the one shared path (``os.environ``
-    + ``ConfigEnv.environment()`` + injected secrets). So "configured" is eve-resolved,
-    never a plugin's ambient self-report (the AWS-off-``~/.aws`` bug is structurally
-    impossible). ``key`` is the provider id; ``names`` is typically ``["is_configured"]``.
+    Derives ``is_configured`` from both universally ``required`` fields and the
+    optional ``required_any`` alternatives. Every universal field must be set,
+    and at least one alternative group must be complete. So "configured" is
+    eve-resolved, never a plugin's connectivity self-report. ``key`` is the
+    provider id; ``names`` is typically ``["is_configured"]``.
     """
-    import os
-
-    from eve_sdk.config import ConfigEnv
-    from eve_sdk.provider_command import _inject_secrets, _load_public_plugin
+    from eve_sdk.provider_command import _load_public_plugin, resolved_provider_environment
 
     def resolve(scope: str, key: str, names: list[str]) -> dict[str, Any]:
         plugin = _load_public_plugin("provider", key)
-        env = dict(os.environ)
-        env.update(ConfigEnv.environment())
-        env = _inject_secrets(key, plugin, env)
+        env = resolved_provider_environment(key, plugin)
         schema = plugin.get("config_schema") or {}
         required = [
             (field, spec)
-            for section in ("secrets", "settings")
+            for section in ("config", "secrets")
             for field, spec in (schema.get(section) or {}).items()
             if isinstance(spec, Mapping) and spec.get("required")
         ]
@@ -223,11 +212,27 @@ def provider_configured_resolver() -> ContextResolver:
         def present(field: str, spec: Mapping[str, Any]) -> bool:
             candidates = [field]
             env_var = spec.get("env_var")
-            if env_var:
+            if isinstance(env_var, list):
+                candidates.extend(str(name) for name in env_var)
+            elif env_var:
                 candidates.append(str(env_var))
             return any(env.get(candidate) for candidate in candidates)
 
-        values: dict[str, Any] = {"is_configured": all(present(f, s) for f, s in required)}
+        alternatives = schema.get("required_any") or []
+
+        def referenced_present(reference: str) -> bool:
+            section, field = reference.split(".", 1)
+            spec = (schema.get(section) or {}).get(field)
+            return isinstance(spec, Mapping) and present(field, spec)
+
+        required_ok = all(present(field, spec) for field, spec in required)
+        alternatives_ok = not alternatives or any(
+            all(referenced_present(str(reference)) for reference in group)
+            for group in alternatives
+        )
+        values: dict[str, Any] = {
+            "is_configured": required_ok and alternatives_ok
+        }
         return {name: values.get(name, "") for name in names}
 
     return resolve

@@ -38,7 +38,28 @@ def test_package_lifecycle() -> None:
     fsm.fire("package", "x", "install_ok")
     assert fsm.leaves("package", "x") == ["installed"]
 
-    fsm.fire("package", "x", "absent")            # drift: disappeared out of band
+    fsm.fire("package", "x", "install")           # reinstall
+    assert fsm.leaves("package", "x") == ["installing"]
+    fsm.fire("package", "x", "install_ok")
+
+    fsm.fire("package", "x", "remove")
+    assert fsm.leaves("package", "x") == ["removing"]
+    fsm.fire("package", "x", "remove_fail")
+    assert fsm.leaves("package", "x") == ["failed"]
+
+    fsm.fire("package", "x", "remove")             # retry
+    fsm.fire("package", "x", "remove_ok")
+    assert fsm.leaves("package", "x") == ["removed"]
+
+    fsm.fire("package", "x", "found")              # appeared out of band
+    assert fsm.leaves("package", "x") == ["installed"]
+
+    fsm.fire("package", "x", "install")
+    fsm.fire("package", "x", "found")              # authoritative observation
+    assert fsm.leaves("package", "x") == ["installed"]
+
+    fsm.fire("package", "x", "remove")
+    fsm.fire("package", "x", "absent")             # authoritative observation
     assert fsm.leaves("package", "x") == ["missing"]
 
 
@@ -68,7 +89,7 @@ def test_instance_provider_lifecycle() -> None:
 
 def test_instance_provision_lifecycle() -> None:
     fsm = _fsm("instance", machine_id="instance_provision")
-    assert fsm.leaves("instance", "x") == ["unprovisioned"]
+    assert fsm.leaves("instance", "x") == ["unknown"]
 
     fsm.fire("instance", "x", "provision")
     fsm.fire("instance", "x", "provision_ok")
@@ -76,7 +97,7 @@ def test_instance_provision_lifecycle() -> None:
 
     fsm.fire("instance", "x", "provision")        # re-converge
     fsm.fire("instance", "x", "provision_fail")
-    assert fsm.leaves("instance", "x") == ["provision_error"]
+    assert fsm.leaves("instance", "x") == ["error"]
 
     fsm.fire("instance", "x", "provision")        # retry
     fsm.fire("instance", "x", "provision_ok")

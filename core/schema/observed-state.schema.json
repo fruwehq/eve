@@ -131,7 +131,7 @@
       "properties": {
         "status": {
           "type": "string",
-          "enum": ["unknown", "installing", "installed", "missing", "failed", "removed"]
+          "enum": ["failed", "installed", "installing", "missing", "removed", "removing", "unknown"]
         },
         "updated_at": {
           "type": "string",
@@ -153,6 +153,10 @@
         "name": {
           "type": "string",
           "description": "Dotted operation name (e.g. provider.up, package.install)."
+        },
+        "package": {
+          "type": "string",
+          "description": "Package id for a package operation."
         },
         "type": {
           "type": "string",

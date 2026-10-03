@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import shutil
@@ -12,7 +13,12 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-os.environ["EVE_PLUGIN_ROOTS"] = str(Path(__file__).resolve().parents[1] / "tests/fixtures/hermetic")
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--plugin-roots", help="Explicit OS plugin roots for cross-repository runner tests")
+args = parser.parse_args()
+os.environ["EVE_PLUGIN_ROOTS"] = args.plugin_roots or str(
+    Path(__file__).resolve().parents[1] / "tests/fixtures/hermetic"
+)
 os.environ["EVE_PLUGIN_ROOTS_EXCLUSIVE"] = "1"
 os.environ.setdefault("EVE_HOME", tempfile.mkdtemp(prefix="eve-prov."))
 
@@ -237,8 +243,10 @@ print("\n== provision-runner: windows (powershell) ==")
 pwsh = shutil.which("pwsh")
 if pwsh:
     for name, body, expected_status in [
-        ("ok", "Write-Host 'ok'; exit 0", "done"),
         ("fail", "Write-Error 'fail'; exit 42", "failed"),
+        ("native-info", "& (Get-Process -Id $PID).Path -NoProfile -Command 'exit 7'", "done"),
+        ("ok", "Write-Host 'ok'; exit 0", "done"),
+        ("throw", "throw 'failed step'", "failed"),
     ]:
         with tempfile.TemporaryDirectory(prefix=f"eve-runner-pwsh-{name}-") as tmp:
             root = Path(tmp)
@@ -248,7 +256,7 @@ if pwsh:
             logs_dir = prov_dir / "logs"
             for path in [steps_dir, state_dir, logs_dir]:
                 path.mkdir(parents=True, exist_ok=True)
-            step_name = f"00_{name}.ps1" if name == "ok" else "00_fail.ps1"
+            step_name = f"00_{name}.ps1"
             (steps_dir / step_name).write_text(body, encoding="utf-8")
             (state_dir / "state.json").write_text('{"currentStep":0}', encoding="utf-8")
             (state_dir / "steps.list").write_text(step_name + "\n", encoding="utf-8")
@@ -269,7 +277,7 @@ if pwsh:
             else:
                 actual_status = status.get("status") if status else "nil"
                 fail_check(f"Windows runner status: expected={expected_status} actual={actual_status}")
-            if expected_status == "failed":
+            if name == "fail":
                 actual_exit = status["steps"][0]["exit_code"] if status else None
                 pass_check("Windows runner captures exit_code=42") if actual_exit == 42 else fail_check(
                     f"Windows runner exit_code: expected=42 actual={actual_exit}"

@@ -5,9 +5,13 @@ on:
     branches:
       - main
   pull_request:
+    types: [opened, ready_for_review, reopened, synchronize]
   schedule:
     - cron: "0 9 * * *"
   workflow_dispatch:
+
+env:
+  POETRY_VIRTUALENVS_IN_PROJECT: "true"
 
 jobs:
   test:

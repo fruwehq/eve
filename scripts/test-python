@@ -37,7 +37,7 @@ def main() -> int:
             return code
 
         code = subprocess.run(
-            ["poetry", "run", "pytest", "tests/python"],
+            ["poetry", "run", "pytest", "tests"],
             cwd=str(ROOT), check=False,
         ).returncode
         if code != 0:

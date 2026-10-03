@@ -1,20 +1,19 @@
 """Instance-lifecycle transitions, driven by the core instance machine.
 
-The single authority for how a provider operation moves an instance's
-``provider_state``: dispatch computes the next state by **firing an event into the
-``instance_provider`` machine of ``core/fsm/instance.yaml``** seeded from the
-persisted state, not from a second, hand-maintained transition table. The machine
-bundle *is* the lifecycle; this module is the thin, fast adapter eve calls (and the
-persisted ``provider_state`` a status read sees is therefore exactly what the
-machine produced — bug N).
+The single authority for how an instance operation moves its ``provider_state``,
+``provision_state``, or per-package state: dispatch computes the next state by
+**firing an event into the corresponding core machine** seeded from the persisted
+state, not from a second, hand-maintained transition table. The machine bundle *is*
+the lifecycle; this module is the thin, fast adapter Eve calls (and the persisted
+state a status read sees is therefore exactly what the machine produced — bug N).
 
 The engine is pure-functional (``create``/``dispatch`` over plain aggregate-state
-dicts), so "seeding from the persisted state" is: reach each provider leaf once from
-a fresh aggregate by replaying a short event prefix, cache that aggregate per leaf,
-then dispatch the real event against it — dispatch never mutates its input, so the
-cache stays valid. Only the provider machine is driven here; the persisted
-``provision_state`` field keeps its own vocabulary until the ``instance_provision``
-machine is wired the same way.
+dicts), so "seeding from the persisted state" is: reach each lifecycle leaf once
+from a fresh aggregate by replaying a short event prefix, cache that aggregate per
+leaf, then dispatch the real event against it — dispatch never mutates its input, so
+the cache stays valid. This is deliberately limited to these context-free finite
+graphs; a future stateful machine must persist and restore its full aggregate instead
+of extending seed-by-replay.
 """
 
 from __future__ import annotations
@@ -42,7 +41,7 @@ PROVIDER_LEAVES = {
 # The shortest event prefix that reaches each leaf from a fresh aggregate; every
 # concrete state accepts every operator command, so each transient is one event away
 # and `error` is two.
-_SEED_EVENTS: dict[str, list[str]] = {
+_PROVIDER_SEED_EVENTS: dict[str, list[str]] = {
     "unknown": [],
     "creating": ["create"],
     "starting": ["start"],
@@ -54,14 +53,52 @@ _SEED_EVENTS: dict[str, list[str]] = {
     "error": ["create", "op_fail"],
 }
 
-_MACHINE_ID = "instance_provider"
+PROVISION_LEAVES = {"unknown", "provisioning", "provisioned", "error"}
 
-_bundle: Any = None
-_seeded: dict[str, dict[str, Any]] = {}
+_PROVISION_SEED_EVENTS: dict[str, list[str]] = {
+    "unknown": [],
+    "provisioning": ["provision"],
+    "provisioned": ["provision", "provision_ok"],
+    "error": ["provision", "provision_fail"],
+}
+
+PACKAGE_LEAVES = {
+    "failed",
+    "installed",
+    "installing",
+    "missing",
+    "removed",
+    "removing",
+    "unknown",
+}
+
+_PACKAGE_SEED_EVENTS: dict[str, list[str]] = {
+    "failed": ["observe_failed"],
+    "installed": ["found"],
+    "installing": ["install"],
+    "missing": ["absent"],
+    "removed": ["remove", "remove_ok"],
+    "removing": ["remove"],
+    "unknown": [],
+}
+
+_bundles: dict[str, Any] = {}
+_seeded: dict[tuple[str, str, str], dict[str, Any]] = {}
 _sequence = 0
 
 
-def _dispatch(state: dict[str, Any], event: str) -> dict[str, Any]:
+def _bundle(filename: str) -> Any:
+    bundle = _bundles.get(filename)
+    if bundle is None:
+        bundle_yaml = (Workdir.repo_root() / "core" / "fsm" / filename).read_text(
+            encoding="utf-8"
+        )
+        bundle = engine.load_bundle(bundle_yaml)
+        _bundles[filename] = bundle
+    return bundle
+
+
+def _dispatch(bundle: Any, state: dict[str, Any], event: str) -> dict[str, Any]:
     """One input-event RTC step; returns the (new) aggregate state."""
     global _sequence
     _sequence += 1
@@ -76,24 +113,26 @@ def _dispatch(state: dict[str, Any], event: str) -> dict[str, Any]:
         },
         "payload": {},
     }
-    result = engine.dispatch(_bundle, state, {"input": envelope})
+    result = engine.dispatch(bundle, state, {"input": envelope})
     new_state: dict[str, Any] = result["state"]
     return new_state
 
 
-def _seeded_aggregate(leaf: str) -> dict[str, Any]:
-    """The cached aggregate whose provider machine sits at ``leaf``."""
-    global _bundle
-    if _bundle is None:
-        bundle_yaml = (Workdir.repo_root() / "core" / "fsm" / "instance.yaml").read_text(encoding="utf-8")
-        _bundle = engine.load_bundle(bundle_yaml)
-    state = _seeded.get(leaf)
+def _seeded_aggregate(
+    filename: str, machine_id: str, leaf: str, seed_events: dict[str, list[str]]
+) -> dict[str, Any]:
+    """The cached aggregate whose selected lifecycle machine sits at ``leaf``."""
+    bundle = _bundle(filename)
+    cache_key = (filename, machine_id, leaf)
+    state = _seeded.get(cache_key)
     if state is None:
-        state = engine.create(_bundle, _MACHINE_ID, leaf, f"eve-seed-{leaf}", None)["state"]
-        for event in _SEED_EVENTS[leaf]:
-            state = _dispatch(state, event)
+        state = engine.create(
+            bundle, machine_id, leaf, f"eve-seed-{machine_id}-{leaf}", None
+        )["state"]
+        for event in seed_events[leaf]:
+            state = _dispatch(bundle, state, event)
         assert leaf_names(state) == [leaf]
-        _seeded[leaf] = state
+        _seeded[cache_key] = state
     return state
 
 
@@ -134,5 +173,84 @@ def provider_state_after(current: str, event: str | None) -> str | None:
     if event is None:
         return None
     leaf = current if current in PROVIDER_LEAVES else "unknown"
-    moved = leaf_names(_dispatch(_seeded_aggregate(leaf), event))
+    bundle = _bundle("instance.yaml")
+    moved = leaf_names(
+        _dispatch(
+            bundle,
+            _seeded_aggregate(
+                "instance.yaml", "instance_provider", leaf, _PROVIDER_SEED_EVENTS
+            ),
+            event,
+        )
+    )
+    return moved[0] if moved else leaf
+
+
+def provision_event(op_status: str) -> str | None:
+    """Map a provision operation status to an instance-provision event."""
+    return {
+        "running": "provision",
+        "succeeded": "provision_ok",
+        "failed": "provision_fail",
+    }.get(op_status)
+
+
+def provision_state_after(current: str, event: str | None) -> str | None:
+    """The provision_state after firing ``event`` from ``current``."""
+    if event is None:
+        return None
+    leaf = current if current in PROVISION_LEAVES else "unknown"
+    bundle = _bundle("instance.yaml")
+    moved = leaf_names(
+        _dispatch(
+            bundle,
+            _seeded_aggregate(
+                "instance.yaml", "instance_provision", leaf, _PROVISION_SEED_EVENTS
+            ),
+            event,
+        )
+    )
+    return moved[0] if moved else leaf
+
+
+def package_operation_event(command: str, op_status: str) -> str | None:
+    """Map a package operation status to a package-machine event."""
+    if command in {"install", "reinstall"}:
+        return {
+            "failed": "install_fail",
+            "running": "install",
+            "succeeded": "install_ok",
+        }.get(op_status)
+    if command == "down":
+        return {
+            "failed": "remove_fail",
+            "running": "remove",
+            "succeeded": "remove_ok",
+        }.get(op_status)
+    return None
+
+
+def package_observation_event(status: str) -> str | None:
+    """Map a validated package status result to an observation event."""
+    return {
+        "failed": "observe_failed",
+        "installed": "found",
+        "missing": "absent",
+        "unknown": "observe_unknown",
+    }.get(status)
+
+
+def package_state_after(current: str, event: str | None) -> str | None:
+    """The package state after firing ``event`` from ``current``."""
+    if event is None:
+        return None
+    leaf = current if current in PACKAGE_LEAVES else "unknown"
+    bundle = _bundle("package.yaml")
+    moved = leaf_names(
+        _dispatch(
+            bundle,
+            _seeded_aggregate("package.yaml", "package", leaf, _PACKAGE_SEED_EVENTS),
+            event,
+        )
+    )
     return moved[0] if moved else leaf

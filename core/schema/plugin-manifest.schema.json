@@ -193,6 +193,20 @@
             "$ref": "#/$defs/field_spec"
           }
         },
+        "required_any": {
+          "description": "Provider-only alternative complete credential/configuration groups. At least one group must have every referenced field set. References use config.<field> or secrets.<field>.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "pattern": "^(config|secrets)\\.[a-z][a-z0-9_]*$"
+            },
+            "uniqueItems": true
+          }
+        },
         "secrets": {
           "type": "object",
           "additionalProperties": {

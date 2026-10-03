@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -24,8 +25,13 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from eve_sdk.config import ConfigEnv  # noqa: E402
-from eve_sdk.package_dispatch import emit_json  # noqa: E402
+from eve_sdk.package_dispatch import (  # noqa: E402
+    emit_json,
+    package_environment_names,
+    resolved_package_set_environment,
+)
 from eve_sdk.resolve import instance_package_config  # noqa: E402
+from eve_sdk.secrets import write_private_text  # noqa: E402
 from eve_sdk.tf_dispatch import repo_root, resolve_env  # noqa: E402
 
 _USAGE = (
@@ -85,8 +91,14 @@ def _ssh_retry(label: str, cmd: list[str]) -> int:
     return subprocess.run([str(ROOT / "scripts/ssh-retry"), label, *cmd]).returncode
 
 
-def _env_line(key: str, value: str) -> str:
-    return f'export {key}="{value}"'
+def _env_line(key: str, value: str, *, remote_home: bool = False) -> str:
+    if remote_home:
+        return f'export {key}="$HOME"/{shlex.quote(value.removeprefix("$HOME/"))}'
+    return f"export {key}={shlex.quote(value)}"
+
+
+def _write_private_text(path: Path, value: str) -> None:
+    write_private_text(path, value)
 
 
 def main(argv: list[str]) -> int:
@@ -173,6 +185,25 @@ def main(argv: list[str]) -> int:
     if not chain:
         print(f"package-provision: no install chain for {package}", file=sys.stderr)
         return 2
+
+    chain_ids = {str(plugin["id"]) for plugin in chain}
+    applicable_ids = chain_ids
+    applicable_plugins = [
+        plugin for plugin in plugins if str(plugin["id"]) in applicable_ids
+    ]
+    all_package_config = instance_package_config(instance_name)
+    applicable_config = {
+        package_id: value
+        for package_id, value in all_package_config.items()
+        if package_id in applicable_ids
+    }
+    package_env = resolved_package_set_environment(
+        applicable_plugins, applicable_config
+    )
+    applicable_env_names = package_environment_names(applicable_plugins)
+    stage_env_names = package_environment_names(
+        applicable_plugins, path_config_only=True
+    )
 
     steps: list[str] = []
     step_roots: list[str] = []
@@ -280,7 +311,7 @@ def main(argv: list[str]) -> int:
             bundle_packages.replace(",", "\n") + "\n"
         )
 
-        host_tz = os.environ.get("TIMEZONE", "")
+        host_tz = package_env.get("TIMEZONE", "")
         if not host_tz:
             tz_result = subprocess.run(
                 [str(ROOT / "scripts/host-timezone")],
@@ -292,15 +323,15 @@ def main(argv: list[str]) -> int:
         # the remote and rewrite each env var to its remote path — generic, so
         # core names no package. (local_path, remote_rel_dir); uploaded below.
         stage_files: list[tuple[str, str]] = []
-        for stage_var in ConfigEnv.package_stage_env_names():
-            local_path = os.environ.get(stage_var, "")
+        for stage_var in stage_env_names:
+            local_path = package_env.get(stage_var, "")
             if not local_path:
                 continue
             if not Path(local_path).exists():
                 print(f"package-provision: {stage_var} does not exist: {local_path}", file=sys.stderr)
                 return 2
             remote_rel = f"provision/downloads/{stage_var.lower()}"
-            os.environ[stage_var] = f"$HOME/{remote_rel}/{Path(local_path).name}"
+            package_env[stage_var] = f"$HOME/{remote_rel}/{Path(local_path).name}"
             stage_files.append((local_path, remote_rel))
 
         # Core (non-plugin) provision env; plugin env appended generically below
@@ -315,28 +346,27 @@ def main(argv: list[str]) -> int:
             _env_line("PROVISION_USER_NAME", resolved.get("PROVISION_USER_NAME", "")),
             _env_line("VM_USER_NAME", resolved.get("VM_USER_NAME", "")),
             _env_line("VM_USER_PASSWORD", os.environ.get("VM_USER_PASSWORD", "")),
-            _env_line("EPHEMERAL_DISPLAY_RESOLUTION", os.environ.get("EPHEMERAL_DISPLAY_RESOLUTION", "")),
-            _env_line("EPHEMERAL_DISPLAY_FPS", os.environ.get("EPHEMERAL_DISPLAY_FPS", "")),
+            _env_line("EPHEMERAL_DISPLAY_RESOLUTION", package_env.get("EPHEMERAL_DISPLAY_RESOLUTION", "")),
+            _env_line("EPHEMERAL_DISPLAY_FPS", package_env.get("EPHEMERAL_DISPLAY_FPS", "")),
             _env_line("PROVIDER", provider),
             _env_line("TIMEZONE", host_tz),
-            _env_line("VIRTUAL_MONITOR_WIDTH", os.environ.get("VIRTUAL_MONITOR_WIDTH", "1920")),
-            _env_line("VIRTUAL_MONITOR_HEIGHT", os.environ.get("VIRTUAL_MONITOR_HEIGHT", "1080")),
         ]
-        # Per-instance package option overrides (§16): instance scope wins over
-        # the user-scope config-env in os.environ before the generic plugin loop
-        # reads it. Field→env_var mapping comes from each package manifest.
-        os.environ.update(ConfigEnv.instance_package_env(instance_package_config(instance_name)))
         env_lines += [
-            _env_line(_name, os.environ.get(_name, ""))
-            for _name in ConfigEnv.plugin_provision_env_names()
+            _env_line(
+                name, package_env.get(name, ""),
+                remote_home=name in stage_env_names and bool(package_env.get(name)),
+            )
+            for name in applicable_env_names
         ]
-        (stage / "state" / "env").write_text("\n".join(env_lines) + "\n")
+        env_path = stage / "state" / "env"
+        _write_private_text(env_path, "\n".join(env_lines) + "\n")
 
         print(f"[package-provision] uploading {os_provision_dir} scripts for package={package}")
         uploads: list[tuple[str, list[str]]] = [(
             "prepare linux package provision directory",
             [ssh, instance_name, "--",
-             "rm -rf ~/provision/scripts && mkdir -p ~/provision/state ~/provision/logs ~/provision/downloads"],
+             "rm -rf ~/provision/scripts && mkdir -p ~/provision/state ~/provision/logs ~/provision/downloads"
+             " && chmod 0700 ~/provision/state"],
         )]
         for local_path, remote_rel in stage_files:
             uploads.append((
@@ -361,19 +391,43 @@ def main(argv: list[str]) -> int:
         for label, cmd in uploads:
             status = _ssh_retry(label, cmd)
             if status != 0:
+                if label == "upload linux package environment":
+                    _ssh_retry(
+                        "remove linux package environment after upload failure",
+                        [ssh, instance_name, "--", "rm -f ~/provision/state/env"],
+                    )
                 return status
+
+        status = _ssh_retry(
+            "protect linux package environment",
+            [ssh, instance_name, "--", "chmod 0600 ~/provision/state/env"],
+        )
+        if status != 0:
+            _ssh_retry(
+                "remove unprotected linux package environment",
+                [ssh, instance_name, "--", "rm -f ~/provision/state/env"],
+            )
+            return status
 
         remote_steps = "".join(f" ~/provision/scripts/steps/{Path(s).name}" for s in steps)
         print(f"[package-provision] running package={package} steps:{remote_steps}")
         remote_cmd = (
-            'set -e; export PROVISION_ROOT="$HOME/provision"; '
+            'set -e; trap \'rm -f "$HOME/provision/state/env"\' EXIT; '
+            'export PROVISION_ROOT="$HOME/provision"; '
             '. "$HOME/provision/state/env"; '
             "chmod +x ~/provision/scripts/steps/*.sh ~/provision/scripts/lib/*.sh; "
             f"for step in{remote_steps}; do "
             'echo "[package-provision] running $(basename "$step")"; '
             '/usr/bin/env bash "$step"; done'
         )
-        return subprocess.run([ssh, instance_name, "--", remote_cmd]).returncode
+        try:
+            status = subprocess.run([ssh, instance_name, "--", remote_cmd]).returncode
+        finally:
+            cleanup_status = _ssh_retry(
+                "remove linux package environment",
+                [ssh, instance_name, "--", "rm -f ~/provision/state/env"],
+            )
+        return status if status else cleanup_status
     finally:
         shutil.rmtree(stage, ignore_errors=True)
 

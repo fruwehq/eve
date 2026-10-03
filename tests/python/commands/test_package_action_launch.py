@@ -4,23 +4,12 @@ from __future__ import annotations
 
 import importlib.machinery
 import importlib.util
-import os
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 ROOT = Path(__file__).resolve().parents[3]
-
-
-@pytest.fixture(autouse=True)
-def _restore_environ() -> Any:
-    """export_remote_context mutates os.environ; restore it between tests so the
-    EVE_REMOTE_* leak does not break byte-identical env tests elsewhere."""
-    snapshot = dict(os.environ)
-    yield
-    os.environ.clear()
-    os.environ.update(snapshot)
 
 
 def _load_package_action() -> Any:
@@ -39,14 +28,22 @@ def pa() -> Any:
     return _load_package_action()
 
 
-def _stub_spine(monkeypatch: pytest.MonkeyPatch, pa: Any, ip: str = "1.2.3.4") -> dict[str, list[list[str]]]:
-    monkeypatch.setattr(pa, "resolve_env", lambda root, inst: {"VM_USER_NAME": "alice", "OS_FAMILY": "ubuntu", "ENGINE": "terraform"})
+def _stub_spine(monkeypatch: pytest.MonkeyPatch, pa: Any, ip: str = "1.2.3.4") -> dict[str, Any]:
+    monkeypatch.setattr(
+        pa,
+        "resolve_env",
+        lambda root, inst: {
+            "ENGINE": "terraform",
+            "OS_FAMILY": "ubuntu",
+            "VM_USER_NAME": "alice",
+        },
+    )
     monkeypatch.setattr(pa, "instance_ip", lambda root, inst: ip)
-    monkeypatch.setattr(pa, "resolve_private_key", lambda: "/key")
-    captured: dict[str, list[list[str]]] = {"cmds": []}
+    captured: dict[str, Any] = {"cmds": [], "envs": []}
 
-    def fake_exec(cmd: list[str]) -> None:
+    def fake_exec(cmd: list[str], env: dict[str, str]) -> None:
         captured["cmds"].append(cmd)
+        captured["envs"].append(env)
 
     monkeypatch.setattr(pa, "exec_cmd", fake_exec)
     return captured
@@ -61,10 +58,14 @@ def test_exec_action_exports_remote_context_and_runs(
     action = {"id": "open", "label": "Open", "target": "pkg.open", "exec": "remote-open"}
 
     captured = _stub_spine(monkeypatch, pa)
-    pa.run_action_target(action, package, "inst", {}, tmp_path)
+    resolved = {"instance": {"name": "inst"}, "package_config": {}}
+    operation_env = {"SSH_PUBLIC_KEY_FILE": "/key.pub"}
+    pa.run_action_target(
+        action, package, "inst", {}, tmp_path, resolved, operation_env
+    )
 
     assert captured["cmds"] == [[str(tmp_path / "remote-open")]]
-    env = os.environ
+    env = captured["envs"][0]
     assert env["EVE_REMOTE_IP"] == "1.2.3.4"
     assert env["EVE_REMOTE_USER"] == "alice"
     assert env["EVE_REMOTE_OS_FAMILY"] == "ubuntu"
@@ -83,7 +84,10 @@ def test_exec_action_wait_for_runs_target_first(pa: Any, monkeypatch: pytest.Mon
     target_map = {"pkg.wait": {"package": package, "action": wait_action}}
 
     captured = _stub_spine(monkeypatch, pa)
-    pa.run_action_target(open_action, package, "inst", target_map, tmp_path)
+    resolved = {"instance": {"name": "inst"}, "package_config": {}}
+    pa.run_action_target(
+        open_action, package, "inst", target_map, tmp_path, resolved, {}
+    )
 
     assert captured["cmds"] == [[str(tmp_path / "wait")], [str(tmp_path / "open")]]
 
@@ -93,4 +97,69 @@ def test_exec_action_missing_exec_fails_loudly(pa: Any, monkeypatch: pytest.Monk
     action = {"id": "open", "label": "Open", "target": "pkg.open", "exec": "no-such-file"}
     _stub_spine(monkeypatch, pa)
     with pytest.raises(pa.DispatchError, match="launcher exec not found"):
-        pa.run_action_target(action, package, "inst", {}, tmp_path)
+        pa.run_action_target(
+            action,
+            package,
+            "inst",
+            {},
+            tmp_path,
+            {"instance": {"name": "inst"}, "package_config": {}},
+            {},
+        )
+
+
+def test_main_uses_full_manifest_for_action_environment(
+    pa: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    action = {
+        "exec": "remote-open",
+        "id": "open",
+        "label": "Open",
+        "target": "pkg.open",
+    }
+    manifest = {
+        "_path": str(tmp_path / "eve-plugin.yaml"),
+        "_source": "test",
+        "actions": [action],
+        "config_schema": {
+            "secrets": {"token": {"env_var": "PKG_TOKEN"}},
+        },
+        "id": "pkg",
+    }
+    monkeypatch.setattr(pa, "process_environment", lambda: {})
+    monkeypatch.setattr(
+        pa,
+        "resolve_instance",
+        lambda instance, registry: {
+            "instance": {"name": instance},
+            "package_config": {},
+        },
+    )
+    monkeypatch.setattr(
+        pa,
+        "run_json",
+        lambda *args: {
+            "packages": [{"actions": [action], "id": "pkg", "path": "reduced"}]
+        },
+    )
+    monkeypatch.setattr(
+        pa.PluginManifest,
+        "load_all",
+        classmethod(lambda cls, kind: [manifest]),
+    )
+    monkeypatch.setattr(pa, "prepare_overlay", lambda instance, registry: "/overlay")
+    captured: dict[str, Any] = {}
+
+    def fake_run(
+        selected_action: dict[str, Any],
+        package: dict[str, Any],
+        *args: Any,
+    ) -> None:
+        captured["action"] = selected_action
+        captured["package"] = package
+
+    monkeypatch.setattr(pa, "run_action_target", fake_run)
+
+    assert pa.main(["--instance", "inst", "--package", "pkg", "--action", "open"]) == 0
+    assert captured["action"] == action
+    assert captured["package"]["config_schema"] == manifest["config_schema"]

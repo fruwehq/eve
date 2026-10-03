@@ -112,18 +112,18 @@ machines:
   - machine_id: instance_provision
     root:
       type: composite
-      initial: { transition_to: unprovisioned }
+      initial: { transition_to: unknown }
       states:
-        unprovisioned:
+        unknown:
           on_events:
             provision: { transition_to: provisioning }
         provisioning:
           on_events:
             provision_ok:   { transition_to: provisioned }
-            provision_fail: { transition_to: provision_error }
+            provision_fail: { transition_to: error }
         provisioned:
           on_events:
             provision: { transition_to: provisioning }   # re-converge
-        provision_error:
+        error:
           on_events:
             provision: { transition_to: provisioning }   # retry

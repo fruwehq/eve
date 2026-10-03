@@ -212,13 +212,15 @@ class ConfigEnv:
         provider declares none or the value is unset.
         """
         from eve_sdk.plugin_manifest import PluginManifest
+        from eve_sdk.provider_command import resolved_provider_environment
 
         for plugin in PluginManifest.load_all("provider"):
             if plugin.get("id") != provider_id:
                 continue
             bootstrap = plugin.get("bootstrap")
             if isinstance(bootstrap, dict) and bootstrap.get("sudo_password_env"):
-                return os.environ.get(str(bootstrap["sudo_password_env"]), "")
+                env = resolved_provider_environment(provider_id, plugin)
+                return env.get(str(bootstrap["sudo_password_env"]), "")
         return ""
 
     @classmethod
@@ -256,7 +258,12 @@ class ConfigEnv:
         return sorted(names)
 
     @classmethod
-    def provision_env_payload(cls, windows_password: str = "") -> dict[str, str]:
+    def provision_env_payload(
+        cls,
+        windows_password: str = "",
+        environment: dict[str, str] | None = None,
+        package_env_names: list[str] | None = None,
+    ) -> dict[str, str]:
         """Build the generic provision ``env.json`` payload (v4.4 §15).
 
         Core keys (``windows_password``, ``display_resolution``) plus every
@@ -265,12 +272,18 @@ class ConfigEnv:
         provision steps read their keys (e.g. a streaming host's version, a remote
         …) by construction — core names no package. Unset vars are omitted.
         """
+        source = os.environ if environment is None else environment
         payload: dict[str, str] = {
             "windows_password": windows_password,
-            "display_resolution": os.environ.get("EPHEMERAL_DISPLAY_RESOLUTION", ""),
+            "display_resolution": source.get("EPHEMERAL_DISPLAY_RESOLUTION", ""),
         }
-        for _path, env_var, _is_path in cls._plugin_mappings(kinds=("package",)):
-            value = os.environ.get(env_var, "")
+        env_names = (
+            cls.plugin_provision_env_names(kinds=("package",))
+            if package_env_names is None
+            else sorted(set(package_env_names))
+        )
+        for env_var in env_names:
+            value = source.get(env_var, "")
             if not value:
                 continue
             key = env_var.lower().removeprefix("ephemeral_")
