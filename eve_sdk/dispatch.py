@@ -21,12 +21,80 @@ class DispatchError(Exception):
     pass
 
 
+_PROCESS_ENV_NAMES = {
+    "COLORTERM",
+    "DBUS_SESSION_BUS_ADDRESS",
+    "DISPLAY",
+    "EVE_ALLOW_UNPINNED_PLUGINS",
+    "EVE_CONFIG_PATH",
+    "EVE_DISABLE_STATE",
+    "EVE_HOME",
+    "EVE_INSTANCE_REGISTRY",
+    "EVE_INSTANCE_WORKDIR",
+    "EVE_PACKAGE_DOWN_SSH",
+    "EVE_PACKAGE_STATUS_SSH",
+    "EVE_PLUGIN_ALLOW_OVERRIDE",
+    "EVE_PLUGIN_DRY_RUN",
+    "EVE_PLUGIN_ROOTS",
+    "EVE_PLUGIN_ROOTS_EXCLUSIVE",
+    "EVE_PLUGIN_SOURCES",
+    "EVE_PROVIDER_DRY_RUN",
+    "EVE_PROVISION_DRY_RUN",
+    "EVE_PROVISION_SCRIPT",
+    "EVE_PROVISION_WAIT_POLL_INTERVAL",
+    "EVE_SECRETS_DIR",
+    "EVE_SSH_RETRY_ATTEMPTS",
+    "EVE_SSH_RETRY_DELAY",
+    "EVE_STATE_DIR",
+    "EVE_TF_DATA_BASE",
+    "EVE_TF_ENV_JSON",
+    "EVE_TF_PRINT",
+    "EVE_TF_STATE_BASE",
+    "EVE_TM_READ_FLAGS",
+    "EVE_UPLOAD_DIR",
+    "EVE_WAIT_FOR_PROVISION_PROBE_SCRIPT",
+    "HOME",
+    "HTTPS_PROXY",
+    "HTTP_PROXY",
+    "LANG",
+    "LANGUAGE",
+    "LOGNAME",
+    "NO_PROXY",
+    "PATH",
+    "REQUESTS_CA_BUNDLE",
+    "SHELL",
+    "SSH_AGENT_PID",
+    "SSH_AUTH_SOCK",
+    "SSL_CERT_DIR",
+    "SSL_CERT_FILE",
+    "TEMP",
+    "TERM",
+    "TMP",
+    "TMPDIR",
+    "USER",
+    "WAYLAND_DISPLAY",
+    "XDG_RUNTIME_DIR",
+    "http_proxy",
+    "https_proxy",
+    "no_proxy",
+}
+
+
+def process_environment() -> dict[str, str]:
+    """Explicit host transport/routing environment for an outer command boundary."""
+    return {
+        name: value
+        for name, value in os.environ.items()
+        if name in _PROCESS_ENV_NAMES or name.startswith("LC_")
+    }
+
+
 def command_env(extra: dict[str, str] | None = None) -> dict[str, str]:
     """Env for invoking plugin/script commands. Ensures the eve repo root is on
     PYTHONPATH so external (synced) plugin command scripts can `import eve_sdk`
     regardless of where they live on disk (their own `parents[N]` path assumes
     the in-repo layout and is wrong once extracted)."""
-    env = os.environ | (extra or {})
+    env = dict(os.environ) if extra is None else dict(extra)
     root = str(Workdir.repo_root())
     existing = env.get("PYTHONPATH", "")
     env["PYTHONPATH"] = root + (os.pathsep + existing if existing else "")
@@ -163,6 +231,7 @@ def record_package_state(
     command: str,
     status: str,
     package_id: str,
+    package_event: str | None = None,
     package_state: str | None = None,
     error: str | None = None,
 ) -> None:
@@ -173,6 +242,7 @@ def record_package_state(
         f"package.{command}",
         status,
         package=package_id,
+        package_event=package_event,
         package_state=package_state,
         error=error,
     )

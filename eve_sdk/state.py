@@ -37,7 +37,15 @@ class State:
         "error",
     }
     PROVISION_STATES: ClassVar[set[str]] = {"unknown", "provisioning", "provisioned", "error"}
-    PACKAGE_STATES: ClassVar[set[str]] = {"unknown", "installing", "installed", "missing", "failed", "removed"}
+    PACKAGE_STATES: ClassVar[set[str]] = {
+        "failed",
+        "installed",
+        "installing",
+        "missing",
+        "removed",
+        "removing",
+        "unknown",
+    }
     DEFAULT_HISTORY_LIMIT = 50
 
     @classmethod
@@ -133,6 +141,8 @@ class State:
         provider_event: str | None = None,
         provision_state: str | None = None,
         package: str | None = None,
+        package_event: str | None = None,
+        package_observations: dict[str, str] | None = None,
         package_state: str | None = None,
     ) -> dict[str, Any]:
         cls._validate_enum(status, cls.OPERATION_STATUSES, "status")
@@ -144,6 +154,12 @@ class State:
             cls._validate_enum(provision_state, cls.PROVISION_STATES, "provision_state")
         if package_state:
             cls._validate_enum(package_state, cls.PACKAGE_STATES, "package_state")
+        for observed_status in (package_observations or {}).values():
+            cls._validate_enum(
+                observed_status,
+                {"failed", "installed", "missing", "unknown"},
+                "package_observation",
+            )
 
         now = datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
@@ -152,12 +168,22 @@ class State:
             state["updated_at"] = now
             history = state.setdefault("operation_history", [])
             entry = {
-                "id": len(history) + 1,
+                "id": max(
+                    (
+                        int(item.get("id", 0))
+                        for item in history
+                        if isinstance(item, dict)
+                    ),
+                    default=0,
+                )
+                + 1,
                 "name": operation,
                 "type": operation.split(".", 1)[0],
                 "status": status,
                 "at": now,
             }
+            if package is not None:
+                entry["package"] = package
             state["last_operation"] = entry
             history_entry = dict(entry)
             if error is not None:
@@ -182,8 +208,54 @@ class State:
                     state["provider_state"] = new_provider
             if provision_state:
                 state["provision_state"] = provision_state
+            elif operation == "provision":
+                from eve_sdk import instance_fsm
+
+                new_provision = instance_fsm.provision_state_after(
+                    str(state.get("provision_state", "unknown")),
+                    instance_fsm.provision_event(status),
+                )
+                if new_provision is not None:
+                    state["provision_state"] = new_provision
+
             if package and package_state:
-                state.setdefault("package_state", {})[package] = {"status": package_state, "updated_at": now}
+                state.setdefault("package_state", {})[package] = {
+                    "status": package_state,
+                    "updated_at": now,
+                }
+            elif package:
+                from eve_sdk import instance_fsm
+
+                command = operation.split(".", 1)[1] if "." in operation else ""
+                event = package_event or instance_fsm.package_operation_event(command, status)
+                current = str(
+                    state.setdefault("package_state", {})
+                    .get(package, {})
+                    .get("status", "unknown")
+                )
+                new_package = instance_fsm.package_state_after(current, event)
+                if new_package is not None:
+                    state["package_state"][package] = {
+                        "status": new_package,
+                        "updated_at": now,
+                    }
+            if package_observations:
+                from eve_sdk import instance_fsm
+
+                package_states = state.setdefault("package_state", {})
+                for package_id, observed_status in sorted(package_observations.items()):
+                    current = str(
+                        package_states.get(package_id, {}).get("status", "unknown")
+                    )
+                    new_package = instance_fsm.package_state_after(
+                        current,
+                        instance_fsm.package_observation_event(observed_status),
+                    )
+                    if new_package is not None:
+                        package_states[package_id] = {
+                            "status": new_package,
+                            "updated_at": now,
+                        }
             return state
 
         return cls.modify(instance_name, update)
@@ -223,9 +295,39 @@ class State:
                     "provider.ip",
                     "provider.ssh",
                 }:
-                    state["provider_state"] = "error"
+                    from eve_sdk import instance_fsm
+
+                    recovered_provider = instance_fsm.provider_state_after(
+                        str(state.get("provider_state", "unknown")), "op_fail"
+                    )
+                    if recovered_provider is not None:
+                        state["provider_state"] = recovered_provider
                 if recovered.get("type") == "provision":
-                    state["provision_state"] = "error"
+                    from eve_sdk import instance_fsm
+
+                    recovered_provision = instance_fsm.provision_state_after(
+                        str(state.get("provision_state", "unknown")), "provision_fail"
+                    )
+                    if recovered_provision is not None:
+                        state["provision_state"] = recovered_provision
+                if recovered.get("type") == "package" and recovered.get("package"):
+                    from eve_sdk import instance_fsm
+
+                    package_id = str(recovered["package"])
+                    command = str(recovered.get("name", "")).split(".", 1)[-1]
+                    package_states = state.setdefault("package_state", {})
+                    current = str(
+                        package_states.get(package_id, {}).get("status", "unknown")
+                    )
+                    recovered_package = instance_fsm.package_state_after(
+                        current,
+                        instance_fsm.package_operation_event(command, "failed"),
+                    )
+                    if recovered_package is not None:
+                        package_states[package_id] = {
+                            "status": recovered_package,
+                            "updated_at": now,
+                        }
             return state
 
         return cls.modify(instance_name, update)

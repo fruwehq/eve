@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -10,9 +9,17 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from eve_sdk.dispatch import DispatchError, exec_cmd, prepare_overlay, run_json  # noqa: E402
-from eve_sdk.instance_dispatch import load_runtime_env  # noqa: E402
-from eve_sdk.remote_launch import instance_ip, resolve_env, resolve_private_key  # noqa: E402
+from eve_sdk.dispatch import (  # noqa: E402
+    DispatchError,
+    exec_cmd,
+    prepare_overlay,
+    process_environment,
+    run_json,
+)
+from eve_sdk.package_dispatch import resolved_package_environment  # noqa: E402
+from eve_sdk.plugin_manifest import PluginManifest  # noqa: E402
+from eve_sdk.remote_launch import instance_ip, resolve_env  # noqa: E402
+from eve_sdk.resolve import resolve_instance  # noqa: E402
 from eve_sdk.workdir import Workdir  # noqa: E402
 
 
@@ -52,8 +59,13 @@ def parse_args(argv: list[str]) -> tuple[str, str, str, bool]:
 
 
 # ---- generic launcher path (v4.4 §8) ------------------------------------- #
-def export_remote_context(root: Path, instance_name: str, target: str) -> None:
-    """Resolve and export the shared launcher context for a package exec.
+def export_remote_context(
+    root: Path,
+    instance_name: str,
+    target: str,
+    base_env: dict[str, str],
+) -> dict[str, str]:
+    """Resolve the shared launcher context for a package exec.
 
     The documented stable contract is the ``EVE_REMOTE_*`` set below; the full
     ``profile-resolve`` env (incl. ``BUNDLE_PACKAGES``, ``OS_FAMILY``,
@@ -63,12 +75,17 @@ def export_remote_context(root: Path, instance_name: str, target: str) -> None:
     """
     profile_env = resolve_env(root, instance_name)
     ip = instance_ip(root, instance_name)
-    os.environ.update(profile_env)
-    os.environ.update(
+    env = dict(base_env)
+    env.update(profile_env)
+    key_file = env.get("SSH_PUBLIC_KEY_FILE", "")
+    private_key = key_file[:-4] if key_file.endswith(".pub") else env.get(
+        "SSH_PRIVATE_KEY_FILE", ""
+    )
+    env.update(
         {
             "EVE_REMOTE_IP": ip,
             "EVE_REMOTE_USER": profile_env.get("VM_USER_NAME") or profile_env.get("SSH_USER", ""),
-            "EVE_REMOTE_KEY": resolve_private_key(),
+            "EVE_REMOTE_KEY": private_key,
             "EVE_REMOTE_OS_FAMILY": profile_env.get("OS_FAMILY", ""),
             "EVE_REMOTE_ENGINE": profile_env.get("ENGINE", ""),
             "EVE_REMOTE_ACTION": target,
@@ -79,13 +96,18 @@ def export_remote_context(root: Path, instance_name: str, target: str) -> None:
             "EVE_REMOTE_INSTANCE": instance_name,
         }
     )
+    return env
 
 
-def exec_launcher(exec_rel: str, package: dict[str, Any], target: str) -> None:
+def exec_launcher(
+    exec_rel: str,
+    package: dict[str, Any],
+    target: str,
+    env: dict[str, str],
+) -> None:
     """Resolve an action ``exec`` (relative to the plugin dir) and run it.
 
-    Inherits os.environ, so the ``EVE_REMOTE_*`` context exported by
-    :func:`export_remote_context` is visible to the launcher.
+    Receives only the operation-local package and ``EVE_REMOTE_*`` environment.
     """
     plugin_dir = Path(str(package.get("path", ""))).resolve().parent
     exec_path = Path(exec_rel)
@@ -93,7 +115,7 @@ def exec_launcher(exec_rel: str, package: dict[str, Any], target: str) -> None:
         exec_path = (plugin_dir / exec_rel).resolve()
     if not exec_path.is_file():
         raise DispatchError(f"launcher exec not found for action {target}: {exec_rel}")
-    exec_cmd([str(exec_path)])
+    exec_cmd([str(exec_path)], env)
 
 
 def run_action_target(
@@ -102,6 +124,8 @@ def run_action_target(
     instance_name: str,
     target_map: dict[str, dict[str, Any]],
     root: Path,
+    resolved: dict[str, Any],
+    operation_env: dict[str, str],
 ) -> None:
     """Dispatch a package action to its declared launcher command.
 
@@ -117,28 +141,46 @@ def run_action_target(
         wf = target_map.get(wait_for)
         if wf is None:
             raise DispatchError(f"wait_for target not found: {wait_for}")
-        run_action_target(wf["action"], wf["package"], instance_name, target_map, root)
+        run_action_target(
+            wf["action"],
+            wf["package"],
+            instance_name,
+            target_map,
+            root,
+            resolved,
+            operation_env,
+        )
 
     exec_rel = action.get("exec")
     if not exec_rel:
         raise DispatchError(
             f"action {target} has no 'exec' launcher; the owning package must declare one"
         )
-    export_remote_context(root, instance_name, target)
-    exec_launcher(exec_rel, package, target)
+    package_env = resolved_package_environment(package, resolved, operation_env)
+    remote_env = export_remote_context(root, instance_name, target, package_env)
+    exec_launcher(exec_rel, package, target, remote_env)
 
 
 def main(argv: list[str]) -> int:
     instance_name, package_id, action_id, dry_run = parse_args(argv)
-    # Package launchers read config-derived env (e.g. VM_USER_NAME). The old
-    # `make` layer injected config-env before every recipe; load it here like
-    # instance-run does.
-    load_runtime_env(Workdir.repo_root())
     try:
+        # Registry selection is a transport concern, not package configuration.
+        inherited = process_environment()
+        registry_path = inherited.get("EVE_INSTANCE_REGISTRY")
+        resolved = resolve_instance(instance_name, registry_path)
         doc = run_json(str(Workdir.repo_root() / "scripts/package-list"), "--instance", instance_name, "--json")
-        package = next((entry for entry in doc["packages"] if entry["id"] == package_id), None)
-        if package is None:
+        package_view = next(
+            (entry for entry in doc["packages"] if entry["id"] == package_id), None
+        )
+        if package_view is None:
             raise DispatchError(f"unknown package: {package_id}")
+        installed_packages = {
+            str(plugin["id"]): PluginManifest.public(plugin)
+            for plugin in PluginManifest.load_all("package")
+        }
+        package = installed_packages.get(package_id)
+        if package is None:
+            raise DispatchError(f"package plugin not found: {package_id}")
         action = next((entry for entry in package.get("actions", []) if entry["id"] == action_id), None)
         if action is None:
             raise DispatchError(f"unknown action {action_id} for package {package_id}")
@@ -160,15 +202,30 @@ def main(argv: list[str]) -> int:
                 )
             )
             return 0
-        overlay = prepare_overlay(instance_name, os.environ.get("EVE_INSTANCE_REGISTRY"))
-        os.environ["EVE_CATALOG_LOCAL"] = overlay
-        os.environ["EVE_INSTANCE_NAME"] = instance_name
+        overlay = prepare_overlay(instance_name, registry_path)
+        operation_env = {"EVE_CATALOG_LOCAL": overlay, "EVE_INSTANCE_NAME": instance_name}
+        if registry_path:
+            operation_env["EVE_INSTANCE_REGISTRY"] = registry_path
         # target -> {package, action} for wait_for resolution.
         target_map: dict[str, dict[str, Any]] = {}
-        for pkg in doc["packages"]:
-            for act in pkg.get("actions", []):
-                target_map[act["target"]] = {"package": pkg, "action": act}
-        run_action_target(action, package, instance_name, target_map, Workdir.repo_root())
+        for pkg_view in doc["packages"]:
+            full_package = installed_packages.get(str(pkg_view["id"]))
+            if full_package is None:
+                continue
+            for act in full_package.get("actions", []):
+                target_map[act["target"]] = {
+                    "action": act,
+                    "package": full_package,
+                }
+        run_action_target(
+            action,
+            package,
+            instance_name,
+            target_map,
+            Workdir.repo_root(),
+            resolved,
+            operation_env,
+        )
         return 0
     except SystemExit as error:
         raise error

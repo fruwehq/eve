@@ -282,7 +282,33 @@ class PluginManifest:
             if not isinstance(config_schema, dict):
                 raise ValueError(f"{path}: config_schema must be a map")
             validate_json_schema_fragment(config_schema, f"{path}: config_schema")
+            cls._validate_config_required_any(config_schema, path, str(kind))
         cls._validate_requires(plugin, path)
+
+    @staticmethod
+    def _validate_config_required_any(
+        config_schema: dict[str, Any], path: str, kind: str
+    ) -> None:
+        alternatives = config_schema.get("required_any") or []
+        if alternatives and kind != "provider":
+            raise ValueError(
+                f"{path}: config_schema.required_any is only valid on provider plugins"
+            )
+        for group in alternatives:
+            for reference in group:
+                section, field = str(reference).split(".", 1)
+                fields = config_schema.get(section) or {}
+                if field not in fields:
+                    raise ValueError(
+                        f"{path}: config_schema.required_any references "
+                        f"undeclared field {reference}"
+                    )
+                spec = fields[field]
+                if not isinstance(spec, dict) or not spec.get("env_var"):
+                    raise ValueError(
+                        f"{path}: config_schema.required_any field {reference} "
+                        "must declare env_var"
+                    )
 
     @staticmethod
     def public(plugin: dict[str, Any]) -> dict[str, Any]:

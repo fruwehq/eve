@@ -24,7 +24,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from eve_sdk.package_dispatch import emit_json  # noqa: E402
+from eve_sdk.package_dispatch import (  # noqa: E402
+    emit_json,
+    package_environment_names,
+    resolved_package_set_environment,
+)
+from eve_sdk.resolve import instance_package_config  # noqa: E402
 from eve_sdk.tf_dispatch import repo_root, resolve_env  # noqa: E402
 
 _USAGE = (
@@ -210,7 +215,15 @@ def main(argv: list[str]) -> int:
                 windows_password = pw_result.stdout.strip() if pw_result.returncode == 0 else ""
             from eve_sdk.config import ConfigEnv
 
-            env_payload = ConfigEnv.provision_env_payload(windows_password)
+            all_config = instance_package_config(instance_name)
+            package_config = (
+                {package: all_config[package]} if package in all_config else {}
+            )
+            package_env = resolved_package_set_environment([entry], package_config)
+            env_names = package_environment_names([entry])
+            env_payload = ConfigEnv.provision_env_payload(
+                windows_password, package_env, env_names
+            )
             (stage / "state").mkdir(parents=True, exist_ok=True)
             (stage / "state" / "env.json").write_text(
                 json.dumps(env_payload, indent=2, ensure_ascii=False) + "\n",
@@ -253,16 +266,42 @@ def main(argv: list[str]) -> int:
             status = _ssh_retry(label, cmd)
             if status != 0:
                 return status
+        if needs_env:
+            status = _instance_ssh(
+                instance_name,
+                "--",
+                f"icacls '{_REMOTE_STATE_DIR}\\env.json' /inheritance:r "
+                '/grant:r "Administrator:F" "SYSTEM:F" | Out-Null',
+            )
+            if status != 0:
+                _instance_ssh(
+                    instance_name,
+                    "--",
+                    f"Remove-Item -Force -ErrorAction SilentlyContinue '{_REMOTE_STATE_DIR}\\env.json'",
+                )
+                return status
 
+        step_status = 0
         for step in steps:
             step_file = Path(step).name
             print(f"[package-provision-windows] running step={step_file} package={package}")
-            status = _instance_ssh(
+            step_status = _instance_ssh(
                 instance_name, "--",
                 f"& 'C:\\Users\\Administrator\\provision\\scripts-package\\steps\\{step_file}'",
             )
-            if status != 0:
-                return status
+            if step_status != 0:
+                break
+        cleanup_status = 0
+        if needs_env:
+            cleanup_status = _instance_ssh(
+                instance_name,
+                "--",
+                f"Remove-Item -Force -ErrorAction SilentlyContinue '{_REMOTE_STATE_DIR}\\env.json'",
+            )
+        if step_status != 0:
+            return step_status
+        if cleanup_status != 0:
+            return cleanup_status
     finally:
         shutil.rmtree(stage, ignore_errors=True)
 

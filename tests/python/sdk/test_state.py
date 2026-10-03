@@ -86,6 +86,75 @@ def test_provider_event_drives_state_through_the_machine(
     assert State.read("demo")["provider_state"] == "error"
 
 
+def test_provision_operation_drives_state_through_the_machine(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("EVE_STATE_DIR", str(tmp_path))
+
+    assert (
+        State.record_operation("demo", "provision", "running")["provision_state"]
+        == "provisioning"
+    )
+    recovered = State.recover_running("demo")
+    assert recovered["provision_state"] == "error"
+    assert recovered["last_operation"]["status"] == "failed"
+    assert State.record_operation("demo", "provision", "failed")["provision_state"] == "error"
+    assert (
+        State.record_operation("demo", "provision", "running")["provision_state"]
+        == "provisioning"
+    )
+    assert (
+        State.record_operation("demo", "provision", "succeeded")["provision_state"]
+        == "provisioned"
+    )
+    assert (
+        State.record_operation("demo", "provision", "running")["provision_state"]
+        == "provisioning"
+    )
+
+
+def test_package_operation_and_provision_observations_are_machine_driven(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("EVE_STATE_DIR", str(tmp_path))
+
+    installing = State.record_operation(
+        "demo", "package.install", "running", package="mock-app"
+    )
+    assert installing["package_state"]["mock-app"]["status"] == "installing"
+    assert installing["last_operation"]["package"] == "mock-app"
+
+    recovered = State.recover_running("demo")
+    assert recovered["package_state"]["mock-app"]["status"] == "failed"
+
+    State.record_operation("demo", "provision", "running")
+    completed = State.record_operation(
+        "demo",
+        "provision",
+        "succeeded",
+        package_observations={"mock-app": "installed", "mock-tool": "installed"},
+    )
+    assert completed["provision_state"] == "provisioned"
+    assert completed["package_state"]["mock-app"]["status"] == "installed"
+    assert completed["package_state"]["mock-tool"]["status"] == "installed"
+    assert completed["last_operation"]["name"] == "provision"
+
+
+def test_operation_ids_remain_unique_after_history_is_trimmed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("EVE_STATE_DIR", str(tmp_path))
+
+    for _ in range(State.DEFAULT_HISTORY_LIMIT + 5):
+        State.record_operation("demo", "provider.status", "succeeded")
+
+    history = State.read("demo")["operation_history"]
+    ids = [entry["id"] for entry in history]
+    assert len(ids) == State.DEFAULT_HISTORY_LIMIT
+    assert len(ids) == len(set(ids))
+    assert ids[-1] == State.DEFAULT_HISTORY_LIMIT + 5
+
+
 def test_state_concurrent_writers_preserve_history(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("EVE_STATE_DIR", str(tmp_path))
     State.write("concurrency-test", State.default_state("concurrency-test", "2026-01-01T00:00:00Z"))

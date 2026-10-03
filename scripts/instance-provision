@@ -76,7 +76,11 @@ def main(argv: list[str]) -> int:
 
     state_disabled = os.environ.get("EVE_DISABLE_STATE", "0") == "1" or dry_run
 
-    def record_state(status: str, provision_state: str, error: str = "") -> None:
+    def record_state(
+        status: str,
+        error: str = "",
+        package_observations: dict[str, str] | None = None,
+    ) -> None:
         if state_disabled:
             return
         cmd = [
@@ -84,10 +88,14 @@ def main(argv: list[str]) -> int:
             "--instance", instance_name,
             "--operation", "provision",
             "--status", status,
-            "--provision-state", provision_state,
         ]
         if error:
             cmd += ["--error", error]
+        if package_observations:
+            cmd += [
+                "--package-observations-json",
+                json.dumps(package_observations, separators=(",", ":")),
+            ]
         # set -e: a failing instance-state call is fatal with its exit status.
         state_rc = subprocess.run(
             cmd, cwd=root, stdout=subprocess.DEVNULL, check=False,
@@ -95,9 +103,9 @@ def main(argv: list[str]) -> int:
         if state_rc != 0:
             raise SystemExit(state_rc)
 
-    def mark_selected_packages_installed() -> None:
+    def selected_package_observations() -> dict[str, str]:
         if state_disabled:
-            return
+            return {}
         # stdout captured (replaces the `package-list | jq` pipeline); stderr of
         # package-list passes through. Under pipefail a failure is fatal.
         result = subprocess.run(
@@ -108,24 +116,14 @@ def main(argv: list[str]) -> int:
             raise SystemExit(result.returncode)
         doc = json.loads(result.stdout)
         packages = doc.get("packages", []) if isinstance(doc, dict) else []
+        observations: dict[str, str] = {}
         for package in packages:
             if not isinstance(package, dict):
                 continue
             if package.get("selected") is True and package.get("installable") is True:
                 package_id = str(package.get("id"))
-                state_rc = subprocess.run(
-                    [
-                        str(root / "scripts/instance-state"),
-                        "--instance", instance_name,
-                        "--operation", "package.install",
-                        "--status", "succeeded",
-                        "--package", package_id,
-                        "--package-state", "installed",
-                    ],
-                    cwd=root, stdout=subprocess.DEVNULL, check=False,
-                ).returncode
-                if state_rc != 0:
-                    raise SystemExit(state_rc)
+                observations[package_id] = "installed"
+        return observations
 
     if dry_run:
         emit_json({
@@ -137,7 +135,7 @@ def main(argv: list[str]) -> int:
         })
         return 0
 
-    record_state("running", "provisioning")
+    record_state("running")
 
     if force:
         clear_rc = subprocess.run(
@@ -145,7 +143,7 @@ def main(argv: list[str]) -> int:
             cwd=root, check=False,
         ).returncode
         if clear_rc != 0:
-            record_state("failed", "error", "provision.clear-state failed")
+            record_state("failed", "provision.clear-state failed")
             return 1
 
     provision_script = os.environ.get("EVE_PROVISION_SCRIPT", str(root / "scripts/provision"))
@@ -161,6 +159,7 @@ def main(argv: list[str]) -> int:
         resolve_cmd, cwd=root, text=True, stdout=subprocess.PIPE, check=False,
     )
     if resolved.returncode != 0:
+        record_state("failed", "instance resolution failed")
         return resolved.returncode
     os.environ["EVE_RESOLVED_JSON"] = resolved.stdout.rstrip("\n")
 
@@ -168,11 +167,17 @@ def main(argv: list[str]) -> int:
         [provision_script, instance_name], cwd=root, check=False,
     ).returncode
     if exit_code != 0:
-        record_state("failed", "error", f"exit {exit_code}")
+        record_state("failed", f"exit {exit_code}")
         return exit_code
 
-    mark_selected_packages_installed()
-    record_state("succeeded", "provisioned")
+    try:
+        package_observations = selected_package_observations()
+    except (json.JSONDecodeError, OSError, SystemExit) as error:
+        record_state("failed", f"package state recording failed: {error}")
+        if isinstance(error, SystemExit) and isinstance(error.code, int):
+            return error.code
+        return 1
+    record_state("succeeded", package_observations=package_observations)
     return 0
 
 

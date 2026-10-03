@@ -1,4 +1,4 @@
-# v3 Instance State
+# v4.5 Instance State
 
 Concrete instance state lives in `.eve/state/instances/<instance>.json` and
 is updated through `scripts/instance-state`. Core dispatchers should not write
@@ -7,22 +7,25 @@ these JSON files directly.
 ## Top-Level States
 
 - `desired_state`: `unknown`, `running`, `stopped`, `absent`
-- `provider_state`: `unknown`, `initializing`, `initialized`, `planned`,
-  `changing`, `running`, `stopped`, `absent`, `error`
+- `provider_state`: `unknown`, `creating`, `starting`, `stopping`, `destroying`,
+  `running`, `stopped`, `absent`, `error`
 - `provision_state`: `unknown`, `provisioning`, `provisioned`, `error`
 
 ## Package States
 
 Package entries under `package_state` use:
 
-- `unknown`
-- `installed`
-- `missing`
 - `failed`
+- `installed`
+- `installing`
+- `missing`
 - `removed`
-- `reinstalled`
+- `removing`
+- `unknown`
 
-Package state updates must pass both `--package` and `--package-state`.
+Dispatchers derive package state by firing operation and observation events into
+`core/fsm/package.yaml`. The `--package-state` pair remains available only for explicit
+compatibility writes.
 
 ## Observed State Cache
 
@@ -52,13 +55,14 @@ commands, so they do not append lifecycle operations to `operation_history`.
 Every write records `last_operation` and appends to `operation_history`.
 Operation entries include:
 
-- `id`: monotonic per retained history window
+- `id`: monotonic even after the retained history window is trimmed
 - `name`: full operation name, such as `provider.up`, `package.status`, or
   `provision`
 - `type`: operation prefix, such as `provider`, `package`, or `provision`
 - `status`: `running`, `succeeded`, `failed`, or `skipped`
 - `at`: UTC timestamp
 - `error`: present only for failed or error-bearing entries
+- `package`: package id, present on package operations
 
 The history keeps the latest 50 entries by default.
 
@@ -79,8 +83,7 @@ the local state before retrying:
 eve instance recover --instance <name>
 ```
 
-This marks the last running operation as `failed`, records a recovery error, and
-sets `provider_state` or `provision_state` to `error` when the interrupted
-operation belongs to that surface. It does not destroy or change remote
-resources. After recovery, run `eve instance status --instance <name>` and retry
-the relevant lifecycle/provision/package command.
+This marks the last running operation as `failed`, records a recovery error, and fires
+the matching failure event into the provider, provision, or package machine. It does not
+destroy or change remote resources. After recovery, run
+`eve instance status --instance <name>` and retry the relevant command.

@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -25,6 +26,10 @@ sys.path.insert(0, str(ROOT))
 
 from eve_sdk.config import ConfigEnv  # noqa: E402
 from eve_sdk.instance_dispatch import load_runtime_env  # noqa: E402
+from eve_sdk.package_dispatch import (  # noqa: E402
+    package_environment_names,
+    resolved_package_set_environment,
+)
 from eve_sdk.plugin_manifest import PluginManifest  # noqa: E402
 from eve_sdk.resolve import instance_package_config  # noqa: E402
 
@@ -66,8 +71,37 @@ def _parse_env(output: str) -> dict[str, str]:
     return env
 
 
+def _env_line(key: str, value: str) -> str:
+    return f"export {key}={shlex.quote(value)}"
+
+
+def _write_private_text(path: Path, value: str) -> None:
+    path.write_text(value, encoding="utf-8")
+    path.chmod(0o600)
+
+
 def _selected_packages(bundle_packages: str) -> list[str]:
     return [pkg for pkg in bundle_packages.split(",") if pkg]
+
+
+def _selected_package_environment(
+    plugin_doc: dict,
+    bundle_packages: str,
+    profile: str,
+) -> tuple[list[dict], dict[str, str]]:
+    selected = set(_selected_packages(bundle_packages))
+    plugins = [
+        plugin
+        for plugin in plugin_doc.get("plugins") or []
+        if isinstance(plugin, dict) and str(plugin.get("id")) in selected
+    ]
+    all_config = instance_package_config(profile)
+    selected_config = {
+        package_id: value
+        for package_id, value in all_config.items()
+        if package_id in selected
+    }
+    return plugins, resolved_package_set_environment(plugins, selected_config)
 
 
 def _plugin_ubuntu_steps(plugin_doc: dict, bundle_packages: str) -> list[tuple[str, str]]:
@@ -201,6 +235,9 @@ def provision_ubuntu(profile: str, env: dict[str, str], root: Path) -> int:
             [str(root / "scripts/plugin-list"), "--kind", "package", "--json"],
             cwd=root, capture_output=True, text=True, check=False,
         ).stdout)
+        selected_plugins, package_env = _selected_package_environment(
+            plugin_doc, bundle_packages, profile
+        )
         for plugin_path, step in _plugin_ubuntu_steps(plugin_doc, bundle_packages):
             if not plugin_path:
                 continue
@@ -251,18 +288,20 @@ def provision_ubuntu(profile: str, env: dict[str, str], root: Path) -> int:
         # (local_path, remote_rel_dir) and uploaded after the provision dir is
         # prepared, below.
         stage_files: list[tuple[str, str]] = []
-        for stage_var in ConfigEnv.package_stage_env_names():
-            local_path = os.environ.get(stage_var, "")
+        for stage_var in package_environment_names(
+            selected_plugins, path_config_only=True
+        ):
+            local_path = package_env.get(stage_var, "")
             if not local_path:
                 continue
             if not Path(local_path).exists():
                 print(f"[provision] {stage_var} does not exist: {local_path}", file=sys.stderr)
                 return 2
             remote_rel = f"provision/downloads/{stage_var.lower()}"
-            os.environ[stage_var] = f"$HOME/{remote_rel}/{os.path.basename(local_path)}"
+            package_env[stage_var] = f"$HOME/{remote_rel}/{os.path.basename(local_path)}"
             stage_files.append((local_path, remote_rel))
 
-        host_tz = os.environ.get("TIMEZONE", "")
+        host_tz = package_env.get("TIMEZONE", "")
         if not host_tz:
             tz_result = subprocess.run(
                 [str(root / "scripts/host-timezone")], cwd=root,
@@ -274,34 +313,24 @@ def provision_ubuntu(profile: str, env: dict[str, str], root: Path) -> int:
         # Core (non-plugin) provision env. Plugin env is appended generically
         # below so core names no provider or package (v4.4 §15.5).
         env_lines = [
-            f'export ACCESS_BOOTSTRAP_USER="{env.get("ACCESS_BOOTSTRAP_USER", "")}"',
-            f'export ACCESS_HUMAN_USER="{env.get("ACCESS_HUMAN_USER", "")}"',
-            f'export ACCESS_PROVISION_USER="{env.get("ACCESS_PROVISION_USER", "")}"',
-            f'export OS_FAMILY="{os_family}"',
-            f'export PROFILE_NAME="{profile_name}"',
-            f'export HUMAN_USER_NAME="{env.get("HUMAN_USER_NAME", "")}"',
-            f'export PROVISION_USER_NAME="{env.get("PROVISION_USER_NAME", "")}"',
-            f'export VM_USER_NAME="{env.get("VM_USER_NAME", "")}"',
-            f'export VM_USER_PASSWORD="{os.environ.get("VM_USER_PASSWORD", "")}"',
-            f'export EPHEMERAL_DISPLAY_RESOLUTION="{os.environ.get("EPHEMERAL_DISPLAY_RESOLUTION", "")}"',
-            f'export EPHEMERAL_DISPLAY_FPS="{os.environ.get("EPHEMERAL_DISPLAY_FPS", "")}"',
-            f'export PROVIDER="{provider}"',
-            f'export TIMEZONE="{host_tz}"',
-            f'export VIRTUAL_MONITOR_WIDTH="{os.environ.get("VIRTUAL_MONITOR_WIDTH", "1920")}"',
-            f'export VIRTUAL_MONITOR_HEIGHT="{os.environ.get("VIRTUAL_MONITOR_HEIGHT", "1080")}"',
+            _env_line("ACCESS_BOOTSTRAP_USER", env.get("ACCESS_BOOTSTRAP_USER", "")),
+            _env_line("ACCESS_HUMAN_USER", env.get("ACCESS_HUMAN_USER", "")),
+            _env_line("ACCESS_PROVISION_USER", env.get("ACCESS_PROVISION_USER", "")),
+            _env_line("OS_FAMILY", os_family),
+            _env_line("PROFILE_NAME", profile_name),
+            _env_line("HUMAN_USER_NAME", env.get("HUMAN_USER_NAME", "")),
+            _env_line("PROVISION_USER_NAME", env.get("PROVISION_USER_NAME", "")),
+            _env_line("VM_USER_NAME", env.get("VM_USER_NAME", "")),
+            _env_line("VM_USER_PASSWORD", os.environ.get("VM_USER_PASSWORD", "")),
+            _env_line("EPHEMERAL_DISPLAY_RESOLUTION", package_env.get("EPHEMERAL_DISPLAY_RESOLUTION", "")),
+            _env_line("EPHEMERAL_DISPLAY_FPS", package_env.get("EPHEMERAL_DISPLAY_FPS", "")),
+            _env_line("PROVIDER", provider),
+            _env_line("TIMEZONE", host_tz),
         ]
-        # Per-instance package option overrides (§16): instance scope wins over
-        # the user-scope config-env already in os.environ, before the generic
-        # plugin loop reads it. Core names no package — the field→env_var mapping
-        # comes from each package manifest.
-        os.environ.update(ConfigEnv.instance_package_env(instance_package_config(profile)))
-        # Plugin-declared env (config + secrets) from installed provider/package
-        # manifests — generic, so no plugin id is named in core. Staged package
-        # files (above) were rewritten in os.environ to their remote paths, so
-        # they emit here with the remote value.
-        for _name in ConfigEnv.plugin_provision_env_names():
-            env_lines.append(f'export {_name}="{os.environ.get(_name, "")}"')
-        (stage / "state" / "env").write_text("\n".join(env_lines) + "\n", encoding="utf-8")
+        for name in package_environment_names(selected_plugins):
+            env_lines.append(_env_line(name, package_env.get(name, "")))
+        env_path = stage / "state" / "env"
+        _write_private_text(env_path, "\n".join(env_lines) + "\n")
 
         print(f"[provision] uploading {_provision_dir_display(os_provision_dir, root)}/ to remote")
         rc = _ssh_retry(profile, "prepare linux provision directory",
@@ -334,14 +363,24 @@ def provision_ubuntu(profile: str, env: dict[str, str], root: Path) -> int:
                             str(stage / "state" / "env"), "provision/state/")
         if rc:
             return rc
+        rc = _ssh_retry(profile, "protect linux provision environment",
+                        "chmod 0600 ~/provision/state/env")
+        if rc:
+            _ssh_retry(profile, "remove unprotected linux provision environment",
+                       "rm -f ~/provision/state/env")
+            return rc
         rc = _ssh_retry_scp(profile, "upload linux step list",
                             str(stage / "state" / "steps.list"), "provision/state/")
         if rc:
+            _ssh_retry(profile, "remove linux provision environment after upload failure",
+                       "rm -f ~/provision/state/env")
             return rc
         manifest_path = str(stage / "state" / "provision-manifest.json")
         rc = _ssh_retry_scp(profile, "upload linux provision manifest",
                             manifest_path, "provision/state/")
         if rc:
+            _ssh_retry(profile, "remove linux provision environment after upload failure",
+                       "rm -f ~/provision/state/env")
             return rc
         print("[provision] running bootstrap.sh")
         rc = _ssh_retry(profile, "start linux provisioning runner",
@@ -349,11 +388,15 @@ def provision_ubuntu(profile: str, env: dict[str, str], root: Path) -> int:
                         " ~/provision/scripts/steps/*.sh ~/provision/scripts/lib/*.sh"
                         " && ~/provision/scripts/bootstrap.sh")
         if rc:
+            _ssh_retry(profile, "remove linux provision environment after bootstrap failure",
+                       "rm -f ~/provision/state/env")
             return rc
         poll_interval = os.environ.get("EVE_PROVISION_WAIT_POLL_INTERVAL", "5")
         print(f"[provision] waiting for linux provisioning to finish (polling remote log every {poll_interval}s)")
         rc = _run([str(root / "scripts/wait-for-provision"), profile]).returncode
-        return rc
+        cleanup_rc = _ssh_retry(profile, "remove linux provision environment",
+                                "rm -f ~/provision/state/env")
+        return rc if rc else cleanup_rc
     finally:
         import shutil
         shutil.rmtree(stage, ignore_errors=True)
@@ -385,20 +428,26 @@ def provision_windows(profile: str, env: dict[str, str], root: Path) -> int:
             )
             return 1
 
-    tmp_dir = root / "tmp"
-    tmp_dir.mkdir(parents=True, exist_ok=True)
-    env_json = ConfigEnv.provision_env_payload(windows_password)
-
-    (tmp_dir / "env.json").write_text(json.dumps(env_json, indent=2) + "\n", encoding="utf-8")
-
+    plugin_doc = json.loads(subprocess.run(
+        [str(root / "scripts/plugin-list"), "--kind", "package", "--json"],
+        cwd=root, capture_output=True, text=True, check=False,
+    ).stdout)
+    _selected_plugins, package_env = _selected_package_environment(
+        plugin_doc, bundle_packages, profile
+    )
     stage = Path(tempfile.mkdtemp())
     try:
         copytree(os_provision_dir, stage / "provision")
+        env_names = package_environment_names(_selected_plugins)
+        env_json = ConfigEnv.provision_env_payload(
+            windows_password, package_env, env_names
+        )
+        state_dir = stage / "provision" / "state"
+        state_dir.mkdir(parents=True, exist_ok=True)
+        (state_dir / "env.json").write_text(
+            json.dumps(env_json, indent=2) + "\n", encoding="utf-8"
+        )
 
-        plugin_doc = json.loads(subprocess.run(
-            [str(root / "scripts/plugin-list"), "--kind", "package", "--json"],
-            cwd=root, capture_output=True, text=True, check=False,
-        ).stdout)
         for plugin_path, step in _plugin_windows_steps(plugin_doc, bundle_packages):
             if not plugin_path or not step:
                 continue
@@ -449,9 +498,19 @@ def provision_windows(profile: str, env: dict[str, str], root: Path) -> int:
                             str(stage / "provision"), "/C:/Users/Administrator/")
         if rc:
             return rc
-        rc = _ssh_retry_scp(profile, "upload windows env.json",
-                            str(tmp_dir / "env.json"), "/C:/Users/Administrator/provision/state/env.json")
+        rc = _ssh_retry(
+            profile,
+            "protect windows provision environment",
+            'icacls "C:\\Users\\Administrator\\provision\\state\\env.json" '
+            '/inheritance:r /grant:r "Administrator:F" "SYSTEM:F" | Out-Null',
+        )
         if rc:
+            _ssh_retry(
+                profile,
+                "remove unprotected windows provision environment",
+                'Remove-Item -Force -ErrorAction SilentlyContinue '
+                '"C:\\Users\\Administrator\\provision\\state\\env.json"',
+            )
             return rc
         print("[provision] running bootstrap.ps1")
         instance_ssh = str(root / "scripts/instance-ssh")
@@ -460,11 +519,23 @@ def provision_windows(profile: str, env: dict[str, str], root: Path) -> int:
             cwd=root, check=False,
         )
         if result.returncode != 0 and result.returncode != 255:
+            _ssh_retry(
+                profile,
+                "remove windows provision environment after bootstrap failure",
+                'Remove-Item -Force -ErrorAction SilentlyContinue '
+                '"C:\\Users\\Administrator\\provision\\state\\env.json"',
+            )
             return result.returncode
         poll_interval = os.environ.get("EVE_PROVISION_WAIT_POLL_INTERVAL", "5")
         print(f"[provision] waiting for windows provisioning to finish (polling remote log every {poll_interval}s)")
         rc = _run([str(root / "scripts/wait-for-provision"), profile]).returncode
-        return rc
+        cleanup_rc = _ssh_retry(
+            profile,
+            "remove windows provision environment",
+            'Remove-Item -Force -ErrorAction SilentlyContinue '
+            '"C:\\Users\\Administrator\\provision\\state\\env.json"',
+        )
+        return rc if rc else cleanup_rc
     finally:
         import shutil
         shutil.rmtree(stage, ignore_errors=True)
