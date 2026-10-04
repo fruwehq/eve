@@ -100,58 +100,6 @@ class TestRequiresEve:
 # ---------------------------------------------------------------------------
 
 class TestPackageConfigSchema:
-    def test_required_any_accepts_declared_alternatives(self, tmp_path: Path) -> None:
-        manifest = _provider_manifest(
-            tmp_path,
-            config_schema={
-                "config": {"profile": {"env_var": "AWS_PROFILE", "type": "string"}},
-                "required_any": [
-                    ["config.profile"],
-                    ["secrets.access_key", "secrets.secret_key"],
-                ],
-                "secrets": {
-                    "access_key": {"env_var": "AWS_ACCESS_KEY_ID", "type": "string"},
-                    "secret_key": {"env_var": "AWS_SECRET_ACCESS_KEY", "type": "string"},
-                },
-            },
-        )
-        PluginManifest.validate(manifest)
-
-    def test_required_any_rejects_undeclared_reference(self, tmp_path: Path) -> None:
-        manifest = _provider_manifest(
-            tmp_path,
-            config_schema={
-                "config": {"profile": {"env_var": "AWS_PROFILE", "type": "string"}},
-                "required_any": [["secrets.missing"]],
-            },
-        )
-        with pytest.raises(ValueError, match=r"undeclared field secrets\.missing"):
-            PluginManifest.validate(manifest)
-
-    def test_required_any_rejects_field_without_env_var(self, tmp_path: Path) -> None:
-        manifest = _provider_manifest(
-            tmp_path,
-            config_schema={
-                "config": {"profile": {"type": "string"}},
-                "required_any": [["config.profile"]],
-            },
-        )
-        with pytest.raises(ValueError, match=r"config\.profile must declare env_var"):
-            PluginManifest.validate(manifest)
-
-    def test_required_any_rejects_package_manifest(self, tmp_path: Path) -> None:
-        manifest = _package_manifest(
-            tmp_path,
-            config_schema={
-                "config": {
-                    "profile": {"env_var": "PROFILE", "type": "string"}
-                },
-                "required_any": [["config.profile"]],
-            },
-        )
-        with pytest.raises(ValueError, match="only valid on provider plugins"):
-            PluginManifest.validate(manifest)
-
     def test_package_config_schema_valid(self, tmp_path: Path) -> None:
         manifest = _package_manifest(
             tmp_path,

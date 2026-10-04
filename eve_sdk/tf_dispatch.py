@@ -70,16 +70,16 @@ def resolve_env(root: Path, profile: str) -> dict[str, str]:
 def apply_tf_env(root: Path, profile: str) -> None:
     """Run scripts/tf-env and apply its `export KEY=value;` lines to os.environ.
 
-    Mirrors bash `eval "$(./scripts/tf-env "$PROFILE")"`: tf-env's stdout is
-    consumed (parsed into env exports), its stderr passes through, and its exit
-    status is not propagated — a partial failure leaves whatever exports were
-    emitted applied, exactly as the command-substitution+eval form did.
+    Abort on a failed provider environment so authentication requirements cannot
+    be bypassed by continuing with partial exports or ambient backend defaults.
     """
     result = subprocess.run(
         [str(root / "scripts/tf-env"), profile], cwd=root, text=True, capture_output=True,
         check=False,
     )
     sys.stderr.write(result.stderr)
+    if result.returncode != 0:
+        raise SystemExit(result.returncode)
     for line in result.stdout.splitlines():
         stripped = line.rstrip(";").strip()
         if stripped.startswith("export "):

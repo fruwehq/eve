@@ -11,6 +11,7 @@ commands:
   start: {exec: commands/provider-command, args: [start]}
   stop: {exec: commands/provider-command, args: [stop]}
   status: {exec: commands/provider-command, args: [status]}
+  tf-env: {exec: commands/tf-env}
   ip: {exec: commands/provider-command, args: [ip]}
   ssh: {exec: commands/provider-command, args: [ssh]}
   validate: {exec: ../_common/commands/validate-os, args: [all, cloud image URL, cloud_image_url]}

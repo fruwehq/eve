@@ -1,0 +1,6 @@
+#!/usr/bin/env python3
+"""Hermetic Terraform provider environment hook."""
+
+from eve_sdk.tf_env import load_env, print_kv
+
+print_kv("TF_VAR_mock_region", load_env().get("LOCATION_REGION", ""))

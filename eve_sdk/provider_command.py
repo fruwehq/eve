@@ -124,10 +124,12 @@ def dispatch(argv: list[str]) -> int:
 def _inject_secrets(
     provider_name: str, plugin: dict[str, Any], env: dict[str, str]
 ) -> dict[str, str]:
+    schema_secrets = (plugin.get("config_schema") or {}).get("secrets") or {}
+    if not schema_secrets:
+        return env
     secrets = Secrets.read(provider_name)
     if not secrets:
         return env
-    schema_secrets = (plugin.get("config_schema") or {}).get("secrets") or {}
     for secret_key, value in secrets.items():
         schema_entry = schema_secrets.get(secret_key)
         if not isinstance(schema_entry, dict):

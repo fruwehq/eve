@@ -66,6 +66,24 @@ def _run(script: str, *args: str, env: dict[str, str]) -> subprocess.CompletedPr
     )
 
 
+def test_failed_tf_env_aborts_before_applying_partial_exports(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    from eve_sdk.tf_dispatch import apply_tf_env
+
+    monkeypatch.delenv("TF_VAR_partial", raising=False)
+    monkeypatch.setattr(
+        "eve_sdk.tf_dispatch.subprocess.run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args[0], 23, "export TF_VAR_partial='unsafe';\n", "configuration is required\n",
+        ),
+    )
+    with pytest.raises(SystemExit) as failure:
+        apply_tf_env(tmp_path, "test")
+    assert failure.value.code == 23
+    assert "TF_VAR_partial" not in os.environ
+
+
 # --------------------------- usage / missing arg --------------------------- #
 @pytest.mark.parametrize("script", ["tf-init", "tf-plan", "tf-apply", "tf-destroy"])
 def test_missing_arg_prints_usage_and_exits_nonzero(script: str, tf_env: dict[str, str]) -> None:

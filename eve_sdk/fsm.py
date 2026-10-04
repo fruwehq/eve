@@ -173,9 +173,8 @@ def provider_context_resolver() -> ContextResolver:
     FSM context and what dispatch runs with are identical (v4.5 bug M: status ≡
     dispatch). ``key`` is the provider id.
 
-    (Systemic follow-up: drop ambient ``os.environ`` from *both* this resolver and
-    dispatch so no config reaches a plugin behind eve's back; kept here for now to
-    preserve exact parity.)
+    Both the resolver and dispatch use the same operation-local environment;
+    ambient credentials cannot configure a provider.
     """
     from eve_sdk.provider_command import _load_public_plugin, resolved_provider_environment
 
@@ -190,9 +189,8 @@ def provider_context_resolver() -> ContextResolver:
 def provider_configured_resolver() -> ContextResolver:
     """The :data:`ContextResolver` for the core provider machine (``core/fsm/provider.yaml``).
 
-    Derives ``is_configured`` from both universally ``required`` fields and the
-    optional ``required_any`` alternatives. Every universal field must be set,
-    and at least one alternative group must be complete. So "configured" is
+    Derives ``is_configured`` from ordinary ``required`` config and secret fields.
+    Every required field must be set. So "configured" is
     eve-resolved, never a plugin's connectivity self-report. ``key`` is the
     provider id; ``names`` is typically ``["is_configured"]``.
     """
@@ -218,20 +216,8 @@ def provider_configured_resolver() -> ContextResolver:
                 candidates.append(str(env_var))
             return any(env.get(candidate) for candidate in candidates)
 
-        alternatives = schema.get("required_any") or []
-
-        def referenced_present(reference: str) -> bool:
-            section, field = reference.split(".", 1)
-            spec = (schema.get(section) or {}).get(field)
-            return isinstance(spec, Mapping) and present(field, spec)
-
-        required_ok = all(present(field, spec) for field, spec in required)
-        alternatives_ok = not alternatives or any(
-            all(referenced_present(str(reference)) for reference in group)
-            for group in alternatives
-        )
         values: dict[str, Any] = {
-            "is_configured": required_ok and alternatives_ok
+            "is_configured": all(present(field, spec) for field, spec in required)
         }
         return {name: values.get(name, "") for name in names}
 

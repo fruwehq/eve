@@ -79,8 +79,9 @@ accept explicit roots and never need live providers.
 Determa remains the transition authority for provider, provisioning, package,
 and interrupted-operation recovery. Operation IDs are allocated under the state
 lock and remain monotonic when history is trimmed. Authentication evaluates all
-universal requirements plus at least one complete alternative group
-(`required_any` is OR-of-AND). Provider and package command environments are
+ordinary `required: true` configuration and secret fields. AWS requires an
+explicit named profile; Eve does not manage AWS key material or inspect profile
+credentials. Provider and package command environments are
 operation-local and inject only declared target credentials.
 
 Fresh checks identified and fixed these additional problems:
@@ -105,6 +106,28 @@ Fresh checks identified and fixed these additional problems:
   the real-plugin core boundary check. The example is now generic.
 
 ## GitHub and remaining rollout dependency
+
+### Profile-only AWS revision — 2026-10-04 (Asia/Tokyo)
+
+AWS now requires an explicitly configured named profile. Eve no longer declares,
+reads, injects, or edits AWS key material. AWS tooling owns profile credentials
+and login/SSO sessions; Eve does not inspect the profile's contents. Without a
+profile, connectivity returns unconfigured without invoking AWS. With a profile,
+the STS probe always supplies `--profile` and reports a failed login/session as
+configured but unreachable.
+
+No other shipped manifest used alternative authentication groups, so their
+schema, validator, FSM evaluation, tests, and documentation were removed.
+The operation-local environment allowlist remains unchanged. Regression tests
+cover ambient AWS credential isolation and skipped secret-store reads in
+dispatch, legacy profile resolution, and settings. Terraform environment
+failures now abort before backend access instead of applying partial exports.
+
+Revised offline validation: 529 Python tests passed with one intentional skip;
+49 focused schema/configuration/isolation checks passed. All six AWS connectivity
+tests, eight provider backend/profile checks, provider environment contracts,
+actual Linux/PowerShell runners, and combined 47-plugin conformance passed.
+Core CI now runs on draft PRs so readiness can be checked while #55 remains draft.
 
 Core recovery CI skipped because its PR was a draft; the cross-repository job is
 scheduled/manual only. Provider and Linux/Windows recovery CI was absent because
