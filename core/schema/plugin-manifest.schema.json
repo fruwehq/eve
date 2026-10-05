@@ -525,11 +525,12 @@
           "items": {
             "type": "string",
             "enum": [
-              "terraform",
-              "vagrant",
-              "qemu",
+              "docker",
+              "incus",
               "metal",
-              "docker"
+              "qemu",
+              "terraform",
+              "vagrant"
             ]
           }
         },
@@ -538,8 +539,9 @@
           "items": {
             "type": "string",
             "enum": [
-              "vm",
-              "metal"
+              "container",
+              "metal",
+              "vm"
             ]
           }
         }
@@ -1017,8 +1019,9 @@
         "kind": {
           "type": "string",
           "enum": [
-            "vm",
-            "metal"
+            "container",
+            "metal",
+            "vm"
           ]
         },
         "supports": {

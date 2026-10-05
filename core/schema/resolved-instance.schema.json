@@ -25,7 +25,7 @@
 
   "properties": {
     "access": {
-      "description": "Resolved VM access identities. bootstrap_user is the initial login user, provision_user runs automation, and human_user owns desktop/session state.",
+      "description": "Resolved guest access identities. bootstrap_user is the initial login user, provision_user runs automation, and human_user owns desktop/session state.",
       "type": "object",
       "required": ["bootstrap_user", "provision_user", "human_user"],
       "additionalProperties": false,
@@ -141,7 +141,7 @@
         "kind": {
           "type": "string",
           "description": "Machine lifecycle kind.",
-          "enum": ["vm", "metal"]
+          "enum": ["container", "metal", "vm"]
         },
         "supports": {
           "type": "object",
@@ -276,7 +276,7 @@
     "engine": {
       "description": "The execution engine determined from the machine kind and provider.",
       "type": "string",
-      "enum": ["terraform", "vagrant", "qemu", "metal"]
+      "enum": ["incus", "metal", "qemu", "terraform", "vagrant"]
     },
 
     "stack_tags": {

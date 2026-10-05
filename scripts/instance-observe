@@ -10,6 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from eve_sdk.dispatch import last_json_object, validate_provider_output  # noqa: E402
 from eve_sdk.state import State, StateError  # noqa: E402
 
 DEFAULT_TTL_SECONDS = 30
@@ -43,6 +44,17 @@ def normalize_provider_status(value: str) -> str:
 
 def parse_status_output(output: str) -> dict[str, object]:
     observed: dict[str, object] = {}
+    parsed = last_json_object(output, {"status"})
+    if parsed is not None:
+        validate_provider_output(output)
+        # Structured providers already speak the validated observation vocabulary.
+        observed["provider_status"] = parsed["status"]
+        for field in ("guest_access", "ip", "provider_identity"):
+            if field in parsed:
+                observed[field] = parsed[field]
+        if "guest_access" in parsed:
+            observed["ip"] = parsed["guest_access"]["address"]
+        return observed
     for line in output.splitlines():
         parts = [part.strip() for part in line.split(":", 1)]
         if len(parts) != 2:
