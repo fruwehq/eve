@@ -21,12 +21,80 @@ class DispatchError(Exception):
     pass
 
 
+_PROCESS_ENV_NAMES = {
+    "COLORTERM",
+    "DBUS_SESSION_BUS_ADDRESS",
+    "DISPLAY",
+    "EVE_ALLOW_UNPINNED_PLUGINS",
+    "EVE_CONFIG_PATH",
+    "EVE_DISABLE_STATE",
+    "EVE_HOME",
+    "EVE_INSTANCE_REGISTRY",
+    "EVE_INSTANCE_WORKDIR",
+    "EVE_PACKAGE_DOWN_SSH",
+    "EVE_PACKAGE_STATUS_SSH",
+    "EVE_PLUGIN_ALLOW_OVERRIDE",
+    "EVE_PLUGIN_DRY_RUN",
+    "EVE_PLUGIN_ROOTS",
+    "EVE_PLUGIN_ROOTS_EXCLUSIVE",
+    "EVE_PLUGIN_SOURCES",
+    "EVE_PROVIDER_DRY_RUN",
+    "EVE_PROVISION_DRY_RUN",
+    "EVE_PROVISION_SCRIPT",
+    "EVE_PROVISION_WAIT_POLL_INTERVAL",
+    "EVE_SECRETS_DIR",
+    "EVE_SSH_RETRY_ATTEMPTS",
+    "EVE_SSH_RETRY_DELAY",
+    "EVE_STATE_DIR",
+    "EVE_TF_DATA_BASE",
+    "EVE_TF_ENV_JSON",
+    "EVE_TF_PRINT",
+    "EVE_TF_STATE_BASE",
+    "EVE_TM_READ_FLAGS",
+    "EVE_UPLOAD_DIR",
+    "EVE_WAIT_FOR_PROVISION_PROBE_SCRIPT",
+    "HOME",
+    "HTTPS_PROXY",
+    "HTTP_PROXY",
+    "LANG",
+    "LANGUAGE",
+    "LOGNAME",
+    "NO_PROXY",
+    "PATH",
+    "REQUESTS_CA_BUNDLE",
+    "SHELL",
+    "SSH_AGENT_PID",
+    "SSH_AUTH_SOCK",
+    "SSL_CERT_DIR",
+    "SSL_CERT_FILE",
+    "TEMP",
+    "TERM",
+    "TMP",
+    "TMPDIR",
+    "USER",
+    "WAYLAND_DISPLAY",
+    "XDG_RUNTIME_DIR",
+    "http_proxy",
+    "https_proxy",
+    "no_proxy",
+}
+
+
+def process_environment() -> dict[str, str]:
+    """Explicit host transport/routing environment for an outer command boundary."""
+    return {
+        name: value
+        for name, value in os.environ.items()
+        if name in _PROCESS_ENV_NAMES or name.startswith("LC_")
+    }
+
+
 def command_env(extra: dict[str, str] | None = None) -> dict[str, str]:
     """Env for invoking plugin/script commands. Ensures the eve repo root is on
     PYTHONPATH so external (synced) plugin command scripts can `import eve_sdk`
     regardless of where they live on disk (their own `parents[N]` path assumes
     the in-repo layout and is wrong once extracted)."""
-    env = os.environ | (extra or {})
+    env = dict(os.environ) if extra is None else dict(extra)
     root = str(Workdir.repo_root())
     existing = env.get("PYTHONPATH", "")
     env["PYTHONPATH"] = root + (os.pathsep + existing if existing else "")
@@ -144,7 +212,7 @@ def record_provider_state(
     status: str,
     error: str | None = None,
     desired_state: str | None = None,
-    provider_state: str | None = None,
+    provider_event: str | None = None,
 ) -> None:
     if os.environ.get("EVE_DISABLE_STATE") == "1":
         return
@@ -154,7 +222,7 @@ def record_provider_state(
         status,
         error=error,
         desired_state=desired_state,
-        provider_state=provider_state,
+        provider_event=provider_event,
     )
 
 
@@ -163,6 +231,7 @@ def record_package_state(
     command: str,
     status: str,
     package_id: str,
+    package_event: str | None = None,
     package_state: str | None = None,
     error: str | None = None,
 ) -> None:
@@ -173,6 +242,7 @@ def record_package_state(
         f"package.{command}",
         status,
         package=package_id,
+        package_event=package_event,
         package_state=package_state,
         error=error,
     )
@@ -182,22 +252,11 @@ def desired_state_for(command: str | None) -> str | None:
     return {"up": "running", "start": "running", "stop": "stopped", "down": "absent"}.get(command or "")
 
 
-def provider_state_for(command: str | None, status: str) -> str | None:
-    command = command or ""
-    if status == "running" and command in {"up", "down", "start", "stop"}:
-        return "changing"
-    if status == "failed":
-        return None if command in {"resolve", "status", "ip", "ssh"} else "error"
-    if status != "succeeded":
-        return None
-    return {
-        "init": "initialized",
-        "plan": "planned",
-        "up": "running",
-        "start": "running",
-        "stop": "stopped",
-        "down": "absent",
-    }.get(command)
+# The provider-state transition is no longer a hand-maintained table: dispatch
+# fires an event into the core instance machine (core/fsm/instance.yaml) seeded
+# from the persisted state, and the resulting leaf is the new provider_state.
+# ``instance_fsm.dispatch_event`` maps a dispatched (command, op_status) to that
+# event; the firing happens atomically inside State.record_operation.
 
 
 def interactive_provider_command(plugin: dict[str, Any], command: str) -> bool:
@@ -214,26 +273,20 @@ def interactive_provider_command(plugin: dict[str, Any], command: str) -> bool:
 
 
 def last_json_object(output: str, keys: set[str]) -> dict[str, Any] | None:
-    for index in range(len(output) - 1, -1, -1):
-        if output[index] != "{":
-            continue
+    """Find the last matching top-level object, skipping its nested values."""
+    decoder = json.JSONDecoder()
+    result = None
+    offset = 0
+    while (index := output.find("{", offset)) != -1:
         try:
-            parsed = json.loads(output[index:].strip())
+            parsed, end = decoder.raw_decode(output, index)
         except json.JSONDecodeError:
+            offset = index + 1
             continue
+        offset = end
         if isinstance(parsed, dict) and keys.intersection(parsed):
-            return parsed
-    for line in reversed(output.splitlines()):
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            parsed = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(parsed, dict) and keys.intersection(parsed):
-            return parsed
-    return None
+            result = parsed
+    return result
 
 
 def validate_provider_output(output: str) -> None:

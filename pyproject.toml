@@ -9,6 +9,7 @@ license = "MIT"
 readme = "README.md"
 requires-python = ">=3.12,<4.0"
 dependencies = [
+    "determa-state (>=0.2.0,<0.3.0)",
     "jsonschema (>=4.25.1,<5.0.0)",
     "pyyaml (>=6.0.3,<7.0.0)",
     "textual (>=8.2.5,<9.0.0)"
@@ -51,7 +52,16 @@ pythonpath = ["."]
 
 [tool.poetry]
 packages = [{include = "eve_sdk"}]
-include = ["scripts", "core", "config", "oses"]
+include = [
+    {path = ".env", format = ["sdist", "wheel"]},
+    {path = "config/catalog.yaml", format = ["sdist", "wheel"]},
+    {path = "config/defaults.yaml", format = ["sdist", "wheel"]},
+    {path = "core", format = ["sdist", "wheel"]},
+    {path = "oses", format = ["sdist", "wheel"]},
+    {path = "scripts", format = ["sdist", "wheel"]},
+    {path = "tui", format = ["sdist", "wheel"]},
+]
+exclude = ["**/__pycache__/**", "**/*.pyc", "**/*.local.*", ".env.local"]
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]

@@ -19,6 +19,7 @@ from typing import Any
 import yaml
 
 from eve_sdk.catalog import load_catalog
+from eve_sdk.plugin_manifest import PluginManifest
 from eve_sdk.secrets import Secrets
 from eve_sdk.workdir import Workdir
 
@@ -222,6 +223,9 @@ def apply_provider_secrets(resolved: dict[str, Any]) -> None:
     """
     provider = resolved.get("machine", {}).get("provider") or ""
     if not provider:
+        return
+    plugin = next((p for p in PluginManifest.load_all("provider") if p["id"] == provider), {})
+    if not (plugin.get("config_schema") or {}).get("secrets"):
         return
     for key, value in Secrets.read(provider).items():
         if value is None or key in os.environ:

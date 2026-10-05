@@ -1,0 +1,41 @@
+#!/usr/bin/env python3
+"""Stage a provider's terramate stacks for read/power commands.
+
+The write path (tf-init/plan/apply/destroy) vendors the externalized provider
+stacks and runs `terramate generate` before invoking terramate. The read/power
+commands (status, ip, start, stop, password) don't run tf-init, so on a fresh
+checkout — or any tree where `up` hasn't run — terramate can't discover the
+stacks and reports "not created" / errors. This is the shared core helper those
+commands call (via `eve_load_profile_env`, gated on the terraform engine) so the
+read path stages stacks the same way the write path does.
+
+Idempotent and cheap once staged (see stage_provider_stacks): the copy is
+skipped when already current, and `terramate generate` runs only when staging
+changed something or no generated backend file exists yet — safe to call on
+every status poll.
+
+Usage: scripts/tf-stage <provider>
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from eve_sdk.tf_dispatch import repo_root, stage_provider_stacks  # noqa: E402
+
+
+def main(argv: list[str]) -> int:
+    provider = argv[0] if argv else ""
+    if not provider:
+        print("usage: scripts/tf-stage <provider>", file=sys.stderr)
+        return 2
+    stage_provider_stacks(repo_root(), provider)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

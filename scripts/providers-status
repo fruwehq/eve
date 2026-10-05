@@ -7,9 +7,13 @@ Usage:
   scripts/providers-status <provider> <field> # print single field (configured|reachable|notes)
 
 The provider list is derived dynamically from PluginManifest: every provider
-that declares a ``connectivity`` command appears. Each connectivity command
-runs on the HOST (probes local CLIs/creds, not an instance) and prints one
-JSON object: {"configured","reachable","notes"}.
+that declares a ``connectivity`` command appears.
+
+``configured`` is computed by the core provider FSM (``core/fsm/provider.yaml``) from
+eve-resolved config — true iff the provider's *required* config/secrets are present —
+so it can never be a plugin's ambient self-report (v4.5 N/O). ``reachable`` comes from
+the provider's ``connectivity`` command, run on the HOST only when configured; the
+command's own ``configured`` field is ignored (it only needs to answer reachability).
 """
 from __future__ import annotations
 
@@ -22,8 +26,12 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from eve_sdk.dispatch import command_vector  # noqa: E402
+from eve_sdk.dispatch import command_env, command_vector  # noqa: E402
+from eve_sdk.fsm import EveFsm, provider_configured_resolver  # noqa: E402
 from eve_sdk.plugin_manifest import PluginManifest  # noqa: E402
+from eve_sdk.provider_command import resolved_provider_environment  # noqa: E402
+
+CORE_PROVIDER_MACHINE = ROOT / "core" / "fsm" / "provider.yaml"
 
 HEADER = "Provider           Configured  Reachable  Notes"
 SEPARATOR = "-----------------  ----------  ---------  -------------------------------------------"
@@ -45,7 +53,16 @@ def _run_connectivity(plugin: dict[str, Any]) -> tuple[str, str, str]:
     """Run a provider's connectivity command, parse JSON → (configured, reachable, notes)."""
     spec = plugin["commands"]["connectivity"]
     cmd = command_vector(plugin, spec)
-    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    # Use the same shared environment builder as provider dispatch, including
+    # ConfigEnv settings and injected secrets (v4.5 M/O: status == dispatch).
+    env = resolved_provider_environment(str(plugin["id"]), plugin)
+    result = subprocess.run(
+        cmd,
+        env=command_env(env),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
     if result.returncode != 0:
         return "no", "no", f"connectivity check failed (exit {result.returncode})"
     try:
@@ -57,6 +74,26 @@ def _run_connectivity(plugin: dict[str, Any]) -> tuple[str, str, str]:
 
 def _print_row(name: str, configured: str, reachable: str, notes: str) -> None:
     print(f"{name:<17}  {configured:<10}  {reachable:<9}  {notes}")
+
+
+def _provider_status(plugin: dict[str, Any]) -> tuple[str, str, str]:
+    """(configured, reachable, notes) via the core provider FSM (v4.5 N/O).
+
+    ``configured`` is FSM-derived — true iff eve has resolved the provider's *required*
+    config/secrets (``provider_configured_resolver``) — so it can never be a connectivity
+    command's ambient self-report. The connectivity probe runs only when configured, and
+    only its ``reachable`` + ``notes`` are used.
+    """
+    provider_id = str(plugin["id"])
+    fsm = EveFsm(provider_configured_resolver())
+    fsm.load("provider", CORE_PROVIDER_MACHINE.read_text())
+    fsm.fire("provider", provider_id, "resolve")
+    if fsm.state("provider", provider_id) == "unconfigured":
+        return "no", "no", "not configured"
+    _configured, reachable, notes = _run_connectivity(plugin)
+    fsm.fire("provider", provider_id, "probe_ok" if reachable == "yes" else "probe_fail")
+    reachable = "yes" if fsm.state("provider", provider_id) == "reachable" else "no"
+    return "yes", reachable, notes
 
 
 def main(argv: list[str]) -> int:
@@ -71,7 +108,7 @@ def main(argv: list[str]) -> int:
             print(f"Unknown provider: {provider_name} (valid: {' '.join(provider_ids)})", file=sys.stderr)
             return 1
         plugin = next(p for p in providers if p["id"] == provider_name)
-        configured, reachable, notes = _run_connectivity(plugin)
+        configured, reachable, notes = _provider_status(plugin)
         if field:
             if field == "configured":
                 print(configured)
@@ -93,7 +130,7 @@ def main(argv: list[str]) -> int:
         print(HEADER)
         print(SEPARATOR)
         for plugin in providers:
-            configured, reachable, notes = _run_connectivity(plugin)
+            configured, reachable, notes = _provider_status(plugin)
             _print_row(plugin["id"], configured, reachable, notes)
     return 0
 

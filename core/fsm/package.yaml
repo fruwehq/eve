@@ -1,0 +1,49 @@
+# The package lifecycle, shared by every package (v4.5 N/O) — a Determa State
+# format-1 bundle; the declarative replacement for state.py's PACKAGE_STATES.
+# Transitions are driven by eve operations (install / remove) and by observation
+# (found / absent maps a live probe back to a state, keeping the machine honest
+# about drift).
+format: 1
+namespace: eve.core
+events:
+  absent: { direction: input }         # observe: not present
+  found: { direction: input }          # observe: the package is present on the instance
+  install: { direction: input }
+  install_fail: { direction: input }
+  install_ok: { direction: input }
+  observe_failed: { direction: input }
+  observe_unknown: { direction: input }
+  remove: { direction: input }
+  remove_fail: { direction: input }
+  remove_ok: { direction: input }
+machines:
+  - machine_id: package
+    root:
+      type: composite
+      initial: { transition_to: idle }
+      on_events:
+        absent:          { transition_to: idle.missing }
+        found:           { transition_to: idle.installed }
+        observe_failed:  { transition_to: idle.failed }
+        observe_unknown: { transition_to: idle.unknown }
+      states:
+        idle:
+          type: composite
+          initial: { transition_to: unknown }
+          on_events:
+            install: { transition_to: installing }
+            remove:           { transition_to: removing }
+          states:
+            failed: {}
+            installed: {}
+            missing: {}
+            removed: {}
+            unknown: {}
+        installing:
+          on_events:
+            install_fail: { transition_to: idle.failed }
+            install_ok:   { transition_to: idle.installed }
+        removing:
+          on_events:
+            remove_fail: { transition_to: idle.failed }
+            remove_ok:   { transition_to: idle.removed }

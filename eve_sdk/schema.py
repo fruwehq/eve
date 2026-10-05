@@ -58,7 +58,8 @@ def validate_def(schema_name: str, def_name: str, data: Any, label: str) -> None
     defs = raw.get("$defs") or raw.get("defs") or {}
     if not isinstance(defs, dict) or def_name not in defs:
         raise SchemaValidationError(f"Unknown $defs entry: {def_name}")
-    schema = defs[def_name]
+    # Keep sibling definitions available to typed command-output references.
+    schema = {"$defs": defs, "$ref": f"#/$defs/{def_name}"}
     try:
         Draft202012Validator.check_schema(schema)
     except SchemaError as error:

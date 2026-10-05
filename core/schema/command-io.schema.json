@@ -4,8 +4,40 @@
   "title": "Plugin Command I/O",
   "description": "Documents the JSON in/out contract for plugin commands. The input shape is resolved-instance.schema.json (passed via stdin or EVE_RESOLVED_JSON). The $defs below describe the output shapes. This schema is documentation-only -- no data fixtures validate against it because provider commands emit mixed text/JSON on stdout.",
   "$comment": "Documentation-only: defines $defs for reference but has no root type constraint. Do not add a root type or oneOf without also adding corresponding command-output fixtures.",
-
   "$defs": {
+    "incus_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "endpoint",
+        "instance_name",
+        "owner_id",
+        "project",
+        "remote"
+      ],
+      "properties": {
+        "endpoint": {
+          "type": "string",
+          "pattern": "^https://[^/]+$"
+        },
+        "instance_name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,61}[a-z0-9]$"
+        },
+        "owner_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "project": {
+          "type": "string",
+          "minLength": 1
+        },
+        "remote": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$"
+        }
+      }
+    },
     "provider_command_output": {
       "title": "Provider Command Output",
       "description": "JSON emitted by provider commands on stdout. Most commands stream text; lifecycle commands record state through instance-state rather than structured output. When a provider command emits JSON containing a status or ip field, those fields are validated against this contract.",
@@ -15,16 +47,28 @@
         "status": {
           "description": "Provider status value from the status command.",
           "type": "string",
-          "enum": ["running", "stopped", "absent", "unknown"]
+          "enum": [
+            "absent",
+            "creating",
+            "failed",
+            "running",
+            "stopped",
+            "unknown"
+          ]
         },
         "ip": {
           "description": "IP address from the ip command.",
           "type": "string",
           "minLength": 1
+        },
+        "guest_access": {
+          "$ref": "#/$defs/guest_access"
+        },
+        "provider_identity": {
+          "$ref": "#/$defs/provider_identity"
         }
       }
     },
-
     "package_command_output": {
       "title": "Package Command Output",
       "description": "JSON emitted by package commands on stdout. The dispatcher scans the last JSON object in stdout for a status field.",
@@ -34,28 +78,137 @@
         "status": {
           "description": "Package status value.",
           "type": "string",
-          "enum": ["installed", "missing", "unknown", "failed"]
+          "enum": [
+            "installed",
+            "missing",
+            "unknown",
+            "failed"
+          ]
         }
       }
     },
-
     "desired_state_mapping": {
       "title": "Desired State Mapping",
       "description": "Maps provider command to the desired_state the dispatcher records. up/start -> running, stop -> stopped, down -> absent.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "up": { "const": "running" },
-        "start": { "const": "running" },
-        "stop": { "const": "stopped" },
-        "down": { "const": "absent" }
+        "up": {
+          "const": "running"
+        },
+        "start": {
+          "const": "running"
+        },
+        "stop": {
+          "const": "stopped"
+        },
+        "down": {
+          "const": "absent"
+        }
       }
     },
-
     "provider_state_mapping": {
       "title": "Provider State Mapping",
-      "description": "Maps (command, dispatch_status) to the provider_state recorded by the dispatcher. On success: init -> initialized, plan -> planned, up/start -> running, stop -> stopped, down -> absent. On running: -> changing. On failure: -> error (except resolve/status/ip/ssh which set null).",
+      "description": "Maps (command, dispatch_status) to the provider_state recorded by the dispatcher (the core/fsm/instance.yaml vocabulary). On success: init/plan -> creating, up/start -> running, stop -> stopped, down -> absent. On running (in flight): up -> creating, start -> starting, stop -> stopping, down -> destroying. On failure: -> error (except resolve/status/ip/ssh which set null).",
       "type": "object"
+    },
+    "provider_identity": {
+      "description": "Closed provider-discriminated envelope. Each provider implements a namespaced identity variant; new providers add a schema variant, never arbitrary fields.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "identity",
+            "provider"
+          ],
+          "properties": {
+            "provider": {
+              "const": "incus"
+            },
+            "identity": {
+              "$ref": "#/$defs/incus_identity"
+            }
+          }
+        }
+      ]
+    },
+    "guest_access": {
+      "title": "Authenticated SSH guest access",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "address",
+        "credential_reference",
+        "host_identity",
+        "port",
+        "protocol",
+        "provider_identity",
+        "username",
+        "version"
+      ],
+      "properties": {
+        "address": {
+          "type": "string",
+          "pattern": "^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])$"
+        },
+        "credential_reference": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "type"
+          ],
+          "properties": {
+            "path": {
+              "type": "string",
+              "pattern": "^/"
+            },
+            "type": {
+              "const": "ssh-private-key-file"
+            }
+          }
+        },
+        "host_identity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "fingerprint",
+            "mechanism"
+          ],
+          "properties": {
+            "fingerprint": {
+              "type": "string",
+              "pattern": "^SHA256:[A-Za-z0-9+/]{43}$"
+            },
+            "mechanism": {
+              "enum": [
+                "configured-fingerprint",
+                "incus-authenticated-exec"
+              ]
+            }
+          },
+          "description": "SSH host-key fingerprint established by explicit controller configuration or a provider-specific authenticated mechanism; no trust-on-first-use."
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "protocol": {
+          "const": "ssh"
+        },
+        "provider_identity": {
+          "$ref": "#/$defs/provider_identity"
+        },
+        "username": {
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$"
+        },
+        "version": {
+          "const": 2
+        }
+      }
     }
   }
 }

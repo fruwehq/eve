@@ -11,6 +11,23 @@ from eve_sdk.atomic_yaml import AtomicYaml
 from eve_sdk.workdir import Workdir
 
 
+def write_private_text(path: Path, value: str) -> None:
+    """Create secret payloads owner-only before writing any bytes."""
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        os.fchmod(handle.fileno(), 0o600)
+        handle.write(value)
+
+
+def windows_secret_cleanup(path: str) -> str:
+    """Allow an absent payload while propagating failures to delete one."""
+    quoted = "'" + path.replace("'", "''") + "'"
+    return (
+        f"if (Test-Path -LiteralPath {quoted}) {{ "
+        f"Remove-Item -LiteralPath {quoted} -Force -ErrorAction Stop }}"
+    )
+
+
 class SecretsError(Exception):
     pass
 

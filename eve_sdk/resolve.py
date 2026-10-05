@@ -292,7 +292,8 @@ def validate_catalog_selection(
             f"got machine provider {machine['provider']}"
         )
     provider = machine["provider"]
-    if not location.get(provider):
+    # An explicit empty mapping is valid for providers without region/zone data.
+    if not isinstance(location.get(provider), dict):
         raise ResolveError(f"Location {location['name']} has no mapping for provider {provider}")
     supports_raw = machine.get("supports")
     supports = supports_raw if isinstance(supports_raw, dict) else {}

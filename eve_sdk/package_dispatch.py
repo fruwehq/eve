@@ -22,16 +22,20 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from eve_sdk.config import ConfigEnv
 from eve_sdk.dispatch import (
     DispatchError,
     command_vector,
     package_status_from_output,
     prepare_overlay,
+    process_environment,
     record_package_state,
     stream_command,
     validate_package_support,
 )
+from eve_sdk.instance_fsm import package_observation_event
 from eve_sdk.plugin_manifest import PluginManifest
+from eve_sdk.provider_command import _inject_secrets
 from eve_sdk.resolve import resolve_instance
 from eve_sdk.schema import SchemaValidationError, validate_input
 
@@ -211,6 +215,7 @@ def _run_plugin(
     resolved: dict[str, Any],
     dry_run: bool,
     on_output: Callable[[str], None] | None = None,
+    operation_env: dict[str, str] | None = None,
 ) -> str:
     commands = plugin.get("commands")
     if not isinstance(commands, dict):
@@ -226,12 +231,13 @@ def _run_plugin(
     os_paths_raw = plugin.get("os_paths")
     os_paths = os_paths_raw if isinstance(os_paths_raw, dict) else {}
     manifest_path = os_paths.get(os_family) or plugin["path"]
-    env = os.environ | {
+    env = resolved_package_environment(plugin, resolved, operation_env)
+    env.update({
         "EVE_INSTANCE_NAME": resolved["instance"]["name"],
         "EVE_PACKAGE_PLUGIN": str(plugin["id"]),
         "EVE_PACKAGE_PLUGIN_ROOT": str(Path(str(manifest_path)).parent),
         "EVE_RESOLVED_JSON": json.dumps(resolved, separators=(",", ":")),
-    }
+    })
     if dry_run:
         env["EVE_PLUGIN_DRY_RUN"] = "1"
 
@@ -244,6 +250,85 @@ def _run_plugin(
     if status != 0:
         raise DispatchError(f"package command failed: {command}")
     return output
+
+
+def resolved_package_environment(
+    plugin: dict[str, Any],
+    resolved: dict[str, Any],
+    overrides: dict[str, str] | None = None,
+) -> dict[str, str]:
+    """Build an operation-local environment for one package plugin."""
+    package_id = str(plugin["id"])
+    all_package_config = resolved.get("package_config") or {}
+    package_config = (
+        {package_id: all_package_config[package_id]}
+        if package_id in all_package_config
+        else {}
+    )
+    return resolved_package_set_environment(
+        [plugin], package_config, overrides=overrides
+    )
+
+
+def resolved_package_set_environment(
+    plugins: list[dict[str, Any]],
+    package_config: dict[str, Any],
+    *,
+    overrides: dict[str, str] | None = None,
+) -> dict[str, str]:
+    """Build a trusted provision environment for an applicable package set."""
+    declared_names = {
+        str(name)
+        for plugin in plugins
+        for section in ("config", "secrets")
+        for field in ((plugin.get("config_schema") or {}).get(section) or {}).values()
+        if isinstance(field, dict) and field.get("env_var")
+        for name in (
+            field["env_var"]
+            if isinstance(field["env_var"], list)
+            else [field["env_var"]]
+        )
+    }
+    core_names = {name for _path, name, _is_path in ConfigEnv.MAPPINGS}
+    configured = ConfigEnv.environment()
+    env = process_environment()
+    env.update(
+        {
+            name: value
+            for name, value in configured.items()
+            if name in core_names or name in declared_names
+        }
+    )
+    env.update(ConfigEnv.instance_package_env(package_config))
+    for plugin in plugins:
+        env = _inject_secrets(str(plugin["id"]), plugin, env)
+    env.update(overrides or {})
+    return env
+
+
+def package_environment_names(
+    plugins: list[dict[str, Any]], *, path_config_only: bool = False
+) -> list[str]:
+    """Declared environment names for an applicable package set."""
+    sections = ("config",) if path_config_only else ("config", "secrets")
+    return sorted(
+        {
+            str(name)
+            for plugin in plugins
+            for section in sections
+            for field in (
+                (plugin.get("config_schema") or {}).get(section) or {}
+            ).values()
+            if isinstance(field, dict)
+            and field.get("env_var")
+            and (not path_config_only or field.get("type") == "path")
+            for name in (
+                field["env_var"]
+                if isinstance(field["env_var"], list)
+                else [field["env_var"]]
+            )
+        }
+    )
 
 
 def dispatch_package(
@@ -290,9 +375,9 @@ def dispatch_package(
             )
 
         overlay = prepare_overlay(instance_name, registry_path)
-        os.environ["EVE_CATALOG_LOCAL"] = overlay
+        operation_env = {"EVE_CATALOG_LOCAL": overlay}
         if registry_path:
-            os.environ["EVE_INSTANCE_REGISTRY"] = registry_path
+            operation_env["EVE_INSTANCE_REGISTRY"] = registry_path
 
         # Record "running" only after lookup/validation/overlay prep succeeded —
         # so a missing-package or unsupported-version failure records only the
@@ -301,30 +386,54 @@ def dispatch_package(
             record_package_state(instance_name, command, "running", package_id)
 
         if command == "reinstall" and "reinstall" not in plugin.get("commands", {}):
-            _run_plugin(plugin, "down", resolved, dry_run, on_output)
-            output = _run_plugin(plugin, "install", resolved, dry_run, on_output)
+            _run_plugin(
+                plugin, "down", resolved, dry_run, on_output, operation_env
+            )
+            output = _run_plugin(
+                plugin, "install", resolved, dry_run, on_output, operation_env
+            )
         else:
-            output = _run_plugin(plugin, command, resolved, dry_run, on_output)
+            output = _run_plugin(
+                plugin, command, resolved, dry_run, on_output, operation_env
+            )
     except Exception as error:
         if not dry_run:
             try:
                 record_package_state(
-                    instance_name, command, "failed", package_id, "failed", str(error)
+                    instance_name, command, "failed", package_id, error=str(error)
                 )
             except Exception as state_error:
                 print(f"package-dispatch: failed to record failure state: {state_error}", file=sys.stderr)
         print(f"package-dispatch: {error}", file=sys.stderr)
         return 1
 
-    package_state = {
-        "install": "installed",
-        "down": "removed",
-        "reinstall": "reinstalled",
-    }.get(command)
-    if package_state is None:
-        package_state = package_status_from_output(output) or "unknown"
-    if not dry_run:
-        record_package_state(instance_name, command, "succeeded", package_id, package_state)
+    try:
+        package_event = None
+        if command == "status":
+            package_event = package_observation_event(
+                package_status_from_output(output) or "unknown"
+            )
+        if not dry_run:
+            record_package_state(
+                instance_name,
+                command,
+                "succeeded",
+                package_id,
+                package_event=package_event,
+            )
+    except Exception as error:
+        if not dry_run:
+            try:
+                record_package_state(
+                    instance_name, command, "failed", package_id, error=str(error)
+                )
+            except Exception as state_error:
+                print(
+                    f"package-dispatch: failed to record failure state: {state_error}",
+                    file=sys.stderr,
+                )
+        print(f"package-dispatch: {error}", file=sys.stderr)
+        return 1
     return 0
 
 

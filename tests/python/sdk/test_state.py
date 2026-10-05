@@ -31,7 +31,7 @@ def test_state_read_defaults(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) ->
 def test_state_record_operation_and_recover(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("EVE_STATE_DIR", str(tmp_path))
 
-    State.record_operation("demo", "provider.up", "running", desired_state="running", provider_state="changing")
+    State.record_operation("demo", "provider.up", "running", desired_state="running", provider_state="creating")
     recovered = State.recover_running("demo")
 
     assert recovered["provider_state"] == "error"
@@ -42,6 +42,117 @@ def test_state_record_operation_and_recover(monkeypatch: pytest.MonkeyPatch, tmp
 def test_state_rejects_invalid_enum() -> None:
     with pytest.raises(ValueError, match="provider_state must be one of"):
         State.record_operation("demo", "provider.up", "succeeded", provider_state="bogus")
+
+
+def test_provider_event_drives_state_through_the_machine(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """provider_event fires the core instance machine seeded from the persisted
+    provider_state; the resulting leaf becomes the new provider_state (bug N)."""
+    monkeypatch.setenv("EVE_STATE_DIR", str(tmp_path))
+    from eve_sdk.instance_fsm import dispatch_event
+
+    # A full lifecycle: each (command, op_status) is mapped to a machine event by
+    # dispatch_event exactly as provider-dispatch does, then fired from the previous
+    # persisted state. (in-flight -> transient, succeeded -> terminal outcome.)
+    steps = [
+        ("up", "running", "creating"),
+        ("up", "succeeded", "running"),
+        ("stop", "running", "stopping"),
+        ("stop", "succeeded", "stopped"),
+        ("down", "running", "destroying"),
+        ("down", "succeeded", "absent"),
+        # start recovers to running even from absent (operator intent is authoritative)
+        ("start", "running", "starting"),
+        ("start", "succeeded", "running"),
+    ]
+    for command, op_status, expected in steps:
+        state = State.record_operation(
+            "demo", f"provider.{command}", op_status, provider_event=dispatch_event(command, op_status)
+        )
+        assert state["provider_state"] == expected, (command, op_status)
+
+    # A read-only command leaves provider_state untouched (no event).
+    State.record_operation(
+        "demo", "provider.status", "failed", provider_event=dispatch_event("status", "failed")
+    )
+    assert State.read("demo")["provider_state"] == "running"
+
+    # A failed mutating operation lands in error: dispatch records the in-flight step
+    # first (running -> stopping), then the failure (op_fail from the transient -> error).
+    State.record_operation("demo", "provider.stop", "running", provider_event=dispatch_event("stop", "running"))
+    assert State.read("demo")["provider_state"] == "stopping"
+    State.record_operation("demo", "provider.stop", "failed", provider_event=dispatch_event("stop", "failed"))
+    assert State.read("demo")["provider_state"] == "error"
+
+
+def test_provision_operation_drives_state_through_the_machine(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("EVE_STATE_DIR", str(tmp_path))
+
+    assert (
+        State.record_operation("demo", "provision", "running")["provision_state"]
+        == "provisioning"
+    )
+    recovered = State.recover_running("demo")
+    assert recovered["provision_state"] == "error"
+    assert recovered["last_operation"]["status"] == "failed"
+    assert State.record_operation("demo", "provision", "failed")["provision_state"] == "error"
+    assert (
+        State.record_operation("demo", "provision", "running")["provision_state"]
+        == "provisioning"
+    )
+    assert (
+        State.record_operation("demo", "provision", "succeeded")["provision_state"]
+        == "provisioned"
+    )
+    assert (
+        State.record_operation("demo", "provision", "running")["provision_state"]
+        == "provisioning"
+    )
+
+
+def test_package_operation_and_provision_observations_are_machine_driven(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("EVE_STATE_DIR", str(tmp_path))
+
+    installing = State.record_operation(
+        "demo", "package.install", "running", package="mock-app"
+    )
+    assert installing["package_state"]["mock-app"]["status"] == "installing"
+    assert installing["last_operation"]["package"] == "mock-app"
+
+    recovered = State.recover_running("demo")
+    assert recovered["package_state"]["mock-app"]["status"] == "failed"
+
+    State.record_operation("demo", "provision", "running")
+    completed = State.record_operation(
+        "demo",
+        "provision",
+        "succeeded",
+        package_observations={"mock-app": "installed", "mock-tool": "installed"},
+    )
+    assert completed["provision_state"] == "provisioned"
+    assert completed["package_state"]["mock-app"]["status"] == "installed"
+    assert completed["package_state"]["mock-tool"]["status"] == "installed"
+    assert completed["last_operation"]["name"] == "provision"
+
+
+def test_operation_ids_remain_unique_after_history_is_trimmed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("EVE_STATE_DIR", str(tmp_path))
+
+    for _ in range(State.DEFAULT_HISTORY_LIMIT + 5):
+        State.record_operation("demo", "provider.status", "succeeded")
+
+    history = State.read("demo")["operation_history"]
+    ids = [entry["id"] for entry in history]
+    assert len(ids) == State.DEFAULT_HISTORY_LIMIT
+    assert len(ids) == len(set(ids))
+    assert ids[-1] == State.DEFAULT_HISTORY_LIMIT + 5
 
 
 def test_state_concurrent_writers_preserve_history(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

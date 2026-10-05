@@ -75,6 +75,44 @@ def test_add_url_rejects_unsafe_folder_via_registry_validation() -> None:
     assert "relative path inside" in msg
 
 
+def test_is_local_folder() -> None:
+    assert plugins.is_local_folder("../eve-providers")
+    assert plugins.is_local_folder("/home/chris/eve-providers")
+    assert not plugins.is_local_folder("https://github.com/fruwehq/eve-providers.git")
+    assert not plugins.is_local_folder("git@github.com:fruwehq/eve-providers.git")
+
+
+def test_configured_row_returns_local_flag() -> None:
+    ok, _ = plugins.add_url("../eve-providers", ref="v4.5", auth="none")
+    assert ok
+    row = plugins.configured_row("eve-providers")
+    assert row is not None
+    assert row["local"] is True
+    assert row["url"] == "../eve-providers"
+
+    ok2, _ = plugins.add_url("https://example.com/x.git", ref="v1.0.0")
+    assert ok2
+    row2 = plugins.configured_row("x")
+    assert row2 is not None
+    assert row2["local"] is False
+
+
+def test_update_source_replaces_by_id() -> None:
+    ok, _ = plugins.add_url("https://example.com/x.git", ref="v1.0.0")
+    assert ok
+    ok2, msg = plugins.update_source("x", url="../local-x", ref="v2.0.0", subdir="sub")
+    assert ok2
+    row = plugins.configured_row("x")
+    assert row["url"] == "../local-x"
+    assert row["ref"] == "v2.0.0"
+    assert row["subdir"] == "sub"
+    assert row["local"] is True
+
+
+def test_configured_row_returns_none_for_missing() -> None:
+    assert plugins.configured_row("nonexistent") is None
+
+
 def test_derive_id_strips_git_suffix() -> None:
     assert plugins._derive_id("https://github.com/you/your-plugins.git") == "your-plugins"
     assert plugins._derive_id("../eve-providers") == "eve-providers"

@@ -110,12 +110,6 @@ machines:
       instance_type: g5.2xlarge
       disk_gb: 200
 
-  - name: vultr-vcg-a40-1c # 1 vCPU, 5 GB RAM, 90 GB NVMe, 3 TB/mo, $0.075/hr, 1/24 NVIDIA A40 (2 GB VRAM)
-    provider: vultr
-    kind: vm
-    defaults:
-      plan: vcg-a40-1c-5g-2vram
-
   - name: vultr-vcg-a40-2c # 2 vCPUs, 10 GB RAM, 180 GB NVMe, 4 TB/mo, $0.144/hr, 1/12 NVIDIA A40 (4 GB VRAM)
     provider: vultr
     kind: vm

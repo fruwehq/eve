@@ -24,6 +24,6 @@ def test_state_machine_summary() -> None:
             "a": {"state": {"provider_state": "running"}},
             "b": {"state": {"provider_state": "stopped"}},
             "c": {"state": {"provider_state": "error"}},
-            "d": {"state": {"provider_state": "changing"}},
+            "d": {"state": {"provider_state": "creating"}},
         }
     ) == {"running": 1, "stopped": 1, "failed": 1, "other": 1}

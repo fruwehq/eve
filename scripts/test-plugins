@@ -179,7 +179,7 @@ def main():
               sj is not None and sj["last_operation"]["name"] == "package.down")
 
         # recover
-        _run("scripts/instance-state", "--instance", "recover-a", "--operation", "provider.up", "--status", "running", "--provider-state", "changing", env=SE)
+        _run("scripts/instance-state", "--instance", "recover-a", "--operation", "provider.up", "--status", "running", "--provider-state", "creating", env=SE)
         rec = _run_json("scripts/instance-state", "--instance", "recover-a", "--recover-running", env=SE)
         _check("instance state recovers interrupted running operation",
               rec is not None and rec["last_operation"]["status"] == "failed" and rec.get("provider_state") == "error")

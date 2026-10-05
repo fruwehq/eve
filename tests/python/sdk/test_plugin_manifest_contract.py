@@ -238,38 +238,36 @@ class TestProviderCatalog:
 # bundles on package manifests
 # ---------------------------------------------------------------------------
 
-class TestPackageBundles:
-    def test_package_with_bundles_passes(self, tmp_path: Path) -> None:
-        manifest = _package_manifest(
-            tmp_path,
-            bundles=[
-                {"id": "my-bundle", "includes": ["testpkg", "docker"]},
-            ],
-        )
+class TestBundlePlugins:
+    def test_bundle_plugin_validates(self, tmp_path: Path) -> None:
+        manifest = {
+            "_path": str(tmp_path / "eve-plugin.yaml"),
+            "api_version": "eve.plugin/v1",
+            "kind": "bundle",
+            "id": "my-bundle",
+            "display_name": "My Bundle",
+            "members": ["pkg-a", "pkg-b"],
+        }
         PluginManifest.validate(manifest)
 
-    def test_bundle_missing_includes_rejected(self, tmp_path: Path) -> None:
-        manifest = _package_manifest(
-            tmp_path,
-            bundles=[{"id": "bad-bundle"}],
-        )
-        with pytest.raises(ValueError):
+    def test_bundle_without_members_rejected(self, tmp_path: Path) -> None:
+        manifest = {
+            "_path": str(tmp_path / "eve-plugin.yaml"),
+            "api_version": "eve.plugin/v1",
+            "kind": "bundle",
+            "id": "bad-bundle",
+            "display_name": "Bad",
+            "members": [],
+        }
+        with pytest.raises(ValueError, match="members"):
             PluginManifest.validate(manifest)
 
-    def test_bundle_missing_id_rejected(self, tmp_path: Path) -> None:
+    def test_package_with_bundles_field_rejected(self, tmp_path: Path) -> None:
         manifest = _package_manifest(
             tmp_path,
-            bundles=[{"includes": ["docker"]}],
+            bundles=[{"id": "my-bundle", "includes": ["testpkg"]}],
         )
-        with pytest.raises(ValueError):
-            PluginManifest.validate(manifest)
-
-    def test_bundle_empty_includes_rejected(self, tmp_path: Path) -> None:
-        manifest = _package_manifest(
-            tmp_path,
-            bundles=[{"id": "empty-bundle", "includes": []}],
-        )
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="Additional properties"):
             PluginManifest.validate(manifest)
 
 

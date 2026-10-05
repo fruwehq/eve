@@ -10,7 +10,6 @@ from typing import Any, cast
 from eve_sdk.engine import default_engine
 from eve_sdk.secrets import Secrets, SecretsError
 
-
 _CACHE_TTL = 5.0
 _cache: dict[tuple[str, tuple[str, ...]], tuple[float, Any]] = {}
 
@@ -84,6 +83,8 @@ def load_provider_schema(provider_id: str) -> dict[str, Any]:
 
 
 def load_provider_secrets(provider_id: str) -> dict[str, str]:
+    if not load_provider_schema(provider_id).get("secrets"):
+        return {}
     try:
         return Secrets.read(provider_id)
     except SecretsError:
@@ -91,6 +92,8 @@ def load_provider_secrets(provider_id: str) -> dict[str, str]:
 
 
 def load_provider_secret_keys(provider_id: str) -> list[str]:
+    if not load_provider_schema(provider_id).get("secrets"):
+        return []
     try:
         return Secrets.keys_set(provider_id)
     except SecretsError:
@@ -98,6 +101,8 @@ def load_provider_secret_keys(provider_id: str) -> list[str]:
 
 
 def save_provider_secret(provider_id: str, key: str, value: str) -> None:
+    if key not in (load_provider_schema(provider_id).get("secrets") or {}):
+        raise RuntimeError(f"Secret field is not declared: {provider_id}.{key}")
     try:
         Secrets.update(provider_id, {key: value})
     except SecretsError as error:
@@ -120,7 +125,7 @@ def unset_value(section: str, field: str) -> None:
 
 
 def load_missing_fields() -> list[dict[str, Any]]:
-    code, stdout, _ = _run(["./scripts/check-required", "--json"])
+    _code, stdout, _ = _run(["./scripts/check-required", "--json"])
     if not stdout.strip():
         return []
     try:

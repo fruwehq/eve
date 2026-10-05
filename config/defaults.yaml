@@ -11,7 +11,7 @@
 
 display:
   fps:
-  resolution:
+  resolution: 1920x1080
 
 global:
   my_ip:

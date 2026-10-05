@@ -1,0 +1,75 @@
+#!/usr/bin/env python3
+"""Validate tracked sibling manifests, dual-OS schemas, and the combined catalog."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+import tempfile
+from collections import Counter, defaultdict
+from pathlib import Path
+from typing import Any
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from eve_sdk.catalog import load_catalog  # noqa: E402
+from eve_sdk.plugin_manifest import PluginManifest  # noqa: E402
+from eve_sdk.plugin_test import run_plugin_test  # noqa: E402
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--plugin-root", action="append", required=True, type=Path)
+    args = parser.parse_args()
+    roots = [path.resolve() for path in args.plugin_root]
+    os.environ["EVE_PLUGIN_ROOTS"] = os.pathsep.join(map(str, roots))
+    os.environ["EVE_PLUGIN_ROOTS_EXCLUSIVE"] = "1"
+    with tempfile.TemporaryDirectory(prefix="eve-cross-repo.") as home:
+        os.environ["EVE_HOME"] = home
+        halves: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        failures = 0
+        for root in roots:
+            tracked = subprocess.run(
+                ["git", "ls-files", "-z", "*eve-plugin.yaml"],
+                cwd=root, check=True, capture_output=True, text=True,
+            ).stdout
+            for name in sorted(filter(None, tracked.split("\0"))):
+                path = root / name
+                result = run_plugin_test(path)
+                print(f"{'PASS' if result.passed else 'FAIL'} {root.name}/{name}")
+                for check in result.failures:
+                    print(f"  {check.name}: {check.message}")
+                failures += not result.passed
+                plugin = PluginManifest.load(path)
+                if plugin.get("kind") == "package":
+                    halves[str(plugin["id"])].append(plugin)
+        for package_id, plugins in sorted(halves.items()):
+            if len(plugins) > 1:
+                schemas = [plugin.get("config_schema") or {} for plugin in plugins]
+                if any(schema != schemas[0] for schema in schemas[1:]):
+                    print(f"FAIL dual-OS configuration schema parity: {package_id}")
+                    failures += 1
+        plugins = PluginManifest.load_all()
+        for plugin in plugins:
+            PluginManifest.validate(plugin)
+        catalog = load_catalog(plugins=plugins)
+        available = {package["id"] for package in catalog["packages"]}
+        for bundle in catalog["bundles"]:
+            missing = set(bundle.get("packages") or []) - available
+            if missing:
+                print(f"FAIL bundle {bundle['id']} has missing packages: {sorted(missing)}")
+                failures += 1
+        print(json.dumps({
+            "plugins": len(plugins), "kinds": dict(sorted(Counter(p["kind"] for p in plugins).items())),
+            "catalog": {key: len(value) for key, value in catalog.items()},
+            "failures": failures,
+        }, indent=2))
+        return 1 if failures else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

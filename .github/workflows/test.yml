@@ -5,13 +5,16 @@ on:
     branches:
       - main
   pull_request:
+    types: [opened, ready_for_review, reopened, synchronize]
   schedule:
     - cron: "0 9 * * *"
   workflow_dispatch:
 
+env:
+  POETRY_VIRTUALENVS_IN_PROJECT: "true"
+
 jobs:
   test:
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     strategy:
       fail-fast: false
       matrix:
@@ -115,6 +118,9 @@ jobs:
           trap finish_timing EXIT
           python -m pip install --upgrade poetry
           poetry install --no-interaction --no-root
+
+      - name: Test isolated installed wheel
+        run: python scripts/test-wheel
 
       - name: Generate Terramate code
         if: runner.os == 'Linux'

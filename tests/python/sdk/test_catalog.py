@@ -260,18 +260,18 @@ class TestAggregateProviderContributions:
 
 
 class TestAggregatePackageBundles:
-    def test_package_bundles_appended(self) -> None:
+    def test_bundle_plugin_members_appended(self) -> None:
         central = {"bundles": [{"id": "b1", "includes": ["p1"]}]}
-        plugin = {"kind": "package", "bundles": [{"id": "b2", "includes": ["p2"]}]}
+        plugin = {"kind": "bundle", "id": "b2", "members": ["p2"]}
         result = aggregate([central], [plugin])
         assert result["bundles"] == [
             {"id": "b1", "includes": ["p1"]},
             {"id": "b2", "includes": ["p2"]},
         ]
 
-    def test_package_bundle_replaces_same_id(self) -> None:
+    def test_bundle_plugin_replaces_same_id(self) -> None:
         central = {"bundles": [{"id": "b1", "includes": ["p1"]}]}
-        plugin = {"kind": "package", "bundles": [{"id": "b1", "includes": ["p2", "p3"]}]}
+        plugin = {"kind": "bundle", "id": "b1", "members": ["p2", "p3"]}
         result = aggregate([central], [plugin])
         assert result["bundles"] == [{"id": "b1", "includes": ["p2", "p3"]}]
 

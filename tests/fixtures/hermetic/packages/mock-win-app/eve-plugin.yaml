@@ -3,16 +3,25 @@ kind: package
 id: mock-win-app
 display_name: Mock Windows App
 commands:
-  install: {exec: commands/windows/install, args: [mock-win-app]}
-  status: {exec: commands/windows/status, args: [mock-win-app]}
-  down: {exec: commands/windows/down, args: [mock-win-app]}
-supports: {os_families: [windows]}
-down: {destructive: false}
+  install:
+    exec: commands/windows/install
+    args:
+    - mock-win-app
+  status:
+    exec: commands/windows/status
+    args:
+    - mock-win-app
+  down:
+    exec: commands/windows/down
+    args:
+    - mock-win-app
+supports:
+  os_families:
+  - windows
+down:
+  destructive: false
 env: []
-bundles:
-  - id: mock-gaming
-    includes: [mock-win-app]
 install:
   windows:
     steps:
-      - provision/windows/mock-win-app.ps1
+    - provision/windows/mock-win-app.ps1

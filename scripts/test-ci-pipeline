@@ -110,6 +110,12 @@ def main() -> int:
 
     print("\n== ci-pipeline workflow contract ==")
 
+    workflow_env = workflow.get("env", {})
+    checks.assert_check(
+        "Poetry creates the project environment required by scripts/test",
+        isinstance(workflow_env, dict) and workflow_env.get("POETRY_VIRTUALENVS_IN_PROJECT") == "true",
+    )
+
     triggers = workflow.get("on", workflow.get(True))
     checks.assert_check(
         "workflow runs on pull_request",

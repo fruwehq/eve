@@ -46,6 +46,14 @@ SUITE_SCRIPTS: dict[str, list[str]] = {
 
 
 def main(argv: list[str]) -> int:
+    # Match bin/eve: child scripts use the project environment, so repository
+    # tests never depend on or mutate a separate host-Python installation.
+    venv_bin = ROOT / ".venv" / "bin"
+    if not (venv_bin / "python").is_file():
+        print("scripts/test: project environment missing; run poetry install", file=sys.stderr)
+        return 1
+    os.environ["PATH"] = f"{venv_bin}{os.pathsep}{os.environ['PATH']}"
+
     # Set hermetic plugin discovery for all test subprocesses.
     os.environ["EVE_PLUGIN_ROOTS"] = str(ROOT / "tests/fixtures/hermetic")
     os.environ["EVE_PLUGIN_ROOTS_EXCLUSIVE"] = "1"

@@ -124,12 +124,18 @@
       "id": "mock-dev",
       "includes": [
         "mock-app"
+      ],
+      "installable_os_families": [
+        "ubuntu"
       ]
     },
     {
       "id": "mock-gaming",
       "includes": [
         "mock-win-app"
+      ],
+      "installable_os_families": [
+        "windows"
       ]
     }
   ],

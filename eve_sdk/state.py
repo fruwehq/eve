@@ -22,19 +22,30 @@ class StateError(Exception):
 class State:
     OPERATION_STATUSES: ClassVar[set[str]] = {"running", "succeeded", "failed", "skipped"}
     DESIRED_STATES: ClassVar[set[str]] = {"unknown", "running", "stopped", "absent"}
+    # Provider + package state sets follow the core machines (core/fsm/instance.yaml,
+    # core/fsm/package.yaml): the terraform micro-stages collapse into the transient
+    # operation states, and package `reinstalled` folds into `installed`.
     PROVIDER_STATES: ClassVar[set[str]] = {
         "unknown",
-        "initializing",
-        "initialized",
-        "planned",
-        "changing",
+        "creating",
+        "starting",
+        "stopping",
+        "destroying",
         "running",
         "stopped",
         "absent",
         "error",
     }
     PROVISION_STATES: ClassVar[set[str]] = {"unknown", "provisioning", "provisioned", "error"}
-    PACKAGE_STATES: ClassVar[set[str]] = {"unknown", "installed", "missing", "failed", "removed", "reinstalled"}
+    PACKAGE_STATES: ClassVar[set[str]] = {
+        "failed",
+        "installed",
+        "installing",
+        "missing",
+        "removed",
+        "removing",
+        "unknown",
+    }
     DEFAULT_HISTORY_LIMIT = 50
 
     @classmethod
@@ -127,8 +138,11 @@ class State:
         error: str | None = None,
         desired_state: str | None = None,
         provider_state: str | None = None,
+        provider_event: str | None = None,
         provision_state: str | None = None,
         package: str | None = None,
+        package_event: str | None = None,
+        package_observations: dict[str, str] | None = None,
         package_state: str | None = None,
     ) -> dict[str, Any]:
         cls._validate_enum(status, cls.OPERATION_STATUSES, "status")
@@ -140,6 +154,12 @@ class State:
             cls._validate_enum(provision_state, cls.PROVISION_STATES, "provision_state")
         if package_state:
             cls._validate_enum(package_state, cls.PACKAGE_STATES, "package_state")
+        for observed_status in (package_observations or {}).values():
+            cls._validate_enum(
+                observed_status,
+                {"failed", "installed", "missing", "unknown"},
+                "package_observation",
+            )
 
         now = datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
@@ -148,12 +168,22 @@ class State:
             state["updated_at"] = now
             history = state.setdefault("operation_history", [])
             entry = {
-                "id": len(history) + 1,
+                "id": max(
+                    (
+                        int(item.get("id", 0))
+                        for item in history
+                        if isinstance(item, dict)
+                    ),
+                    default=0,
+                )
+                + 1,
                 "name": operation,
                 "type": operation.split(".", 1)[0],
                 "status": status,
                 "at": now,
             }
+            if package is not None:
+                entry["package"] = package
             state["last_operation"] = entry
             history_entry = dict(entry)
             if error is not None:
@@ -165,10 +195,67 @@ class State:
                 state["desired_state"] = desired_state
             if provider_state:
                 state["provider_state"] = provider_state
+            elif provider_event:
+                # Fire the event into the core instance machine, seeded from the
+                # current persisted provider_state; the resulting leaf is the new
+                # provider_state (None -> read-only command, leave it unchanged).
+                from eve_sdk import instance_fsm
+
+                new_provider = instance_fsm.provider_state_after(
+                    str(state.get("provider_state", "unknown")), provider_event
+                )
+                if new_provider is not None:
+                    state["provider_state"] = new_provider
             if provision_state:
                 state["provision_state"] = provision_state
+            elif operation == "provision":
+                from eve_sdk import instance_fsm
+
+                new_provision = instance_fsm.provision_state_after(
+                    str(state.get("provision_state", "unknown")),
+                    instance_fsm.provision_event(status),
+                )
+                if new_provision is not None:
+                    state["provision_state"] = new_provision
+
             if package and package_state:
-                state.setdefault("package_state", {})[package] = {"status": package_state, "updated_at": now}
+                state.setdefault("package_state", {})[package] = {
+                    "status": package_state,
+                    "updated_at": now,
+                }
+            elif package:
+                from eve_sdk import instance_fsm
+
+                command = operation.split(".", 1)[1] if "." in operation else ""
+                event = package_event or instance_fsm.package_operation_event(command, status)
+                current = str(
+                    state.setdefault("package_state", {})
+                    .get(package, {})
+                    .get("status", "unknown")
+                )
+                new_package = instance_fsm.package_state_after(current, event)
+                if new_package is not None:
+                    state["package_state"][package] = {
+                        "status": new_package,
+                        "updated_at": now,
+                    }
+            if package_observations:
+                from eve_sdk import instance_fsm
+
+                package_states = state.setdefault("package_state", {})
+                for package_id, observed_status in sorted(package_observations.items()):
+                    current = str(
+                        package_states.get(package_id, {}).get("status", "unknown")
+                    )
+                    new_package = instance_fsm.package_state_after(
+                        current,
+                        instance_fsm.package_observation_event(observed_status),
+                    )
+                    if new_package is not None:
+                        package_states[package_id] = {
+                            "status": new_package,
+                            "updated_at": now,
+                        }
             return state
 
         return cls.modify(instance_name, update)
@@ -178,7 +265,19 @@ class State:
         now = datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
         def update(state: dict[str, Any]) -> dict[str, Any]:
-            state["observed_state"] = state.get("observed_state", {}) | observed
+            cached = state.get("observed_state", {}).copy()
+            # Every refresh replaces access. A merge must never retain an old
+            # authenticated binding after a non-running observation or error.
+            if "provider_status" in observed or "refresh_error" in observed:
+                cached.pop("guest_access", None)
+                if observed.get("provider_status") != "running" or observed.get("refresh_error"):
+                    cached.pop("ip", None)
+                    observed_without_access = {k: v for k, v in observed.items() if k not in {"guest_access", "ip"}}
+                    state["observed_state"] = cached | observed_without_access
+                else:
+                    state["observed_state"] = cached | observed
+            else:
+                state["observed_state"] = cached | observed
             state["updated_at"] = now
             return state
 
@@ -208,9 +307,39 @@ class State:
                     "provider.ip",
                     "provider.ssh",
                 }:
-                    state["provider_state"] = "error"
+                    from eve_sdk import instance_fsm
+
+                    recovered_provider = instance_fsm.provider_state_after(
+                        str(state.get("provider_state", "unknown")), "op_fail"
+                    )
+                    if recovered_provider is not None:
+                        state["provider_state"] = recovered_provider
                 if recovered.get("type") == "provision":
-                    state["provision_state"] = "error"
+                    from eve_sdk import instance_fsm
+
+                    recovered_provision = instance_fsm.provision_state_after(
+                        str(state.get("provision_state", "unknown")), "provision_fail"
+                    )
+                    if recovered_provision is not None:
+                        state["provision_state"] = recovered_provision
+                if recovered.get("type") == "package" and recovered.get("package"):
+                    from eve_sdk import instance_fsm
+
+                    package_id = str(recovered["package"])
+                    command = str(recovered.get("name", "")).split(".", 1)[-1]
+                    package_states = state.setdefault("package_state", {})
+                    current = str(
+                        package_states.get(package_id, {}).get("status", "unknown")
+                    )
+                    recovered_package = instance_fsm.package_state_after(
+                        current,
+                        instance_fsm.package_operation_event(command, "failed"),
+                    )
+                    if recovered_package is not None:
+                        package_states[package_id] = {
+                            "status": recovered_package,
+                            "updated_at": now,
+                        }
             return state
 
         return cls.modify(instance_name, update)

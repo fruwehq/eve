@@ -110,10 +110,11 @@ The Windows SSH server default shell is **PowerShell** (not `cmd.exe`). All scri
 
 This project provisions environments from scratch — we control the OS, installed packages, shell, and runtime versions. **Never add fallback logic** (e.g. "try PowerShell, fall back to cmd.exe" or "check both Program Files and AppData just in case"). Always use the single correct path for the environment we build. If the environment changes, change the script — don't layer on fallbacks that mask the real requirement.
 
-## Catalog kinds: vm vs metal
+## Catalog machine kinds
 
 Machine entries declare a `kind:` field. Current supported kinds:
 
+- `kind: container` — disposable system-container lifecycle (`incus`), with provider-owned cloud-init SSH bootstrap. This is not a VM or a guest package.
 - `kind: vm` — disposable VM lifecycle (`aws`, `gcp`, `vultr`, `truenas`, `local-qemu`). `up` creates, `down` deletes.
 - `kind: metal` — persistent hardware (`raspberry-pi`). `down` tears down managed workloads, **not** the machine. Don't force metal targets through VM lifecycle assumptions.
 

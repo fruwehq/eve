@@ -1,7 +1,7 @@
 {
   "instance": "aws-gpu-a",
   "desired_state": "running",
-  "provider_state": "changing",
+  "provider_state": "creating",
   "provision_state": "unknown",
   "package_state": {},
   "observed_state": {

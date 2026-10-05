@@ -1,0 +1,5 @@
+api_version: eve.plugin/v1
+kind: bundle
+id: mock-dev
+display_name: Mock Dev
+members: [mock-app]

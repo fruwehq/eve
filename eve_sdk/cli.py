@@ -16,7 +16,7 @@ def main() -> int:
         sys.path.insert(0, str(root))
     import runpy
 
-    module = runpy.run_path(str(root / "scripts" / "eve-cli"), run_name="__main__")
+    module = runpy.run_path(str(root / "scripts" / "eve-cli"), run_name="eve_cli")
     return int(module["main"]())
 
 

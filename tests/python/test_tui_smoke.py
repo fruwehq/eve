@@ -168,14 +168,13 @@ def test_plugin_toggle_add_then_flips_to_remove() -> None:
             await app.push_screen(screen)
             await pilot.pause()
             toggle = screen.query_one("#plugins-toggle", Button)
-            assert str(toggle.label) == "Add selected"
+            # Toggle button is always "Remove" (warning); Edit is the primary default.
+            assert str(toggle.label) == "Remove"
             assert screen._rows[0][0] == "rec"  # empty override -> all recommended
             sid = screen._rows[0][1]
-            screen._activate_current()  # space/enter/button on a recommended row -> add
+            screen._activate_current()  # space/enter on a recommended row -> add
             await pilot.pause()
             assert any(r["id"] == sid for r in p.configured_rows())
-            # the added source is now configured at row 0 -> button flips
-            assert str(toggle.label) == "Remove selected"
 
     asyncio.run(_run())
 

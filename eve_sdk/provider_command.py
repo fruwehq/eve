@@ -14,12 +14,13 @@ from eve_sdk.dispatch import (
     exec_cmd,
     interactive_provider_command,
     prepare_overlay,
-    provider_state_for,
+    process_environment,
     read_resolved_from_env_or_stdin,
     record_provider_state,
     stream_command,
     validate_provider_output,
 )
+from eve_sdk.instance_fsm import dispatch_event
 from eve_sdk.plugin_manifest import PluginManifest
 from eve_sdk.resolve import resolve_instance
 from eve_sdk.schema import validate_input, validate_output
@@ -123,18 +124,54 @@ def dispatch(argv: list[str]) -> int:
 def _inject_secrets(
     provider_name: str, plugin: dict[str, Any], env: dict[str, str]
 ) -> dict[str, str]:
+    schema_secrets = (plugin.get("config_schema") or {}).get("secrets") or {}
+    if not schema_secrets:
+        return env
     secrets = Secrets.read(provider_name)
     if not secrets:
         return env
-    schema_secrets = (plugin.get("config_schema") or {}).get("secrets") or {}
     for secret_key, value in secrets.items():
-        env[secret_key] = value
         schema_entry = schema_secrets.get(secret_key)
-        if isinstance(schema_entry, dict):
-            mapped = schema_entry.get("env_var")
-            if mapped:
-                env[mapped] = value
+        if not isinstance(schema_entry, dict):
+            continue
+        mapped = schema_entry.get("env_var")
+        if mapped:
+            for name in mapped if isinstance(mapped, list) else [mapped]:
+                env[str(name)] = value
     return env
+
+
+def resolved_provider_environment(
+    provider_name: str,
+    plugin: dict[str, Any],
+    overrides: dict[str, str] | None = None,
+) -> dict[str, str]:
+    """Build the one provider environment used by status and dispatch."""
+    from eve_sdk.config import ConfigEnv
+
+    declared_names = {
+        str(name)
+        for section in ("config", "secrets")
+        for field in ((plugin.get("config_schema") or {}).get(section) or {}).values()
+        if isinstance(field, dict) and field.get("env_var")
+        for name in (
+            field["env_var"]
+            if isinstance(field["env_var"], list)
+            else [field["env_var"]]
+        )
+    }
+    core_names = {name for _path, name, _is_path in ConfigEnv.MAPPINGS}
+    configured = ConfigEnv.environment()
+    env = process_environment()
+    env.update(
+        {
+            name: value
+            for name, value in configured.items()
+            if name in core_names or name in declared_names
+        }
+    )
+    env.update(overrides or {})
+    return _inject_secrets(provider_name, plugin, env)
 
 
 def _select_plugin(plugins: list[dict[str, Any]], kind: str, plugin_id: str) -> dict[str, Any]:
@@ -179,7 +216,9 @@ def dispatch_provider_command(
     if not isinstance(spec, dict):
         raise DispatchError(f"provider plugin {provider_name} has no command: {command}")
     cmd = command_vector(plugin, spec) + list(extra_args)
-    env = _inject_secrets(provider_name, plugin, dict(os.environ) | {"EVE_PROVIDER_PLUGIN": provider_name})
+    env = resolved_provider_environment(
+        provider_name, plugin, {"EVE_PROVIDER_PLUGIN": provider_name}
+    )
     if dry_run:
         env["EVE_PLUGIN_DRY_RUN"] = "1"
         print(json.dumps({"kind": "provider", "provider": provider_name, "command": command, "dry_run": True}))
@@ -232,12 +271,16 @@ def dispatch_instance_command(
         return 0
 
     overlay = prepare_overlay(instance_name, registry_path)
-    env = _inject_secrets(provider, plugin, dict(os.environ) | {
-        "EVE_CATALOG_LOCAL": overlay,
-        "EVE_INSTANCE_NAME": instance_name,
-        "EVE_PROVIDER_PLUGIN": provider,
-        "EVE_RESOLVED_JSON": json.dumps(resolved, separators=(",", ":")),
-    })
+    env = resolved_provider_environment(
+        provider,
+        plugin,
+        {
+            "EVE_CATALOG_LOCAL": overlay,
+            "EVE_INSTANCE_NAME": instance_name,
+            "EVE_PROVIDER_PLUGIN": provider,
+            "EVE_RESOLVED_JSON": json.dumps(resolved, separators=(",", ":")),
+        },
+    )
     if registry_path:
         env["EVE_INSTANCE_REGISTRY"] = registry_path
 
@@ -252,7 +295,7 @@ def dispatch_instance_command(
         command,
         "running",
         desired_state=desired_state,
-        provider_state=provider_state_for(command, "running"),
+        provider_event=dispatch_event(command, "running"),
     )
 
     exit_status, output = stream_command(
@@ -268,7 +311,7 @@ def dispatch_instance_command(
                 "failed",
                 error=f"invalid provider output: {error}",
                 desired_state=desired_state,
-                provider_state=provider_state_for(command, "failed"),
+                provider_event=dispatch_event(command, "failed"),
             )
             print(f"provider-dispatch: {error}", file=sys.stderr)
             return 1
@@ -277,7 +320,7 @@ def dispatch_instance_command(
             command,
             "succeeded",
             desired_state=desired_state,
-            provider_state=provider_state_for(command, "succeeded"),
+            provider_event=dispatch_event(command, "succeeded"),
         )
     else:
         try:
@@ -287,7 +330,7 @@ def dispatch_instance_command(
                 "failed",
                 error=f"exit {exit_status}",
                 desired_state=desired_state,
-                provider_state=provider_state_for(command, "failed"),
+                provider_event=dispatch_event(command, "failed"),
             )
         except Exception as error:
             print(f"provider-dispatch: failed to record failure state: {error}", file=sys.stderr)

@@ -112,7 +112,7 @@ def test_aggregate_summary() -> None:
             "c": {"state": {"provider_state": "absent"}},
             "d": {"state": {"provider_state": "error"}},
             "e": {"state": {"provider_state": "running", "last_error": "boom"}},
-            "f": {"state": {"provider_state": "changing"}},
+            "f": {"state": {"provider_state": "creating"}},
             "g": {"state": "not a dict"},
         }
     ) == {"running": 1, "stopped": 2, "failed": 2, "other": 2}

@@ -24,7 +24,8 @@ def parser() -> argparse.ArgumentParser:
             "      scripts/instance-state --instance <name> --observed-json <json>\n"
             "      scripts/instance-state --instance <name> --operation <name> --status <status> "
             "[--desired-state <state>] [--provider-state <state>] [--provision-state <state>] "
-            "[--package <id> --package-state <state>] [--error <message>]"
+            "[--package <id> --package-state <state>] "
+            "[--package-observations-json <json>] [--error <message>]"
         ),
         add_help=True,
     )
@@ -37,6 +38,7 @@ def parser() -> argparse.ArgumentParser:
     arg_parser.add_argument("--provider-state")
     arg_parser.add_argument("--provision-state")
     arg_parser.add_argument("--package")
+    arg_parser.add_argument("--package-observations-json")
     arg_parser.add_argument("--package-state")
     arg_parser.add_argument("--observed-json")
     arg_parser.add_argument("--error")
@@ -61,6 +63,14 @@ def main() -> int:
                 return 2
             if (args.package is None) != (args.package_state is None):
                 raise ValueError("package and package_state must be provided together")
+            package_observations = None
+            if args.package_observations_json:
+                package_observations = json.loads(args.package_observations_json)
+                if not isinstance(package_observations, dict) or not all(
+                    isinstance(key, str) and isinstance(value, str)
+                    for key, value in package_observations.items()
+                ):
+                    raise ValueError("package_observations_json must be an object of strings")
             state = State.record_operation(
                 args.instance,
                 args.operation,
@@ -70,6 +80,7 @@ def main() -> int:
                 provider_state=args.provider_state,
                 provision_state=args.provision_state,
                 package=args.package,
+                package_observations=package_observations,
                 package_state=args.package_state,
             )
         print(json.dumps(state, indent=2))
