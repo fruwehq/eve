@@ -10,7 +10,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from eve_sdk.dispatch import last_json_object, validate_provider_output  # noqa: E402
+from eve_sdk.dispatch import last_json_object  # noqa: E402
+from eve_sdk.schema import validate_output  # noqa: E402
 from eve_sdk.state import State, StateError  # noqa: E402
 
 DEFAULT_TTL_SECONDS = 30
@@ -46,9 +47,9 @@ def parse_status_output(output: str) -> dict[str, object]:
     observed: dict[str, object] = {}
     parsed = last_json_object(output, {"status"})
     if parsed is not None:
-        validate_provider_output(output)
+        validate_output(parsed, "provider_command_output")
         # Structured providers already speak the validated observation vocabulary.
-        observed["provider_status"] = parsed["status"]
+        observed["provider_status"] = normalize_provider_status(parsed["status"])
         for field in ("guest_access", "ip", "provider_identity"):
             if field in parsed:
                 observed[field] = parsed[field]
@@ -100,7 +101,12 @@ def main(argv: list[str]) -> int:
             env, str(ROOT / "scripts/provider-dispatch"), "--instance", instance, "--command", "status"
         )
         if status.returncode == 0:
-            observed.update(parse_status_output(status.stdout))
+            try:
+                observed.update(parse_status_output(status.stdout))
+            except Exception as error:
+                observed.update(provider_status="unknown", refresh_error="Invalid provider observation")
+                State.update_observed(instance, observed)
+                raise ValueError("Invalid provider observation") from error
             observed["provider_status_raw"] = status.stdout.strip()
             observed["refresh_error"] = None
             if observed.get("provider_status") == "running" and not observed.get("ip"):

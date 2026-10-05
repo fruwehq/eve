@@ -5,6 +5,39 @@
   "description": "Documents the JSON in/out contract for plugin commands. The input shape is resolved-instance.schema.json (passed via stdin or EVE_RESOLVED_JSON). The $defs below describe the output shapes. This schema is documentation-only -- no data fixtures validate against it because provider commands emit mixed text/JSON on stdout.",
   "$comment": "Documentation-only: defines $defs for reference but has no root type constraint. Do not add a root type or oneOf without also adding corresponding command-output fixtures.",
   "$defs": {
+    "incus_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "endpoint",
+        "instance_name",
+        "owner_id",
+        "project",
+        "remote"
+      ],
+      "properties": {
+        "endpoint": {
+          "type": "string",
+          "pattern": "^https://[^/]+$"
+        },
+        "instance_name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,61}[a-z0-9]$"
+        },
+        "owner_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "project": {
+          "type": "string",
+          "minLength": 1
+        },
+        "remote": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$"
+        }
+      }
+    },
     "provider_command_output": {
       "title": "Provider Command Output",
       "description": "JSON emitted by provider commands on stdout. Most commands stream text; lifecycle commands record state through instance-state rather than structured output. When a provider command emits JSON containing a status or ip field, those fields are validated against this contract.",
@@ -80,42 +113,25 @@
       "type": "object"
     },
     "provider_identity": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "endpoint",
-        "instance_name",
-        "owner_id",
-        "project",
-        "provider",
-        "remote"
-      ],
-      "properties": {
-        "endpoint": {
-          "type": "string",
-          "pattern": "^https://[^/]+$"
-        },
-        "instance_name": {
-          "type": "string",
-          "pattern": "^[a-z][a-z0-9-]{0,61}[a-z0-9]$"
-        },
-        "owner_id": {
-          "type": "string",
-          "pattern": "^[0-9a-f]{64}$"
-        },
-        "project": {
-          "type": "string",
-          "minLength": 1
-        },
-        "provider": {
-          "type": "string",
-          "minLength": 1
-        },
-        "remote": {
-          "type": "string",
-          "pattern": "^[a-z][a-z0-9-]*$"
+      "description": "Closed provider-discriminated envelope. Each provider implements a namespaced identity variant; new providers add a schema variant, never arbitrary fields.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "identity",
+            "provider"
+          ],
+          "properties": {
+            "provider": {
+              "const": "incus"
+            },
+            "identity": {
+              "$ref": "#/$defs/incus_identity"
+            }
+          }
         }
-      }
+      ]
     },
     "guest_access": {
       "title": "Authenticated SSH guest access",
@@ -166,9 +182,13 @@
               "pattern": "^SHA256:[A-Za-z0-9+/]{43}$"
             },
             "mechanism": {
-              "const": "provider-authenticated-exec"
+              "enum": [
+                "configured-fingerprint",
+                "incus-authenticated-exec"
+              ]
             }
-          }
+          },
+          "description": "SSH host-key fingerprint established by explicit controller configuration or a provider-specific authenticated mechanism; no trust-on-first-use."
         },
         "port": {
           "type": "integer",
@@ -183,7 +203,7 @@
         },
         "username": {
           "type": "string",
-          "pattern": "^[a-z_][a-z0-9_-]*$"
+          "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$"
         },
         "version": {
           "const": 2

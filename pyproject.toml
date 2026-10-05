@@ -52,7 +52,16 @@ pythonpath = ["."]
 
 [tool.poetry]
 packages = [{include = "eve_sdk"}]
-include = ["scripts", "core", "config", "oses"]
+include = [
+    {path = ".env", format = ["sdist", "wheel"]},
+    {path = "config/catalog.yaml", format = ["sdist", "wheel"]},
+    {path = "config/defaults.yaml", format = ["sdist", "wheel"]},
+    {path = "core", format = ["sdist", "wheel"]},
+    {path = "oses", format = ["sdist", "wheel"]},
+    {path = "scripts", format = ["sdist", "wheel"]},
+    {path = "tui", format = ["sdist", "wheel"]},
+]
+exclude = ["**/__pycache__/**", "**/*.pyc", "**/*.local.*", ".env.local"]
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]

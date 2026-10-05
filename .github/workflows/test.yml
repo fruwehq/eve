@@ -119,6 +119,9 @@ jobs:
           python -m pip install --upgrade poetry
           poetry install --no-interaction --no-root
 
+      - name: Test isolated installed wheel
+        run: python scripts/test-wheel
+
       - name: Generate Terramate code
         if: runner.os == 'Linux'
         run: |

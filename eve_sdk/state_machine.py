@@ -18,6 +18,9 @@ def normalize_provider_state(status: Any) -> str:
 
 
 def effective_provider_state(state: dict[str, Any]) -> str:
+    observed = state.get("observed_state", {})
+    if isinstance(observed, dict) and normalize_provider_state(observed.get("provider_status", "")) == "error":
+        return "error"
     provider_state = str(state.get("provider_state", "unknown"))
     desired_state = str(state.get("desired_state", "unknown"))
     provision_state = str(state.get("provision_state", "unknown"))
@@ -80,6 +83,9 @@ def provider_actions_available(state: dict[str, Any]) -> bool:
     eps = effective_provider_state(state)
     desired_state = str(state.get("desired_state", "unknown"))
     provision_state = str(state.get("provision_state", "unknown"))
+    observed = state.get("observed_state", {})
+    if isinstance(observed, dict) and normalize_provider_state(observed.get("provider_status", "")) == "error":
+        return False
     return eps == "running" or (eps == "error" and desired_state == "running" and provision_state == "provisioned")
 
 

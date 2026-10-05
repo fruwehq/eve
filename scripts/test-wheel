@@ -1,0 +1,66 @@
+#!/usr/bin/env python3
+"""Build and test a wheel in a clean venv outside the source checkout."""
+
+from __future__ import annotations
+
+import os
+import subprocess
+import sys
+import tempfile
+import venv
+from pathlib import Path
+
+
+def main() -> int:
+    root = Path(__file__).resolve().parents[1]
+    env = {k: v for k, v in os.environ.items() if k not in {"PYTHONHOME", "PYTHONPATH"} and not k.startswith("EVE_")}
+    with tempfile.TemporaryDirectory(prefix="eve-wheel-") as scratch:
+        work = Path(scratch)
+        subprocess.run(
+            [sys.executable, "-m", "pip", "wheel", "--no-deps", "--wheel-dir", str(work), str(root)],
+            cwd=work,
+            env=env,
+            check=True,
+        )
+        venv.EnvBuilder(with_pip=True).create(work / "venv")
+        python = work / "venv/bin/python"
+        subprocess.run(
+            [str(python), "-m", "pip", "install", str(next(work.glob("eve-*.whl")))], cwd=work, env=env, check=True
+        )
+        subprocess.run([str(work / "venv/bin/eve"), "--help"], cwd=work, env=env, check=True)
+        subprocess.run(
+            [
+                str(python),
+                "-I",
+                "-c",
+                """
+from eve_sdk.schema import load_schema, validate_output, SchemaValidationError
+from eve_sdk.workdir import Workdir
+assert 'site-packages' in str(Workdir.repo_root())
+for schema in ('command-io.schema.json', 'observed-state.schema.json',
+               'plugin-manifest.schema.json', 'resolved-instance.schema.json'):
+    load_schema(schema)
+validate_output({'status': 'running'}, 'provider_command_output')
+try:
+    validate_output({'status': 'bogus'}, 'provider_command_output')
+except SchemaValidationError:
+    pass
+else:
+    raise AssertionError('invalid output accepted')
+for asset in ('config/defaults.yaml', 'core/fsm/instance.yaml', 'scripts/provision',
+              'oses/mockos-1.0-amd64/provision/scripts/bootstrap.sh', 'tui/app.py'):
+    assert (Workdir.repo_root() / asset).is_file(), asset
+assert not (Workdir.repo_root() / '.env.local').exists()
+assert not (Workdir.repo_root() / 'config/catalog.local.yaml').exists()
+""",
+            ],
+            cwd=work,
+            env=env,
+            check=True,
+        )
+    print("[OK] isolated installed wheel: CLI, schemas, command validation, runtime assets")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

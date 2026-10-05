@@ -265,7 +265,19 @@ class State:
         now = datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
         def update(state: dict[str, Any]) -> dict[str, Any]:
-            state["observed_state"] = state.get("observed_state", {}) | observed
+            cached = state.get("observed_state", {}).copy()
+            # Every refresh replaces access. A merge must never retain an old
+            # authenticated binding after a non-running observation or error.
+            if "provider_status" in observed or "refresh_error" in observed:
+                cached.pop("guest_access", None)
+                if observed.get("provider_status") != "running" or observed.get("refresh_error"):
+                    cached.pop("ip", None)
+                    observed_without_access = {k: v for k, v in observed.items() if k not in {"guest_access", "ip"}}
+                    state["observed_state"] = cached | observed_without_access
+                else:
+                    state["observed_state"] = cached | observed
+            else:
+                state["observed_state"] = cached | observed
             state["updated_at"] = now
             return state
 
